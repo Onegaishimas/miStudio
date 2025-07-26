@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mistudio-explain-metrics
+  namespace: mistudio-services
+  labels:
+    app: mistudio-explain
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: mistudio-explain
+  endpoints:
+  - port: http
+    path: /api/v1/metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - mistudio-services
+

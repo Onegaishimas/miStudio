@@ -1,0 +1,41 @@
+models:
+  llama3.1:8b:
+    gpu_memory_mb: 8192
+    target_gpu: "RTX_3080_Ti"
+    use_cases: ["simple_patterns", "quick_explanations"]
+    max_concurrent: 2
+    parameters:
+      temperature: 0.1
+      top_p: 0.9
+      max_tokens: 200
+      
+  llama3.1:70b:
+    gpu_memory_mb: 20480
+    target_gpu: "RTX_3090"
+    use_cases: ["complex_behavioral", "detailed_analysis"]
+    max_concurrent: 1
+    parameters:
+      temperature: 0.1
+      top_p: 0.9
+      max_tokens: 300
+      
+  codellama:13b:
+    gpu_memory_mb: 12288
+    target_gpu: "RTX_3080_Ti"
+    use_cases: ["technical_patterns", "code_analysis"]
+    max_concurrent: 1
+    parameters:
+      temperature: 0.0
+      top_p: 0.95
+      max_tokens: 250
+      
+  mistral:7b:
+    gpu_memory_mb: 7168
+    target_gpu: "RTX_3080_Ti"
+    use_cases: ["fallback", "lightweight_processing"]
+    max_concurrent: 2
+    parameters:
+      temperature: 0.2
+      top_p: 0.9
+      max_tokens: 200
+

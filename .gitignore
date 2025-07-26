@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environments
+.env
+.venv
+env/
+venv/
+miStudio-dev-env/
+
+# Logs, Backups, and Generated Text
+*.log
+logs/
+*.backup.*
+*.swp
+status.txt
+mistudio_consolidated.txt
+miStudioFind_complete_code.txt
+project_knowledge.txt
+
+# Service-specific Data & Logs
+# These rules will fix the large file issues
+services/miStudioTrain/data/
+services/miStudioExplain/data/
+services/miStudioExplain/logs/
+data/
+
+
+# OS generated files
+.DS_Store
+Thumbs.db

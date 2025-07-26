@@ -1,0 +1,48 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mistudio-explain-alerts
+  namespace: mistudio-services
+  labels:
+    app: mistudio-explain
+    component: monitoring
+spec:
+  groups:
+  - name: mistudio-explain.rules
+    rules:
+    - alert: MiStudioExplainDown
+      expr: up{job="mistudio-explain"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "miStudioExplain service is down"
+        description: "miStudioExplain service has been down for more than 1 minute."
+    
+    - alert: MiStudioExplainHighMemoryUsage
+      expr: (container_memory_usage_bytes{pod=~"mistudio-explain-.*"} / container_spec_memory_limit_bytes{pod=~"mistudio-explain-.*"}) > 0.9
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "miStudioExplain high memory usage"
+        description: "miStudioExplain pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of memory."
+    
+    - alert: MiStudioExplainHighCPUUsage
+      expr: (rate(container_cpu_usage_seconds_total{pod=~"mistudio-explain-.*"}[5m]) / container_spec_cpu_quota{pod=~"mistudio-explain-.*"} * container_spec_cpu_period{pod=~"mistudio-explain-.*"}) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "miStudioExplain high CPU usage"
+        description: "miStudioExplain pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of CPU."
+    
+    - alert: MiStudioExplainGPUMemoryHigh
+      expr: nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes > 0.95
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "miStudioExplain GPU memory usage critical"
+        description: "GPU {{ $labels.gpu }} memory usage is {{ $value | humanizePercentage }}."
+

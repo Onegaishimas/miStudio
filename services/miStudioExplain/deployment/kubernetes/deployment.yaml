@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mistudio-explain
+  namespace: mistudio-services
+  labels:
+    app: mistudio-explain
+    component: explanation-service
+    version: v1.0.0
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: mistudio-explain
+  template:
+    metadata:
+      labels:
+        app: mistudio-explain
+        component: explanation-service
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+        prometheus.io/path: "/api/v1/metrics"
+    spec:
+      serviceAccountName: mistudio-explain
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: mistudio-explain
+        image: localhost:32000/mistudio/explain:v1.0.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8002
+          name: http
+          protocol: TCP
+        env:
+        - name: OLLAMA_SERVICE_NAME
+          value: "ollama"
+        - name: OLLAMA_NAMESPACE  
+          value: "mistudio-services"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: DATA_PATH
+          value: "/app/data"
+        - name: CACHE_PATH
+          value: "/app/data/cache"
+        - name: PYTHONPATH
+          value: "/app"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0,1"
+        resources:
+          requests:
+            memory: "16Gi"
+            cpu: "4000m"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "32Gi"
+            cpu: "8000m"
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: data-storage
+          mountPath: /app/data
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+        - name: logs-storage
+          mountPath: /app/logs
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8002
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8002
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8002
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 10
+      volumes:
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: mistudio-explain-data
+      - name: config-volume
+        configMap:
+          name: mistudio-explain-config
+          defaultMode: 0444
+      - name: logs-storage
+        emptyDir:
+          sizeLimit: 1Gi
+      nodeSelector:
+        kubernetes.io/hostname: mcs-lnxgpu01
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: "nvidia.com/gpu"
+                operator: "Exists"
+

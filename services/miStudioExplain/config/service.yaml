@@ -1,0 +1,24 @@
+ollama:
+  service_name: "ollama"
+  namespace: "mistudio-services"
+  port: 11434
+  timeout: 300
+  retry_attempts: 3
+
+gpu:
+  rtx_3090_device: "cuda:0"
+  rtx_3080_ti_device: "cuda:1"
+  memory_buffer_mb: 1024
+  max_utilization_percent: 90.0
+
+processing:
+  default_quality_threshold: 0.4
+  max_concurrent_jobs: 3
+  default_batch_size: 10
+  explanation_timeout: 120
+  max_retries: 2
+
+log_level: "INFO"
+data_path: "./data"
+cache_path: "./data/cache"
+

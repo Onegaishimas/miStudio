@@ -1,0 +1,21 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: mistudio-explain-pods
+  namespace: mistudio-services
+  labels:
+    app: mistudio-explain
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: mistudio-explain
+  podMetricsEndpoints:
+  - port: http
+    path: /api/v1/metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - mistudio-services
+
