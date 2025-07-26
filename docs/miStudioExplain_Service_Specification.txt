@@ -1,0 +1,775 @@
+miStudioExplain_Service_Specification.docx
+32.93 KB •773 lines
+Formatting may be inconsistent from source
+
+miStudioExplain Service Specification
+Service: miStudioExplain
+Purpose: Step 3 of miStudio Interpretability Workflow
+Version: 1.0.0
+Status: 📋 SPECIFICATION COMPLETE - READY FOR DEVELOPMENT
+Date: July 26, 2025
+________________________________________
+1. Service Overview
+1.1 Primary Purpose
+miStudioExplain is the AI explanation engine that transforms abstract feature mappings from miStudioFind into human-readable, actionable descriptions of AI behavioral patterns. It takes the technical analysis of what text patterns activate each feature and generates clear, understandable explanations that reveal what the AI model has learned and how it makes decisions.
+1.2 Core Business Value
+•	Human Interpretability: Convert statistical patterns into plain English descriptions
+•	AI Safety: Identify potentially harmful or concerning behavioral patterns
+•	Research Insights: Generate detailed understanding of model capabilities
+•	Regulatory Compliance: Provide transparent explanations for AI decision-making
+•	Model Improvement: Enable targeted improvements based on interpretable insights
+1.3 Input Sources and Data Flow
+miStudioFind Results → miStudioExplain → Human-Readable Explanations
+├── feature_analysis.json (21.7MB)     ├── explanation_generation.py
+├── pattern_categories.json            ├── quality_validation.py
+└── quality_metrics.json               └── structured_output.json
+________________________________________
+2. Input File Specifications
+2.1 Primary Input: miStudioFind JSON Output
+File: feature_analysis.json (21.7MB for 512 features)
+Structure:
+json
+{
+  "job_metadata": {
+    "job_id": "find_20250726_151321_d9675dce",
+    "source_training_job": "train_20250725_222505_9775",
+    "model_name": "microsoft/phi-4",
+    "total_features": 512,
+    "processing_time": "1.1 seconds"
+  },
+  "features": [
+    {
+      "feature_id": 348,
+      "coherence_score": 0.501,
+      "quality_level": "medium",
+      "pattern_category": "technical",
+      "pattern_keywords": ["json", "schema", "validation"],
+      "top_activations": [
+        {
+          "text": "JSON schema validation patterns...",
+          "activation_strength": 0.89,
+          "context": "API documentation"
+        }
+      ],
+      "activation_statistics": {
+        "mean": 0.15,
+        "std": 0.08,
+        "frequency": 0.023
+      }
+    }
+  ]
+}
+2.2 Secondary Input: Pattern Categories
+File: Pattern categorization metadata from advanced filtering
+Categories Available:
+•	Technical: API schemas, JSON structures, code patterns
+•	Conversational: Role-based chat, user interactions
+•	Behavioral: Tool usage decisions, capability assessments
+•	Temporal: Time management, scheduling patterns
+2.3 Quality Metrics Input
+File: Quality assessment scores and confidence metrics
+Quality Tiers:
+•	Excellent (>0.8 coherence): High-priority explanations
+•	Good (0.6-0.8): Standard explanation generation
+•	Fair (0.4-0.6): Basic explanation with caveats
+•	Poor (<0.4): Skip or flag for manual review
+________________________________________
+3. Service Workflow Architecture
+3.1 Processing Pipeline
+Input → Prioritization → LLM Generation → Validation → Output
+  ↓           ↓              ↓             ↓          ↓
+JSON       Filter by      Generate      Score      Structured
+Files      Quality       Explanations  Quality    Explanations
+3.2 Detailed Workflow Steps
+Step 1: Input Processing and Validation
+•	Load miStudioFind JSON outputs
+•	Validate data integrity and completeness
+•	Parse feature mappings and quality scores
+•	Initialize processing queue
+Step 2: Feature Prioritization
+•	Filter features by coherence score (≥0.4 threshold)
+•	Sort by quality level and business importance
+•	Batch features for efficient LLM processing
+•	Estimate processing time and costs
+Step 3: Context Preparation
+•	Extract top activating text samples per feature
+•	Compile pattern keywords and categories
+•	Generate context-rich prompts for LLM
+•	Prepare batch requests for API efficiency
+Step 4: LLM Explanation Generation
+•	Submit batched requests to LLM API (GPT-4/Claude)
+•	Generate human-readable explanations
+•	Handle API rate limits and retries
+•	Process streaming responses
+Step 5: Quality Validation and Scoring
+•	Validate explanation quality against criteria
+•	Cross-reference with pattern categories
+•	Score explanation accuracy and usefulness
+•	Flag inconsistencies for review
+Step 6: Result Structuring and Persistence
+•	Format explanations in structured output
+•	Generate summary reports and insights
+•	Save to multiple formats (JSON, HTML, PDF)
+•	Update archive system with results
+________________________________________
+4. Modular Design Architecture
+4.1 Core Processing Modules
+InputManager (core/input_manager.py)
+Purpose: Load and validate miStudioFind outputs Responsibilities:
+•	Parse JSON feature analysis files
+•	Validate data completeness and integrity
+•	Extract metadata and configuration
+•	Prepare data structures for processing
+FeaturePrioritizer (core/feature_prioritizer.py)
+Purpose: Intelligent feature selection and ranking Responsibilities:
+•	Filter features by quality thresholds
+•	Rank by coherence score and business value
+•	Batch features for efficient processing
+•	Generate processing estimates
+ContextBuilder (core/context_builder.py)
+Purpose: Prepare rich context for LLM prompts Responsibilities:
+•	Compile top activating text samples
+•	Extract pattern keywords and categories
+•	Build comprehensive feature profiles
+•	Generate optimized prompts
+ExplanationGenerator (core/explanation_generator.py)
+Purpose: Core LLM integration and explanation generation Responsibilities:
+•	Manage LLM API connections (GPT-4/Claude)
+•	Generate human-readable explanations
+•	Handle batch processing and rate limits
+•	Process and structure LLM responses
+QualityValidator (core/quality_validator.py)
+Purpose: Validate and score explanation quality Responsibilities:
+•	Assess explanation accuracy and clarity
+•	Cross-reference with pattern categories
+•	Generate quality scores and confidence metrics
+•	Flag issues for human review
+ResultManager (core/result_manager.py)
+Purpose: Structure, format, and persist results Responsibilities:
+•	Format explanations in multiple output formats
+•	Generate summary reports and insights
+•	Manage persistent storage and archival
+•	Provide retrieval and export capabilities
+4.2 API and Integration Layer
+ExplainService (api/explain_service.py)
+Purpose: Main service orchestration Responsibilities:
+•	Coordinate all processing modules
+•	Manage job lifecycle and progress tracking
+•	Handle async processing with progress updates
+•	Provide status and result endpoints
+APIEndpoints (api/endpoints.py)
+Purpose: RESTful API interface Responsibilities:
+•	Accept explanation job requests
+•	Provide real-time status updates
+•	Serve explanation results in multiple formats
+•	Support filtering and search capabilities
+4.3 Infrastructure and Support
+OllamaManager (infrastructure/ollama_manager.py)
+Purpose: Local LLM orchestration and management Responsibilities:
+•	Discover and connect to Ollama service in Kubernetes cluster
+•	Manage model loading/unloading for optimal GPU utilization
+•	Handle concurrent requests and load balancing across GPUs
+•	Monitor model performance and resource usage
+•	Implement intelligent model selection based on task complexity
+LocalLLMService (infrastructure/local_llm_service.py)
+Purpose: Unified interface for local model inference Responsibilities:
+•	Abstract different local model providers (Ollama, vLLM, etc.)
+•	Implement request queuing and batch processing
+•	Handle model warming and GPU memory management
+•	Provide streaming responses for long explanations
+•	Cache frequent explanations for performance
+ConfigManager (infrastructure/config_manager.py)
+Purpose: Configuration and settings management Responsibilities:
+•	Manage LLM provider settings
+•	Control quality thresholds and filtering
+•	Handle batch sizes and processing limits
+•	Support environment-specific configurations
+________________________________________
+5. LLM Integration Strategy
+5.1 Prompt Engineering Approach
+Explanation Prompt Template
+You are an AI interpretability expert analyzing neural network features. 
+
+Feature Information:
+- Feature ID: {feature_id}
+- Coherence Score: {coherence_score}
+- Pattern Category: {pattern_category}
+- Keywords: {pattern_keywords}
+
+Top Activating Text Samples:
+{top_activations}
+
+Task: Generate a clear, human-readable explanation of what this feature detects or represents in AI behavior. Focus on:
+1. What specific pattern this feature identifies
+2. Why this pattern is significant for AI behavior
+3. Potential implications for AI safety or capability
+
+Keep the explanation concise (2-3 sentences) but informative.
+Batch Processing Optimization
+•	Process 10-20 features per API call for efficiency
+•	Use async processing to handle multiple batches
+•	Implement intelligent retry logic for failed requests
+•	Cache results to avoid duplicate processing
+5.2 LLM Provider Support
+Primary: Local Ollama Models 🚀
+•	Infrastructure: Existing containerized Ollama in Kubernetes cluster
+•	Models: Llama 3.1 8B/70B, Mistral 7B/8x7B, CodeLlama variants
+•	Hardware: RTX 3090 (24GB) + RTX 3080 Ti (12GB) = 36GB total
+•	Cost: Zero API costs, only infrastructure overhead
+•	Privacy: Complete data sovereignty, no external API calls
+•	Performance: Sub-second response times for local inference
+Recommended Model Selection:
+yaml
+Primary: llama3.1:8b (fits RTX 3080 Ti, fast inference)
+Heavy: llama3.1:70b (RTX 3090, higher quality explanations)  
+Code: codellama:13b (technical pattern explanations)
+Fallback: mistral:7b (lightweight backup option)
+Secondary: Cloud APIs (Fallback Only)
+•	OpenAI GPT-4: Fallback for complex edge cases
+•	Anthropic Claude: Alternative for validation/comparison
+•	Usage: <5% of total explanations, cost-controlled
+•	Trigger: Only when local models fail or confidence is low
+________________________________________
+6. Output Specifications
+6.1 Primary Output: Structured Explanations
+File: feature_explanations.json
+Structure:
+json
+{
+  "job_metadata": {
+    "explain_job_id": "explain_20250726_153045_abc123",
+    "source_find_job": "find_20250726_151321_d9675dce",
+    "processing_time": "24.3 minutes",
+    "total_features_processed": 68,
+    "explanation_quality_average": 0.87
+  },
+  "explanations": [
+    {
+      "feature_id": 348,
+      "original_coherence": 0.501,
+      "explanation": "This feature detects JSON schema validation patterns in API documentation and code examples. It activates when the AI encounters structured data validation rules, indicating the model has learned to recognize formal data specification patterns. This is significant for understanding how the AI processes technical documentation and API-related content.",
+      "explanation_quality": 0.89,
+      "explanation_confidence": 0.92,
+      "pattern_verification": "confirmed",
+      "safety_assessment": "neutral",
+      "business_relevance": "high"
+    }
+  ],
+  "summary_insights": {
+    "high_quality_explanations": 58,
+    "safety_concerns_identified": 2,
+    "business_critical_features": 12,
+    "technical_pattern_count": 23,
+    "behavioral_pattern_count": 15
+  }
+}
+6.2 Human-Readable Report
+File: explanation_report.html
+Sections:
+•	Executive Summary: Key insights and findings
+•	Feature Explanations: Detailed descriptions by category
+•	Safety Assessment: Potential risks or concerns identified
+•	Business Insights: Actionable findings for model improvement
+•	Technical Details: Processing statistics and quality metrics
+6.3 Export Formats
+•	JSON: Machine-readable structured data
+•	HTML: Human-friendly web report
+•	PDF: Professional document format
+•	CSV: Spreadsheet-compatible for analysis
+•	TXT: Plain text summary for integration
+________________________________________
+7. Quality Validation Framework
+7.1 Explanation Quality Metrics
+Accuracy Assessment
+•	Cross-reference explanation with original pattern data
+•	Verify consistency with pattern categories
+•	Check for factual correctness and logical coherence
+•	Score: 0.0-1.0 based on validation criteria
+Clarity and Usefulness
+•	Evaluate explanation readability and comprehension
+•	Assess actionability for model improvement
+•	Check for appropriate technical level
+•	Score: 0.0-1.0 based on human usability
+Safety Relevance
+•	Identify potential safety or risk implications
+•	Flag concerning behavioral patterns
+•	Assess need for further investigation
+•	Classification: safe/concerning/requires_review
+7.2 Automated Validation Pipeline
+Consistency Checking
+•	Verify explanation aligns with pattern keywords
+•	Check coherence with activation examples
+•	Validate category classification accuracy
+•	Flag inconsistencies for human review
+Quality Scoring Algorithm
+python
+quality_score = (
+    accuracy_score * 0.4 +
+    clarity_score * 0.3 + 
+    consistency_score * 0.2 +
+    relevance_score * 0.1
+)
+________________________________________
+8. Development Backlog
+8.1 Sprint 1: Local LLM Infrastructure (2 weeks)
+Epic: Ollama Integration and Core Pipeline
+•	Story 1.1: Kubernetes service discovery for Ollama deployment
+•	Story 1.2: Model management system (download, load, cache)
+•	Story 1.3: GPU allocation and scheduling across RTX 3090/3080 Ti
+•	Story 1.4: Basic explanation generation with Llama 3.1 8B
+•	Story 1.5: Local model performance monitoring and metrics
+Acceptance Criteria:
+•	✅ Automatic discovery of Ollama service in cluster
+•	✅ Successfully load and run Llama 3.1 8B on RTX 3080 Ti
+•	✅ Generate explanations for top 10 features using local models
+•	✅ GPU utilization monitoring and optimization
+•	✅ Zero external API dependencies
+8.2 Sprint 2: Multi-Model Intelligence and Quality (2 weeks)
+Epic: Advanced Model Selection and Validation
+•	Story 2.1: Intelligent model selection (8B vs 70B vs CodeLlama)
+•	Story 2.2: Quality validation framework for local model outputs
+•	Story 2.3: Automated safety assessment and pattern verification
+•	Story 2.4: Model-specific prompt optimization
+•	Story 2.5: Performance benchmarking across different models
+Acceptance Criteria:
+•	✅ Automatic model selection based on feature complexity
+•	✅ Quality scores >85% for technical explanations
+•	✅ Safety assessment classifications working
+•	✅ Optimized prompts for each model type
+•	✅ Performance metrics and model comparison analytics
+8.3 Sprint 3: Batch Processing and Optimization (2 weeks)
+Epic: Production Readiness
+•	Story 3.1: Batch processing for multiple features
+•	Story 3.2: Rate limiting and API optimization
+•	Story 3.3: Multiple output format support
+•	Story 3.4: Progress tracking and status updates
+•	Story 3.5: Archive integration with miStudioFind
+Acceptance Criteria:
+•	✅ Process all 68 meaningful features efficiently
+•	✅ Generate multiple output formats
+•	✅ Real-time progress tracking
+•	✅ Integration with existing archive system
+8.4 Sprint 4: Production Deployment (2 weeks)
+Epic: Containerization and Deployment
+•	Story 4.1: Docker containerization
+•	Story 4.2: MicroK8s deployment manifests
+•	Story 4.3: Health monitoring and observability
+•	Story 4.4: API documentation and testing
+•	Story 4.5: End-to-end integration testing
+Acceptance Criteria:
+•	✅ Containerized service running on MicroK8s
+•	✅ Full API documentation with examples
+•	✅ Health checks and monitoring operational
+•	✅ Complete integration with miStudioFind
+________________________________________
+9. Technical Requirements
+9.1 Infrastructure Requirements
+Compute Resources:
+yaml
+CPU: 8-16 cores (for LLM API orchestration)
+Memory: 16-32GB RAM (for batch processing)
+Storage: 100GB+ (for explanation database)
+Network: High-bandwidth for LLM API access
+GPU: Optional (for future local LLM deployment)
+Container Specifications:
+dockerfile
+Base Image: python:3.11-slim
+Dependencies: FastAPI, httpx, asyncio, pydantic
+LLM Libraries: openai, anthropic
+Storage: postgres-client, boto3
+Monitoring: prometheus-client, structlog
+9.2 Performance Targets (Local LLM Optimized)
+Processing Speed:
+•	68 meaningful features in <15 minutes (2x faster with local models)
+•	10 high-priority features in <2 minutes (5x faster)
+•	Concurrent processing: 2-4 explanations simultaneously across GPUs
+•	Model switching: <30 seconds for different model selection
+•	Response latency: <5 seconds average per explanation
+Quality Targets:
+•	Explanation accuracy: >85% validation score (local models excel at technical content)
+•	Processing success rate: >98% for quality features (no API failures)
+•	GPU utilization: >80% during active processing
+•	Model efficiency: Smart model selection based on feature complexity
+Cost Optimization:
+•	Zero API costs: 100% local processing
+•	Power efficiency: <500W total GPU power consumption
+•	Infrastructure ROI: <3 months payback vs cloud APIs at scale
+•	Scalability: Linear cost scaling with hardware only
+________________________________________
+10. Integration Points
+10.1 Upstream Integration (miStudioFind)
+Data Sources:
+•	Primary: miStudioFind JSON exports
+•	Archive: Historical feature analysis data
+•	Metadata: Job tracking and lineage information
+Integration Method:
+•	Direct file system access to miStudioFind outputs
+•	API-based job triggering and status updates
+•	Shared storage for seamless data flow
+10.2 Downstream Preparation (miStudioScore)
+Output Preparation:
+•	Structured explanations ready for automated scoring
+•	Quality metrics for validation algorithms
+•	Safety assessments for risk evaluation
+•	Multi-format exports for diverse validation approaches
+10.3 External System Integration
+Business Intelligence:
+•	Data warehouse integration via JSON/CSV exports
+•	Analytics platforms for explanation effectiveness tracking
+•	Compliance systems for regulatory reporting
+Development Tools:
+•	CI/CD pipelines for automated testing
+•	Monitoring systems for operational visibility
+•	Documentation systems for knowledge management
+________________________________________
+11. Success Metrics and KPIs
+11.1 Technical Success Metrics
+Processing Performance:
+•	✅ Feature Coverage: 100% of quality features (≥0.4 coherence)
+•	✅ Processing Time: <30 minutes for complete analysis
+•	✅ Quality Score: >80% average explanation accuracy
+•	✅ Uptime: >99% service availability
+Integration Success:
+•	✅ Data Flow: Seamless integration with miStudioFind
+•	✅ Output Quality: Ready for miStudioScore validation
+•	✅ Format Support: Multiple export formats working
+•	✅ Error Handling: Graceful degradation and recovery
+11.2 Business Value Metrics
+Interpretability Impact:
+•	✅ Human Understanding: Clear, actionable AI behavior descriptions
+•	✅ Safety Insights: Identification of concerning patterns
+•	✅ Research Value: Meaningful insights for AI development
+•	✅ Compliance: Transparent explanations for regulatory needs
+Operational Excellence:
+•	✅ Automation: Zero manual intervention required
+•	✅ Reproducibility: Consistent results across runs
+•	✅ Scalability: Linear scaling with feature count
+•	✅ Cost Efficiency: Optimized LLM API usage
+________________________________________
+12. Risk Assessment and Mitigation
+12.1 Technical Risks (Updated for Local Models)
+Risk: GPU Memory Conflicts Between Models
+•	Probability: Medium
+•	Impact: Medium (processing delays)
+•	Mitigation: Intelligent GPU scheduling, model unloading, memory monitoring
+•	Monitoring: GPU memory usage, model loading times, scheduling conflicts
+Risk: Model Quality Variability Across Different Sizes
+•	Probability: Low
+•	Impact: Medium (explanation quality variation)
+•	Mitigation: Model-specific validation, prompt optimization, quality thresholds
+•	Monitoring: Quality score distribution by model, validation metrics
+Risk: Local Model Inference Bottlenecks
+•	Probability: Low
+•	Impact: Medium (processing speed)
+•	Mitigation: Concurrent processing, model caching, GPU load balancing
+•	Monitoring: Inference latency, GPU utilization, throughput metrics
+12.2 Business Risks
+Risk: Inaccurate or Misleading Explanations
+•	Probability: Low
+•	Impact: High (trust and safety)
+•	Mitigation: Rigorous validation, confidence scoring, human oversight
+•	Monitoring: Explanation accuracy metrics, user feedback
+Risk: Integration Failures with Pipeline
+•	Probability: Low
+•	Impact: High (workflow disruption)
+•	Mitigation: Comprehensive testing, fallback mechanisms
+•	Monitoring: End-to-end pipeline health, integration tests
+________________________________________
+13. Future Enhancement Roadmap
+13.1 Near-term Enhancements (3-6 months)
+Advanced Explanation Features:
+•	Comparative Analysis: Explain differences between similar features
+•	Causal Relationships: Identify feature interactions and dependencies
+•	Temporal Analysis: Track feature behavior changes over time
+•	Multi-model Comparison: Compare features across different models
+Quality Improvements:
+•	Human Feedback Loop: Incorporate human validation for continuous improvement
+•	Explanation Personalization: Tailor explanations for different audiences
+•	Interactive Exploration: Web interface for exploring explanations
+•	Confidence Intervals: Provide uncertainty estimates for explanations
+13.2 Long-term Vision (6-12 months)
+Enterprise Features:
+•	Multi-tenant Support: Secure isolation for multiple organizations
+•	Custom Explanation Templates: Configurable explanation formats
+•	Integration APIs: Rich APIs for third-party tool integration
+•	Compliance Reporting: Automated regulatory compliance documentation
+Research and Innovation:
+•	Novel Explanation Methods: Beyond LLM-based approaches
+•	Multimodal Explanations: Support for vision-language models
+•	Real-time Explanation: Live explanation generation during inference
+•	Explanation Validation: Automated truth-value assessment
+________________________________________
+14. Conclusion
+14.1 Service Readiness Assessment
+miStudioExplain is architecturally complete and ready for immediate development with:
+•	✅ Clear Requirements: Well-defined inputs, outputs, and workflow
+•	✅ Modular Design: Clean separation of concerns for maintainability
+•	✅ Integration Plan: Seamless connection with existing miStudio services
+•	✅ Quality Framework: Robust validation and scoring mechanisms
+•	✅ Production Strategy: Containerization and deployment planning
+14.2 Strategic Impact
+This service will provide unprecedented AI transparency by:
+•	Democratizing AI Understanding: Making complex AI behavior accessible to humans
+•	Enabling AI Safety: Identifying concerning patterns before they cause harm
+•	Accelerating Research: Providing rich insights for AI development
+•	Supporting Compliance: Meeting regulatory requirements for AI transparency
+•	Improving Models: Enabling targeted improvements based on interpretable insights
+14.3 Implementation Recommendation
+Immediate Action: Begin development immediately with 4-sprint plan
+Priority Focus:
+1.	Sprint 1: Core infrastructure and basic explanation generation
+2.	Sprint 2: Quality validation and safety assessment
+3.	Sprint 3: Batch processing and production optimization
+4.	Sprint 4: Containerization and full deployment
+Success Criteria: Achieve 80% explanation accuracy for behavioral patterns within 8-week timeline, establishing foundation for real-time AI monitoring and steering capabilities.
+________________________________________
+15. Local LLM Implementation Guide
+15.1 Ollama Integration Architecture
+Service Discovery and Connection
+python
+# Kubernetes service discovery for Ollama
+class OllamaServiceDiscovery:
+    def __init__(self):
+        self.k8s_client = kubernetes.client.CoreV1Api()
+        self.ollama_service_name = "ollama"
+        self.ollama_namespace = "mistudio-services"
+    
+    async def discover_ollama_endpoint(self):
+        service = self.k8s_client.read_namespaced_service(
+            name=self.ollama_service_name, 
+            namespace=self.ollama_namespace
+        )
+        return f"http://{service.spec.cluster_ip}:11434"
+Model Management Strategy
+python
+# Intelligent model selection based on feature complexity
+class ModelSelector:
+    MODEL_CONFIGS = {
+        "llama3.1:8b": {
+            "gpu_memory": "8GB",
+            "target_gpu": "RTX_3080_Ti", 
+            "use_cases": ["simple_patterns", "quick_explanations"],
+            "max_concurrent": 2
+        },
+        "llama3.1:70b": {
+            "gpu_memory": "20GB",
+            "target_gpu": "RTX_3090",
+            "use_cases": ["complex_behavioral", "detailed_analysis"],
+            "max_concurrent": 1
+        },
+        "codellama:13b": {
+            "gpu_memory": "12GB", 
+            "target_gpu": "RTX_3080_Ti",
+            "use_cases": ["technical_patterns", "code_analysis"],
+            "max_concurrent": 1
+        }
+    }
+    
+    def select_model(self, feature_complexity: str, pattern_category: str) -> str:
+        if pattern_category == "technical" and feature_complexity == "high":
+            return "codellama:13b"
+        elif feature_complexity == "high" or pattern_category == "behavioral":
+            return "llama3.1:70b" 
+        else:
+            return "llama3.1:8b"
+15.2 GPU Resource Management
+Dynamic GPU Allocation
+python
+class GPUScheduler:
+    def __init__(self):
+        self.rtx_3090_capacity = {"total": 24576, "available": 24576}  # MB
+        self.rtx_3080_ti_capacity = {"total": 12288, "available": 12288}
+        self.active_models = {}
+    
+    def allocate_gpu_for_model(self, model_name: str) -> str:
+        model_config = ModelSelector.MODEL_CONFIGS[model_name]
+        required_memory = self._parse_memory(model_config["gpu_memory"])
+        
+        target_gpu = model_config["target_gpu"]
+        if target_gpu == "RTX_3090" and self.rtx_3090_capacity["available"] >= required_memory:
+            self.rtx_3090_capacity["available"] -= required_memory
+            return "cuda:0"  # RTX 3090
+        elif target_gpu == "RTX_3080_Ti" and self.rtx_3080_ti_capacity["available"] >= required_memory:
+            self.rtx_3080_ti_capacity["available"] -= required_memory
+            return "cuda:1"  # RTX 3080 Ti
+        else:
+            raise GPUResourceError(f"Insufficient GPU memory for {model_name}")
+Model Loading and Caching
+python
+class ModelCache:
+    def __init__(self, ollama_client):
+        self.ollama_client = ollama_client
+        self.loaded_models = {}
+        self.model_usage_stats = {}
+    
+    async def ensure_model_loaded(self, model_name: str) -> bool:
+        if model_name not in self.loaded_models:
+            # Pull model if not available
+            await self.ollama_client.pull(model_name)
+            
+            # Load model into GPU memory
+            await self.ollama_client.generate(
+                model=model_name, 
+                prompt="warming up", 
+                options={"num_predict": 1}
+            )
+            
+            self.loaded_models[model_name] = {
+                "loaded_at": datetime.now(),
+                "gpu_device": self._get_model_gpu(model_name),
+                "status": "ready"
+            }
+        return True
+15.3 Prompt Engineering for Local Models
+Model-Specific Prompt Optimization
+python
+class LocalModelPrompts:
+    
+    @staticmethod
+    def get_llama_explanation_prompt(feature_data: dict) -> str:
+        return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are an AI interpretability expert. Analyze neural network features and provide clear explanations.<|eot_id|>
+
+<|start_header_id|>user<|end_header_id|>
+Feature #{feature_data['feature_id']} (coherence: {feature_data['coherence_score']:.3f})
+Category: {feature_data['pattern_category']}
+Keywords: {', '.join(feature_data['pattern_keywords'])}
+
+Top activating examples:
+{chr(10).join([f"- {act['text'][:100]}..." for act in feature_data['top_activations'][:3]])}
+
+Explain in 2-3 sentences what pattern this feature detects and why it's significant for AI behavior.<|eot_id|>
+
+<|start_header_id|>assistant<|end_header_id|>"""
+
+    @staticmethod  
+    def get_codellama_technical_prompt(feature_data: dict) -> str:
+        return f"""# AI Feature Analysis
+        
+## Feature Information
+- ID: {feature_data['feature_id']}
+- Coherence Score: {feature_data['coherence_score']:.3f}
+- Pattern Type: {feature_data['pattern_category']}
+
+## Code/Technical Patterns Detected:
+{chr(10).join([f"```{act['text'][:150]}```" for act in feature_data['top_activations'][:2]])}
+
+## Analysis Request:
+Explain what technical or code pattern this feature identifies. Focus on:
+1. Specific technical concept or pattern
+2. Why this matters for AI code understanding
+3. Potential applications or implications
+
+Response (2-3 sentences):"""
+15.4 Performance Optimization
+Concurrent Processing Pipeline
+python
+class ConcurrentExplainProcessor:
+    def __init__(self, max_concurrent: int = 4):
+        self.max_concurrent = max_concurrent
+        self.processing_queue = asyncio.Queue()
+        self.gpu_semaphores = {
+            "cuda:0": asyncio.Semaphore(1),  # RTX 3090 - single large model
+            "cuda:1": asyncio.Semaphore(2)   # RTX 3080 Ti - dual small models
+        }
+    
+    async def process_feature_batch(self, features: List[dict]) -> List[dict]:
+        # Group features by optimal model
+        model_groups = self._group_features_by_model(features)
+        
+        # Process each group concurrently
+        tasks = []
+        for model_name, feature_group in model_groups.items():
+            task = self._process_model_group(model_name, feature_group)
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return self._flatten_results(results)
+    
+    async def _process_model_group(self, model_name: str, features: List[dict]):
+        gpu_device = ModelSelector.MODEL_CONFIGS[model_name]["target_gpu"]
+        semaphore = self.gpu_semaphores[self._gpu_device_id(gpu_device)]
+        
+        async with semaphore:
+            # Load model and process features
+            await self.model_cache.ensure_model_loaded(model_name)
+            
+            explanations = []
+            for feature in features:
+                explanation = await self._generate_single_explanation(model_name, feature)
+                explanations.append(explanation)
+            
+            return explanations
+15.5 Monitoring and Observability
+Local Model Performance Metrics
+python
+# Prometheus metrics for local LLM performance
+from prometheus_client import Counter, Histogram, Gauge
+
+# Model usage metrics
+MODEL_REQUESTS = Counter('mistudio_explain_model_requests_total', 
+                        'Total requests per model', ['model_name'])
+                        
+EXPLANATION_DURATION = Histogram('mistudio_explain_duration_seconds',
+                                'Time to generate explanation', ['model_name'])
+
+GPU_MEMORY_USAGE = Gauge('mistudio_explain_gpu_memory_bytes',
+                        'GPU memory usage', ['gpu_device', 'model_name'])
+
+EXPLANATION_QUALITY = Histogram('mistudio_explain_quality_score',
+                               'Quality score of explanations', ['model_name'])
+
+# Usage in explanation generation
+class MetricsCollector:
+    @staticmethod
+    async def track_explanation_generation(model_name: str, feature_id: int):
+        MODEL_REQUESTS.labels(model_name=model_name).inc()
+        
+        start_time = time.time()
+        with EXPLANATION_DURATION.labels(model_name=model_name).time():
+            explanation = await generate_explanation(model_name, feature_id)
+        
+        # Track GPU memory usage
+        gpu_memory = get_gpu_memory_usage(model_name)
+        GPU_MEMORY_USAGE.labels(
+            gpu_device=get_model_gpu(model_name),
+            model_name=model_name
+        ).set(gpu_memory)
+        
+        return explanation
+15.6 Cost and Efficiency Analysis
+Local vs Cloud Cost Comparison
+python
+class CostAnalyzer:
+    # Infrastructure costs (per hour)
+    RTX_3090_POWER_COST = 0.35  # 350W @ $0.10/kWh
+    RTX_3080_TI_POWER_COST = 0.32  # 320W @ $0.10/kWh
+    
+    # Cloud API costs (per 1K tokens)
+    OPENAI_GPT4_COST = 0.03
+    ANTHROPIC_CLAUDE_COST = 0.045
+    
+    @classmethod
+    def calculate_processing_cost(cls, num_features: int, avg_tokens_per_explanation: int = 150):
+        # Local processing cost
+        estimated_processing_time = num_features * 0.8 / 60  # 0.8 sec per feature, convert to hours
+        local_cost = (cls.RTX_3090_POWER_COST + cls.RTX_3080_TI_POWER_COST) * estimated_processing_time
+        
+        # Cloud API cost comparison
+        total_tokens = num_features * avg_tokens_per_explanation
+        openai_cost = (total_tokens / 1000) * cls.OPENAI_GPT4_COST
+        anthropic_cost = (total_tokens / 1000) * cls.ANTHROPIC_CLAUDE_COST
+        
+        return {
+            "local_cost": local_cost,
+            "openai_cost": openai_cost,
+            "anthropic_cost": anthropic_cost,
+            "savings_vs_openai": openai_cost - local_cost,
+            "savings_vs_anthropic": anthropic_cost - local_cost,
+            "roi_break_even_features": openai_cost / local_cost if local_cost > 0 else float('inf')
+        }
+
+________________________________________
+Document Status: ✅ SPECIFICATION COMPLETE - READY FOR DEVELOPMENT
+Next Phase: miStudioExplain Implementation (4 sprints, 8 weeks)
+Platform Progress: Step 3 of 7 in miStudio AI Interpretability Workflow
