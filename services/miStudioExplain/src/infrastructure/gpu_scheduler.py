@@ -1,162 +1,90 @@
 """
 GPU Scheduler for miStudioExplain Service
 
-Dynamic GPU allocation and resource management.
+Manages GPU resource allocation and prevents resource contention.
 """
 
-import logging
 import asyncio
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
-from enum import Enum
-from datetime import datetime
+import logging
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
-class GPUDevice(Enum):
-    """Available GPU devices"""
-    RTX_3090 = "cuda:0"
-    RTX_3080_TI = "cuda:1"
-
-
-@dataclass
-class GPUStatus:
-    """Current GPU status information"""
-    device_id: str
-    name: str
-    total_memory_mb: int
-    used_memory_mb: int
-    available_memory_mb: int
-    utilization_percent: float
-
-
-@dataclass
-class ResourceAllocation:
-    """GPU resource allocation for a model"""
-    allocation_id: str
-    device_id: str
-    allocated_memory_mb: int
-    model_name: str
-    allocation_time: datetime
-
-
 class GPUScheduler:
-    """Manages GPU resource allocation and scheduling"""
-    
-    GPU_CAPACITIES = {
-        "cuda:0": {"total": 24576, "name": "RTX_3090"},
-        "cuda:1": {"total": 12288, "name": "RTX_3080_Ti"}
-    }
-    
-    def __init__(self):
-        self.allocations: Dict[str, ResourceAllocation] = {}
-        self.allocation_lock = asyncio.Lock()
-        
-    async def get_gpu_status(self, device_id: str) -> Optional[GPUStatus]:
-        """Get current GPU status"""
-        try:
-            # Simplified GPU status (would normally use nvidia-ml-py or nvidia-smi)
-            capacity = self.GPU_CAPACITIES.get(device_id, {})
-            if not capacity:
-                return None
-            
-            # Calculate used memory from allocations
-            used_memory = sum(
-                alloc.allocated_memory_mb 
-                for alloc in self.allocations.values() 
-                if alloc.device_id == device_id
-            )
-            
-            total_memory = capacity["total"]
-            available_memory = total_memory - used_memory
-            
-            return GPUStatus(
-                device_id=device_id,
-                name=capacity["name"],
-                total_memory_mb=total_memory,
-                used_memory_mb=used_memory,
-                available_memory_mb=available_memory,
-                utilization_percent=0.0  # Would get from nvidia-smi
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Error getting GPU status: {e}")
-            return None
-        
-    async def allocate_gpu_for_model(self, model_name: str, required_memory_mb: int) -> Optional[str]:
-        """Allocate GPU resources for a model"""
-        async with self.allocation_lock:
-            try:
-                optimal_gpu = self.get_optimal_gpu_for_model(model_name)
-                gpu_status = await self.get_gpu_status(optimal_gpu)
-                
-                if not gpu_status:
-                    return None
-                
-                if gpu_status.available_memory_mb < required_memory_mb:
-                    logger.warning(f"⚠️ Insufficient memory on {optimal_gpu}")
-                    return None
-                
-                # Create allocation
-                allocation_id = f"{model_name}_{datetime.now().strftime(%Y%m%d_%H%M%S)}"
-                allocation = ResourceAllocation(
-                    allocation_id=allocation_id,
-                    device_id=optimal_gpu,
-                    allocated_memory_mb=required_memory_mb,
-                    model_name=model_name,
-                    allocation_time=datetime.now()
-                )
-                
-                self.allocations[allocation_id] = allocation
-                logger.info(f"✅ Allocated {required_memory_mb}MB on {optimal_gpu} for {model_name}")
-                return allocation_id
-                
-            except Exception as e:
-                logger.error(f"❌ Error allocating GPU: {e}")
-                return None
-        
-    async def release_gpu_allocation(self, allocation_id: str) -> bool:
-        """Release GPU allocation"""
-        async with self.allocation_lock:
-            try:
-                if allocation_id in self.allocations:
-                    allocation = self.allocations.pop(allocation_id)
-                    logger.info(f"✅ Released allocation {allocation_id}")
-                    return True
-                return False
-            except Exception as e:
-                logger.error(f"❌ Error releasing allocation: {e}")
-                return False
-        
-    def get_optimal_gpu_for_model(self, model_name: str) -> str:
-        """Determine optimal GPU for a specific model"""
-        try:
-            from .ollama_manager import OllamaManager
-            
-            model_config = OllamaManager.MODEL_CONFIGS.get(model_name)
-            if model_config:
-                if model_config.target_gpu == "RTX_3090":
-                    return "cuda:0"
-                elif model_config.target_gpu == "RTX_3080_Ti":
-                    return "cuda:1"
-            
-            return "cuda:1"  # Default to RTX 3080 Ti
-            
-        except Exception as e:
-            logger.error(f"❌ Error determining optimal GPU: {e}")
-            return "cuda:1"
-        
-    async def monitor_gpu_utilization(self) -> Dict[str, GPUStatus]:
-        """Monitor GPU utilization across all devices"""
-        try:
-            results = {}
-            for device_id in self.GPU_CAPACITIES.keys():
-                status = await self.get_gpu_status(device_id)
-                if status:
-                    results[device_id] = status
-            return results
-        except Exception as e:
-            logger.error(f"❌ Error monitoring GPU utilization: {e}")
-            return {}
+    """
+    Manages and schedules access to GPU resources within the cluster.
 
+    This scheduler prevents multiple models from being loaded onto the same GPU
+    if it would exceed the GPU's memory capacity.
+    """
+
+    def __init__(self, gpu_inventory: Dict[str, int]):
+        """
+        Initializes the scheduler with a dictionary of available GPUs and their memory.
+
+        Args:
+            gpu_inventory: A dictionary where keys are GPU identifiers (e.g., "gpu-0")
+                           and values are their total memory in MB (e.g., 12288).
+        """
+        self._gpu_inventory = gpu_inventory
+        self._gpu_status: Dict[str, Dict] = {
+            gpu_id: {"total_memory_mb": mem, "used_memory_mb": 0, "model_using": None}
+            for gpu_id, mem in gpu_inventory.items()
+        }
+        self._lock = asyncio.Lock()
+        logger.info(f"🔧 GPUScheduler initialized with inventory: {self._gpu_inventory}")
+
+    async def acquire_gpu(self, model_name: str, memory_required_mb: int) -> Optional[str]:
+        """
+        Acquires an available GPU for a model if resources are sufficient.
+
+        This method is atomic and safe from race conditions.
+
+        Args:
+            model_name: The name of the model requesting the GPU.
+            memory_required_mb: The amount of GPU memory the model needs.
+
+        Returns:
+            The ID of the acquired GPU if successful, otherwise None.
+        """
+        async with self._lock:
+            logger.info(f"Attempting to acquire GPU for {model_name} (requires {memory_required_mb}MB)...")
+
+            # Find a GPU with enough free memory
+            for gpu_id, status in self._gpu_status.items():
+                if status["model_using"] is None:  # Check if GPU is free
+                    if status["total_memory_mb"] >= memory_required_mb:
+                        # Allocate the GPU
+                        status["used_memory_mb"] = memory_required_mb
+                        status["model_using"] = model_name
+                        logger.info(f"✅ Acquired {gpu_id} for model {model_name}.")
+                        return gpu_id
+
+            logger.warning(f"❌ No available GPU with sufficient memory for {model_name}.")
+            return None
+
+    async def release_gpu(self, gpu_id: str):
+        """
+        Releases a GPU, making it available for other tasks.
+
+        Args:
+            gpu_id: The ID of the GPU to release.
+        """
+        async with self._lock:
+            if gpu_id in self._gpu_status:
+                model_name = self._gpu_status[gpu_id]["model_using"]
+                if model_name:
+                    logger.info(f"Releasing {gpu_id} from model {model_name}...")
+                    # Reset the status
+                    self._gpu_status[gpu_id]["used_memory_mb"] = 0
+                    self._gpu_status[gpu_id]["model_using"] = None
+                    logger.info(f"✅ {gpu_id} has been released and is now free.")
+                else:
+                    logger.warning(f"Attempted to release {gpu_id}, but it was already free.")
+            else:
+                logger.error(f"Attempted to release an unknown GPU: {gpu_id}")
+
+    def get_status(self) -> Dict[str, Dict]:
+        """Returns the current status of all managed GPUs."""
+        return self._gpu_status
