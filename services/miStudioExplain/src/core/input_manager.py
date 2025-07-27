@@ -5,7 +5,7 @@ Handles validation, parsing, and structuring of incoming requests.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class ExplanationRequest(BaseModel):
     request_id: str = Field(..., description="A unique identifier for this explanation request.")
     analysis_type: str = Field("complex_behavioral", description="The type of analysis requested (e.g., 'technical_patterns', 'complex_behavioral').")
     complexity: str = Field("medium", description="The complexity of the explanation required ('low', 'medium', 'high').")
+    model: Optional[str] = Field(None, description="Optionally specify a model to use (e.g., 'llama3.1:8b').")
     input_data: RawTextInput | FindResultInput = Field(..., description="The data to be explained, which can be raw text or a structured find result.")
 
 
@@ -61,7 +62,6 @@ class InputManager:
             return validated_request
         except ValidationError as e:
             logger.error(f"❌ Validation failed for request: {e}")
-            # The error message from Pydantic is already very informative
             raise ValueError(f"Invalid request payload: {e}")
         except Exception as e:
             logger.error(f"❌ An unexpected error occurred during request processing: {e}")
@@ -70,27 +70,19 @@ class InputManager:
     def get_corpus_from_request(self, request: ExplanationRequest) -> str:
         """
         Extracts the primary text corpus to be analyzed from the request.
-
-        This method handles the logic for pulling the relevant text, whether it comes
-        from a raw input or a structured result from miStudioFind.
         """
         if isinstance(request.input_data, RawTextInput):
             logger.info(f"Extracting corpus from RawTextInput for request {request.request_id}.")
             return request.input_data.text_corpus
         elif isinstance(request.input_data, FindResultInput):
             logger.info(f"Extracting corpus from FindResultInput for request {request.request_id}.")
-            # For a 'find' result, we might combine the summary with key parts of the analysis.
-            # This logic can be expanded based on what provides the best context for the LLM.
             corpus = (
                 f"Summary Report from Find Job {request.input_data.find_job_id}:\n"
                 f"{request.input_data.summary_report}\n\n"
                 f"Key Feature Analysis:\n"
-                # For simplicity, we'll just stringify the top-level keys.
-                # A more advanced implementation would format this nicely.
                 f"{', '.join(request.input_data.feature_analysis.keys())}"
             )
             return corpus
         else:
-            # This should not be reached due to Pydantic validation, but it's good practice.
             logger.error(f"Unsupported input data type for request {request.request_id}.")
             raise TypeError(f"Unsupported input data type: {type(request.input_data)}")

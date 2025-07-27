@@ -46,12 +46,16 @@ class ExplanationGenerator:
         """
         logger.info(f"Generating explanation for request {request.request_id}...")
 
-        # 1. Select the optimal model for the task
-        model_name = self.ollama_manager.get_optimal_model_for_task(
-            task_type=request.analysis_type,
-            complexity=request.complexity
-        )
-        logger.info(f"Selected optimal model: {model_name}")
+        # 1. Check if a model was specified in the request; otherwise, choose the optimal one.
+        if request.model:
+            model_name = request.model
+            logger.info(f"Using model specified in request: {model_name}")
+        else:
+            model_name = self.ollama_manager.get_optimal_model_for_task(
+                task_type=request.analysis_type,
+                complexity=request.complexity
+            )
+            logger.info(f"Selected optimal model: {model_name}")
 
         # 2. Get the model's specific parameters from the manager's config
         model_config = self.ollama_manager.MODEL_CONFIGS.get(model_name)

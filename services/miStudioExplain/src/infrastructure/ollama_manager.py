@@ -60,6 +60,14 @@ class OllamaManager:
             use_cases=["technical_patterns", "code_analysis"],
             max_concurrent=1,
             parameters={"temperature": 0.0, "top_p": 0.95, "max_tokens": 250}
+        ),
+        "huihui_ai/phi4-abliterated:latest": ModelConfig(
+            name="huihui_ai/phi4-abliterated:latest",
+            gpu_memory_mb=8192,
+            target_gpu="RTX_3080_Ti",
+            use_cases=["simple_patterns", "quick_explanations"],
+            max_concurrent=2,
+            parameters={"temperature": 0.2, "top_p": 0.9, "max_tokens": 200}
         )
     }
 
