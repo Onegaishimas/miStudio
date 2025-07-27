@@ -1,39 +1,32 @@
-"""
-Tests for GPU Scheduler
-"""
-
 import pytest
-import asyncio
-from unittest.mock import Mock, patch
 from src.infrastructure.gpu_scheduler import GPUScheduler
 
+@pytest.fixture
+def scheduler():
+    """Provides a scheduler with a predefined GPU inventory for testing."""
+    inventory = {"gpu-0": 12000, "gpu-1": 24000}
+    return GPUScheduler(gpu_inventory=inventory)
 
-class TestGPUScheduler:
-    """Test cases for GPUScheduler"""
-    
-    def setup_method(self):
-        """Setup test environment"""
-        self.scheduler = GPUScheduler()
-        
-    @pytest.mark.asyncio
-    async def test_gpu_allocation(self):
-        """Test GPU resource allocation"""
-        # TODO: Implement test
-        pass
-        
-    @pytest.mark.asyncio
-    async def test_resource_monitoring(self):
-        """Test GPU resource monitoring"""
-        # TODO: Implement test
-        pass
-        
-    def test_optimal_gpu_selection(self):
-        """Test optimal GPU selection logic"""
-        # TODO: Implement test
-        pass
-        
-    def test_allocation_efficiency(self):
-        """Test allocation efficiency calculation"""
-        # TODO: Implement test
-        pass
+@pytest.mark.asyncio
+async def test_gpu_allocation(scheduler: GPUScheduler):
+    """Tests that a GPU can be successfully acquired and released."""
+    # Acquire a GPU
+    gpu_id = await scheduler.acquire_gpu(model_name="test-model", memory_required_mb=8000)
+    assert gpu_id == "gpu-0"
 
+    # Verify status
+    status = scheduler.get_status()
+    assert status["gpu-0"]["model_using"] == "test-model"
+    assert status["gpu-0"]["used_memory_mb"] == 8000
+
+    # Release the GPU
+    await scheduler.release_gpu(gpu_id)
+    status = scheduler.get_status()
+    assert status["gpu-0"]["model_using"] is None
+    assert status["gpu-0"]["used_memory_mb"] == 0
+
+@pytest.mark.asyncio
+async def test_gpu_allocation_fails_if_no_memory(scheduler: GPUScheduler):
+    """Tests that allocation fails if no GPU has enough memory."""
+    gpu_id = await scheduler.acquire_gpu(model_name="large-model", memory_required_mb=30000)
+    assert gpu_id is None

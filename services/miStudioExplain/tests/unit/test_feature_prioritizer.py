@@ -1,35 +1,19 @@
-"""
-Tests for Feature Prioritizer
-"""
-
 import pytest
-from src.core.feature_prioritizer import FeaturePrioritizer, FeatureComplexity
+from src.core.feature_prioritizer import FeaturePrioritizer
+from src.core.input_manager import ExplanationRequest # Corrected import
 
+@pytest.fixture
+def prioritizer():
+    """Provides a fresh instance of FeaturePrioritizer for each test."""
+    return FeaturePrioritizer()
 
-class TestFeaturePrioritizer:
-    """Test cases for FeaturePrioritizer"""
-    
-    def setup_method(self):
-        """Setup test environment"""
-        self.prioritizer = FeaturePrioritizer()
-        
-    def test_quality_filtering(self):
-        """Test feature quality filtering"""
-        # TODO: Implement test
-        pass
-        
-    def test_priority_scoring(self):
-        """Test priority score calculation"""
-        # TODO: Implement test
-        pass
-        
-    def test_feature_ranking(self):
-        """Test feature ranking logic"""
-        # TODO: Implement test
-        pass
-        
-    def test_batch_creation(self):
-        """Test batch creation for processing"""
-        # TODO: Implement test
-        pass
-
+def test_prioritize_from_text(prioritizer: FeaturePrioritizer):
+    """Tests that the prioritizer can extract keywords from raw text."""
+    text = "This is a test. The test is important. A test helps verify code."
+    request_data = {
+        "request_id": "test-req",
+        "input_data": {"text_corpus": text * 5} # Ensure it's long enough
+    }
+    request = ExplanationRequest.model_validate(request_data)
+    features = prioritizer.prioritize_features(request)
+    assert "test" in features
