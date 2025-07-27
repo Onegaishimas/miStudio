@@ -1,0 +1,11 @@
+scoring_jobs:
+  - scorer: relevance_scorer
+    name: "security_relevance"
+    params:
+      positive_keywords:
+        - "security"
+        - "vulnerability"
+        - "injection"
+      negative_keywords:
+        - "marketing"
+        - "frontend"
