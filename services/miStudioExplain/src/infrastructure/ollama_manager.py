@@ -63,17 +63,25 @@ class OllamaManager:
         )
     }
 
-    def __init__(self, namespace: str = "mistudio-services"):
+    def __init__(self, namespace: str = "mistudio-services", ollama_endpoint: Optional[str] = None):
+        """
+        Initializes the manager.
+
+        Args:
+            namespace: The Kubernetes namespace for service discovery (fallback).
+            ollama_endpoint: A specific endpoint URL for the Ollama service.
+        """
         self.namespace = namespace
-        self.ollama_endpoint = f"http://ollama.{self.namespace}.svc.cluster.local:11434"
+        # Prioritize the provided endpoint, otherwise use the default for in-cluster discovery.
+        self.ollama_endpoint = ollama_endpoint or f"http://ollama.{self.namespace}.svc.cluster.local:11434"
         self.service_info = None
-        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0)) # Increased timeout for model pulling
+        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0))
 
     async def initialize(self) -> bool:
         """Initialize connection to Ollama service and perform a health check."""
-        logger.info("🔧 Initializing Ollama connection...")
+        logger.info(f"🔧 Initializing Ollama connection to endpoint: {self.ollama_endpoint}")
         if await self.health_check():
-            logger.info(f"✅ Ollama connection initialized successfully to {self.ollama_endpoint}")
+            logger.info(f"✅ Ollama connection initialized successfully.")
             return True
         else:
             logger.error(f"❌ Ollama health check failed at {self.ollama_endpoint}")
@@ -82,6 +90,7 @@ class OllamaManager:
     async def health_check(self) -> bool:
         """Check Ollama service health and list available models."""
         try:
+            # The API endpoint for listing models is /api/tags
             response = await self.http_client.get(f"{self.ollama_endpoint}/api/tags")
             response.raise_for_status()
             data = response.json()
@@ -116,15 +125,14 @@ class OllamaManager:
             pull_data = {"name": model_name}
             async with self.http_client.stream("POST", f"{self.ollama_endpoint}/api/pull", json=pull_data, timeout=600.0) as response:
                 async for line in response.aiter_lines():
-                    # Process streaming output for progress if needed
-                    pass
+                    pass # Process streaming output for progress if needed
             
-            await self.health_check() # Refresh model list
-            if model_name in self.service_info.available_models:
+            await self.health_check() # Refresh model list after pulling
+            if self.service_info and model_name in self.service_info.available_models:
                  logger.info(f"✅ Model {model_name} pulled successfully")
                  return True
             else:
-                 logger.error(f"❌ Failed to pull model {model_name}. It's not in the available models list after pull.")
+                 logger.error(f"❌ Failed to pull model {model_name}.")
                  return False
 
         except Exception as e:
@@ -137,6 +145,7 @@ class OllamaManager:
             return {"success": False, "error": f"Model {model_name} not available"}
 
         try:
+            # The system prompt is now part of the main prompt content
             generation_data = {
                 "model": model_name,
                 "prompt": prompt,
