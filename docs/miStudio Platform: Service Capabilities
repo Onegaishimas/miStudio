@@ -1,0 +1,68 @@
+miStudio Platform: Service Capabilities
+1. Introduction
+The miStudio platform is a suite of powerful, interconnected microservices designed to provide a complete, end-to-end workflow for large language model (LLM) interpretability. In an era where LLMs are increasingly treated as inscrutable "black boxes," miStudio provides the critical tools to illuminate their inner workings. Each service in the platform offers a distinct set of capabilities, creating a seamless journey that takes a user from initial, high-level model analysis to fine-grained, active, real-time intervention.
+
+This document outlines the specific capabilities of each service. It details both the currently implemented features that form the platform's foundation and the planned capabilities that will define its future as a comprehensive tool for model understanding and control.
+
+2. Core Discovery Pipeline (Implemented Capabilities)
+This set of services forms the foundational data-gathering and analysis pipeline of miStudio. They work in sequence to extract, analyze, and explain the fundamental features of a target LLM. The quality and granularity of the insights produced by this core pipeline are the bedrock upon which all of the platform's more advanced capabilities are built.
+
+2.1. miStudioTrain: Feature Extractor
+The miStudioTrain service is responsible for creating the core "dictionary" of a model's features by training a Sparse Autoencoder (SAE). This dictionary is the key that unlocks the model's internal language.
+
+Capability: Automated SAE Training: Ingests a specified base LLM and a dataset to automatically train and generate a high-quality SAE. An SAE learns to represent the model's complex, high-dimensional internal state using a much larger set of simple, "sparse" features, where only a few features are active at any given time. This process, designed to run as a single, asynchronous job, allows researchers to launch long-running training tasks and receive a notification upon completion, freeing them up for other work.
+
+Capability: Flexible Model & Layer Targeting: Users can precisely target any LLM available on the Hugging Face Hub and specify the exact layer (e.g., a specific transformer block's MLP or attention output) from which to extract the model's internal activations. This is a critical capability for deep analysis, as features in earlier layers of a model tend to represent simple concepts (like syntax or specific tokens), while features in deeper layers represent more abstract, semantic concepts. This flexibility allows researchers to probe a model's reasoning at any depth.
+
+Capability: Efficient Resource Utilization: Includes an intelligent GPU manager to schedule and execute computationally expensive training jobs on available hardware. This goes beyond simply using a GPU; it involves queuing, prioritizing, and managing access to ensure that these valuable computational assets are used to their full capacity, maximizing throughput and minimizing idle time for the entire organization.
+
+2.2. miStudioFind: Feature Analyzer
+Once an SAE is trained, the miStudioFind service provides a suite of tools to analyze the thousands of learned features and identify the most significant and interesting ones for further investigation.
+
+Capability: Comprehensive Feature Statistics: For every feature in the SAE, the service automatically calculates a rich set of statistics, including activation frequency (how often the feature turns "on"), activation sparsity, variance, and distribution across a dataset. These metrics provide a quantitative foundation for analysis; for instance, a very sparse feature that activates strongly might represent a rare but important concept, while a feature that activates frequently across many different kinds of text may represent a broad semantic idea.
+
+Capability: Top Activating Example Identification: The service can instantly identify and retrieve the specific text examples from a dataset that cause each feature to activate most strongly. This is the primary method for bridging the gap between abstract statistics and concrete meaning. For a feature hypothesized to be about "SQL injection," this capability would surface examples like ...' OR 1=1; --, providing immediate, compelling evidence for the user to interpret.
+
+Capability: Advanced, Composable Filtering: Provides a powerful filtering engine that allows users to search for features based on complex, multi-layered criteria. This acts as a query language for model behavior, enabling researchers to formulate and test sophisticated hypotheses, such as, "Find features with high activation frequency but low variance that activate on text containing the word 'security' but not the word 'compliance'."
+
+Capability: Keyword-Based Pattern Discovery: Users can supply lists of keywords to automatically discover features that show a high correlation with specific concepts. This provides a fast path to finding features relevant to a particular domain. Instead of sifting through features manually, an auditor can provide a list of terms related to PII (Personally Identifiable Information) and immediately receive a ranked list of candidate features that the model might be using to identify it.
+
+2.3. miStudioExplain: AI-Powered Interpreter
+The miStudioExplain service uses an LLM to translate the raw data and statistics from miStudioFind into human-readable insights, acting as an automated research assistant.
+
+Capability: Natural Language Summarization: Synthesizes the statistical data and top activating examples for a feature and generates a concise, clear, natural-language summary of what the feature likely represents. This saves researchers countless hours of manual interpretation, allowing them to focus on verifying the LLM's summary and exploring its deeper implications. For example, it might summarize a feature as, "This feature detects discussions of Python programming, specifically related to the pandas library and its DataFrame objects."
+
+Capability: Automated Context & Prompt Engineering: Automatically constructs a detailed, context-rich prompt for the explanation-generating LLM. The quality of an LLM's output is famously sensitive to the quality of its prompt. By handling this complex engineering step automatically, this capability ensures the highest possible quality of explanation and democratizes the service for users who are not prompt engineering experts.
+
+Capability: Foundational Quality Validation: Includes a preliminary framework for validating the coherence of the generated explanation. This system can, for instance, check if the explanation uses keywords that are actually present in the top-activating examples it was shown. This is a crucial first step toward ensuring the reliability of the AI-generated explanations and lays the groundwork for the more advanced scoring capabilities to come.
+
+3. Advanced Analysis & Intervention (Future Capabilities)
+This set of services, currently in the project backlog, builds upon the core pipeline to enable active monitoring, scoring, and causal intervention in model behavior. These capabilities represent the shift from passively describing what a model does to actively prescribing what it should do.
+
+3.1. miStudioScore: Feature Importance Ranking
+This service will move beyond simple filtering to quantitatively rank features by their importance and utility.
+
+Future Capability: Task-Based Utility Scoring: Will be able to assess a feature's importance by measuring the impact on the model's performance (e.g., increase in loss) when that specific feature is "ablated" or removed during a specific task. This provides causal evidence of a feature's role. If ablating a feature significantly harms the model's ability to write safe code, we have strong evidence that the feature is causally responsible for that skill.
+
+Future Capability: Business-Driven Relevance Scoring: Will allow users to define custom scoring logic based on business needs, such as ranking features based on their correlation with proprietary keyword lists. A financial firm could use this to find and rank all features related to discussions of equity trading, while a legal firm could rank features related to specific points of contract law, making the tool directly applicable to enterprise-level risk and opportunity analysis.
+
+3.2. miStudioCorrelate: Circuit Discovery
+This service will uncover the relationships between features, revealing the "circuits" that models use for more complex, multi-step reasoning.
+
+Future Capability: Co-activation Analysis: Will analyze feature activations across a massive dataset to identify groups of features that consistently fire together, suggesting they form a functional circuit. For example, it might discover that a feature for "identifying a function definition in Python" often activates with another feature for "identifying the function's arguments." Together, these features form a circuit for understanding a function's signature, a concept more complex than either feature alone.
+
+Future Capability: Circuit Visualization Data: Will produce output in a graph-based format (e.g., nodes and edges) that can be directly fed into UI tools to visualize these feature circuits. This capability will transform abstract correlation matrices into an interactive, explorable map of the model's internal logic, making complex relationships intuitive to grasp.
+
+3.3. miStudioMonitor: Real-Time Model Insight
+This service will provide a live, real-time "CAT scan" of a model's internal state as it processes information.
+
+Future Capability: Live Feature Activation Streaming: Will expose a high-performance streaming API (e.g., WebSocket) that broadcasts feature activations in real-time as a user inputs text. This enables live dashboards that visualize a model's "thought process," allowing a developer to see exactly which concepts the model is considering, word by word, as it formulates a response.
+
+Future Capability: Early Warning & Anomaly Detection: The real-time data stream can be used to power an early-warning system that alerts users when potentially undesirable features (e.g., a "bias" or "toxicity" feature) begin to activate. This is a paradigm shift for AI safety, moving from reactive moderation of bad outputs to proactive, pre-emptive intervention the moment the model begins to think about generating harmful content.
+
+3.4. miStudioSteer: Causal Model Intervention
+This is the ultimate goal of the platform: moving from observing to controlling, effectively giving users a set of dials to tune a model's behavior on the fly.
+
+Future Capability: Live Model Behavior Steering: Will give users the unprecedented ability to actively and causally intervene in a model's reasoning process during generation. This is the difference between reading a book and being able to whisper in the author's ear to influence the next chapter. It changes the user from a passive observer into an active collaborator with the model.
+
+Future Capability: Targeted Suppression & Amplification: Users will be able to submit a prompt along with a "steering vector" that tells the model to either amplify or suppress specific features. This allows for dynamic personalization without costly retraining. For example, a user could make a model a better creative writer by amplifying features related to "metaphorical language" and "unusual sentence structure," or make it a more factual question-answerer by suppressing those same features and amplifying ones related to "verbatim recall."

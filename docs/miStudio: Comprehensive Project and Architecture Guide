@@ -1,0 +1,223 @@
+miStudio: Comprehensive Project and Architecture Guide
+1. For the Product Owner: Vision, Status, and Roadmap
+1.1. Executive Summary
+miStudio is an enterprise-grade, end-to-end platform for Machine Learning Interpretability, designed to unlock the "black box" of large language models (LLMs). Our mission is to provide unparalleled insight into how a model works, enabling developers and organizations to build safer, more ethical, and more capable AI systems with confidence.
+
+The platform ingests a standard LLM (e.g., Llama3, GPT-4) and, using a cutting-edge technique called Sparse Autoencoders (SAEs), decomposes its complex, high-dimensional internal "thought processes" into thousands of discrete, monosemantic, and understandable "features." For example, where a model might fail on a security audit, miStudio allows us to isolate the specific internal feature the model uses to recognize "SQL injection attacks," analyze its behavior, and understand its failure modes. Similarly, we can identify features corresponding to "toxic language," "medical terminology," or even abstract concepts like "legal privilege in text."
+
+This capability moves beyond simple input-output testing into the realm of genuine model introspection. It allows our users to Find important features from millions of possibilities, Explain what they do in plain language, Score their relevance to business objectives, Monitor their activation in real-time, and ultimately, Steer the model's behavior by directly intervening in its reasoning process.
+
+1.2. User Personas & Value Proposition
+AI Safety Researcher: Faces the challenge of auditing opaque models for dangerous emergent capabilities. miStudio provides the tools to move from theoretical risk to empirical evidence, gaining the ability to audit models for specific behaviors like deception, bias, or sycophancy, and understand precisely how they arise from the model's internal feature set.
+
+ML Engineer/Developer: Often struggles to debug model failures beyond "the output was wrong." With miStudio, an engineer can investigate why a model produced an incorrect or unexpected output. For instance, if a coding assistant generates insecure code, the developer can trace the failure back to a specific, flawed feature related to "code security analysis" and gather data to help fine-tune or patch the model's behavior.
+
+Product Manager: Needs to ensure that AI-powered features are reliable, safe, and aligned with user expectations before launch. miStudio provides a new layer of quality assurance, allowing product managers to have greater confidence that a model will behave as intended in production, reducing the risk of costly reputational damage from unforeseen model misbehavior.
+
+Compliance Officer: Is tasked with ensuring that AI systems adhere to a growing web of regulations (e.g., the EU AI Act, GDPR). miStudio provides the mechanism to create detailed, evidence-based reports and audits of model behavior. This allows an organization to demonstrate due diligence and prove that its models are not, for example, using protected attributes like race or gender in their decision-making processes.
+
+1.3. Current Project Status (As of July 2025)
+The foundational pipeline of miStudio is complete and functional. This represents the core "discovery" phase of the platform's capabilities, which is the essential first step toward full model transparency.
+
+Implemented Services:
+
+miStudioTrain: Successfully trains SAEs on base LLMs, achieving good reconstruction loss and high feature sparsity, indicating a valid feature decomposition.
+
+miStudioFind: Successfully analyzes SAEs to identify and filter features based on a rich set of calculated statistics.
+
+miStudioExplain: Successfully generates coherent, natural-language explanations for isolated features.
+
+Current State: The platform can successfully take a base LLM, extract a feature dictionary (the SAE), and provide a data-rich, human-readable report on what individual features represent. This provides the raw material for all further analysis.
+
+1.4. Future Roadmap & Backlog
+The next phase of development focuses on moving from passive analysis to active, value-driving intervention and monitoring. These services are specified in the project backlog and represent the most significant future value of the platform.
+
+miStudioScore: Develop a dedicated service to rank features by importance, novelty, or custom business logic. This moves from "what is this feature?" to "how important is this feature to my goals?"
+
+miStudioCorrelate: Build functionality to discover relationships between features (e.g., "feature A and feature B often activate together, forming a 'circuit' for a more complex concept"). This unlocks a deeper, systemic understanding of model reasoning.
+
+miStudioMonitor: Create a real-time dashboard to monitor feature activations as the model processes live data, providing an early-warning system for undesirable behavior before it results in a negative output.
+
+miStudioSteer: The ultimate goal of the platform. This service will allow users to actively suppress or amplify certain features in a live model to control its output (e.g., "turn down the 'sycophancy' feature during a performance review" or "amplify the 'code security analysis' feature when generating production code").
+
+miStudioUI: A unified web front-end that provides a seamless, interactive experience for the entire Train -> Find -> Explain -> Score -> Monitor -> Steer workflow, making these powerful tools accessible to all user personas.
+
+2. For the Architect: System Design & Technology
+2.1. Architectural Approach
+miStudio is built on a Kubernetes-native microservices architecture. This design was chosen explicitly for its ability to deliver scalability, resilience, and maintainability for a complex, multi-stage ML workflow. Each component is an independent, containerized service that communicates via well-defined REST APIs, allowing services to be developed, deployed, and scaled independently. For example, the miStudioTrain service can be scaled onto a cluster of GPU nodes, while the stateless miStudioExplain service can be scaled out horizontally on cheaper CPU nodes.
+
+The primary technology stack is:
+
+Backend: Python 3.11+ with FastAPI & Pydantic. FastAPI was chosen for its high performance, native asynchronous support (critical for I/O-bound operations like calling other services), and automatic data validation via Pydantic.
+
+ML/Scientific Computing: PyTorch, Hugging Face (Transformers, Datasets), NumPy, and Scikit-learn. This is the standard, battle-tested stack for modern ML research and production.
+
+Containerization & Orchestration: Docker & Kubernetes. This choice provides infrastructure-as-code, self-healing capabilities, and portability across cloud providers.
+
+Interpretability LLM: A self-hosted Ollama instance running a model like Llama3 for the miStudioExplain service. This ensures data privacy and avoids reliance on external, pay-per-use APIs.
+
+Monitoring: Prometheus for metrics collection and Grafana for visualization, providing immediate, out-of-the-box insight into service health and performance.
+
+Data Persistence: Service outputs (like trained SAEs or feature sets) are stored in a shared, persistent backend. This can be a Kubernetes Persistent Volume Claim (PVC) for simplicity in single-cluster deployments, or a more scalable object store like MinIO or a cloud provider's S3 for larger, distributed deployments.
+
+2.2. Data Flow & Service Interaction
+The platform operates as a multi-stage pipeline where data artifacts are passed between services. The full, envisioned data flow is as follows:
+
+<p align="center">Figure 1: The complete, envisioned miStudio architecture, including backlog services.</p>
+
+miStudioTrain: A user submits a request specifying a base LLM and a dataset. The service fetches the model, extracts activations by running the dataset through it, and trains an SAE. The resulting SAE model file (.pt) is saved to the persistent storage backend.
+
+miStudioFind: This service takes the path to a trained SAE and a dataset. It runs a comprehensive analysis, calculating statistics for every feature and identifying top activating examples. It produces a detailed features.json file, which becomes the foundational data artifact for the rest of the pipeline.
+
+miStudioExplain: This service consumes the features.json file. For each feature, it queries the Ollama service with a carefully constructed prompt to generate a natural language explanation, then outputs a final, enriched explanations.json file.
+
+miStudioScore (Backlog): This service would act as an enrichment stage. It would ingest the features.json or explanations.json file and apply various scoring algorithms to add a quantitative "importance" metric to each feature object within the file.
+
+miStudioCorrelate (Backlog): This service would also ingest the features.json data, but would perform cross-feature analysis to find statistically significant relationships, outputting a separate graph-like data structure (e.g., a JSON file of nodes and edges) representing these discovered circuits.
+
+miStudioMonitor (Backlog): This service would load a trained SAE and expose a streaming API (e.g., WebSocket). It would accept live text input, run it through the base model and SAE, and stream the resulting sparse feature activation vectors to a client dashboard.
+
+miStudioSteer (Backlog): This service would be the most complex, loading both a base model and an SAE. It would use model patching to expose an API that allows a user to run the model while applying real-time "steering vectors" to the activation stream, thus modifying the model's output on the fly.
+
+3. For the Developer: Service Catalogue & Implementation Details
+This section details each service, both implemented and planned, with specific guidance for developers.
+
+3.1. miStudioTrain (Implemented)
+Purpose: Train a Sparse Autoencoder (SAE) on a base LLM's activations.
+
+Status: Complete.
+
+Core Logic:
+
+activation_extractor.py: Loads a Hugging Face model and dataset, then uses PyTorch's register_forward_hook method to attach a callback function to the target layer. This hook captures the output tensor of that layer during the forward pass without altering the model's architecture.
+
+sae.py: A PyTorch nn.Module implementation of a Sparse Autoencoder. It consists of an encoder that maps the high-dimensional activation to a sparse, higher-dimensional feature space, and a decoder that attempts to reconstruct the original activation from these sparse features. The loss function combines reconstruction error (MSE) with an L1 penalty on the feature activations to enforce sparsity.
+
+training_service.py: Orchestrates the extraction and training loop, managing batching, the AdamW optimizer, and periodic evaluation of loss metrics.
+
+gpu_manager.py: Ensures that training jobs are allocated to available GPU resources correctly.
+
+API Endpoint: POST /train
+
+Input (TrainRequest): { "model_name": "mistralai/Mistral-7B-v0.1", "dataset_name": "stas/openwebtext-10k", "layer": 15, ... }
+
+Output: A trained .pt (PyTorch) model file saved to a shared volume.
+
+To-Do/Improvements:
+
+Support for more complex SAE architectures (e.g., Gated SAEs).
+
+Implement more sophisticated learning rate schedulers like CosineAnnealingLR.
+
+3.2. miStudioFind (Implemented)
+Purpose: Analyze a trained SAE to find and prioritize interesting features.
+
+Status: Complete.
+
+Core Logic:
+
+feature_analyzer.py: Calculates key statistics for each feature, such as activation frequency, variance, and identifies the text examples that activate it most strongly (top-k activations).
+
+pattern_discovery.py: Implements basic pattern finding, such as identifying features that are correlated with certain keywords.
+
+advanced_filtering.py: Allows for combining multiple criteria to filter the feature set. A developer could construct a filter like (frequency > 0.001) AND (variance > 2.5).
+
+API Endpoint: POST /find
+
+Input (FindRequest): { "sae_path": "/models/sae_mistral_layer15.pt", "dataset_name": "stas/openwebtext-10k", ... }
+
+Output: A features.json file containing an array of feature objects with their associated data.
+
+3.3. miStudioExplain (Implemented)
+Purpose: Generate natural language explanations for features.
+
+Status: Complete.
+
+Core Logic:
+
+context_builder.py: For a given feature, it assembles a detailed prompt. The prompt is structured with clear sections for "Top 5 Activating Examples," "Statistical Properties," and a final instruction like "Based on the data above, provide a concise explanation of what this feature represents."
+
+ollama_manager.py: Manages the connection to the self-hosted Ollama service, sends the prompt, and retrieves the explanation.
+
+quality_validator.py: A placeholder for future logic. An implementation could involve using a second LLM call to score the first explanation's coherence or checking for factual consistency between the explanation and the provided examples.
+
+API Endpoint: POST /explain
+
+Input (ExplainRequest): { "feature_data_path": "/results/features.json" }
+
+Output: An explanations.json file, which is an enriched version of the input file with an added explanation field for each feature.
+
+3.4. miStudioScore (Backlog)
+Purpose: Quantitatively score the importance of features.
+
+Status: Not Implemented.
+
+Proposed Logic:
+
+Implement various scoring algorithms:
+
+Utility Score: This would be implemented by running an "ablation study." The service would run a benchmark task (e.g., summarization) with the normal model. Then, it would run the same task again, but with a forward hook that zeroes out the activation of the target feature. The difference in the model's loss between the two runs is the feature's utility score for that task.
+
+Interpretability Score: Can be derived from the quality validation in miStudioExplain.
+
+Business Relevance Score: Score based on correlation with custom keyword lists relevant to the user (e.g., "toxicity," "PII," "customer satisfaction").
+
+Proposed API: POST /score with a path to a feature set and a scoring configuration.
+
+3.5. miStudioCorrelate (Backlog)
+Purpose: Find relationships and "circuits" of co-occurring features.
+
+Status: Not Implemented.
+
+Proposed Logic:
+
+Analyze feature activation vectors across a large dataset.
+
+Use techniques like Pearson correlation or mutual information to identify pairs or groups of features that frequently activate together.
+
+The output could be a graph structure where nodes are features and edges represent the strength of their correlation. This would allow for graph-based analysis, like finding cliques of highly-interrelated features.
+
+Proposed API: POST /correlate with a path to a feature set.
+
+3.6. miStudioMonitor (Backlog)
+Purpose: Real-time monitoring of feature activations.
+
+Status: Not Implemented.
+
+Proposed Logic:
+
+The service would load an SAE.
+
+It would expose a WebSocket or gRPC streaming endpoint for low-latency communication.
+
+A client (like the miStudioUI) would send text to the service.
+
+The service would run the text through the base model, get the activations, run them through the SAE's encoder, and stream the resulting sparse feature vector back to the client in real-time.
+
+Proposed API: WS /monitor/{sae_id}.
+
+3.7. miStudioSteer (Backlog)
+Purpose: Actively control model behavior by manipulating features.
+
+Status: Not Implemented.
+
+Proposed Logic:
+
+This is the most complex service and requires deep integration with the base model.
+
+It would use a technique called "model patching" or "activation addition." A forward hook would be placed on the target layer of the base model.
+
+Inside the hook, the service would take the original activation vector (x) and add a "steering vector" (v_steer) to it before it's passed to the next layer. The steering vector is constructed by taking the decoder weights of the target features from the SAE and multiplying them by the desired steering strength (e.g., -1.5 to suppress, 2.0 to amplify).
+
+Proposed API: POST /generate_steered with the prompt, SAE ID, and a steering vector { "feature_123": -1.5, "feature_456": 2.0 }.
+
+3.8. DevOps & Getting Started
+Prerequisites: Docker, kubectl, make.
+
+Setup: Run mistudio-setup.sh from the root directory. This will install Python dependencies using pip and set up pre-commit hooks for code formatting and linting.
+
+Running a Service Locally: Navigate to a service directory (e.g., services/miStudioTrain) and run make dev. This will typically use uvicorn to launch the FastAPI service with hot-reloading enabled for development.
+
+Running Tests: From a service directory, run make test. This will execute the pytest test suite located in the /tests directory.
+
+Deployment: From a service directory, run make build (which runs docker build) followed by make deploy (which runs kubectl apply -f ...). This will build the Docker image, push it to a registry, and apply the Kubernetes manifests located in the /deployment/kubernetes directory to deploy or update the service.
