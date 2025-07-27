@@ -1,17 +1,17 @@
 #!/bin/bash
 #
-# Development startup script for the miStudioExplain service.
+# Development startup script for the miStudioTrain service.
 #
 # This script sets the necessary PYTHONPATH and launches the FastAPI
 # application using uvicorn on the designated port.
 
-echo "Starting miStudioExplain service..."
+echo "Starting miStudioTrain service..."
 
 # Add the 'src' directory to the PYTHONPATH to allow uvicorn to find the 'main' module
 export PYTHONPATH=${PYTHONPATH}:$(pwd)/src
 
 # Launch the Uvicorn server
 # --host 0.0.0.0 makes the service accessible from outside the container/machine
-# --port 8003 sets the listening port
+# --port 8001 sets the listening port
 # --reload enables auto-reloading for development
-uvicorn src.main:app --host 0.0.0.0 --port 8003 --reload
+uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
