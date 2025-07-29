@@ -61,6 +61,44 @@ app = FastAPI(
 # --- API Endpoint ---
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for service monitoring."""
+    try:
+        # Check if Ollama is responsive
+        ollama_status = await ollama_manager.health_check() if ollama_manager else False
+        
+        return {
+            "service": "miStudioExplain",
+            "status": "healthy",
+            "version": "1.0.0",
+            "ollama_available": ollama_status,
+            "components": {
+                "input_manager": input_manager is not None,
+                "explanation_generator": explanation_generator is not None,
+                "result_manager": result_manager is not None
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "service": "miStudioExplain", 
+            "status": "unhealthy",
+            "error": str(e)
+        }
+
+@app.get("/")
+async def root():
+    """Root endpoint with service information."""
+    return {
+        "service": "miStudioExplain",
+        "status": "running", 
+        "version": "1.0.0",
+        "description": "Explanation Generation Service for miStudio AI Interpretability Platform",
+        "documentation": "/docs",
+        "health_check": "/health"
+    }
+
 @app.post("/explain", response_class=JSONResponse)
 async def create_explanation(request_data: dict):
     """

@@ -21,7 +21,7 @@ class TrainConfig:
     min_loss: float = 0.01
     gpu_id: Optional[int] = None
     max_sequence_length: int = 512
-    data_path: str = "/data"
+    data_path: str = "/data/samples"
     service_name: str = "miStudioTrain"
     service_version: str = "v1.2.0"
 
