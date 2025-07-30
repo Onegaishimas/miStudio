@@ -1,23 +1,25 @@
-# src/main.py - Clean version with proper imports
+# src/main.py - Unified Configuration Version with Fixed Response Models
 """
-Main FastAPI application for miStudioFind service - Complete Implementation.
+Main FastAPI application for miStudioFind service - Standardized Implementation.
 """
 
 import os
 import sys
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from pathlib import Path
 
 # Add the parent directory to Python path to access core modules
 SERVICE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SERVICE_ROOT)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pydantic import BaseModel, Field
 import zipfile
 import io
 
@@ -34,16 +36,193 @@ logging.getLogger("torch").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-# Configuration
-class Config:
-    """Service configuration."""
-    data_path = os.getenv("DATA_PATH", "/home/sean/app/miStudio/services/miStudioTrain/data")
-    api_host = os.getenv("API_HOST", "0.0.0.0")
-    api_port = int(os.getenv("API_PORT", "8001"))
-    log_level = os.getenv("LOG_LEVEL", "INFO")
-    service_version = "1.0.0"
 
-config = Config()
+# =============================================================================
+# Unified Configuration - Same Pattern as miStudioTrain
+# =============================================================================
+
+class ServiceConfig:
+    """Unified configuration for miStudioFind - Environment-first approach"""
+    
+    def __init__(self):
+        # Primary data path - same pattern for all services
+        self.data_path = os.getenv("DATA_PATH", "/data")
+        self.data_path_obj = Path(self.data_path)
+        self.data_path_obj.mkdir(parents=True, exist_ok=True)
+        
+        # Service metadata
+        self.service_name = "miStudioFind"
+        self.service_version = "1.0.0"
+        
+        # API configuration
+        self.api_host = os.getenv("API_HOST", "0.0.0.0")
+        self.api_port = int(os.getenv("API_PORT", "8002"))
+        self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        
+        # Feature analysis configuration
+        self.top_k_selections = int(os.getenv("TOP_K_SELECTIONS", "20"))
+        self.coherence_threshold = float(os.getenv("COHERENCE_THRESHOLD", "0.5"))
+        self.batch_size = int(os.getenv("BATCH_SIZE", "100"))
+        self.memory_optimization = os.getenv("MEMORY_OPTIMIZATION", "true").lower() == "true"
+        
+        # Performance configuration
+        self.max_concurrent_jobs = int(os.getenv("MAX_CONCURRENT_JOBS", "4"))
+        self.processing_timeout_minutes = int(os.getenv("PROCESSING_TIMEOUT_MINUTES", "60"))
+        self.memory_limit_gb = float(os.getenv("MEMORY_LIMIT_GB", "8.0"))
+        
+        # Output configuration
+        self.save_intermediate_results = os.getenv("SAVE_INTERMEDIATE_RESULTS", "true").lower() == "true"
+        self.compress_outputs = os.getenv("COMPRESS_OUTPUTS", "false").lower() == "true"
+        self.feature_preview_count = int(os.getenv("FEATURE_PREVIEW_COUNT", "50"))
+        
+        # Create subdirectories
+        self._ensure_directories()
+    
+    def _ensure_directories(self):
+        """Ensure all required directories exist"""
+        directories = [
+            self.data_path_obj / "models",
+            self.data_path_obj / "activations",
+            self.data_path_obj / "results" / "find",
+            self.data_path_obj / "cache",
+            self.data_path_obj / "logs" / "find"
+        ]
+        
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+    
+    @property
+    def models_dir(self) -> Path:
+        return self.data_path_obj / "models"
+    
+    @property
+    def activations_dir(self) -> Path:
+        return self.data_path_obj / "activations"
+    
+    @property
+    def results_dir(self) -> Path:
+        return self.data_path_obj / "results" / "find"
+    
+    @property
+    def cache_dir(self) -> Path:
+        return self.data_path_obj / "cache"
+    
+    @property
+    def logs_dir(self) -> Path:
+        return self.data_path_obj / "logs" / "find"
+
+
+# Global configuration instance
+config = ServiceConfig()
+
+
+# =============================================================================
+# API Models - Fixed Response Models
+# =============================================================================
+
+class FindRequest(BaseModel):
+    """Request model for feature analysis"""
+    source_job_id: str = Field(description="Source training job ID from miStudioTrain")
+    top_k: int = Field(default=20, description="Number of top activations per feature")
+    coherence_threshold: float = Field(default=0.5, description="Minimum coherence threshold for features")
+
+
+class AnalysisParameters(BaseModel):
+    """Analysis parameters model"""
+    top_k: int
+    coherence_threshold: float
+
+
+class NextSteps(BaseModel):
+    """Next steps model"""
+    check_status: str
+    get_results: str
+
+
+class FindJobResponse(BaseModel):
+    """Response model for starting feature analysis"""
+    job_id: str
+    status: str
+    message: str
+    source_job_id: str
+    parameters: AnalysisParameters
+    timestamp: str
+    next_steps: NextSteps
+
+
+class ComponentStatus(BaseModel):
+    """Component status model"""
+    processing_service: bool
+    enhanced_persistence: bool
+    advanced_filter: bool
+
+
+class HealthResponse(BaseModel):
+    """Health check response model"""
+    status: str
+    service: str
+    version: str
+    data_path: str
+    timestamp: str
+    components: ComponentStatus
+
+
+class ConfigResponse(BaseModel):
+    """Configuration response model"""
+    service_name: str
+    service_version: str
+    data_path: str
+    api_host: str
+    api_port: int
+    top_k_selections: int
+    coherence_threshold: float
+    max_concurrent_jobs: int
+    processing_timeout_minutes: int
+    memory_optimization: bool
+
+
+class JobStatusResponse(BaseModel):
+    """Response model for job status"""
+    job_id: str
+    status: str
+    progress: float
+    message: str
+    start_time: Optional[str] = None
+    estimated_time_remaining: Optional[int] = None
+
+
+class JobResultResponse(BaseModel):
+    """Response model for job results"""
+    job_id: str
+    status: str
+    results_path: Optional[str] = None
+    feature_count: Optional[int] = None
+    processing_time: Optional[float] = None
+
+
+class JobSummary(BaseModel):
+    """Job summary model"""
+    job_id: str
+    status: str
+    source_job_id: str
+    created_at: str
+    completed_at: Optional[str] = None
+
+
+class JobListResponse(BaseModel):
+    """Response model for job listing"""
+    jobs: List[JobSummary]
+    total: int
+
+
+class CancelJobResponse(BaseModel):
+    """Response model for job cancellation"""
+    message: str
+
+
+# =============================================================================
+# Service Initialization with Fallback Handling
+# =============================================================================
 
 # Import core modules with fallback handling
 processing_service = None
@@ -79,33 +258,27 @@ except ImportError as e:
     class QualityTier:
         pass
 
+
+# =============================================================================
+# FastAPI Application Setup
+# =============================================================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown."""
-    # Startup
-    logger.info("miStudioFind API starting up...")
+    logger.info(f"🚀 {config.service_name} API starting up...")
     logger.info(f"Data path: {config.data_path}")
     logger.info(f"Service version: {config.service_version}")
-    
-    # Verify data path exists
-    if os.path.exists(config.data_path):
-        logger.info("✅ Data path accessible")
-    else:
-        logger.warning(f"⚠️ Data path not found: {config.data_path}")
-    
+    logger.info(f"✅ Data path accessible")
     yield
-    
-    # Shutdown
-    logger.info("miStudioFind API shutting down...")
+    logger.info(f"🛑 {config.service_name} API shutting down...")
 
-# FastAPI application
+
 app = FastAPI(
     title="miStudioFind API",
-    description="Feature Analysis Service for AI Interpretability - Analyzes SAE features from miStudioTrain",
+    description="Feature analysis and discovery service for sparse autoencoders",
     version=config.service_version,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan,
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -117,434 +290,339 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint with service information."""
-    return {
-        "service": "miStudioFind", 
-        "status": "running",
-        "version": config.service_version,
-        "description": "Feature Analysis Service for miStudio AI Interpretability Platform",
-        "documentation": "/docs",
-        "health_check": "/health",
-        "features_available": {
-            "basic_analysis": processing_service is not None,
-            "file_persistence": enhanced_persistence is not None,
-            "advanced_filtering": advanced_filter is not None
-        }
-    }
 
-# Health check endpoint
-@app.get("/health")
+# =============================================================================
+# API Endpoints with Proper Response Models
+# =============================================================================
+
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Comprehensive health check endpoint."""
-    try:
-        # Check data path accessibility
-        data_path_exists = os.path.exists(config.data_path)
-        data_path_writable = False
-        
-        if data_path_exists:
-            try:
-                test_file = os.path.join(config.data_path, ".health_check")
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                os.remove(test_file)
-                data_path_writable = True
-            except (OSError, PermissionError):
-                data_path_writable = False
-        
-        # Check processing service
-        processing_service_healthy = processing_service is not None
-        
-        # Overall health
-        healthy = data_path_exists and processing_service_healthy
-        
-        return {
-            "healthy": healthy,
-            "service": "miStudioFind",
-            "version": config.service_version,
-            "timestamp": datetime.now().isoformat(),
-            "configuration": {
-                "data_path": config.data_path,
-                "api_host": config.api_host,
-                "api_port": config.api_port,
-                "log_level": config.log_level
-            },
-            "system_checks": {
-                "data_path_exists": data_path_exists,
-                "data_path_writable": data_path_writable,
-                "processing_service_initialized": processing_service_healthy,
-                "enhanced_persistence_available": enhanced_persistence is not None,
-                "advanced_filtering_available": advanced_filter is not None
-            },
-            "endpoints": {
-                "validation": "/api/v1/validate/{job_id}",
-                "start_analysis": "/api/v1/find/start",
-                "job_status": "/api/v1/find/{job_id}/status",
-                "job_results": "/api/v1/find/{job_id}/results",
-                "list_jobs": "/api/v1/find/jobs",
-                "export": "/api/v1/find/{job_id}/export" if enhanced_persistence else "Not available",
-                "filtering": "/api/v1/find/{job_id}/results/filtered" if advanced_filter else "Not available"
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {
-            "healthy": False,
-            "service": "miStudioFind",
-            "version": config.service_version,
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+    """Health check endpoint"""
+    return HealthResponse(
+        status="healthy",
+        service=config.service_name,
+        version=config.service_version,
+        data_path=config.data_path,
+        timestamp=datetime.now().isoformat(),
+        components=ComponentStatus(
+            processing_service=processing_service is not None,
+            enhanced_persistence=enhanced_persistence is not None,
+            advanced_filter=advanced_filter is not None
+        )
+    )
 
-# File validation endpoint
-@app.get("/api/v1/validate/{job_id}")
-async def validate_training_files(job_id: str):
-    """Validate that miStudioTrain output files exist and are ready for analysis."""
-    try:
-        logger.info(f"Validating files for job: {job_id}")
-        
-        # Define expected file paths from miStudioTrain
-        files_to_check = {
-            "sae_model": f"{config.data_path}/models/{job_id}/sae_model.pt",
-            "feature_activations": f"{config.data_path}/activations/{job_id}/feature_activations.pt", 
-            "metadata": f"{config.data_path}/activations/{job_id}/metadata.json"
-        }
-        
-        results = {}
-        total_size_mb = 0
-        
-        # Check each file
-        for name, path in files_to_check.items():
-            file_exists = os.path.exists(path)
-            file_size = 0
-            file_readable = False
-            
-            if file_exists:
-                try:
-                    file_size = os.path.getsize(path)
-                    total_size_mb += file_size / 1e6
-                    # Test readability
-                    with open(path, 'rb') as f:
-                        f.read(1)  # Try to read first byte
-                    file_readable = True
-                except (OSError, PermissionError):
-                    file_readable = False
-            
-            results[name] = {
-                "path": path,
-                "exists": file_exists,
-                "size_bytes": file_size,
-                "size_mb": round(file_size / 1e6, 2),
-                "readable": file_readable
-            }
-        
-        # Overall validation
-        all_files_present = all(f["exists"] for f in results.values())
-        all_files_readable = all(f["readable"] for f in results.values())
-        reasonable_sizes = all(f["size_mb"] > 0.1 for f in results.values())
-        
-        # Try to peek at metadata if available
-        metadata_info = {}
-        metadata_path = files_to_check["metadata"]
-        if os.path.exists(metadata_path):
-            try:
-                with open(metadata_path, 'r') as f:
-                    metadata = json.load(f)
-                metadata_info = {
-                    "source_service": metadata.get("service", "unknown"),
-                    "model_name": metadata.get("model_info", {}).get("model_name", "unknown"),
-                    "feature_count": metadata.get("sae_config", {}).get("hidden_dim", 0),
-                    "activation_dim": metadata.get("model_info", {}).get("hidden_size", 0),
-                    "ready_for_find": metadata.get("ready_for_find_service", False),
-                    "training_loss": metadata.get("training_results", {}).get("final_loss", "unknown")
-                }
-            except (json.JSONDecodeError, KeyError) as e:
-                metadata_info = {"error": f"Could not parse metadata: {e}"}
-        
-        return {
-            "job_id": job_id,
-            "validation_timestamp": datetime.now().isoformat(),
-            "files": results,
-            "summary": {
-                "all_files_present": all_files_present,
-                "all_files_readable": all_files_readable,
-                "reasonable_file_sizes": reasonable_sizes,
-                "total_size_mb": round(total_size_mb, 2),
-                "ready_for_analysis": all_files_present and all_files_readable and reasonable_sizes
-            },
-            "metadata_info": metadata_info,
-            "next_steps": {
-                "can_start_analysis": all_files_present and all_files_readable,
-                "recommendation": (
-                    "Files look good - ready for feature analysis!" 
-                    if all_files_present and all_files_readable 
-                    else "Please check file accessibility"
-                )
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error validating files for job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
 
-# Start analysis endpoint
-@app.post("/api/v1/find/start")
-async def start_analysis(request: Dict[str, Any]):
-    """Start feature analysis job."""
+@app.get("/api/v1/config", response_model=ConfigResponse)
+async def get_config():
+    """Get current service configuration"""
+    return ConfigResponse(
+        service_name=config.service_name,
+        service_version=config.service_version,
+        data_path=config.data_path,
+        api_host=config.api_host,
+        api_port=config.api_port,
+        top_k_selections=config.top_k_selections,
+        coherence_threshold=config.coherence_threshold,
+        max_concurrent_jobs=config.max_concurrent_jobs,
+        processing_timeout_minutes=config.processing_timeout_minutes,
+        memory_optimization=config.memory_optimization
+    )
+
+
+@app.post("/api/v1/find", response_model=FindJobResponse)
+async def start_feature_analysis(request: FindRequest, background_tasks: BackgroundTasks):
+    """Start feature analysis job"""
+    
+    if processing_service is None:
+        raise HTTPException(
+            status_code=503, 
+            detail="Processing service not available"
+        )
+    
     try:
-        # Extract request parameters
-        source_job_id = request.get("source_job_id")
-        top_k = request.get("top_k", 20)
-        coherence_threshold = request.get("coherence_threshold", 0.7)
+        # Validate source job exists
+        source_models_dir = config.models_dir / request.source_job_id
+        source_activations_dir = config.activations_dir / request.source_job_id
         
-        # Validate required parameters
-        if not source_job_id:
-            raise HTTPException(status_code=400, detail="source_job_id is required")
-        
-        if not 1 <= top_k <= 100:
-            raise HTTPException(status_code=400, detail="top_k must be between 1 and 100")
-        
-        if not 0.0 <= coherence_threshold <= 1.0:
-            raise HTTPException(status_code=400, detail="coherence_threshold must be between 0.0 and 1.0")
-        
-        logger.info(f"Starting analysis for job: {source_job_id} with top_k={top_k}")
-        
-        # Check if processing service is available
-        if processing_service is None:
+        if not source_models_dir.exists() or not source_activations_dir.exists():
             raise HTTPException(
-                status_code=503, 
-                detail="Processing service not available. Check core module imports."
+                status_code=404,
+                detail=f"Source job {request.source_job_id} not found. Expected directories: {source_models_dir}, {source_activations_dir}"
             )
         
-        # Start the analysis job
-        job_id = await processing_service.start_analysis_job(source_job_id, top_k)
+        # Check for required files
+        sae_model_path = source_models_dir / "sae_model.pt"
+        feature_activations_path = source_activations_dir / "feature_activations.pt"
+        metadata_path = source_activations_dir / "metadata.json"
         
-        return {
-            "job_id": job_id,
-            "status": "queued", 
-            "message": f"Feature analysis started for {source_job_id}",
-            "source_job_id": source_job_id,
-            "parameters": {
-                "top_k": top_k,
-                "coherence_threshold": coherence_threshold
-            },
-            "timestamp": datetime.now().isoformat(),
-            "next_steps": {
-                "check_status": f"/api/v1/find/{job_id}/status",
-                "get_results": f"/api/v1/find/{job_id}/results"
-            }
-        }
+        missing_files = []
+        for path in [sae_model_path, feature_activations_path, metadata_path]:
+            if not path.exists():
+                missing_files.append(str(path))
         
-    except HTTPException:
-        raise
+        if missing_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required files: {missing_files}"
+            )
+        
+        # Start analysis job
+        job_id = await processing_service.start_analysis_job(
+            source_job_id=request.source_job_id,
+            top_k=request.top_k
+        )
+        
+        return FindJobResponse(
+            job_id=job_id,
+            status="queued",
+            message=f"Feature analysis started for {request.source_job_id}",
+            source_job_id=request.source_job_id,
+            parameters=AnalysisParameters(
+                top_k=request.top_k,
+                coherence_threshold=request.coherence_threshold
+            ),
+            timestamp=datetime.now().isoformat(),
+            next_steps=NextSteps(
+                check_status=f"/api/v1/find/{job_id}/status",
+                get_results=f"/api/v1/find/{job_id}/results"
+            )
+        )
+        
     except Exception as e:
-        logger.error(f"Failed to start analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis startup failed: {str(e)}")
+        logger.error(f"Error starting feature analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Job status endpoint
-@app.get("/api/v1/find/{job_id}/status")
+
+@app.get("/api/v1/find/{job_id}/status", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
-    """Get current status of an analysis job."""
+    """Get status of feature analysis job"""
+    
+    if processing_service is None:
+        raise HTTPException(status_code=503, detail="Processing service not available")
+    
     try:
-        if processing_service is None:
-            raise HTTPException(status_code=503, detail="Processing service not available")
+        # Call non-async method from SimpleProcessingService
+        status_data = processing_service.get_job_status(job_id)
         
-        status = processing_service.get_job_status(job_id)
-        if not status:
+        if status_data is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
-        # Add computed fields
-        status["timestamp"] = datetime.now().isoformat()
-        
-        # Calculate progress percentage
-        progress = status.get("progress", {})
-        total = progress.get("total_features", 0)
-        processed = progress.get("features_processed", 0)
-        
-        if total > 0:
-            status["progress_percentage"] = round((processed / total) * 100, 1)
-        else:
-            status["progress_percentage"] = 0.0
-        
-        return status
-        
+        # Convert SimpleProcessingService format to our response model
+        return JobStatusResponse(
+            job_id=job_id,
+            status=status_data.get("status", "unknown"),
+            progress=status_data.get("progress", {}).get("features_processed", 0) / max(1, status_data.get("progress", {}).get("total_features", 1)),
+            message=f"Processing {status_data.get('progress', {}).get('features_processed', 0)}/{status_data.get('progress', {}).get('total_features', 0)} features",
+            start_time=datetime.fromtimestamp(status_data.get("start_time", 0)).isoformat() if status_data.get("start_time") else None,
+            estimated_time_remaining=status_data.get("progress", {}).get("estimated_time_remaining")
+        )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting status for job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+        logger.error(f"Error getting job status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Job results endpoint
-@app.get("/api/v1/find/{job_id}/results")
+
+@app.get("/api/v1/find/{job_id}/results", response_model=JobResultResponse)
 async def get_job_results(job_id: str):
-    """Get results of a completed analysis job."""
+    """Get results of completed feature analysis job"""
+    
+    if processing_service is None:
+        raise HTTPException(status_code=503, detail="Processing service not available")
+    
     try:
-        if processing_service is None:
-            raise HTTPException(status_code=503, detail="Processing service not available")
+        # Call non-async method from SimpleProcessingService
+        results_data = processing_service.get_job_results(job_id)
         
-        results = processing_service.get_job_results(job_id)
-        if not results:
+        if results_data is None:
             # Check if job exists but isn't completed
-            status = processing_service.get_job_status(job_id)
-            if status:
+            status_data = processing_service.get_job_status(job_id)
+            if status_data:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Job {job_id} is not completed yet. Current status: {status['status']}"
+                    detail=f"Job {job_id} is not completed yet. Current status: {status_data.get('status', 'unknown')}"
                 )
             else:
                 raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
-        # Calculate summary statistics
-        feature_results = results.get("results", [])
-        if feature_results:
-            quality_distribution = {"high": 0, "medium": 0, "low": 0}
-            coherence_scores = []
-            
-            for result in feature_results:
-                quality_level = result.get("quality_level", "low")
-                quality_distribution[quality_level] = quality_distribution.get(quality_level, 0) + 1
-                coherence_scores.append(result.get("coherence_score", 0.0))
-            
-            summary = {
-                "total_features_analyzed": len(feature_results),
-                "quality_distribution": quality_distribution,
-                "mean_coherence_score": round(sum(coherence_scores) / len(coherence_scores), 3),
-                "high_quality_features": quality_distribution["high"],
-                "interpretable_features": quality_distribution["high"] + quality_distribution["medium"]
-            }
-        else:
-            summary = {
-                "total_features_analyzed": 0,
-                "quality_distribution": {"high": 0, "medium": 0, "low": 0},
-                "mean_coherence_score": 0.0,
-                "high_quality_features": 0,
-                "interpretable_features": 0
-            }
-        
-        return {
-            "job_id": job_id,
-            "source_job_id": results.get("source_job_id"),
-            "status": results.get("status"),
-            "processing_time_seconds": results.get("processing_time", 0),
-            "timestamp": datetime.now().isoformat(),
-            "summary": summary,
-            "results": feature_results,
-            "ready_for_explain_service": summary["interpretable_features"] > 0
-        }
-        
+        # Convert SimpleProcessingService format to our response model
+        return JobResultResponse(
+            job_id=job_id,
+            status=results_data.get("status", "unknown"),
+            results_path=f"/api/v1/find/{job_id}/download/json",  # Provide download path
+            feature_count=len(results_data.get("results", [])),
+            processing_time=results_data.get("processing_time", 0)
+        )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting results for job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Results retrieval failed: {str(e)}")
+        logger.error(f"Error getting job results: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# List jobs endpoint
-@app.get("/api/v1/find/jobs")
+
+@app.get("/api/v1/jobs", response_model=JobListResponse)
 async def list_jobs():
-    """List all analysis jobs (active and completed)."""
+    """List all analysis jobs"""
+    
+    if processing_service is None:
+        raise HTTPException(status_code=503, detail="Processing service not available")
+    
     try:
-        if processing_service is None:
-            return {
-                "active_jobs": [],
-                "completed_jobs": [],
-                "message": "Processing service not available"
-            }
+        # Get jobs from both active and completed dictionaries
+        job_summaries = []
         
-        active_jobs = list(processing_service.active_jobs.values())
-        completed_jobs = list(processing_service.completed_jobs.values())
+        # Add active jobs
+        for job_id, job_data in processing_service.active_jobs.items():
+            job_summaries.append(JobSummary(
+                job_id=job_id,
+                status=job_data.get("status", "unknown"),
+                source_job_id=job_data.get("source_job_id", ""),
+                created_at=datetime.fromtimestamp(job_data.get("start_time", 0)).isoformat(),
+                completed_at=None
+            ))
         
-        # Add summary statistics
-        total_jobs = len(active_jobs) + len(completed_jobs)
-        successful_jobs = len([job for job in completed_jobs if job.get("status") == "completed"])
+        # Add completed jobs
+        for job_id, job_data in processing_service.completed_jobs.items():
+            completed_time = None
+            if job_data.get("completion_time"):
+                completed_time = datetime.fromtimestamp(job_data["completion_time"]).isoformat()
+            
+            job_summaries.append(JobSummary(
+                job_id=job_id,
+                status=job_data.get("status", "unknown"),
+                source_job_id=job_data.get("source_job_id", ""),
+                created_at=datetime.fromtimestamp(job_data.get("start_time", 0)).isoformat(),
+                completed_at=completed_time
+            ))
         
-        return {
-            "active_jobs": active_jobs,
-            "completed_jobs": completed_jobs,
-            "summary": {
-                "total_jobs": total_jobs,
-                "active_count": len(active_jobs),
-                "completed_count": len(completed_jobs),
-                "success_rate": (successful_jobs / len(completed_jobs) * 100) if completed_jobs else 0.0
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        
+        return JobListResponse(jobs=job_summaries, total=len(job_summaries))
     except Exception as e:
-        logger.error(f"Error listing jobs: {e}")
-        raise HTTPException(status_code=500, detail=f"Job listing failed: {str(e)}")
+        logger.error(f"Error listing jobs: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# ENHANCED ENDPOINTS (Only available if modules loaded successfully)
 
-@app.get("/api/v1/find/{job_id}/export")
-async def export_results(job_id: str, format: str = "json", include_files: bool = True):
-    """Export results in specified format with optional file bundle."""
+@app.delete("/api/v1/find/{job_id}", response_model=CancelJobResponse)
+async def cancel_job(job_id: str):
+    """Cancel a running analysis job"""
+    
+    if processing_service is None:
+        raise HTTPException(status_code=503, detail="Processing service not available")
+    
+    try:
+        success = await processing_service.cancel_job(job_id)
+        if success:
+            return CancelJobResponse(message=f"Job {job_id} cancelled successfully")
+        else:
+            raise HTTPException(status_code=400, detail=f"Job {job_id} cannot be cancelled")
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    except Exception as e:
+        logger.error(f"Error cancelling job: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# File Download Endpoints (if enhanced_persistence is available)
+# =============================================================================
+
+@app.get("/api/v1/find/{job_id}/download/{format}")
+async def download_results(job_id: str, format: str):
+    """Download analysis results in specified format"""
+    
     if enhanced_persistence is None:
         raise HTTPException(status_code=503, detail="Enhanced persistence not available")
     
     try:
-        # Get job results first
-        if processing_service is None:
-            raise HTTPException(status_code=503, detail="Processing service not available")
+        file_path = await enhanced_persistence.get_result_file(job_id, format)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Results not found for job {job_id} in format {format}")
         
-        results = processing_service.get_job_results(job_id)
-        if not results:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found or not completed")
-        
-        # Save in all formats
-        saved_files = enhanced_persistence.save_comprehensive_results(job_id, results)
-        
-        if format == "all" or include_files:
-            # Create zip bundle with all formats
-            zip_buffer = io.BytesIO()
-            
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                for format_name, file_path in saved_files.items():
-                    if os.path.exists(file_path):
-                        zip_file.write(file_path, f"{job_id}_{format_name}.{format_name}")
-            
-            zip_buffer.seek(0)
-            
-            return StreamingResponse(
-                io.BytesIO(zip_buffer.read()),
-                media_type="application/zip",
-                headers={"Content-Disposition": f"attachment; filename={job_id}_analysis_complete.zip"}
-            )
-        
-        elif format in saved_files:
-            # Return specific format
-            file_path = saved_files[format]
-            if os.path.exists(file_path):
-                return FileResponse(
-                    file_path,
-                    media_type="application/octet-stream",
-                    filename=f"{job_id}_analysis.{format}"
-                )
-            else:
-                raise HTTPException(status_code=404, detail=f"File not found: {format}")
-        
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported format: {format}")
-            
-    except HTTPException:
-        raise
+        return FileResponse(
+            path=str(file_path),
+            filename=f"{job_id}_results.{format}",
+            media_type="application/octet-stream"
+        )
     except Exception as e:
-        logger.error(f"Export failed for job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+        logger.error(f"Error downloading results: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Additional Utility Endpoints
+# =============================================================================
+
+@app.get("/api/v1/source-jobs")
+async def list_source_jobs():
+    """List available training jobs that can be analyzed"""
+    try:
+        models_dir = config.models_dir
+        activations_dir = config.activations_dir
+        
+        source_jobs = []
+        
+        if models_dir.exists():
+            for job_dir in models_dir.iterdir():
+                if job_dir.is_dir() and job_dir.name.startswith("train_"):
+                    # Check if corresponding activations exist
+                    activation_dir = activations_dir / job_dir.name
+                    sae_model_path = job_dir / "sae_model.pt"
+                    
+                    if activation_dir.exists() and sae_model_path.exists():
+                        source_jobs.append({
+                            "job_id": job_dir.name,
+                            "model_path": str(sae_model_path),
+                            "activations_path": str(activation_dir),
+                            "ready_for_analysis": True
+                        })
+        
+        return {
+            "source_jobs": source_jobs,
+            "total": len(source_jobs),
+            "data_path": str(config.data_path)
+        }
+    except Exception as e:
+        logger.error(f"Error listing source jobs: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/stats")
+async def get_service_stats():
+    """Get service statistics"""
+    try:
+        stats = {
+            "service": config.service_name,
+            "version": config.service_version,
+            "uptime_seconds": 0,  # Could be calculated if tracking start time
+            "total_jobs_processed": 0,  # Would need to track this
+            "active_jobs": len(processing_service.active_jobs) if processing_service else 0,
+            "data_path": config.data_path,
+            "disk_usage": {
+                "models_dir": str(config.models_dir),
+                "activations_dir": str(config.activations_dir),
+                "results_dir": str(config.results_dir)
+            }
+        }
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting service stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Application Entry Point
+# =============================================================================
 
 if __name__ == "__main__":
     import uvicorn
     
-    logger.info(f"Starting miStudioFind API on {config.api_host}:{config.api_port}")
-    logger.info(f"Data path configured: {config.data_path}")
-    logger.info(f"Service version: {config.service_version}")
-    logger.info("Ready to analyze your Phi-4 breakthrough results!")
+    logger.info(f"🚀 Starting {config.service_name} on {config.api_host}:{config.api_port}")
+    logger.info(f"📂 Data path: {config.data_path}")
+    logger.info(f"🔗 Points to: {config.data_path_obj.resolve()}")
     
     uvicorn.run(
-        app,
-        host=config.api_host,
-        port=config.api_port,
-        log_level=config.log_level.lower()
+        app, 
+        host=config.api_host, 
+        port=config.api_port, 
+        log_level=config.log_level.lower(),
+        access_log=True
     )
