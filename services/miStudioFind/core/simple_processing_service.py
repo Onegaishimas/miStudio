@@ -1,13 +1,15 @@
 # core/simple_processing_service.py
 """
-Simple processing service to orchestrate feature analysis.
+Simple processing service to orchestrate feature analysis with file persistence.
 """
 
 import asyncio
 import logging
 import time
 import uuid
+import json
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 from core.input_manager import InputManager
@@ -17,12 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleProcessingService:
-    """Simple processing service for feature analysis jobs."""
+    """Simple processing service for feature analysis jobs with file persistence."""
     
-    def __init__(self, data_path: str):
+    def __init__(self, data_path: str, enhanced_persistence=None):
         """Initialize processing service."""
         self.data_path = data_path
         self.input_manager = InputManager(data_path)
+        self.enhanced_persistence = enhanced_persistence
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
         self.completed_jobs: Dict[str, Dict[str, Any]] = {}
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
@@ -107,6 +110,51 @@ class SimpleProcessingService:
             job_info["completion_time"] = time.time()
             job_info["processing_time"] = job_info["completion_time"] - job_info["start_time"]
             
+            # Save results to files if enhanced persistence is available
+            if self.enhanced_persistence:
+                try:
+                    # Create results structure for file saving
+                    file_results = {
+                        "job_id": job_id,
+                        "source_job_id": source_job_id,
+                        "status": "completed",
+                        "results": results,
+                        "processing_time": job_info["processing_time"],
+                        "timestamp": datetime.now().isoformat(),
+                        "metadata": {
+                            "total_features": len(results),
+                            "source_job_id": source_job_id,
+                            "top_k": top_k,
+                            "analysis_type": "feature_analysis",
+                            "service": "miStudioFind",
+                            "version": "1.0.0"
+                        }
+                    }
+                    
+                    # Save using enhanced persistence (multiple formats)
+                    saved_files = self.enhanced_persistence.save_comprehensive_results(job_id, file_results)
+                    self.logger.info(f"✅ Saved results in multiple formats: {list(saved_files.keys())}")
+                    
+                    # Also save in the specific location expected by miStudioExplain
+                    explain_results_dir = Path(self.data_path) / "results" / "find"
+                    explain_results_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    explain_results_file = explain_results_dir / f"{job_id}_results.json"
+                    with open(explain_results_file, 'w') as f:
+                        json.dump(file_results, f, indent=2)
+                    
+                    self.logger.info(f"✅ Saved results for miStudioExplain: {explain_results_file}")
+                    
+                    # Store file paths in job info for reference
+                    job_info["saved_files"] = {
+                        "enhanced_persistence": saved_files,
+                        "explain_service_file": str(explain_results_file)
+                    }
+                    
+                except Exception as e:
+                    self.logger.warning(f"Failed to save result files: {e}")
+                    # Don't fail the job if file saving fails
+            
             # Move to completed jobs
             self.completed_jobs[job_id] = job_info
             del self.active_jobs[job_id]
@@ -140,4 +188,57 @@ class SimpleProcessingService:
         job_info = self.completed_jobs.get(job_id)
         if job_info and job_info["status"] == "completed":
             return job_info
+        return None
+    
+    def list_jobs(self) -> List[Dict[str, Any]]:
+        """List all jobs (active and completed)."""
+        all_jobs = []
+        
+        # Add active jobs
+        for job_id, job_info in self.active_jobs.items():
+            all_jobs.append({
+                "job_id": job_id,
+                "status": job_info["status"],
+                "source_job_id": job_info["source_job_id"],
+                "created_at": datetime.fromtimestamp(job_info["start_time"]).isoformat(),
+                "completed_at": None
+            })
+        
+        # Add completed jobs
+        for job_id, job_info in self.completed_jobs.items():
+            completed_time = None
+            if job_info.get("completion_time"):
+                completed_time = datetime.fromtimestamp(job_info["completion_time"]).isoformat()
+            
+            all_jobs.append({
+                "job_id": job_id,
+                "status": job_info["status"],
+                "source_job_id": job_info["source_job_id"],
+                "created_at": datetime.fromtimestamp(job_info["start_time"]).isoformat(),
+                "completed_at": completed_time
+            })
+        
+        return all_jobs
+    
+    async def cancel_job(self, job_id: str) -> bool:
+        """Cancel an active job."""
+        if job_id in self.active_jobs:
+            job_info = self.active_jobs[job_id]
+            job_info["status"] = "cancelled"
+            job_info["error"] = "Job cancelled by user request"
+            
+            # Move to completed jobs
+            self.completed_jobs[job_id] = job_info
+            del self.active_jobs[job_id]
+            
+            self.logger.info(f"Job {job_id} cancelled successfully")
+            return True
+        
+        return False
+    
+    def get_saved_files(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about saved files for a job."""
+        job_info = self.completed_jobs.get(job_id)
+        if job_info and job_info.get("saved_files"):
+            return job_info["saved_files"]
         return None

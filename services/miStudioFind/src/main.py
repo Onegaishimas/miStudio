@@ -231,7 +231,7 @@ advanced_filter = None
 
 try:
     from core.simple_processing_service import SimpleProcessingService
-    processing_service = SimpleProcessingService(config.data_path)
+    processing_service = SimpleProcessingService(config.data_path, enhanced_persistence)
     logger.info("✅ Successfully initialized processing service")
 except ImportError as e:
     logger.error(f"Failed to import SimpleProcessingService: {e}")
@@ -426,7 +426,7 @@ async def get_job_status(job_id: str):
 @app.get("/api/v1/find/{job_id}/results", response_model=JobResultResponse)
 async def get_job_results(job_id: str):
     """Get results of completed feature analysis job"""
-    
+
     if processing_service is None:
         raise HTTPException(status_code=503, detail="Processing service not available")
     
