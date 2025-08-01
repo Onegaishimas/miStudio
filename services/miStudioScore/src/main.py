@@ -25,6 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Additional imports for file downloads
+from fastapi.responses import FileResponse
+import os
+
 # =============================================================================
 # Service Configuration
 # =============================================================================
@@ -339,6 +343,10 @@ class IntegratedScoreService:
             with open(output_dir / "scoring_results.json", 'w') as f:
                 json.dump(results, f, indent=2)
             
+            # Save CSV results if features exist
+            if features:
+                self._save_csv_results(features, output_dir / "scored_features.csv", added_scores)
+            
             # Mark job as completed
             job_info["status"] = "completed"
             job_info["completion_time"] = datetime.now().isoformat()
@@ -431,6 +439,58 @@ class IntegratedScoreService:
         # Sort by start time (newest first)
         all_jobs.sort(key=lambda x: x["start_time"], reverse=True)
         return all_jobs
+    
+    def _save_csv_results(self, features: List[Dict[str, Any]], csv_path: Path, added_scores: List[str]):
+        """Save features to CSV format"""
+        try:
+            import pandas as pd
+            
+            if not features:
+                # Create empty CSV with headers
+                headers = ["feature_id", "feature_index"] + added_scores + ["timestamp"]
+                df = pd.DataFrame(columns=headers)
+                df.to_csv(csv_path, index=False)
+                logger.info(f"Empty CSV created at {csv_path}")
+                return
+            
+            # Convert features to DataFrame
+            df = pd.DataFrame(features)
+            
+            # Ensure all score columns exist
+            for score in added_scores:
+                if score not in df.columns:
+                    df[score] = None
+            
+            # Save to CSV
+            df.to_csv(csv_path, index=False)
+            logger.info(f"CSV results saved to {csv_path}")
+            
+        except ImportError:
+            # Fallback CSV creation without pandas
+            try:
+                import csv
+                
+                headers = ["feature_id", "feature_index"] + added_scores + ["timestamp"]
+                
+                with open(csv_path, 'w', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(headers)
+                    
+                    for feature in features:
+                        row = []
+                        for header in headers:
+                            row.append(feature.get(header, ''))
+                        writer.writerow(row)
+                
+                logger.info(f"CSV results saved to {csv_path} (fallback method)")
+                
+            except Exception as e:
+                logger.error(f"Error in fallback CSV creation: {e}")
+                raise
+                
+        except Exception as e:
+            logger.error(f"Error saving CSV results: {e}")
+            raise
 
 # =============================================================================
 # Service Initialization
