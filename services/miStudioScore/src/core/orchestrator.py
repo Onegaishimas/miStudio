@@ -1,6 +1,7 @@
-# src/core/orchestrator.py - Updated with Shared Storage Integration
+# src/core/orchestrator.py - Updated with Pattern Scorer Removed
 """
-Enhanced orchestrator for miStudioScore with shared storage integration.
+Enhanced orchestrator for miStudioScore with only working scorers.
+Pattern scorer has been completely removed as it was broken and provided no analytical value.
 """
 
 import logging
@@ -26,7 +27,7 @@ class IntegratedOrchestrator:
         for directory in [self.find_results_dir, self.explain_results_dir, self.score_results_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         
-        # Initialize available scorers
+        # Initialize available scorers (pattern_scorer removed)
         self.scorers = {}
         self._load_scorers()
         
@@ -34,7 +35,7 @@ class IntegratedOrchestrator:
         logger.info(f"Available scorers: {list(self.scorers.keys())}")
     
     def _load_scorers(self):
-        """Load available scoring modules"""
+        """Load available scoring modules (working scorers only)"""
         try:
             from core.scoring.relevance_scorer import RelevanceScorer
             self.scorers["relevance_scorer"] = RelevanceScorer
@@ -49,364 +50,266 @@ class IntegratedOrchestrator:
         except ImportError:
             logger.warning("AblationScorer not available")
         
-        # Add built-in pattern scorer
-        self.scorers["pattern_scorer"] = PatternScorer
-        logger.info("✅ Loaded PatternScorer (built-in)")
+        # Pattern scorer has been completely removed - it was broken and provided no value
+        logger.info(f"Total working scorers loaded: {len(self.scorers)}")
     
     def discover_source_jobs(self, source_type: str) -> List[Dict[str, Any]]:
         """Discover available source jobs for scoring"""
-        available_jobs = []
-        
         if source_type == "find":
-            # Check main Find results directory
-            if self.find_results_dir.exists():
-                for job_dir in self.find_results_dir.iterdir():
-                    if job_dir.is_dir():
-                        results_file = job_dir / "analysis_results.json"
-                        if results_file.exists():
-                            try:
-                                with open(results_file, 'r') as f:
-                                    data = json.load(f)
-                                
-                                available_jobs.append({
-                                    "source_job_id": job_dir.name,
-                                    "source_type": "find",
-                                    "feature_count": len(data.get('results', [])),
-                                    "results_path": str(results_file),
-                                    "location": "main"
-                                })
-                            except Exception as e:
-                                logger.warning(f"Could not read Find job {job_dir.name}: {e}")
-            
-            # Check enhanced persistence directories
-            results_base = self.data_path / "results"
-            if results_base.exists():
-                for job_dir in results_base.glob("find_*"):
-                    if job_dir.is_dir() and job_dir.name not in [j["source_job_id"] for j in available_jobs]:
-                        results_file = job_dir / f"{job_dir.name}_complete_results.json"
-                        if results_file.exists():
-                            try:
-                                with open(results_file, 'r') as f:
-                                    data = json.load(f)
-                                
-                                available_jobs.append({
-                                    "source_job_id": job_dir.name,
-                                    "source_type": "find",
-                                    "feature_count": len(data.get('results', [])),
-                                    "results_path": str(results_file),
-                                    "location": "enhanced"
-                                })
-                            except Exception as e:
-                                logger.warning(f"Could not read enhanced Find job {job_dir.name}: {e}")
-        
+            source_dir = self.find_results_dir
         elif source_type == "explain":
-            if self.explain_results_dir.exists():
-                for job_dir in self.explain_results_dir.iterdir():
-                    if job_dir.is_dir():
-                        results_file = job_dir / "explanation_results.json"
-                        if results_file.exists():
-                            try:
-                                with open(results_file, 'r') as f:
-                                    data = json.load(f)
-                                
-                                available_jobs.append({
-                                    "source_job_id": job_dir.name,
-                                    "source_type": "explain",
-                                    "explanation_count": len(data.get('explanations', [])),
-                                    "results_path": str(results_file),
-                                    "location": "main"
-                                })
-                            except Exception as e:
-                                logger.warning(f"Could not read Explain job {job_dir.name}: {e}")
+            source_dir = self.explain_results_dir
+        else:
+            raise ValueError(f"Unknown source type: {source_type}")
         
-        logger.info(f"Discovered {len(available_jobs)} available {source_type} jobs")
-        return available_jobs
-    
-    def load_source_data(self, source_type: str, source_job_id: str) -> List[Dict[str, Any]]:
-        """Load source data and convert to features format"""
-        if source_type == "find":
-            # Try main results directory first
-            main_path = self.find_results_dir / source_job_id / "analysis_results.json"
-            
-            if main_path.exists():
-                with open(main_path, 'r') as f:
-                    data = json.load(f)
-                features = data.get('results', [])
-                logger.info(f"Loaded {len(features)} features from Find job: {main_path}")
-                return features
-            
-            # Try enhanced persistence directory
-            enhanced_path = self.data_path / "results" / source_job_id / f"{source_job_id}_complete_results.json"
-            
-            if enhanced_path.exists():
-                with open(enhanced_path, 'r') as f:
-                    data = json.load(f)
-                features = data.get('results', [])
-                logger.info(f"Loaded {len(features)} features from enhanced Find job: {enhanced_path}")
-                return features
-        
-        elif source_type == "explain":
-            explain_path = self.explain_results_dir / source_job_id / "explanation_results.json"
-            
-            if explain_path.exists():
-                with open(explain_path, 'r') as f:
-                    data = json.load(f)
-                explanations = data.get('explanations', [])
+        jobs = []
+        for job_dir in source_dir.iterdir():
+            if job_dir.is_dir():
+                # Look for key files to determine job validity
+                if source_type == "find":
+                    key_file = job_dir / "features.json"
+                elif source_type == "explain":
+                    key_file = job_dir / "explanation_results.json"
                 
-                # Convert explanations to features format
-                features = []
-                for exp in explanations:
-                    feature = {
-                        "feature_id": exp.get("feature_id"),
-                        "coherence_score": exp.get("coherence_score", 0),
-                        "pattern_keywords": exp.get("pattern_keywords", []),
-                        "explanation": exp.get("explanation", ""),
-                        "confidence": exp.get("confidence", "unknown"),
-                        **exp  # Include all other fields
-                    }
-                    features.append(feature)
-                
-                logger.info(f"Loaded {len(features)} features from Explain job: {explain_path}")
-                return features
-        
-        # List available jobs for error message
-        available_jobs = self.discover_source_jobs(source_type)
-        available_ids = [job["source_job_id"] for job in available_jobs]
-        
-        raise FileNotFoundError(f"{source_type.title()} job {source_job_id} not found. Available: {available_ids}")
-    
-    def execute_scoring_pipeline(self, source_type: str, source_job_id: str, 
-                                config: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
-        """Execute the complete scoring pipeline with shared storage integration"""
-        try:
-            # Load source features
-            features = self.load_source_data(source_type, source_job_id)
-            if not features:
-                logger.error(f"No features found in {source_type} job {source_job_id}")
-                return None, []
-            
-            logger.info(f"Starting scoring pipeline with {len(features)} features")
-            
-            # Process scoring jobs
-            added_scores = []
-            scoring_jobs = config.get("scoring_jobs", [])
-            
-            if not scoring_jobs:
-                logger.warning("No scoring jobs found in configuration")
-                return None, []
-            
-            for job in scoring_jobs:
-                scorer_name = job.get("scorer")
-                job_params = job.get("params", {})
-                job_name = job.get("name")
-                
-                if not job_name:
-                    logger.warning(f"Scoring job with scorer '{scorer_name}' is missing a 'name'. Skipping.")
-                    continue
-                
-                if scorer_name in self.scorers:
-                    logger.info(f"Executing job '{job_name}' with scorer '{scorer_name}'...")
-                    scorer_class = self.scorers[scorer_name]
-                    scorer_instance = scorer_class()
+                if key_file.exists():
+                    # Get job metadata
+                    info_file = job_dir / "job_info.json"
+                    if info_file.exists():
+                        try:
+                            with open(info_file, 'r') as f:
+                                job_info = json.load(f)
+                        except:
+                            job_info = {}
+                    else:
+                        job_info = {}
                     
-                    # Pass all params to the scorer instance, including the job name
-                    all_params = {"name": job_name, **job_params}
-                    features = scorer_instance.score(features, **all_params)
-                    added_scores.append(job_name)
+                    jobs.append({
+                        "job_id": job_dir.name,
+                        "source_type": source_type,
+                        "job_directory": str(job_dir),
+                        "key_file": str(key_file),
+                        "metadata": job_info
+                    })
+        
+        return sorted(jobs, key=lambda x: x["job_id"], reverse=True)
+    
+    def execute_scoring_pipeline(self, source_type: str, source_job_id: str, scoring_config: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+        """Execute scoring pipeline with integrated storage"""
+        logger.info(f"Starting scoring pipeline for {source_type} job {source_job_id}")
+        
+        # Validate source job exists
+        source_jobs = self.discover_source_jobs(source_type)
+        source_job = next((j for j in source_jobs if j["job_id"] == source_job_id), None)
+        
+        if not source_job:
+            raise ValueError(f"Source job {source_job_id} not found in {source_type} results")
+        
+        # Load source data
+        source_data_path = source_job["key_file"]
+        logger.info(f"Loading source data from: {source_data_path}")
+        
+        try:
+            with open(source_data_path, 'r') as f:
+                features = json.load(f)
+            
+            # Handle different source formats
+            if source_type == "explain" and isinstance(features, dict):
+                # Extract features from explanation results
+                if "explanations" in features:
+                    features = features["explanations"]
+                elif "features" in features:
+                    features = features["features"]
                 else:
-                    logger.warning(f"Scorer '{scorer_name}' not found. Skipping job.")
+                    raise ValueError("Could not extract features from explanation results")
             
-            # Generate unique job ID for this scoring run
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            job_id = f"score_{timestamp}_{source_job_id}"
+            if not isinstance(features, list):
+                raise ValueError(f"Expected features to be a list, got {type(features)}")
             
-            # Save the enriched data to shared storage
-            output_path = self._save_results_to_shared_storage(
-                job_id, source_type, source_job_id, features, added_scores, config
-            )
-            
-            logger.info(f"✅ Scoring pipeline completed. Added scores: {added_scores}")
-            return output_path, added_scores
+            logger.info(f"Loaded {len(features)} features from source")
             
         except Exception as e:
-            logger.error(f"Scoring pipeline failed: {e}")
+            logger.error(f"Failed to load source data: {e}")
             raise
-    
-    def _save_results_to_shared_storage(self, job_id: str, source_type: str, 
-                                      source_job_id: str, features: List[Dict[str, Any]], 
-                                      added_scores: List[str], config: Dict[str, Any]) -> str:
-        """Save results to shared storage with comprehensive format support"""
         
-        # Create job-specific directory
-        job_dir = self.score_results_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
+        # Execute scoring jobs
+        added_scores = []
+        scoring_jobs = scoring_config.get("scoring_jobs", [])
         
-        # Create comprehensive results structure
-        results_data = {
-            "job_id": job_id,
-            "source_type": source_type,
-            "source_job_id": source_job_id,
-            "status": "completed",
-            "timestamp": datetime.now().isoformat(),
-            "processing_summary": {
-                "total_features": len(features),
-                "scores_added": added_scores,
-                "scoring_config": config
-            },
-            "features": features,
-            "metadata": {
-                "service": "miStudioScore",
-                "version": "1.0.0",
-                "source_type": source_type,
-                "source_job_id": source_job_id
-            }
-        }
-        
-        # Save main JSON results
-        json_path = job_dir / "scoring_results.json"
-        with open(json_path, 'w') as f:
-            json.dump(results_data, f, indent=2, default=str)
-        
-        # Save CSV format
-        csv_path = job_dir / "scored_features.csv"
-        self._save_csv_format(features, added_scores, csv_path)
-        
-        # Save summary report
-        summary_path = job_dir / "summary_report.txt"
-        self._save_summary_report(job_id, source_type, source_job_id, 
-                                features, added_scores, summary_path)
-        
-        # Save job metadata
-        metadata_path = job_dir / "job_info.json"
-        job_metadata = {
-            "job_id": job_id,
-            "source_type": source_type,
-            "source_job_id": source_job_id,
-            "timestamp": datetime.now().isoformat(),
-            "files_created": {
-                "json": str(json_path),
-                "csv": str(csv_path),
-                "summary": str(summary_path),
-                "metadata": str(metadata_path)
-            },
-            "processing_summary": results_data["processing_summary"]
-        }
-        
-        with open(metadata_path, 'w') as f:
-            json.dump(job_metadata, f, indent=2, default=str)
-        
-        logger.info(f"✅ Results saved to shared storage: {job_dir}")
-        return str(json_path)
-    
-    def _save_csv_format(self, features: List[Dict[str, Any]], 
-                        added_scores: List[str], csv_path: Path):
-        """Save features in CSV format"""
-        import csv
-        
-        # Determine columns
-        base_columns = ["feature_id", "coherence_score"]
-        score_columns = added_scores
-        optional_columns = ["quality_level", "pattern_keywords", "explanation", "confidence"]
-        
-        # Check what columns are available
-        all_columns = base_columns + score_columns
-        for col in optional_columns:
-            if any(col in feature for feature in features):
-                all_columns.append(col)
-        
-        with open(csv_path, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=all_columns)
-            writer.writeheader()
+        for job in scoring_jobs:
+            scorer_name = job.get("scorer")
+            job_params = job.get("params", {})
+            job_name = job.get("name")
             
-            for feature in features:
-                row = {}
-                for col in all_columns:
-                    if col == "pattern_keywords" and col in feature:
-                        # Join keywords with semicolons
-                        row[col] = "; ".join(str(k) for k in feature[col])
-                    else:
-                        row[col] = feature.get(col, "")
-                writer.writerow(row)
-    
-    def _save_summary_report(self, job_id: str, source_type: str, source_job_id: str,
-                           features: List[Dict[str, Any]], added_scores: List[str], 
-                           summary_path: Path):
-        """Save human-readable summary report"""
-        with open(summary_path, 'w') as f:
-            f.write(f"miStudioScore Summary Report\n")
-            f.write(f"============================\n\n")
-            f.write(f"Job ID: {job_id}\n")
-            f.write(f"Source Type: {source_type}\n")
-            f.write(f"Source Job ID: {source_job_id}\n")
-            f.write(f"Generated: {datetime.now().isoformat()}\n\n")
-            f.write(f"Processing Summary:\n")
-            f.write(f"Total Features: {len(features)}\n")
-            f.write(f"Scores Added: {len(added_scores)}\n")
-            f.write(f"Score Types: {', '.join(added_scores)}\n\n")
+            if not job_name:
+                logger.warning(f"Scoring job with scorer '{scorer_name}' is missing a 'name'. Skipping.")
+                continue
             
-            # Score statistics
-            f.write(f"Score Statistics:\n")
-            f.write(f"================\n")
-            for score_name in added_scores:
-                scores = [f.get(score_name, 0) for f in features if score_name in f]
-                if scores:
-                    f.write(f"{score_name}:\n")
-                    f.write(f"  Count: {len(scores)}\n")
-                    f.write(f"  Average: {sum(scores)/len(scores):.3f}\n")
-                    f.write(f"  Max: {max(scores):.3f}\n")
-                    f.write(f"  Min: {min(scores):.3f}\n\n")
+            if scorer_name not in self.scorers:
+                logger.error(f"Scorer '{scorer_name}' not found. Available scorers: {list(self.scorers.keys())}")
+                continue
             
-            # Top features
-            f.write(f"Top 10 Features by Average Score:\n")
-            f.write(f"=================================\n")
-            
-            # Calculate average scores for ranking
-            scored_features = []
-            for feature in features:
-                avg_score = sum(feature.get(score, 0) for score in added_scores) / len(added_scores) if added_scores else 0
-                scored_features.append((feature, avg_score))
-            
-            # Sort by average score
-            scored_features.sort(key=lambda x: x[1], reverse=True)
-            
-            for i, (feature, avg_score) in enumerate(scored_features[:10]):
-                f.write(f"{i+1:2d}. Feature {feature.get('feature_id', 'unknown'):>3} ")
-                f.write(f"(avg: {avg_score:.3f}) ")
+            try:
+                logger.info(f"Executing scoring job: {job_name} using {scorer_name}")
+                scorer_class = self.scorers[scorer_name]
+                scorer_instance = scorer_class()
                 
-                # Show individual scores
-                score_details = []
+                # Prepare parameters
+                all_params = {"name": job_name, **job_params}
+                
+                # Execute scoring
+                features = scorer_instance.score(features, **all_params)
+                added_scores.append(job_name)
+                
+                logger.info(f"✅ Completed scoring job: {job_name}")
+                
+            except Exception as e:
+                logger.error(f"Scoring job '{job_name}' failed: {e}", exc_info=True)
+                continue
+        
+        if not added_scores:
+            logger.warning("No scoring jobs completed successfully")
+            return None, []
+        
+        # Generate output path
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        job_id = f"score_{timestamp}_{hash(source_job_id) % 100000000:08x}"
+        
+        output_dir = self.score_results_dir / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save results in multiple formats
+        results_json_path = output_dir / "scoring_results.json"
+        scored_features_csv_path = output_dir / "scored_features.csv"
+        job_info_path = output_dir / "job_info.json"
+        summary_path = output_dir / "summary_report.txt"
+        
+        # Save JSON results
+        with open(results_json_path, 'w') as f:
+            json.dump(features, f, indent=2)
+        
+        # Save CSV results
+        self._save_csv_results(features, scored_features_csv_path, added_scores)
+        
+        # Save job info
+        job_info = {
+            "job_id": job_id,
+            "source_type": source_type,
+            "source_job_id": source_job_id,
+            "timestamp": datetime.now().isoformat(),
+            "total_features": len(features),
+            "scores_added": added_scores,
+            "scoring_config": scoring_config
+        }
+        
+        with open(job_info_path, 'w') as f:
+            json.dump(job_info, f, indent=2)
+        
+        # Generate summary report
+        self._generate_summary_report(features, added_scores, summary_path, job_info)
+        
+        logger.info(f"✅ Scoring pipeline completed. Results saved to: {output_dir}")
+        
+        return str(results_json_path), added_scores
+    
+    def _save_csv_results(self, features: List[Dict[str, Any]], csv_path: Path, added_scores: List[str]):
+        """Save results in CSV format"""
+        try:
+            import csv
+            
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                # Determine all possible fields
+                all_fields = set()
+                for feature in features:
+                    all_fields.update(feature.keys())
+                
+                # Order fields: feature_id, coherence_score, then added scores, then rest
+                ordered_fields = []
+                if "feature_id" in all_fields:
+                    ordered_fields.append("feature_id")
+                if "coherence_score" in all_fields:
+                    ordered_fields.append("coherence_score")
+                
+                # Add scoring results
+                for score in added_scores:
+                    if score in all_fields:
+                        ordered_fields.append(score)
+                
+                # Add remaining fields
+                remaining_fields = sorted(all_fields - set(ordered_fields))
+                ordered_fields.extend(remaining_fields)
+                
+                writer = csv.DictWriter(csvfile, fieldnames=ordered_fields)
+                writer.writeheader()
+                
+                for feature in features:
+                    row = {}
+                    for field in ordered_fields:
+                        value = feature.get(field, "")
+                        # Handle complex objects by converting to string
+                        if isinstance(value, (dict, list)):
+                            value = str(value)
+                        row[field] = value
+                    writer.writerow(row)
+                    
+            logger.info(f"CSV results saved to: {csv_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save CSV results: {e}")
+    
+    def _generate_summary_report(self, features: List[Dict[str, Any]], added_scores: List[str], 
+                                summary_path: Path, job_info: Dict[str, Any]):
+        """Generate human-readable summary report"""
+        try:
+            with open(summary_path, 'w') as f:
+                f.write("miStudioScore Summary Report\n")
+                f.write("============================\n")
+                f.write(f"Job ID: {job_info['job_id']}\n")
+                f.write(f"Source Type: {job_info['source_type']}\n")
+                f.write(f"Source Job ID: {job_info['source_job_id']}\n")
+                f.write(f"Generated: {job_info['timestamp']}\n")
+                f.write(f"Processing Time: {job_info.get('processing_time', 'Unknown')}\n\n")
+                
+                f.write(f"Results Summary:\n")
+                f.write(f"Total Features: {len(features)}\n")
+                f.write(f"Scores Added: {len(added_scores)}\n")
+                f.write(f"Score Types: {', '.join(added_scores)}\n\n")
+                
+                # Score statistics
+                f.write(f"Score Statistics:\n")
                 for score_name in added_scores:
-                    if score_name in feature:
-                        score_details.append(f"{score_name}={feature[score_name]:.3f}")
+                    scores = [f.get(score_name, 0) for f in features if score_name in f]
+                    if scores:
+                        f.write(f"{score_name}:\n")
+                        f.write(f"  Average: {sum(scores)/len(scores):.3f}\n")
+                        f.write(f"  Max: {max(scores):.3f}\n")
+                        f.write(f"  Min: {min(scores):.3f}\n")
                 
-                if score_details:
-                    f.write(f"[{', '.join(score_details)}]")
-                f.write("\n")
-
-
-class PatternScorer:
-    """Built-in pattern-based scorer"""
-    
-    def score(self, features: List[Dict[str, Any]], **params) -> List[Dict[str, Any]]:
-        """Apply pattern-based scoring"""
-        score_name = params.get("name", "pattern_score")
-        
-        for feature in features:
-            # Calculate pattern score based on coherence and keyword diversity
-            coherence = feature.get("coherence_score", 0)
-            keywords = feature.get("pattern_keywords", [])
-            keyword_diversity = min(len(keywords) / 10.0, 1.0)  # Normalize to max 10 keywords
+                # Top features
+                f.write(f"\nTop 5 Features by Average Score:\n")
+                f.write(f"--------------------------------\n")
+                
+                # Calculate average scores for ranking
+                scored_features = []
+                for feature in features:
+                    avg_score = sum(feature.get(score, 0) for score in added_scores) / len(added_scores) if added_scores else 0
+                    scored_features.append((feature, avg_score))
+                
+                # Sort by average score
+                scored_features.sort(key=lambda x: x[1], reverse=True)
+                
+                for i, (feature, avg_score) in enumerate(scored_features[:5]):
+                    feature_id = feature.get('feature_id', feature.get('feature_index', 'unknown'))
+                    f.write(f"{i+1}. Feature {feature_id} (avg: {avg_score:.3f})\n")
+                    
+            logger.info(f"Summary report saved to: {summary_path}")
             
-            # Combine coherence and keyword diversity
-            pattern_score = (coherence * 0.7) + (keyword_diversity * 0.3)
-            feature[score_name] = min(1.0, pattern_score)
-        
-        return features
+        except Exception as e:
+            logger.error(f"Failed to generate summary report: {e}")
 
 
-# Legacy compatibility function
+# Legacy compatibility function (pattern_scorer removed)
 def execute_scoring(features_path: str, config_path: str, output_dir: str) -> Tuple[Optional[str], List[str]]:
-    """Legacy function for backward compatibility"""
+    """Legacy function for backward compatibility (pattern_scorer removed)"""
     logger.warning("Using legacy execute_scoring function")
     logger.warning("Consider migrating to IntegratedOrchestrator for better shared storage integration")
     
@@ -437,7 +340,7 @@ def execute_scoring(features_path: str, config_path: str, output_dir: str) -> Tu
             return orchestrator.execute_scoring_pipeline(source_type, source_job_id, config)
         
         else:
-            # Fall back to original legacy behavior
+            # Fall back to original legacy behavior (with working scorers only)
             from utils.file_handler import load_json_file, load_yaml_config, save_json_file
             
             features = load_json_file(features_path)
@@ -446,8 +349,25 @@ def execute_scoring(features_path: str, config_path: str, output_dir: str) -> Tu
             added_scores = []
             scoring_jobs = config.get("scoring_jobs", [])
             
-            # Use built-in scorers for legacy mode
-            available_scorers = {"pattern_scorer": PatternScorer}
+            # Use only working scorers for legacy mode (pattern_scorer removed)
+            available_scorers = {}
+            
+            # Try to import working scorers
+            try:
+                from core.scoring.relevance_scorer import RelevanceScorer
+                available_scorers["relevance_scorer"] = RelevanceScorer
+            except ImportError:
+                logger.warning("RelevanceScorer not available in legacy mode")
+            
+            try:
+                from core.scoring.ablation_scorer import AblationScorer
+                available_scorers["ablation_scorer"] = AblationScorer
+            except ImportError:
+                logger.warning("AblationScorer not available in legacy mode")
+            
+            if not available_scorers:
+                logger.error("No working scorers available")
+                return None, []
             
             for job in scoring_jobs:
                 scorer_name = job.get("scorer")
@@ -463,6 +383,8 @@ def execute_scoring(features_path: str, config_path: str, output_dir: str) -> Tu
                     all_params = {"name": job_name, **job_params}
                     features = scorer_instance.score(features, **all_params)
                     added_scores.append(job_name)
+                else:
+                    logger.warning(f"Scorer '{scorer_name}' not available. Available: {list(available_scorers.keys())}")
             
             # Save using legacy format
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
