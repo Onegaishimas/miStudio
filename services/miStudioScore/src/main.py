@@ -232,27 +232,43 @@ class IntegratedScoreService:
         logger.info(f"  Score results path: {self.config.score_results_dir}")
         logger.info(f"  Available scorers: {self.available_scorers}")
     
-    def _initialize_scorers(self):
-        """Initialize available scoring modules"""
-        try:
-            from core.scoring.relevance_scorer import RelevanceScorer
-            self.available_scorers.append("relevance_scorer")
-        except ImportError:
-            logger.warning("RelevanceScorer not available")
-        
-        try:
-            from core.scoring.ablation_scorer import AblationScorer
-            self.available_scorers.append("ablation_scorer")
-        except ImportError:
-            logger.warning("AblationScorer not available")
-        
-        # Add simple pattern-based scorer as fallback
-        self.available_scorers.append("pattern_scorer")
+def _initialize_scorers(self):
+    """Initialize available scoring modules (safe version)"""
+    # Start with empty list
+    self.available_scorers = []
     
-    def discover_source_jobs(self, source_type: str) -> List[Dict[str, Any]]:
-        """Discover available source jobs for scoring"""
-        available_jobs = []
-        
+    # Only try to load working scorers with proper error handling
+    try:
+        # Check if relevance scorer exists
+        scorer_file = Path(__file__).parent / "scorers" / "relevance_scorer.py"
+        if scorer_file.exists():
+            from src.scorers.relevance_scorer import RelevanceScorer
+            self.available_scorers.append("relevance_scorer")
+            logger.info("✅ Loaded RelevanceScorer")
+        else:
+            logger.warning("RelevanceScorer file not found")
+    except Exception as e:
+        logger.warning(f"RelevanceScorer not available: {e}")
+    
+    try:
+        # Check if ablation scorer exists
+        scorer_file = Path(__file__).parent / "scorers" / "ablation_scorer.py" 
+        if scorer_file.exists():
+            from src.scorers.ablation_scorer import AblationScorer
+            self.available_scorers.append("ablation_scorer")
+            logger.info("✅ Loaded AblationScorer")
+        else:
+            logger.warning("AblationScorer file not found")
+    except Exception as e:
+        logger.warning(f"AblationScorer not available: {e}")
+        if not self.available_scorers:
+            logger.warning("No scorers available - service will have limited functionality")
+        else:
+            logger.info(f"Working scorers loaded: {self.available_scorers}")        
+
+        def discover_source_jobs(self, source_type: str) -> List[Dict[str, Any]]:
+            """Discover available source jobs for scoring"""
+            available_jobs = []
         if source_type == "find":
             source_dir = self.config.find_results_dir
             if source_dir.exists():
