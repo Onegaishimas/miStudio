@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: mistudio-services
-  labels:
-    name: mistudio-services
-    app: mistudio-explain
-
