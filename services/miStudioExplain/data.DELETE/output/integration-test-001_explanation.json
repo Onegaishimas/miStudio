@@ -1,0 +1,15 @@
+{
+    "request_id": "integration-test-001",
+    "analysis_type": "complex_behavioral",
+    "validation_passed": true,
+    "explanation": {
+        "success": true,
+        "explanation_text": "This is a mocked explanation about the test corpus.",
+        "model_used": "mock-model:latest",
+        "token_count": 10
+    },
+    "original_input": {
+        "text_corpus": "This is a long test corpus designed to pass all the validation steps and test the full internal workflow of the application without making a real network call to the large language model.",
+        "source_description": "ad-hoc text input"
+    }
+}
