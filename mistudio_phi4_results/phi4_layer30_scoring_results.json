@@ -1,11 +1,12 @@
 {
-  "job_id": "score_20250802_210741_01ec8be4",
+  "job_id": "score_20250803_042438_04363444",
   "source_type": "explain",
-  "source_job_id": "explain_20250802_210711_945b7314",
-  "timestamp": "2025-08-02T21:07:41.792241",
+  "source_job_id": "explain_20250803_042408_620ad5c4",
+  "timestamp": "2025-08-03T04:24:38.261880",
   "features": [],
   "scores_added": [
-    "security_relevance"
+    "security_relevance",
+    "technical_complexity"
   ],
   "scoring_config": {
     "scoring_jobs": [
@@ -39,5 +40,5 @@
     ]
   },
   "total_features_processed": 0,
-  "successful_scoring_jobs": 1
+  "successful_scoring_jobs": 2
 }

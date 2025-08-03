@@ -348,7 +348,7 @@ class EnhancedActivationExtractor:
                 # Forward pass to trigger hooks with mixed precision
                 with torch.no_grad():
                     if self.device.type == "cuda":
-                        with torch.cuda.amp.autocast():
+                        with torch.amp.autocast('cuda'):  # FIXED: Updated from torch.cuda.amp.autocast
                             _ = self.model(**inputs)
                     else:
                         _ = self.model(**inputs)

@@ -309,7 +309,7 @@ class MiStudioTrainService:
                 # Initialize mixed precision scaler for large models
                 scaler = None
                 if device.type == "cuda" and model_opts["is_large_model"]:
-                    scaler = torch.cuda.amp.GradScaler()
+                    scaler = torch.amp.GradScaler('cuda')
                     logger.info("Enabled mixed precision training for memory efficiency")
 
                 # Prepare data with memory-efficient dataloader
@@ -353,7 +353,7 @@ class MiStudioTrainService:
                             
                             # Use mixed precision for large models
                             if scaler is not None:
-                                with torch.cuda.amp.autocast():
+                                with torch.amp.autocast('cuda'):
                                     reconstruction, hidden, total_loss = sae(batch_data)
                                     recon_error = F.mse_loss(reconstruction, batch_data)
                                     sparsity_level = torch.mean(torch.sum(hidden > 0, dim=1).float()) / hidden_dim
@@ -473,7 +473,7 @@ class MiStudioTrainService:
                             batch_activations = activations[i : i + len(batch_texts)].to(device)
 
                             if scaler is not None:
-                                with torch.cuda.amp.autocast():
+                                with torch.amp.autocast('cuda'):
                                     features = sae.encode(batch_activations)
                             else:
                                 features = sae.encode(batch_activations)
