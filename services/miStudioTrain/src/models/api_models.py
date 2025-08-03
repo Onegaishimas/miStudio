@@ -1,14 +1,18 @@
 # =============================================================================
-# models/api_models.py
+# models/api_models.py - Fixed Pydantic Protected Namespace Warnings
 # =============================================================================
 
 import requests
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 
 
 class TrainingRequest(BaseModel):
     """Enhanced training request with dynamic model loading and validation"""
+    
+    # Fix Pydantic v2 protected namespace warnings
+    model_config = ConfigDict(protected_namespaces=())
+    
     # Required fields
     model_name: str = Field(description="HuggingFace model name (e.g., 'microsoft/Phi-4')")
     corpus_file: str = Field(description="Input corpus file name in samples/")
@@ -84,6 +88,10 @@ class TrainingRequest(BaseModel):
 
 class ModelInfo(BaseModel):
     """Model information response"""
+    
+    # Fix Pydantic v2 protected namespace warnings
+    model_config = ConfigDict(protected_namespaces=())
+    
     model_name: str
     actual_model_loaded: str
     architecture: str
@@ -96,6 +104,10 @@ class ModelInfo(BaseModel):
 
 class TrainingStatus(BaseModel):
     """Training status response"""
+    
+    # Fix Pydantic v2 protected namespace warnings
+    model_config = ConfigDict(protected_namespaces=())
+    
     job_id: str
     status: str  # 'queued', 'running', 'completed', 'failed'
     progress: float  # 0.0 to 1.0
@@ -109,6 +121,10 @@ class TrainingStatus(BaseModel):
 
 class TrainingResult(BaseModel):
     """Training completion result"""
+    
+    # Fix Pydantic v2 protected namespace warnings
+    model_config = ConfigDict(protected_namespaces=())
+    
     job_id: str
     status: str
     model_path: str

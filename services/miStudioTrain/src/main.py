@@ -1,8 +1,10 @@
-# main.py - Memory Optimized Version with Dynamic Model Loading
+# main.py - Memory Optimized Version with Fixed Multiprocessing Issues
 
 import os
 import torch
 import aiofiles
+import signal
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Optional
@@ -11,6 +13,11 @@ from transformers import AutoTokenizer, AutoConfig
 
 # Set memory optimization environment variables before any PyTorch imports
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+# Fix multiprocessing issues
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Disable tokenizer parallelism
+import multiprocessing
+multiprocessing.set_start_method('spawn', force=True)  # Use spawn instead of fork
 
 from utils.logging_config import setup_logging
 from models.api_models import TrainingRequest, TrainingStatus, TrainingResult
@@ -68,6 +75,23 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+
+# Add signal handlers for graceful shutdown
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    logger = __import__('logging').getLogger(__name__)
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    
+    # Clear GPU cache on forced shutdown
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        logger.info("Cleared GPU cache during signal shutdown")
+    
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 
 @app.get("/health")
@@ -333,4 +357,16 @@ async def delete_corpus_file(filename: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info", access_log=True)
+    
+    # Configure uvicorn for better multiprocessing handling
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8001,  # miStudioTrain service port
+        log_level="info", 
+        access_log=True,
+        # Disable workers in development to avoid multiprocessing issues
+        workers=1,
+        # Use lifespan for proper startup/shutdown
+        lifespan="on"
+    )
