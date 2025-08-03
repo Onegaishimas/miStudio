@@ -530,8 +530,24 @@ class IntegratedScoreService:
             
             with open(source_file, 'r') as f:
                 data = json.load(f)
-                logger.info(f"📂 Loaded source data from: {source_file}")
-                return data
+                
+                # Handle different source formats by extracting features properly
+                if source_type == "explain" and "explanations" in data:
+                    # For explain results, the features are in "explanations"
+                    # Create a new structure with "features" at the top level
+                    features_data = {
+                        "features": data["explanations"],  # ✅ Extract explanations as features
+                        "source_type": source_type,
+                        "source_job_id": source_job_id,
+                        "timestamp": data.get("timestamp"),
+                        "total_features": len(data["explanations"])
+                    }
+                    logger.info(f"📂 Loaded {len(data['explanations'])} explanations as features from: {source_file}")
+                    return features_data
+                else:
+                    # For find results, return as-is (already has "features")
+                    logger.info(f"📂 Loaded source data from: {source_file}")
+                    return data
                 
         except Exception as e:
             logger.error(f"Error loading source data: {e}")
