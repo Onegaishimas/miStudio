@@ -1,9 +1,10 @@
 # =============================================================================
-# core/activation_extractor.py - Memory Optimized Version
+# core/activation_extractor.py - Memory Optimized Version with Enhanced Cleanup
 # =============================================================================
 
 import torch
 import logging
+import gc
 from typing import Optional, List
 from transformers import AutoTokenizer, AutoModel, BitsAndBytesConfig
 from models.api_models import ModelInfo
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class EnhancedActivationExtractor:
-    """Enhanced activation extractor with dynamic model loading and memory optimizations"""
+    """Enhanced activation extractor with comprehensive memory management"""
 
     def __init__(
         self,
@@ -33,6 +34,9 @@ class EnhancedActivationExtractor:
         self.model_info = None
         self.model = None
         self.tokenizer = None
+
+        # Track cleanup state
+        self._is_cleaned_up = False
 
         # Load the specified model
         self._load_model()
@@ -134,7 +138,29 @@ class EnhancedActivationExtractor:
 
         except Exception as e:
             logger.error(f"Failed to load {self.model_name}: {e}")
+            # Clean up any partially loaded resources
+            self._cleanup_partial_load()
             raise RuntimeError(f"Could not load model {self.model_name}: {str(e)}")
+
+    def _cleanup_partial_load(self):
+        """Clean up resources if model loading fails"""
+        try:
+            if self.model is not None:
+                if self.device.type == "cuda":
+                    self.model.cpu()
+                del self.model
+                self.model = None
+            
+            if self.tokenizer is not None:
+                del self.tokenizer
+                self.tokenizer = None
+            
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+                
+            logger.debug("Cleaned up partial model loading resources")
+        except Exception as e:
+            logger.warning(f"Error during partial cleanup: {e}")
 
     def _extract_model_info(self):
         """Extract information about the loaded model"""
@@ -276,7 +302,10 @@ class EnhancedActivationExtractor:
             raise ValueError(f"Cannot register hook on layer {self.layer_number}: {str(e)}")
 
     def extract_activations(self, texts: List[str], batch_size: int = 8) -> torch.Tensor:
-        """Extract activations from texts with memory management"""
+        """Extract activations from texts with enhanced memory management"""
+        if self._is_cleaned_up:
+            raise RuntimeError("Cannot extract activations after cleanup has been called")
+            
         self.activations = []
         all_activations = []
 
@@ -367,15 +396,79 @@ class EnhancedActivationExtractor:
         return result
 
     def cleanup(self):
-        """Remove hooks and clean up memory"""
-        if self.hook:
-            self.hook.remove()
-        self.activations = []
+        """Enhanced cleanup method for comprehensive resource management"""
+        if self._is_cleaned_up:
+            logger.debug("Cleanup already performed, skipping")
+            return
+            
+        logger.info("Starting comprehensive activation extractor cleanup...")
         
-        # Additional memory cleanup
-        if self.device.type == "cuda":
-            torch.cuda.empty_cache()
+        try:
+            # Step 1: Remove forward hooks
+            if self.hook:
+                self.hook.remove()
+                self.hook = None
+                logger.debug("Removed forward hooks")
+            
+            # Step 2: Clear activation cache
+            if self.activations:
+                del self.activations
+                self.activations = []
+                logger.debug("Cleared activation cache")
+            
+            # Step 3: Move model to CPU and delete
+            if self.model is not None:
+                try:
+                    if self.device.type == "cuda":
+                        logger.debug(f"Moving model from {self.device} to CPU")
+                        self.model.cpu()
+                    del self.model
+                    self.model = None
+                    logger.debug("Model deleted")
+                except Exception as e:
+                    logger.warning(f"Error cleaning up model: {e}")
+            
+            # Step 4: Clean up tokenizer
+            if self.tokenizer is not None:
+                del self.tokenizer
+                self.tokenizer = None
+                logger.debug("Tokenizer deleted")
+            
+            # Step 5: Python garbage collection
+            collected = gc.collect()
+            logger.debug(f"Garbage collection freed {collected} objects")
+            
+            # Step 6: Final GPU cache clear
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.debug("GPU cache cleared and synchronized")
+            
+            # Step 7: Mark as cleaned up
+            self._is_cleaned_up = True
+            
+            logger.info("Activation extractor cleanup completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error during activation extractor cleanup: {e}")
+            # Still mark as cleaned up to prevent repeated attempts
+            self._is_cleaned_up = True
+
+    def cleanup_gpu_resources(self):
+        """Alias for cleanup method for consistency with other classes"""
+        self.cleanup()
 
     def get_model_info(self) -> ModelInfo:
         """Get model information"""
+        if self._is_cleaned_up:
+            logger.warning("Model info requested after cleanup - returning cached info")
         return self.model_info
+
+    def __del__(self):
+        """Destructor to ensure cleanup when object is garbage collected"""
+        try:
+            if not self._is_cleaned_up:
+                self.cleanup()
+        except Exception:
+            # Ignore errors during destruction
+            pass
