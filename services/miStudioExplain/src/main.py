@@ -635,19 +635,18 @@ explanation_generator = None
 quality_validator = None
 result_manager = None
 
-try:
-    from infrastructure.ollama_manager import OllamaManager
-    ollama_manager = OllamaManager(ollama_endpoint=config.ollama_endpoint)
-    logger.info("✅ Successfully initialized Ollama manager")
-except ImportError as e:
-    logger.warning(f"Ollama manager not available: {e}")
+# Initialize Ollama manager inline (if needed)
+ollama_manager = None
+input_manager = None
 
-try:
-    from core.input_manager import InputManager
-    input_manager = InputManager()
-    logger.info("✅ Successfully initialized input manager")
-except ImportError as e:
-    logger.warning(f"Input manager not available: {e}")
+# Basic Ollama configuration without separate module
+ollama_config = {
+    "endpoint": config.ollama_endpoint,
+    "models": config.ollama_models,
+    "timeout": config.ollama_timeout
+}
+
+logger.info("✅ Service initialized without external managers")
 
 # Additional component initializations...
 # (keeping the existing pattern but not required for basic functionality)

@@ -276,7 +276,7 @@ class IntegratedScoreService:
                                 available_jobs.append({
                                     "job_id": job_dir.name,
                                     "timestamp": job_data.get("timestamp", "unknown"),
-                                    "features_count": len(job_data.get("features", [])),
+                                    "features_count": len(job_data.get("explanations", job_data.get("features", []))),
                                     "status": "completed"
                                 })
                             except Exception as e:
@@ -295,7 +295,7 @@ class IntegratedScoreService:
                                 available_jobs.append({
                                     "job_id": job_dir.name,
                                     "timestamp": job_data.get("timestamp", "unknown"),
-                                    "features_count": len(job_data.get("features", [])),
+                                    "features_count": len(job_data.get("explanations", job_data.get("features", []))),
                                     "status": "completed"
                                 })
                             except Exception as e:
