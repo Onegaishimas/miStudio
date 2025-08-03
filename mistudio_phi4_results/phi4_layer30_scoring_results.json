@@ -1,0 +1,43 @@
+{
+  "job_id": "score_20250802_210741_01ec8be4",
+  "source_type": "explain",
+  "source_job_id": "explain_20250802_210711_945b7314",
+  "timestamp": "2025-08-02T21:07:41.792241",
+  "features": [],
+  "scores_added": [
+    "security_relevance"
+  ],
+  "scoring_config": {
+    "scoring_jobs": [
+      {
+        "name": "security_relevance",
+        "scorer": "relevance_scorer",
+        "parameters": {
+          "positive_keywords": [
+            "security",
+            "authentication",
+            "encryption",
+            "privacy",
+            "access"
+          ],
+          "negative_keywords": [
+            "decoration",
+            "style",
+            "cosmetic",
+            "visual"
+          ]
+        }
+      },
+      {
+        "name": "technical_complexity",
+        "scorer": "ablation_scorer",
+        "parameters": {
+          "threshold": 0.3,
+          "analysis_type": "complexity_assessment"
+        }
+      }
+    ]
+  },
+  "total_features_processed": 0,
+  "successful_scoring_jobs": 1
+}
