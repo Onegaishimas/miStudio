@@ -1,8 +1,8 @@
 {
-  "job_id": "score_20250803_042438_04363444",
+  "job_id": "score_20250803_044719_0487111b",
   "source_type": "explain",
-  "source_job_id": "explain_20250803_042408_620ad5c4",
-  "timestamp": "2025-08-03T04:24:38.261880",
+  "source_job_id": "explain_20250803_044649_46387f96",
+  "timestamp": "2025-08-03T04:47:19.357717",
   "features": [],
   "scores_added": [
     "security_relevance",

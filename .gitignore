@@ -31,3 +31,4 @@ data/
 .DS_Store
 Thumbs.db
 mistudio_phi4_results/
+mistudio_phi4_results/phi4_layer30_scoring_results.json
