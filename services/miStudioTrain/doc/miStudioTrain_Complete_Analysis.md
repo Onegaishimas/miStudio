@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 ### Memory Optimization Setup
 
 ```python
-os.environ\['PYTORCH\_CUDA\_ALLOC\_CONF'] = 'expandable\_segments:True'
+os.environ\['PYTORCH\_CUDA\_ALLOC_CONF'] = 'expandable_segments:True'
 ```
 
 **Purpose**: Configures PyTorch memory allocation for better GPU memory management
