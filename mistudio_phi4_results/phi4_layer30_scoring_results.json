@@ -1,9 +1,670 @@
 {
-  "job_id": "score_20250803_165833_046c8883",
+  "job_id": "score_20250803_175028_05114ae7",
   "source_type": "explain",
-  "source_job_id": "explain_20250803_165803_acc001e2",
-  "timestamp": "2025-08-03T16:58:33.917022",
-  "features": [],
+  "source_job_id": "explain_20250803_174958_ce8a9890",
+  "timestamp": "2025-08-03T17:50:28.815352",
+  "features": [
+    {
+      "feature_id": 1,
+      "explanation": "This feature detects text patterns containing: language, revolutionized, understanding., natural, have. It activates strongly on content like: 'Transformers have revolutionized natural language understanding....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "language",
+        "revolutionized",
+        "understanding.",
+        "natural",
+        "have"
+      ],
+      "sample_texts": [
+        "Transformers have revolutionized natural language understanding.",
+        "Transformers have revolutionized natural language understanding.",
+        "Transformers have revolutionized natural language understanding."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:49:58.804050",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 4,
+      "explanation": "This feature detects text patterns containing: learning, layers., multiple, networks, uses. It activates strongly on content like: 'Deep learning uses neural networks with multiple layers....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "learning",
+        "layers.",
+        "multiple",
+        "networks",
+        "uses"
+      ],
+      "sample_texts": [
+        "Deep learning uses neural networks with multiple layers.",
+        "Deep learning uses neural networks with multiple layers.",
+        "Deep learning uses neural networks with multiple layers."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:49:59.004875",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 8,
+      "explanation": "This feature detects text patterns containing: interpretability, and, crucial, safety, feature. It activates strongly on content like: 'Feature interpretability is crucial for AI safety and alignment....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "interpretability",
+        "and",
+        "crucial",
+        "safety",
+        "feature"
+      ],
+      "sample_texts": [
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:49:59.205331",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 11,
+      "explanation": "This feature detects text patterns containing: learning, layers., multiple, networks, uses. It activates strongly on content like: 'Deep learning uses neural networks with multiple layers....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "learning",
+        "layers.",
+        "multiple",
+        "networks",
+        "uses"
+      ],
+      "sample_texts": [
+        "Deep learning uses neural networks with multiple layers.",
+        "Deep learning uses neural networks with multiple layers.",
+        "Deep learning uses neural networks with multiple layers."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:49:59.405782",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 13,
+      "explanation": "This feature detects text patterns containing: learning, layers., multiple, networks, uses. It activates strongly on content like: 'Deep learning uses neural networks with multiple layers....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "learning",
+        "layers.",
+        "multiple",
+        "networks",
+        "uses"
+      ],
+      "sample_texts": [
+        "Deep learning uses neural networks with multiple layers.",
+        "Deep learning uses neural networks with multiple layers.",
+        "Deep learning uses neural networks with multiple layers."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:49:59.605206",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 14,
+      "explanation": "This feature detects text patterns containing: large, learning, datasets, require, machine. It activates strongly on content like: 'Machine learning models require large datasets for training....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "large",
+        "learning",
+        "datasets",
+        "require",
+        "machine"
+      ],
+      "sample_texts": [
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:49:59.807325",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 15,
+      "explanation": "This feature detects text patterns containing: large, learning, datasets, require, machine. It activates strongly on content like: 'Machine learning models require large datasets for training....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "large",
+        "learning",
+        "datasets",
+        "require",
+        "machine"
+      ],
+      "sample_texts": [
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:00.008915",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 22,
+      "explanation": "This feature detects text patterns containing: interpretability, and, crucial, safety, feature. It activates strongly on content like: 'Feature interpretability is crucial for AI safety and alignment....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "interpretability",
+        "and",
+        "crucial",
+        "safety",
+        "feature"
+      ],
+      "sample_texts": [
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:00.209348",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 24,
+      "explanation": "This feature detects text patterns containing: text., language, understand, computers, natural. It activates strongly on content like: 'Natural language processing helps computers understand text....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "text.",
+        "language",
+        "understand",
+        "computers",
+        "natural"
+      ],
+      "sample_texts": [
+        "Natural language processing helps computers understand text.",
+        "Natural language processing helps computers understand text.",
+        "Natural language processing helps computers understand text."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:00.409775",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 28,
+      "explanation": "This feature detects text patterns containing: language, revolutionized, understanding., natural, have. It activates strongly on content like: 'Transformers have revolutionized natural language understanding....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "language",
+        "revolutionized",
+        "understanding.",
+        "natural",
+        "have"
+      ],
+      "sample_texts": [
+        "Transformers have revolutionized natural language understanding.",
+        "Transformers have revolutionized natural language understanding.",
+        "Transformers have revolutionized natural language understanding."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:00.609693",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 31,
+      "explanation": "This feature detects text patterns containing: interpretability, and, crucial, safety, feature. It activates strongly on content like: 'Feature interpretability is crucial for AI safety and alignment....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "interpretability",
+        "and",
+        "crucial",
+        "safety",
+        "feature"
+      ],
+      "sample_texts": [
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:00.809522",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 34,
+      "explanation": "This feature detects text patterns containing: and, transforming, intelligence, how, artificial. It activates strongly on content like: 'Artificial intelligence is transforming how we work and live....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "and",
+        "transforming",
+        "intelligence",
+        "how",
+        "artificial"
+      ],
+      "sample_texts": [
+        "Artificial intelligence is transforming how we work and live.",
+        "Artificial intelligence is transforming how we work and live.",
+        "Artificial intelligence is transforming how we work and live."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:01.009973",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 40,
+      "explanation": "This feature detects text patterns containing: large, learning, datasets, require, machine. It activates strongly on content like: 'Machine learning models require large datasets for training....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "large",
+        "learning",
+        "datasets",
+        "require",
+        "machine"
+      ],
+      "sample_texts": [
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:01.210612",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 42,
+      "explanation": "This feature detects text patterns containing: interpretability, and, crucial, safety, feature. It activates strongly on content like: 'Feature interpretability is crucial for AI safety and alignment....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "interpretability",
+        "and",
+        "crucial",
+        "safety",
+        "feature"
+      ],
+      "sample_texts": [
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment.",
+        "Feature interpretability is crucial for AI safety and alignment."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:01.410038",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 44,
+      "explanation": "This feature detects text patterns containing: and, transforming, intelligence, how, artificial. It activates strongly on content like: 'Artificial intelligence is transforming how we work and live....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "and",
+        "transforming",
+        "intelligence",
+        "how",
+        "artificial"
+      ],
+      "sample_texts": [
+        "Artificial intelligence is transforming how we work and live.",
+        "Artificial intelligence is transforming how we work and live.",
+        "Artificial intelligence is transforming how we work and live."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:01.611031",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 50,
+      "explanation": "This feature detects text patterns containing: large, learning, datasets, require, machine. It activates strongly on content like: 'Machine learning models require large datasets for training....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "large",
+        "learning",
+        "datasets",
+        "require",
+        "machine"
+      ],
+      "sample_texts": [
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:01.811559",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 56,
+      "explanation": "This feature detects text patterns containing: brown, fox, jumps, over, dog.. It activates strongly on content like: 'The quick brown fox jumps over the lazy dog....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "brown",
+        "fox",
+        "jumps",
+        "over",
+        "dog."
+      ],
+      "sample_texts": [
+        "The quick brown fox jumps over the lazy dog.",
+        "The quick brown fox jumps over the lazy dog.",
+        "The quick brown fox jumps over the lazy dog."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:02.011149",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 61,
+      "explanation": "This feature detects text patterns containing: large, learning, datasets, require, machine. It activates strongly on content like: 'Machine learning models require large datasets for training....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "large",
+        "learning",
+        "datasets",
+        "require",
+        "machine"
+      ],
+      "sample_texts": [
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:02.211032",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 63,
+      "explanation": "This feature detects text patterns containing: large, learning, datasets, require, machine. It activates strongly on content like: 'Machine learning models require large datasets for training....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "large",
+        "learning",
+        "datasets",
+        "require",
+        "machine"
+      ],
+      "sample_texts": [
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training.",
+        "Machine learning models require large datasets for training."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:02.411575",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    },
+    {
+      "feature_id": 64,
+      "explanation": "This feature detects text patterns containing: language, revolutionized, understanding., natural, have. It activates strongly on content like: 'Transformers have revolutionized natural language understanding....'",
+      "confidence": "high",
+      "coherence_score": 1.0,
+      "quality_level": "high",
+      "pattern_keywords": [
+        "language",
+        "revolutionized",
+        "understanding.",
+        "natural",
+        "have"
+      ],
+      "sample_texts": [
+        "Transformers have revolutionized natural language understanding.",
+        "Transformers have revolutionized natural language understanding.",
+        "Transformers have revolutionized natural language understanding."
+      ],
+      "explanation_type": "pattern_based",
+      "analysis_parameters": {
+        "find_job_id": "find_20250803_174958_0246e457",
+        "analysis_type": "behavioral_patterns",
+        "complexity": "medium",
+        "model": "llama3.2:3b",
+        "quality_threshold": 0.5,
+        "max_features": 20,
+        "include_examples": true
+      },
+      "generated_by": "integrated_explain_service",
+      "timestamp": "2025-08-03T17:50:02.611124",
+      "security_relevance": 0.0,
+      "technical_complexity": 0.4
+    }
+  ],
   "scores_added": [
     "security_relevance",
     "technical_complexity"
@@ -39,6 +700,6 @@
       }
     ]
   },
-  "total_features_processed": 0,
+  "total_features_processed": 20,
   "successful_scoring_jobs": 2
 }
