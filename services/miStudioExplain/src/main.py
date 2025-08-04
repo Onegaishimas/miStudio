@@ -281,28 +281,72 @@ class IntegratedExplainService:
         return available_jobs
     
     def load_find_results(self, find_job_id: str) -> Dict[str, Any]:
-        """Load Find results from available locations"""
-        # Try main results directory first
-        main_path = self.config.find_results_dir / find_job_id / "analysis_results.json"
+        """Load Find results with comprehensive fallback logic - enhanced like miStudioScore"""
         
-        if main_path.exists():
-            with open(main_path, 'r') as f:
-                data = json.load(f)
-            logger.info(f"Loaded Find results from main directory: {main_path}")
-            return data
+        logger.info(f"🔍 Loading Find data for job: {find_job_id}")
         
-        # Try enhanced persistence directory
-        enhanced_path = self.config.data_path_obj / "results" / find_job_id / f"{find_job_id}_complete_results.json"
+        # Define multiple possible file paths based on observed structure (like miStudioScore)
+        possible_paths = [
+            self.config.find_results_dir / find_job_id / "analysis_results.json",
+            self.config.find_results_dir / find_job_id / f"{find_job_id}_analysis_results.json",
+            self.config.find_results_dir / find_job_id / f"{find_job_id}_complete_results.json",
+            self.config.data_path_obj / "results" / find_job_id / f"{find_job_id}_complete_results.json",
+            self.config.find_results_dir / find_job_id / f"{find_job_id}_analysis.json",
+            self.config.data_path_obj / "results" / find_job_id / f"{find_job_id}_analysis.json",
+            self.config.find_results_dir / find_job_id / "results.json"
+        ]
         
-        if enhanced_path.exists():
-            with open(enhanced_path, 'r') as f:
-                data = json.load(f)
-            logger.info(f"Loaded Find results from enhanced directory: {enhanced_path}")
-            return data
+        # Try each path until we find valid data
+        for source_file in possible_paths:
+            if source_file.exists():
+                try:
+                    logger.info(f"📂 Attempting to load: {source_file}")
+                    with open(source_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    # Validate data contains expected content
+                    if "results" in data and data["results"]:
+                        logger.info(f"✅ Loaded {len(data['results'])} features from: {source_file}")
+                        return data
+                    elif "features" in data and data["features"]:
+                        # Handle case where results are stored as features
+                        logger.info(f"✅ Loaded {len(data['features'])} features (as results) from: {source_file}")
+                        return {"results": data["features"], **{k: v for k, v in data.items() if k != "features"}}
+                    
+                    logger.warning(f"📂 File {source_file} exists but doesn't contain expected data structure")
+                    
+                except Exception as e:
+                    logger.warning(f"Error reading {source_file}: {e}")
+                    continue
+            else:
+                logger.debug(f"📂 File not found: {source_file}")
         
-        # List available jobs for error message
-        available = self.discover_find_jobs()
-        available_ids = [job["find_job_id"] for job in available]
+        # If we get here, no valid data was found - provide comprehensive debugging info
+        logger.error(f"❌ No valid source data found for Find job {find_job_id}")
+        logger.error(f"🔍 Searched paths:")
+        for path in possible_paths:
+            logger.error(f"   - {path} (exists: {path.exists()})")
+        
+        # List available jobs for debugging
+        available_jobs = self.discover_find_jobs()
+        available_ids = [job["find_job_id"] for job in available_jobs]
+        logger.error(f"📋 Available Find jobs: {available_ids}")
+        
+        # Show directory contents for debugging
+        find_dir = self.config.find_results_dir
+        if find_dir.exists():
+            logger.error(f"📁 Contents of {find_dir}:")
+            try:
+                for item in find_dir.iterdir():
+                    if item.is_dir():
+                        logger.error(f"   📁 {item.name}/")
+                        try:
+                            for subitem in item.iterdir():
+                                logger.error(f"      📄 {subitem.name}")
+                        except:
+                            pass
+            except Exception as e:
+                logger.error(f"   Error listing contents: {e}")
         
         raise ValueError(f"Find job {find_job_id} not found. Available jobs: {available_ids}")
     
@@ -847,12 +891,18 @@ async def get_job_results(job_id: str):
             end = datetime.fromisoformat(status_data["completion_time"])
             processing_time = (end - start).total_seconds()
         
-        # Prepare download links for saved files
-        download_links = {}
+        # Prepare download links with standardized endpoints like miStudioScore
+        download_links = {
+            "json": f"/api/v1/explain/{job_id}/download/json",
+            "csv": f"/api/v1/explain/{job_id}/download/csv"
+        }
+        
+        # Add additional file download links for saved files
         saved_files = status_data.get("saved_files", {})
         if saved_files:
             for file_type, file_path in saved_files.items():
-                download_links[file_type] = f"/api/v1/explain/{job_id}/download/{file_type}"
+                if file_type not in download_links:  # Don't override standard endpoints
+                    download_links[file_type] = f"/api/v1/explain/{job_id}/download/{file_type}"
         
         # Calculate summary statistics
         high_conf = sum(1 for r in results if r.get("confidence") == "high")
@@ -971,6 +1021,46 @@ async def preview_find_job(find_job_id: str, limit: int = 5):
         
     except Exception as e:
         logger.error(f"Error previewing Find job: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/explain/{job_id}/download/json")
+async def download_json_results(job_id: str):
+    """Download JSON results file - standardized like miStudioScore"""
+    
+    try:
+        results_path = config.explain_results_dir / job_id / "explanation_results.json"
+        
+        if not results_path.exists():
+            raise HTTPException(status_code=404, detail=f"Results file not found for job {job_id}")
+        
+        return FileResponse(
+            path=str(results_path),
+            filename=f"explanation_results_{job_id}.json",
+            media_type="application/json"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading JSON results: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/explain/{job_id}/download/csv")
+async def download_csv_results(job_id: str):
+    """Download CSV results file - standardized like miStudioScore"""
+    
+    try:
+        results_path = config.explain_results_dir / job_id / "explanations.csv"
+        
+        if not results_path.exists():
+            raise HTTPException(status_code=404, detail=f"CSV results file not found for job {job_id}")
+        
+        return FileResponse(
+            path=str(results_path),
+            filename=f"explanations_{job_id}.csv",
+            media_type="text/csv"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading CSV results: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/explain/{job_id}/download/{file_type}")
