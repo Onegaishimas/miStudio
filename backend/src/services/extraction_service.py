@@ -1137,45 +1137,19 @@ class ExtractionService:
             sae.eval()
             logger.info(f"SAE loaded on device: {device}")
 
-            # Fix for JumpReLU SAEs with miscalibrated thresholds
-            # Some trained SAEs have thresholds ~1.0 but encoder weights that produce
-            # pre-activations much smaller than 1.0, causing no features to fire.
-            # We detect this and rescale the threshold to be appropriate.
+            # Log JumpReLU threshold statistics for diagnostics
+            # The actual calibration will happen after we load the base model,
+            # so we can measure real z values instead of estimating from weights
             if architecture_type == "jumprelu" and hasattr(sae, 'activation'):
                 with torch.no_grad():
-                    # Get current threshold and encoder stats
-                    log_threshold = sae.activation.log_threshold
-                    threshold = torch.exp(log_threshold)
-                    mean_threshold = threshold.mean().item()
-
-                    # Estimate typical pre-activation magnitude
-                    # For constant_norm_rescale: x_normalized has norm sqrt(d_model)
-                    # z = x_normalized @ W_enc.t() ≈ sqrt(d_model) * |W_enc row|
-                    W_enc_row_norms = sae.W_enc.norm(dim=1)
-                    mean_enc_norm = W_enc_row_norms.mean().item()
-                    expected_z_scale = (hidden_dim ** 0.5) * mean_enc_norm
-
-                    # If threshold >> expected z scale, features won't fire
-                    if mean_threshold > 0.1 and expected_z_scale < mean_threshold * 0.5:
-                        # Threshold is too high relative to encoder magnitude
-                        # Rescale threshold to be ~10% of expected z magnitude
-                        target_threshold = expected_z_scale * 0.1
-                        scale_factor = target_threshold / mean_threshold
-
-                        logger.warning(
-                            f"JumpReLU SAE has miscalibrated threshold! "
-                            f"mean_threshold={mean_threshold:.4f}, expected_z_scale={expected_z_scale:.4f}. "
-                            f"Rescaling threshold by {scale_factor:.4f} (target={target_threshold:.6f})"
-                        )
-
-                        # Adjust log_threshold: new_threshold = old_threshold * scale_factor
-                        # log(new) = log(old) + log(scale_factor)
-                        sae.activation.log_threshold.data += torch.log(
-                            torch.tensor(scale_factor, device=device)
-                        )
-
-                        new_threshold = torch.exp(sae.activation.log_threshold).mean().item()
-                        logger.info(f"Threshold rescaled: {mean_threshold:.4f} -> {new_threshold:.6f}")
+                    threshold = torch.exp(sae.activation.log_threshold)
+                    logger.info(
+                        f"JumpReLU SAE threshold stats: "
+                        f"mean={threshold.mean().item():.6f}, "
+                        f"min={threshold.min().item():.6f}, "
+                        f"max={threshold.max().item():.6f}, "
+                        f"median={threshold.median().item():.6f}"
+                    )
 
             # Find model record
             model_record = None
@@ -1279,6 +1253,122 @@ class ExtractionService:
                 hook_manager.register_hooks([layer_index], hook_type_enums, architecture)
 
                 text_column = (dataset_record.extra_metadata or {}).get("text_column", "text")
+
+                # JumpReLU threshold calibration using ACTUAL z values
+                # This is much more accurate than weight-based estimates
+                if architecture_type == "jumprelu" and hasattr(sae, 'activation'):
+                    logger.info("Running JumpReLU threshold calibration on sample data...")
+
+                    # Get a small sample for calibration (first batch)
+                    calibration_batch = dataset[:min(batch_size, len(dataset))]
+                    cal_input_ids = []
+
+                    if isinstance(calibration_batch, dict) and "input_ids" in calibration_batch:
+                        input_ids = calibration_batch["input_ids"]
+                        if not isinstance(input_ids, list):
+                            input_ids = [input_ids]
+                        for ids in input_ids:
+                            if isinstance(ids, list):
+                                cal_input_ids.append(ids)
+                            else:
+                                cal_input_ids.append(ids.tolist() if hasattr(ids, 'tolist') else list(ids))
+
+                    if cal_input_ids:
+                        # Pad and prepare calibration batch
+                        cal_max_length = max(len(ids) for ids in cal_input_ids)
+                        cal_pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id or 0
+                        cal_padded = [ids + [cal_pad_token_id] * (cal_max_length - len(ids)) for ids in cal_input_ids]
+                        cal_masks = [[1] * len(ids) + [0] * (cal_max_length - len(ids)) for ids in cal_input_ids]
+
+                        cal_input_tensor = torch.tensor(cal_padded, device=device, dtype=torch.long)
+                        cal_mask_tensor = torch.tensor(cal_masks, device=device, dtype=torch.long)
+
+                        # Get base model activations
+                        with torch.no_grad():
+                            hook_manager.clear_activations()
+                            _ = base_model(input_ids=cal_input_tensor, attention_mask=cal_mask_tensor)
+
+                            if hook_manager.activations:
+                                cal_layer_name = list(hook_manager.activations.keys())[0]
+                                cal_activations = hook_manager.activations[cal_layer_name][0]
+
+                                # Flatten to [total_tokens, hidden_dim]
+                                cal_activations_flat = cal_activations.reshape(-1, hidden_dim).float()
+
+                                # Apply normalization if the SAE uses it
+                                if hasattr(sae, 'normalize') and hasattr(sae, 'normalize_activations'):
+                                    if sae.normalize_activations != 'none':
+                                        cal_activations_flat, _ = sae.normalize(cal_activations_flat)
+
+                                # Compute z values (pre-JumpReLU) = W_enc @ x + b_enc
+                                z_values = torch.nn.functional.linear(cal_activations_flat, sae.W_enc, sae.b_enc)
+
+                                # Get statistics
+                                z_mean = z_values.mean().item()
+                                z_std = z_values.std().item()
+                                z_max = z_values.max().item()
+                                z_positive_mean = z_values[z_values > 0].mean().item() if (z_values > 0).any() else 0
+                                z_95_percentile = torch.quantile(z_values.flatten().float(), 0.95).item()
+
+                                # Get threshold statistics
+                                threshold = torch.exp(sae.activation.log_threshold)
+                                threshold_mean = threshold.mean().item()
+                                threshold_median = threshold.median().item()
+
+                                logger.info(
+                                    f"Calibration z-values: mean={z_mean:.4f}, std={z_std:.4f}, "
+                                    f"max={z_max:.4f}, 95th_pct={z_95_percentile:.4f}, "
+                                    f"positive_mean={z_positive_mean:.4f}"
+                                )
+                                logger.info(
+                                    f"Threshold: mean={threshold_mean:.6f}, median={threshold_median:.6f}"
+                                )
+
+                                # Count how many activations would pass the threshold
+                                threshold_expanded = threshold.unsqueeze(0).expand_as(z_values)
+                                passing = (z_values > threshold_expanded).float()
+                                pass_rate = passing.mean().item()
+                                features_with_any_activation = (z_values.max(dim=0).values > threshold).float().mean().item()
+
+                                logger.info(
+                                    f"Pass rate: {pass_rate*100:.2f}% of activations, "
+                                    f"{features_with_any_activation*100:.2f}% of features have any activation"
+                                )
+
+                                # Calibration fix: if very few activations pass, rescale threshold
+                                if pass_rate < 0.001:  # Less than 0.1% pass
+                                    # Target: set threshold so that ~5% of max z values would pass
+                                    # This gives reasonable sparsity while ensuring features fire
+                                    z_max_per_feature = z_values.max(dim=0).values  # Max z for each feature
+                                    target_threshold = z_max_per_feature * 0.5  # 50% of max z
+                                    target_threshold = torch.clamp(target_threshold, min=1e-6)
+
+                                    # Compute new log_threshold
+                                    new_log_threshold = torch.log(target_threshold)
+
+                                    logger.warning(
+                                        f"THRESHOLD CALIBRATION: Pass rate too low ({pass_rate*100:.4f}%)! "
+                                        f"Rescaling threshold from mean={threshold_mean:.6f} to use "
+                                        f"50% of observed max z values per feature."
+                                    )
+
+                                    # Update threshold
+                                    sae.activation.log_threshold.data = new_log_threshold
+
+                                    # Log new stats
+                                    new_threshold = torch.exp(sae.activation.log_threshold)
+                                    new_threshold_mean = new_threshold.mean().item()
+                                    new_pass_rate = (z_values > new_threshold.unsqueeze(0)).float().mean().item()
+
+                                    logger.info(
+                                        f"New threshold mean: {new_threshold_mean:.6f}, "
+                                        f"new pass rate: {new_pass_rate*100:.2f}%"
+                                    )
+
+                                # Clean up calibration tensors
+                                del z_values, cal_activations_flat, cal_activations
+                                if torch.cuda.is_available():
+                                    torch.cuda.empty_cache()
 
                 with torch.no_grad():
                     # Track timing for live metrics
