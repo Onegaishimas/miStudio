@@ -6,6 +6,9 @@ layers to capture activations during inference. Supports hooks for:
 - Residual stream (after layer norm)
 - MLP outputs (after feed-forward layers)
 - Attention outputs (after self-attention layers)
+
+Architecture support is dynamic - any transformer with standard attention + MLP
+blocks is supported via runtime introspection (see layer_discovery.py).
 """
 
 import logging
@@ -15,6 +18,12 @@ from enum import Enum
 import torch
 import torch.nn as nn
 import numpy as np
+
+from .layer_discovery import (
+    discover_transformer_structure,
+    get_hookable_module,
+    TransformerStructure,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +42,14 @@ class HookManager:
     This class provides methods to register hooks on specific layers, collect
     activations during forward passes, and clean up hooks afterward.
 
+    Uses dynamic layer discovery to support any transformer architecture without
+    hardcoded mappings. See layer_discovery.py for introspection logic.
+
     Attributes:
         model: The PyTorch model to hook
         activations: Dictionary storing captured activations by layer name
         hooks: List of registered hook handles for cleanup
+        structure: Discovered transformer structure (populated on first register_hooks call)
     """
 
     def __init__(self, model: nn.Module):
@@ -49,6 +62,7 @@ class HookManager:
         self.model = model
         self.activations: Dict[str, List[torch.Tensor]] = {}
         self.hooks: List[torch.utils.hooks.RemovableHandle] = []
+        self.structure: Optional[TransformerStructure] = None
 
     def create_hook(self, layer_name: str) -> Callable:
         """
@@ -90,24 +104,29 @@ class HookManager:
         """
         Register hooks on specified layers and hook types.
 
-        This method identifies the appropriate module paths for each architecture
-        and registers hooks based on the requested types.
+        Uses dynamic layer discovery to identify transformer layers automatically.
+        The architecture parameter is used as a hint for logging but does not
+        restrict which models can be used.
 
         Args:
             layer_indices: List of transformer layer indices to hook (e.g., [0, 5, 10])
             hook_types: List of hook types to register (RESIDUAL, MLP, ATTENTION)
-            architecture: Model architecture name (llama, gpt2, etc.)
+            architecture: Model architecture name (used as hint, not for validation)
 
         Raises:
-            ValueError: If architecture is not supported or layers don't exist
+            ValueError: If transformer layers cannot be found or no hooks register
         """
         logger.info(f"Registering hooks for architecture={architecture}, layers={layer_indices}, types={hook_types}")
 
-        # Get the transformer layers container for this architecture
-        layers_module = self._get_layers_module(architecture)
+        # Discover transformer structure dynamically
+        self.structure = discover_transformer_structure(self.model, architecture_hint=architecture)
+        layers_module = self.structure.layers_module
 
-        if layers_module is None:
-            raise ValueError(f"Could not find transformer layers for architecture: {architecture}")
+        logger.info(
+            f"Discovered {self.structure.num_layers} layers at '{self.structure.layers_path}'. "
+            f"Layer components: attention={self.structure.attention_module}, "
+            f"mlp={self.structure.mlp_module}, norm={self.structure.residual_norm_module}"
+        )
 
         # Register hooks for each specified layer
         for layer_idx in layer_indices:
@@ -133,50 +152,9 @@ class HookManager:
                 f"Check that the architecture is correctly detected and layer modules exist."
             )
 
-    def _get_layers_module(self, architecture: str) -> Optional[nn.ModuleList]:
-        """
-        Get the transformer layers container for a given architecture.
-
-        Args:
-            architecture: Model architecture name
-
-        Returns:
-            ModuleList containing transformer layers, or None if not found
-        """
-        architecture = architecture.lower()
-
-        # Common paths for different architectures
-        # LFM2 (LiquidAI) uses Llama-style architecture with model.model.layers
-        if architecture in ["llama", "mistral", "mixtral", "gemma", "gemma2", "gemma3", "lfm2"]:
-            if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):
-                return self.model.model.layers
-        elif architecture == "gpt2":
-            if hasattr(self.model, "transformer") and hasattr(self.model.transformer, "h"):
-                return self.model.transformer.h
-        elif architecture in ["gpt_neox", "pythia"]:
-            if hasattr(self.model, "gpt_neox") and hasattr(self.model.gpt_neox, "layers"):
-                return self.model.gpt_neox.layers
-        elif architecture in ["phi", "phi3", "phi3_v"]:
-            if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):
-                return self.model.model.layers
-        elif architecture in ["qwen", "qwen2", "qwen3"]:
-            # Qwen models can have layers at transformer.h (Qwen/Qwen2) or model.layers (Qwen3)
-            # Try both paths to handle different model variants and quantization wrappers
-            if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):
-                return self.model.model.layers
-            elif hasattr(self.model, "transformer") and hasattr(self.model.transformer, "h"):
-                return self.model.transformer.h
-            # Log available attributes for debugging
-            logger.warning(f"Qwen model structure - model attrs: {dir(self.model)[:10]}")
-            if hasattr(self.model, "model"):
-                logger.warning(f"Qwen model structure - model.model attrs: {dir(self.model.model)[:10]}")
-            if hasattr(self.model, "transformer"):
-                logger.warning(f"Qwen model structure - model.transformer attrs: {dir(self.model.transformer)[:10]}")
-        elif architecture == "falcon":
-            if hasattr(self.model, "transformer") and hasattr(self.model.transformer, "h"):
-                return self.model.transformer.h
-
-        return None
+    # NOTE: _get_layers_module() has been removed.
+    # Layer discovery is now handled by layer_discovery.discover_transformer_structure()
+    # which supports any transformer architecture without hardcoded mappings.
 
     def _register_hook_for_layer(
         self,
@@ -188,13 +166,16 @@ class HookManager:
         """
         Register a single hook on a specific layer.
 
+        Uses dynamic discovery to find the appropriate module to hook.
+
         Args:
             layer: The transformer layer module
             layer_idx: Index of the layer
             hook_type: Type of hook to register
-            architecture: Model architecture name
+            architecture: Model architecture name (used for logging only)
         """
-        module_to_hook = self._get_module_for_hook_type(layer, hook_type, architecture)
+        # Use dynamic discovery to find the module
+        module_to_hook = get_hookable_module(layer, hook_type.value, self.structure)
 
         if module_to_hook is None:
             logger.warning(f"Could not find module for {hook_type.value} hook on layer {layer_idx}")
@@ -210,59 +191,9 @@ class HookManager:
 
         logger.debug(f"Registered {hook_type.value} hook on layer {layer_idx}")
 
-    def _get_module_for_hook_type(
-        self,
-        layer: nn.Module,
-        hook_type: HookType,
-        architecture: str
-    ) -> Optional[nn.Module]:
-        """
-        Get the specific module to hook for a given hook type.
-
-        Args:
-            layer: The transformer layer
-            hook_type: Type of hook (RESIDUAL, MLP, ATTENTION)
-            architecture: Model architecture name
-
-        Returns:
-            Module to register hook on, or None if not found
-        """
-        architecture = architecture.lower()
-
-        if hook_type == HookType.RESIDUAL:
-            # Hook after the final layer norm (before residual addition)
-            if hasattr(layer, "post_attention_layernorm"):
-                return layer.post_attention_layernorm  # Llama-style
-            elif hasattr(layer, "ln_2"):
-                return layer.ln_2  # GPT-2 style
-            elif hasattr(layer, "operator_norm"):
-                return layer.operator_norm  # LFM2 (LiquidAI) style
-            elif hasattr(layer, "ffn_norm"):
-                return layer.ffn_norm  # LFM2 alternative - pre-FFN norm
-
-        elif hook_type == HookType.MLP:
-            # Hook the MLP module output
-            if hasattr(layer, "mlp"):
-                return layer.mlp
-            elif hasattr(layer, "feed_forward"):
-                return layer.feed_forward
-
-        elif hook_type == HookType.ATTENTION:
-            # Hook the attention module output
-            if hasattr(layer, "self_attn"):
-                return layer.self_attn  # Llama-style
-            elif hasattr(layer, "attn"):
-                return layer.attn  # GPT-2 style
-            elif hasattr(layer, "conv"):
-                return layer.conv  # LFM2 (LiquidAI) convolution layers
-
-        # Log available attributes to help debug architecture mismatches
-        layer_attrs = [attr for attr in dir(layer) if not attr.startswith('_')]
-        logger.warning(
-            f"Could not find module for {hook_type.value} hook on {architecture}. "
-            f"Available layer attributes: {layer_attrs[:20]}..."  # First 20 to avoid log spam
-        )
-        return None
+    # NOTE: _get_module_for_hook_type() has been removed.
+    # Hook module discovery is now handled by layer_discovery.get_hookable_module()
+    # which dynamically finds modules based on common naming patterns.
 
     def clear_activations(self) -> None:
         """

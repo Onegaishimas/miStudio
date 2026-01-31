@@ -1,8 +1,11 @@
 """
 Unit tests for model_loader module.
 
-Tests model loading utilities, quantization configurations, architecture validation,
-and memory estimation without requiring actual model downloads.
+Tests model loading utilities, quantization configurations, and memory estimation
+without requiring actual model downloads.
+
+Note: Architecture validation has been replaced with dynamic layer discovery
+(see layer_discovery.py and test_layer_discovery.py).
 """
 
 import pytest
@@ -11,35 +14,19 @@ import torch
 from transformers import BitsAndBytesConfig
 
 from src.ml.model_loader import (
-    validate_architecture,
     extract_architecture_config,
     get_quantization_config,
     estimate_model_memory,
     get_fallback_format,
-    SUPPORTED_ARCHITECTURES,
     ModelLoadError,
     OutOfMemoryError,
 )
 from src.models.model import QuantizationFormat
 
 
-class TestArchitectureValidation:
-    """Test architecture validation functionality."""
-
-    def test_validate_supported_architecture(self):
-        """Test that supported architectures pass validation."""
-        for arch in SUPPORTED_ARCHITECTURES:
-            # Should not raise
-            validate_architecture(arch)
-            validate_architecture(arch.upper())  # Case insensitive
-
-    def test_validate_unsupported_architecture(self):
-        """Test that unsupported architectures raise ValueError."""
-        with pytest.raises(ValueError, match="Unsupported architecture"):
-            validate_architecture("unsupported_model")
-
-        with pytest.raises(ValueError, match="Unsupported architecture"):
-            validate_architecture("bert")  # Not a causal LM
+# Note: TestArchitectureValidation class has been removed.
+# Architecture validation is now handled dynamically via layer_discovery.py.
+# See tests/unit/test_layer_discovery.py for the new tests.
 
 
 class TestArchitectureConfigExtraction:
@@ -227,23 +214,7 @@ class TestFallbackLogic:
         assert fallback is None
 
 
-class TestSupportedArchitectures:
-    """Test that expected architectures are supported."""
-
-    def test_common_architectures_supported(self):
-        """Test that common model architectures are in the supported list."""
-        expected_architectures = {
-            "llama",
-            "gpt2",
-            "gpt_neox",
-            "phi",
-            "pythia",
-            "mistral",
-        }
-
-        for arch in expected_architectures:
-            assert arch in SUPPORTED_ARCHITECTURES
-
-    def test_minimum_architectures(self):
-        """Test that we support at least 6 architectures."""
-        assert len(SUPPORTED_ARCHITECTURES) >= 6
+# TestSupportedArchitectures class has been removed.
+# With dynamic layer discovery, any transformer architecture is supported
+# as long as it has standard attention + MLP blocks.
+# See tests/unit/test_layer_discovery.py for architecture detection tests.

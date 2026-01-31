@@ -22,26 +22,9 @@ from ..models.model import QuantizationFormat
 logger = logging.getLogger(__name__)
 
 
-# Supported model architectures
-SUPPORTED_ARCHITECTURES = {
-    "llama",
-    "gpt2",
-    "gpt_neox",
-    "phi",
-    "phi3",  # Phi-3 and Phi-4 models
-    "phi3_v",  # Phi-3 Vision models
-    "pythia",
-    "mistral",
-    "mixtral",
-    "qwen",
-    "qwen2",  # Qwen2 models
-    "qwen3",  # Qwen3 models (added to transformers 2025-03-31)
-    "falcon",
-    "gemma",   # Gemma models (google/gemma-*)
-    "gemma2",  # Gemma 2 models (google/gemma-2-2b, etc.)
-    "gemma3",  # Gemma 3 models (future)
-    "lfm2",   # LiquidAI LFM2 models (LiquidAI/LFM2.5-*)
-}
+# Note: Architecture validation has been replaced with dynamic layer discovery.
+# Any transformer model with standard attention + MLP structure is now supported.
+# See layer_discovery.py for the dynamic introspection logic.
 
 
 class ModelLoadError(Exception):
@@ -54,22 +37,9 @@ class OutOfMemoryError(Exception):
     pass
 
 
-def validate_architecture(architecture: str) -> None:
-    """
-    Validate that the model architecture is supported.
-
-    Args:
-        architecture: Model architecture name (e.g., "llama", "gpt2")
-
-    Raises:
-        ValueError: If architecture is not supported
-    """
-    # Normalize to lowercase for case-insensitive comparison
-    if architecture.lower() not in SUPPORTED_ARCHITECTURES:
-        raise ValueError(
-            f"Unsupported architecture: {architecture}. "
-            f"Supported architectures: {', '.join(sorted(SUPPORTED_ARCHITECTURES))}"
-        )
+# validate_architecture() has been removed.
+# Architecture validation now happens dynamically during hook registration.
+# This allows any transformer model with standard structure to be used.
 
 
 def extract_architecture_config(config: AutoConfig) -> Dict[str, Any]:
@@ -251,8 +221,9 @@ def load_model_from_hf(
             local_files_only=local_files_only,
         )
 
-        # Validate architecture
-        validate_architecture(config.model_type)
+        # Note: Architecture validation removed. Dynamic layer discovery handles this.
+        # Any transformer model with standard attention + MLP blocks is now supported.
+        logger.info(f"Model architecture: {config.model_type}")
 
         # Extract architecture configuration
         arch_config = extract_architecture_config(config)

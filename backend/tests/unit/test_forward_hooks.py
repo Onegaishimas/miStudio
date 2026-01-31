@@ -442,15 +442,30 @@ class TestHookManager:
             # Should log warning about invalid index
             assert "exceeds model depth" in caplog.text
 
-    def test_invalid_architecture(self, llama_model):
-        """Test handling of unsupported architecture."""
+    def test_dynamic_architecture_discovery(self, llama_model):
+        """Test that dynamic discovery works with any architecture name.
+
+        With the new dynamic layer discovery, the architecture parameter is just
+        a hint for logging. The actual layer detection happens by introspecting
+        the model structure. So even an "unknown" architecture name should work
+        if the model has standard transformer structure.
+        """
         with HookManager(llama_model) as hook_manager:
-            with pytest.raises(ValueError, match="Could not find transformer layers"):
-                hook_manager.register_hooks(
-                    layer_indices=[0],
-                    hook_types=[HookType.RESIDUAL],
-                    architecture="unsupported_architecture"
-                )
+            # Should NOT raise - dynamic discovery finds layers by structure
+            hook_manager.register_hooks(
+                layer_indices=[0],
+                hook_types=[HookType.RESIDUAL],
+                architecture="unknown_architecture_name"
+            )
+
+            # Verify hooks were registered successfully
+            assert len(hook_manager.hooks) == 1
+
+            # Verify structure was discovered
+            assert hook_manager.structure is not None
+            assert hook_manager.structure.num_layers == 3  # SimpleLlamaModel has 3 layers
+            assert hook_manager.structure.attention_module == "self_attn"
+            assert hook_manager.structure.mlp_module == "mlp"
 
     def test_activation_detachment(self, llama_model, sample_input):
         """Test that activations are properly detached from computation graph."""
