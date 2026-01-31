@@ -24,10 +24,11 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
   const [repoId, setRepoId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [customName, setCustomName] = useState('');
-  const [selectedFile, setSelectedFile] = useState<HFFileInfo | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
   const [showToken, setShowToken] = useState(false);
 
   const {
@@ -71,7 +72,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
       return;
     }
 
-    setSelectedFile(null);
+    setSelectedFiles(new Set());
     try {
       await previewHFRepository({
         repo_id: repoId.trim(),
@@ -82,32 +83,74 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
     }
   };
 
+  const toggleFileSelection = (filepath: string) => {
+    setSelectedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(filepath)) {
+        next.delete(filepath);
+      } else {
+        next.add(filepath);
+      }
+      return next;
+    });
+  };
+
+  const selectAllInLayer = (files: HFFileInfo[]) => {
+    setSelectedFiles(prev => {
+      const next = new Set(prev);
+      files.forEach(f => next.add(f.filepath));
+      return next;
+    });
+  };
+
+  const deselectAllInLayer = (files: HFFileInfo[]) => {
+    setSelectedFiles(prev => {
+      const next = new Set(prev);
+      files.forEach(f => next.delete(f.filepath));
+      return next;
+    });
+  };
+
+  const isLayerFullySelected = (files: HFFileInfo[]) => {
+    return files.every(f => selectedFiles.has(f.filepath));
+  };
+
   const handleDownload = async () => {
-    if (!selectedFile || !hfPreview) {
-      setValidationError('Please select an SAE file to download');
+    if (selectedFiles.size === 0 || !hfPreview) {
+      setValidationError('Please select at least one SAE file to download');
       return;
     }
 
     if (!selectedModelId) {
-      setValidationError('Please select a model to link this SAE with for steering');
+      setValidationError('Please select a model to link these SAEs with for steering');
       return;
     }
 
+    const filesToDownload = hfPreview.sae_files.filter(f => selectedFiles.has(f.filepath));
+
     setIsDownloading(true);
+    setDownloadProgress({ current: 0, total: filesToDownload.length });
+
     try {
-      await downloadSAE({
-        repo_id: hfPreview.repo_id,
-        filepath: selectedFile.filepath,
-        name: customName.trim() || undefined,
-        access_token: accessToken.trim() || undefined,
-        model_id: selectedModelId,  // Link to local model for steering
-      });
+      // Download each selected file sequentially
+      for (let i = 0; i < filesToDownload.length; i++) {
+        const file = filesToDownload[i];
+        setDownloadProgress({ current: i + 1, total: filesToDownload.length });
+
+        await downloadSAE({
+          repo_id: hfPreview.repo_id,
+          filepath: file.filepath,
+          name: customName.trim() || undefined,
+          access_token: accessToken.trim() || undefined,
+          model_id: selectedModelId,
+        });
+      }
 
       // Clear form on success
       setRepoId('');
       setAccessToken('');
       setCustomName('');
-      setSelectedFile(null);
+      setSelectedFiles(new Set());
       setSelectedModelId('');
       clearHFPreview();
       onDownloadComplete?.();
@@ -117,6 +160,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
       setValidationError(errorMessage);
     } finally {
       setIsDownloading(false);
+      setDownloadProgress({ current: 0, total: 0 });
     }
   };
 
@@ -300,40 +344,87 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
               cfg.json and/or sae_weights.safetensors files.
             </div>
           ) : (
-            <div className="max-h-60 overflow-y-auto space-y-2">
-              {hfPreview.sae_files.map((file) => (
-                <div
-                  key={file.filepath}
-                  onClick={() => setSelectedFile(file)}
-                  className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                    selectedFile?.filepath === file.filepath
-                      ? 'bg-emerald-500/20 border border-emerald-500/50'
-                      : 'bg-slate-800 border border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {selectedFile?.filepath === file.filepath ? (
-                        <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                      ) : (
-                        <FileCode className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                      )}
-                      <span className="text-sm text-slate-200 truncate font-mono">
-                        {file.filepath}
-                      </span>
+            <div className="max-h-60 overflow-y-auto">
+              {/* Group files by layer and render with sticky headers */}
+              {(() => {
+                // Group files by layer
+                const filesByLayer = new Map<number | 'unknown', HFFileInfo[]>();
+                hfPreview.sae_files.forEach((file) => {
+                  const layerKey = file.layer ?? 'unknown';
+                  if (!filesByLayer.has(layerKey)) {
+                    filesByLayer.set(layerKey, []);
+                  }
+                  filesByLayer.get(layerKey)!.push(file);
+                });
+
+                // Sort layers numerically (unknown last)
+                const sortedLayers = Array.from(filesByLayer.keys()).sort((a, b) => {
+                  if (a === 'unknown') return 1;
+                  if (b === 'unknown') return -1;
+                  return (a as number) - (b as number);
+                });
+
+                return sortedLayers.map((layerKey) => {
+                  const layerFiles = filesByLayer.get(layerKey)!;
+                  const allSelected = isLayerFullySelected(layerFiles);
+
+                  return (
+                    <div key={layerKey} className="relative">
+                      {/* Sticky layer header with select all toggle */}
+                      <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 px-3 py-2 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                          {layerKey === 'unknown' ? 'Unknown Layer' : `Layer ${layerKey}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => allSelected ? deselectAllInLayer(layerFiles) : selectAllInLayer(layerFiles)}
+                          className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+                        >
+                          {allSelected ? 'Deselect All' : 'Select All'}
+                        </button>
+                      </div>
+                      {/* Files in this layer */}
+                      <div className="space-y-2 p-2">
+                        {layerFiles.map((file) => {
+                          const isSelected = selectedFiles.has(file.filepath);
+                          return (
+                            <div
+                              key={file.filepath}
+                              onClick={() => toggleFileSelection(file.filepath)}
+                              className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                                isSelected
+                                  ? 'bg-emerald-500/20 border border-emerald-500/50'
+                                  : 'bg-slate-800 border border-slate-700 hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {isSelected ? (
+                                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                                  ) : (
+                                    <FileCode className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                  )}
+                                  <span className="text-sm text-slate-200 truncate font-mono">
+                                    {file.filepath}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
+                                  {formatFileSize(file.size_bytes)}
+                                </span>
+                              </div>
+                              {file.n_features && (
+                                <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
+                                  <span>{file.n_features.toLocaleString()} features</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
-                      {formatFileSize(file.size_bytes)}
-                    </span>
-                  </div>
-                  {(file.layer !== undefined || file.n_features) && (
-                    <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
-                      {file.layer !== undefined && <span>Layer {file.layer}</span>}
-                      {file.n_features && <span>{file.n_features.toLocaleString()} features</span>}
-                    </div>
-                  )}
-                </div>
-              ))}
+                  );
+                });
+              })()}
             </div>
           )}
         </div>
@@ -351,18 +442,20 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
         <button
           type="button"
           onClick={handleDownload}
-          disabled={!selectedFile || !selectedModelId || isDownloading}
+          disabled={selectedFiles.size === 0 || !selectedModelId || isDownloading}
           className={`w-full py-3 flex items-center justify-center gap-2 ${COMPONENTS.button.primary}`}
         >
           {isDownloading ? (
             <>
               <Loader className="w-5 h-5 animate-spin" />
-              Downloading...
+              Downloading {downloadProgress.current} of {downloadProgress.total}...
             </>
           ) : (
             <>
               <Download className="w-5 h-5" />
-              Download Selected SAE
+              {selectedFiles.size === 0
+                ? 'Select SAEs to Download'
+                : `Download ${selectedFiles.size} Selected SAE${selectedFiles.size !== 1 ? 's' : ''}`}
             </>
           )}
         </button>
