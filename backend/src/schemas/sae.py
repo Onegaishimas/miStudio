@@ -49,6 +49,7 @@ class HFFileInfo(BaseModel):
     filepath: str = Field(..., description="File path within repository")
     size_bytes: Optional[int] = Field(None, description="File size in bytes")
     is_sae: bool = Field(False, description="Whether this appears to be an SAE file")
+    layer: Optional[int] = Field(None, description="Layer number extracted from filepath (e.g., layer_1 -> 1)")
 
 
 class HFRepoPreviewResponse(BaseModel):

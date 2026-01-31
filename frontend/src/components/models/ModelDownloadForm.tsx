@@ -73,8 +73,8 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
       // Detect specific error types and provide helpful messages
       if (errorMessage.includes('trust_remote_code') || errorMessage.includes('trust remote code')) {
         setValidationError('This model requires executing custom code. Please enable "Trust Remote Code" below and try again.');
-      } else if (errorMessage.includes('Unsupported architecture')) {
-        setValidationError(`${errorMessage}\n\nThis model architecture is not yet supported. Please check the supported architectures list or try a different model.`);
+      } else if (errorMessage.includes('Could not discover transformer layers')) {
+        setValidationError(`${errorMessage}\n\nThis model does not appear to have a standard transformer architecture with attention and MLP blocks.`);
       } else {
         setValidationError(errorMessage);
       }
@@ -105,8 +105,8 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
       // Detect specific error types and provide helpful messages
       if (errorMessage.includes('trust_remote_code') || errorMessage.includes('trust remote code')) {
         setValidationError('This model requires executing custom code. Please enable "Trust Remote Code" below and try again.');
-      } else if (errorMessage.includes('Unsupported architecture')) {
-        setValidationError(`${errorMessage}\n\nThis model architecture is not yet supported. Please check the supported architectures list or try a different model.`);
+      } else if (errorMessage.includes('Could not discover transformer layers')) {
+        setValidationError(`${errorMessage}\n\nThis model does not appear to have a standard transformer architecture with attention and MLP blocks.`);
       } else {
         setValidationError(errorMessage);
       }

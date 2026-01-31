@@ -624,11 +624,12 @@ describe('ModelDownloadForm', () => {
       );
     });
 
-    it('should detect unsupported architecture and show helpful message', async () => {
-      const unsupportedArchError = new Error(
-        'Unsupported architecture: CoDA. Supported architectures: falcon, gemma, gemma2, gemma3, gpt2, gpt_neox, lfm2, llama, mistral, mixtral, phi, phi3, phi3_v, pythia, qwen, qwen2, qwen3'
+    it('should detect non-transformer model and show helpful message', async () => {
+      // New error message from dynamic layer discovery (backend no longer has hardcoded architecture list)
+      const nonTransformerError = new Error(
+        'Could not discover transformer layers in model. Architecture hint: coda. Please check if this model has a standard transformer architecture.'
       );
-      mockOnDownload.mockRejectedValueOnce(unsupportedArchError);
+      mockOnDownload.mockRejectedValueOnce(nonTransformerError);
 
       render(<ModelDownloadForm onDownload={mockOnDownload} />);
 
@@ -640,8 +641,7 @@ describe('ModelDownloadForm', () => {
 
       await waitFor(() => {
         const errorText = screen.getByText((content, element) => {
-          return content.includes('Unsupported architecture: CoDA') &&
-                 content.includes('This model architecture is not yet supported');
+          return content.includes('Could not discover transformer layers');
         });
         expect(errorText).toBeInTheDocument();
       });

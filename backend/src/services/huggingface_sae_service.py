@@ -98,10 +98,15 @@ class HuggingFaceSAEService:
                 # Check if this looks like an SAE file
                 is_sae = HuggingFaceSAEService._is_sae_file(file_path)
 
+                # Extract layer number from filepath (e.g., "layer_1/..." -> 1)
+                layer_match = re.search(r'layer[_/](\d+)', file_path, re.IGNORECASE)
+                layer_num = int(layer_match.group(1)) if layer_match else None
+
                 file_info = HFFileInfo(
                     filepath=file_path,
                     size_bytes=None,  # Would need additional API call per file
-                    is_sae=is_sae
+                    is_sae=is_sae,
+                    layer=layer_num
                 )
                 file_infos.append(file_info)
 

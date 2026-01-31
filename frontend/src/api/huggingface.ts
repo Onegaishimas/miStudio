@@ -13,26 +13,9 @@
 const HF_HUB_API = 'https://huggingface.co/api';
 const HF_DATASETS_SERVER_API = 'https://datasets-server.huggingface.co';
 
-// Supported model architectures (based on backend error message)
-const SUPPORTED_ARCHITECTURES = [
-  'falcon',
-  'gemma',
-  'gemma2',
-  'gemma3',
-  'gpt2',
-  'gpt_neox',
-  'lfm2',
-  'llama',
-  'mistral',
-  'mixtral',
-  'phi',
-  'phi3',
-  'phi3_v',
-  'pythia',
-  'qwen',
-  'qwen2',
-  'qwen3',
-];
+// NOTE: Architecture validation removed. The backend now uses dynamic layer discovery
+// to support any transformer architecture with standard attention + MLP blocks.
+// See backend/src/ml/layer_discovery.py for the introspection logic.
 
 /**
  * Dataset split information from the /info endpoint
@@ -248,19 +231,14 @@ export async function getModelInfo(repoId: string): Promise<ModelInfo> {
     requiresTrustRemoteCode = hasCustomCode;
   }
 
-  // Detect if model architecture is unsupported
-  let unsupportedArchitecture: string | null = null;
-  if (modelInfo.config?.model_type) {
-    const modelType = modelInfo.config.model_type.toLowerCase();
-    if (!SUPPORTED_ARCHITECTURES.includes(modelType)) {
-      unsupportedArchitecture = modelInfo.config.model_type;
-    }
-  }
+  // NOTE: Architecture validation removed. The backend now uses dynamic layer discovery
+  // to support any transformer architecture. Unsupported architectures will be detected
+  // at runtime during hook registration if the model lacks standard attention/MLP blocks.
 
   return {
     ...modelInfo,
     requiresTrustRemoteCode,
-    unsupportedArchitecture,
+    unsupportedArchitecture: null, // Always null - backend handles validation dynamically
   };
 }
 
