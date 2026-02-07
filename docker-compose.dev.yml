@@ -131,7 +131,7 @@ services:
       INFERENCE_SERVER_SECRET: local-secret
       AUTOINTERPRET_SERVER_SECRET: local-secret
     ports:
-      - "3001:3000"  # Neuronpedia runs on port 3000 inside container
+      - "3001:3000"
     restart: unless-stopped
     depends_on:
       neuronpedia-postgres:
