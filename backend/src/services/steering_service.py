@@ -746,48 +746,26 @@ class SteeringService:
         or failed from contaminating subsequent generations. Critical for ensuring
         unsteered baselines are truly unsteered.
 
+        Uses dynamic layer discovery to find layers, then walks ALL submodules
+        of each layer to clear hooks regardless of naming convention.
+
         Args:
             model: The transformer model to clear hooks from
 
         Returns:
             Number of hooks cleared
         """
+        from ..ml.layer_discovery import discover_transformer_structure
+
         hooks_cleared = 0
 
-        # Get all transformer layer modules
-        layers_module = None
-
-        # Try different model architectures
-        if hasattr(model, "transformer") and hasattr(model.transformer, "h"):
-            layers_module = model.transformer.h
-        elif hasattr(model, "model") and hasattr(model.model, "layers"):
-            layers_module = model.model.layers
-        elif hasattr(model, "gpt_neox") and hasattr(model.gpt_neox, "layers"):
-            layers_module = model.gpt_neox.layers
-        elif hasattr(model, "layers"):
-            layers_module = model.layers
-
-        if layers_module is None:
+        # Use dynamic discovery to find transformer layers
+        try:
+            structure = discover_transformer_structure(model)
+            layers_module = structure.layers_module
+        except ValueError:
             logger.warning("Could not find transformer layers to clear hooks from")
             return 0
-
-        # Clear forward hooks from each layer - comprehensive list of submodules
-        # that might have hooks attached
-        all_submodule_names = [
-            # Attention components
-            "self_attn", "attn", "attention",
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "query", "key", "value", "dense",
-            "rotary_emb", "pos_emb",
-            # MLP components
-            "mlp", "feed_forward", "ffn",
-            "gate_proj", "up_proj", "down_proj",
-            "fc1", "fc2", "dense_h_to_4h", "dense_4h_to_h",
-            # LayerNorm components
-            "input_layernorm", "post_attention_layernorm",
-            "ln_1", "ln_2", "layer_norm", "final_layer_norm",
-            "pre_feedforward_layernorm", "post_feedforward_layernorm",
-        ]
 
         for layer_idx, layer in enumerate(layers_module):
             # Clear hooks on the layer module itself
@@ -796,14 +774,14 @@ class SteeringService:
                 layer._forward_hooks.clear()
                 hooks_cleared += count
 
-            # Clear hooks on all possible submodules
-            for submodule_name in all_submodule_names:
-                if hasattr(layer, submodule_name):
-                    submodule = getattr(layer, submodule_name)
-                    if hasattr(submodule, "_forward_hooks") and submodule._forward_hooks:
-                        count = len(submodule._forward_hooks)
-                        submodule._forward_hooks.clear()
-                        hooks_cleared += count
+            # Walk ALL submodules of this layer (architecture-agnostic)
+            for name, submodule in layer.named_modules():
+                if name == "":
+                    continue  # Skip the layer itself (already handled)
+                if hasattr(submodule, "_forward_hooks") and submodule._forward_hooks:
+                    count = len(submodule._forward_hooks)
+                    submodule._forward_hooks.clear()
+                    hooks_cleared += count
 
         if hooks_cleared > 0:
             logger.warning(
@@ -856,20 +834,23 @@ class SteeringService:
                 # Note: Don't persist this, just check it
                 pass
 
-        # 6. For Gemma-2 specific: clear the sliding window cache
-        if hasattr(model, "model"):
-            inner_model = model.model
-            if hasattr(inner_model, "layers"):
-                for layer in inner_model.layers:
-                    # Clear any layer-level cache
-                    if hasattr(layer, "_cache"):
-                        layer._cache = None
-                    if hasattr(layer, "self_attn"):
-                        attn = layer.self_attn
-                        if hasattr(attn, "_cache"):
-                            attn._cache = None
-                        if hasattr(attn, "past_key_value"):
-                            attn.past_key_value = None
+        # 6. Clear per-layer caches (sliding window, attention KV cache, etc.)
+        # Use dynamic discovery to find layers for any architecture
+        from ..ml.layer_discovery import discover_transformer_structure
+        try:
+            structure = discover_transformer_structure(model)
+            for layer in structure.layers_module:
+                # Clear any layer-level cache
+                if hasattr(layer, "_cache"):
+                    layer._cache = None
+                # Walk all submodules to clear attention caches
+                for name, submodule in layer.named_modules():
+                    if hasattr(submodule, "_cache"):
+                        submodule._cache = None
+                    if hasattr(submodule, "past_key_value"):
+                        submodule.past_key_value = None
+        except ValueError:
+            pass  # If layers can't be found, skip per-layer cache clearing
 
         logger.debug("[Model State] Model state reset for clean generation")
 
@@ -882,10 +863,8 @@ class SteeringService:
         """
         Get the target module for hook registration.
 
-        Supports common transformer architectures:
-        - GPT-2/GPT-Neo: transformer.h[layer]
-        - LLaMA/Mistral/Gemma: model.layers[layer]
-        - BLOOM: transformer.h[layer]
+        Uses dynamic layer discovery to support any transformer architecture
+        without hardcoded mappings.
 
         Args:
             model: The transformer model
@@ -895,33 +874,22 @@ class SteeringService:
         Returns:
             Target module or None if not found
         """
-        # Try different model architectures
-        module = None
+        from ..ml.layer_discovery import discover_transformer_structure
 
-        # GPT-2 style (transformer.h)
-        if hasattr(model, "transformer") and hasattr(model.transformer, "h"):
-            layers = model.transformer.h
-            if layer < len(layers):
-                module = layers[layer]
+        try:
+            structure = discover_transformer_structure(model)
+            layers_module = structure.layers_module
 
-        # LLaMA/Mistral style (model.layers)
-        elif hasattr(model, "model") and hasattr(model.model, "layers"):
-            layers = model.model.layers
-            if layer < len(layers):
-                module = layers[layer]
-
-        # GPT-NeoX style (gpt_neox.layers)
-        elif hasattr(model, "gpt_neox") and hasattr(model.gpt_neox, "layers"):
-            layers = model.gpt_neox.layers
-            if layer < len(layers):
-                module = layers[layer]
-
-        # Generic fallback - try to find layers attribute
-        elif hasattr(model, "layers"):
-            if layer < len(model.layers):
-                module = model.layers[layer]
-
-        return module
+            if layer < len(layers_module):
+                return layers_module[layer]
+            else:
+                logger.warning(
+                    f"Layer {layer} exceeds model depth {len(layers_module)}"
+                )
+                return None
+        except ValueError as e:
+            logger.error(f"Could not discover transformer layers: {e}")
+            return None
 
     def _create_steering_hook(
         self,

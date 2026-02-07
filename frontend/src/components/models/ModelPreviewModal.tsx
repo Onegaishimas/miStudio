@@ -139,22 +139,9 @@ export function ModelPreviewModal({
 
           {!loading && !error && modelInfo && (
             <>
-              {/* Unsupported Architecture Error */}
-              {modelInfo.unsupportedArchitecture && (
-                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-                  <div className="flex items-start gap-3">
-                    <Info className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-medium text-red-300">Unsupported Architecture</p>
-                      <p className="text-sm text-red-200/80 mt-1">
-                        This model uses the <span className="font-mono">{modelInfo.unsupportedArchitecture}</span> architecture,
-                        which is not currently supported. Supported architectures are: falcon, gemma, gemma2, gemma3, gpt2, gpt_neox, lfm2, llama,
-                        mistral, mixtral, phi, phi3, phi3_v, pythia, qwen, qwen2, qwen3.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Architecture compatibility is now checked dynamically at runtime.
+                  Any transformer with standard attention + MLP blocks is supported.
+                  Errors surface during extraction/steering, not at download time. */}
 
               {/* Trust Remote Code Warning */}
               {modelInfo.requiresTrustRemoteCode && !modelInfo.unsupportedArchitecture && (
@@ -330,7 +317,7 @@ export function ModelPreviewModal({
         {!loading && !error && modelInfo && (
           <div className="border-t border-slate-800 p-4 bg-slate-900/50 space-y-4">
             {/* Trust Remote Code Checkbox */}
-            {modelInfo.requiresTrustRemoteCode && !modelInfo.unsupportedArchitecture && (
+            {modelInfo.requiresTrustRemoteCode && (
               <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                 <input
                   type="checkbox"
@@ -361,11 +348,11 @@ export function ModelPreviewModal({
               {onDownload && (
                 <button
                   onClick={handleDownload}
-                  disabled={!!modelInfo.unsupportedArchitecture || (modelInfo.requiresTrustRemoteCode && !trustRemoteCode)}
+                  disabled={modelInfo.requiresTrustRemoteCode && !trustRemoteCode}
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg transition-colors text-white font-medium flex items-center gap-2"
                 >
                   <Download className="w-4 h-4" />
-                  {modelInfo.unsupportedArchitecture ? 'Unsupported Architecture' : `Download with ${selectedQuantization}`}
+                  {`Download with ${selectedQuantization}`}
                 </button>
               )}
             </div>

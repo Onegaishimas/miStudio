@@ -346,6 +346,23 @@ spec:
                 name: mistudio-frontend
                 port:
                   number: 80
+    - host: k8s-mistudio.hitsai.net
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-frontend
+                port:
+                  number: 80
 
 ---
 # Separate ingress for WebSocket to ensure proper upgrade handling
@@ -376,6 +393,16 @@ spec:
                 name: mistudio-backend
                 port:
                   number: 8000
+    - host: k8s-mistudio.hitsai.net
+      http:
+        paths:
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-backend
+                port:
+                  number: 8000
 
 ---
 # Separate ingress for Ollama with path rewrite
@@ -393,6 +420,16 @@ spec:
   ingressClassName: public
   rules:
     - host: k8s-mistudio.mcslab.io
+      http:
+        paths:
+          - path: /ollama(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ollama-proxy
+                port:
+                  number: 11434
+    - host: k8s-mistudio.hitsai.net
       http:
         paths:
           - path: /ollama(/|$)(.*)
