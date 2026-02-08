@@ -184,6 +184,59 @@ np_deploy() {
   np_data
 }
 
+# ===========================
+# MILLM HELPERS
+# ===========================
+MILLM_NS="millm"
+MILLM_MANIFEST="/home/sean/app/k8s-millm.mcslab.io/millm-deployment.yaml"
+
+# Check DockerHub for miLLM image timestamps
+millm_check() {
+  echo "=== miLLM DockerHub Image Timestamps ==="
+  echo -n "Backend:  " && curl -s "https://hub.docker.com/v2/repositories/hitsai/millm-backend/tags/?page_size=1" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('results',[{}])[0]; print(t.get('last_updated','?'))"
+  echo -n "Admin UI: " && curl -s "https://hub.docker.com/v2/repositories/hitsai/millm-admin-ui/tags/?page_size=1" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('results',[{}])[0]; print(t.get('last_updated','?'))"
+  echo "Current:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+# Full deploy: pull + apply manifest + restart + wait
+millm_deploy() {
+  echo "=== Pulling images ===" && \
+  k8s "docker pull hitsai/millm-backend:latest && docker pull hitsai/millm-admin-ui:latest" && \
+  echo "=== Applying manifest ===" && \
+  k8s "kubectl apply -f $MILLM_MANIFEST" && \
+  echo "=== Restarting deployments ===" && \
+  k8s "kubectl rollout restart deployment/millm-backend deployment/millm-frontend -n $MILLM_NS" && \
+  echo "=== Waiting for backend rollout ===" && \
+  k8s "kubectl rollout status deployment/millm-backend -n $MILLM_NS --timeout=180s" && \
+  echo "=== Waiting for frontend rollout ===" && \
+  k8s "kubectl rollout status deployment/millm-frontend -n $MILLM_NS --timeout=180s" && \
+  echo "=== Pod Status ===" && \
+  k8s "kubectl get pods -n $MILLM_NS"
+}
+
+# Apply manifest only
+millm_apply() {
+  echo "=== Applying manifest from $MILLM_MANIFEST ==="
+  k8s "kubectl apply -f $MILLM_MANIFEST"
+}
+
+# Quick pod status
+millm_status() {
+  k8s "kubectl get pods -n $MILLM_NS -o wide"
+}
+
+# View backend logs
+millm_logs() {
+  local lines=${1:-50}
+  k8s "kubectl logs -n $MILLM_NS deployment/millm-backend --tail=$lines"
+}
+
+# Run database migrations
+millm_migrate() {
+  echo "=== Running miLLM Database Migrations ==="
+  k8s "kubectl exec -n $MILLM_NS deployment/millm-backend -- python -m alembic upgrade head"
+}
+
 echo "K8s helpers loaded. Available commands:"
 echo ""
 echo "  === MISTUDIO ==="
@@ -209,3 +262,11 @@ echo "  np_purge        - Purge all model data (with confirmation)"
 echo "  np_restart      - Restart webapp"
 echo "  np_add_column   - Add missing column: np_add_column Table column TYPE"
 echo "  np_deploy       - Full deploy (pull + restart + wait)"
+echo ""
+echo "  === MILLM ==="
+echo "  millm_check     - Check DockerHub image timestamps"
+echo "  millm_deploy    - Full deploy (pull + apply + restart + wait)"
+echo "  millm_apply     - Apply manifest (no restart)"
+echo "  millm_status    - Quick pod status"
+echo "  millm_logs      - Backend logs (millm_logs [lines])"
+echo "  millm_migrate   - Run database migrations"
