@@ -1308,7 +1308,9 @@ class ExtractionService:
                                 z_std = z_values.std().item()
                                 z_max = z_values.max().item()
                                 z_positive_mean = z_values[z_values > 0].mean().item() if (z_values > 0).any() else 0
-                                z_95_percentile = torch.quantile(z_values.flatten().float(), 0.95).item()
+                                z_flat = z_values.flatten().float()
+                                k = max(1, int(z_flat.numel() * 0.05))
+                                z_95_percentile = z_flat.kthvalue(z_flat.numel() - k + 1).values.item()
 
                                 # Get threshold statistics
                                 threshold = torch.exp(sae.activation.log_threshold)
