@@ -1292,8 +1292,8 @@ class ExtractionService:
                                 cal_layer_name = list(hook_manager.activations.keys())[0]
                                 cal_activations = hook_manager.activations[cal_layer_name][0]
 
-                                # Flatten to [total_tokens, hidden_dim]
-                                cal_activations_flat = cal_activations.reshape(-1, hidden_dim).float()
+                                # Flatten to [total_tokens, hidden_dim] and move to SAE device
+                                cal_activations_flat = cal_activations.reshape(-1, hidden_dim).float().to(sae.W_enc.device)
 
                                 # Apply normalization if the SAE uses it
                                 if hasattr(sae, 'normalize') and hasattr(sae, 'normalize_activations'):
