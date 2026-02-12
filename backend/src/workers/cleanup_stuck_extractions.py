@@ -84,7 +84,7 @@ def cleanup_stuck_extractions_task(self):
                         emit_extraction_job_progress(
                             extraction_id=extraction.id,
                             training_id=extraction.training_id,
-                            sae_id=extraction.sae_id,
+                            sae_id=extraction.external_sae_id,
                             status="failed",
                             message=extraction.error_message,
                         )
