@@ -543,6 +543,61 @@ class Transcoder(nn.Module):
 # JumpReLU Implementation (Gemma Scope / arXiv:2407.14435)
 # =============================================================================
 
+class StraightThroughL0(Function):
+    """
+    Custom autograd function for differentiable L0 counting with STE.
+
+    Forward: Exact binary indicator H(z - θ) (no phantom contributions from dead features)
+    Backward: Gaussian kernel STE provides smooth gradients near the threshold boundary.
+
+    This replaces the sigmoid surrogate which inflated L0 for dead features:
+    sigmoid((0 - 0.001)/0.001) = 0.269, causing phantom L0 from every dead neuron.
+
+    With STE, dead features contribute exactly 0 in forward, but still receive
+    gradient via the Gaussian kernel to push them toward activation if beneficial.
+    """
+
+    @staticmethod
+    def forward(ctx, z: torch.Tensor, threshold: torch.Tensor, bandwidth: float = 0.001):
+        """
+        Forward: exact Heaviside H(z - θ).
+
+        Args:
+            z: Pre-activations [batch, latent_dim]
+            threshold: Per-feature thresholds [latent_dim]
+            bandwidth: Gaussian kernel width for backward STE
+
+        Returns:
+            Binary indicators: 1 where z > threshold, 0 otherwise
+        """
+        indicators = (z > threshold).to(z.dtype)
+        ctx.save_for_backward(z, threshold)
+        ctx.bandwidth = bandwidth
+        return indicators
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        """
+        Backward: Gaussian kernel STE for smooth gradients.
+
+        d/dz H(z-θ) ≈ K(z-θ) = (1/(ε√2π)) exp(-(z-θ)²/(2ε²))
+        d/dθ H(z-θ) ≈ -K(z-θ)
+        """
+        z, threshold = ctx.saved_tensors
+        bandwidth = ctx.bandwidth
+
+        delta = z - threshold
+        # Gaussian kernel: peaks at z = θ, decays for distant features
+        kernel = torch.exp(-0.5 * (delta / bandwidth) ** 2) / (bandwidth * math.sqrt(2 * math.pi))
+
+        # Gradient w.r.t. z: pushes pre-activations toward/away from threshold
+        grad_z = grad_output * kernel
+        # Gradient w.r.t. threshold: negative (increasing θ reduces L0)
+        grad_threshold = (-grad_output * kernel).sum(dim=0)
+
+        return grad_z, grad_threshold, None
+
+
 class JumpReLUFunction(Function):
     """
     Custom autograd function for JumpReLU with Straight-Through Estimator (STE).
@@ -899,19 +954,19 @@ class JumpReLUSAE(nn.Module):
                 l0_mean = l0_per_sample.mean()  # Average active features
                 l0_sparsity = (f != 0).float().mean()  # Fraction for logging
 
-            # Differentiable L0 surrogate using sigmoid approximation of Heaviside
-            # σ((z - θ) / ε) ≈ H(z - θ), but with smooth gradients
-            # This provides gradient signal to both encoder (via z) and thresholds (via θ)
+            # Differentiable L0 using Straight-Through Estimator
+            # Forward: exact Heaviside H(z - θ) — no phantom L0 from dead features
+            # Backward: Gaussian kernel STE — smooth gradients near threshold boundary
             threshold = self.activation.threshold
             bandwidth = self.activation.bandwidth
-            l0_surrogate = torch.sigmoid((z - threshold) / bandwidth)
+            l0_differentiable = StraightThroughL0.apply(z, threshold, bandwidth)
 
             # Normalize by latent_dim → fraction [0, 1] instead of count [0, d_sae]
             # This makes sparsity_coeff independent of SAE width
-            l0_surrogate_fraction = l0_surrogate.mean(dim=-1).mean()
+            l0_diff_fraction = l0_differentiable.mean(dim=-1).mean()
 
-            # L0 penalty: λ * L0_fraction (differentiable)
-            loss_l0 = self.sparsity_coeff * l0_surrogate_fraction
+            # L0 penalty: λ * L0_fraction (differentiable via STE backward)
+            loss_l0 = self.sparsity_coeff * l0_diff_fraction
 
             # Total loss
             loss_total = loss_reconstruction + loss_l0
