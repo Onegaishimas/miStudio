@@ -380,7 +380,43 @@ export const HYPERPARAMETER_DOCS: Record<string, HyperparameterDoc> = {
       'If training unstable early: increase warmup_steps',
       'If using small learning_rate: warmup less important',
     ],
-    relatedParams: ['learning_rate', 'total_steps'],
+    relatedParams: ['learning_rate', 'total_steps', 'sparsity_warmup_steps'],
+  },
+
+  sparsity_warmup_steps: {
+    name: 'Sparsity Warmup Steps',
+    purpose: 'Linearly ramps the sparsity penalty (L1 or L0) from 0 to full value. This is the single most important setting for preventing dead neurons.',
+    description:
+      'During the first N steps, the sparsity penalty coefficient is scaled by step/N. This allows the SAE to first learn meaningful features before the sparsity constraint pushes them to be selective. Without sparsity warmup, the full penalty from step 0 kills features before they form.',
+    examples: [
+      {
+        value: 0,
+        effect: 'No warmup: Full sparsity penalty from step 0',
+        useCase: 'Only if very low l1_alpha/sparsity_coeff',
+      },
+      {
+        value: 2000,
+        effect: 'Short warmup: Quick ramp to full sparsity',
+        useCase: 'Short training runs (< 20k steps)',
+      },
+      {
+        value: 5000,
+        effect: 'Standard warmup: Good balance (recommended)',
+        useCase: 'Most SAE training scenarios',
+      },
+      {
+        value: 10000,
+        effect: 'Long warmup: Very gradual sparsity introduction',
+        useCase: 'Large SAEs (64k+ features) or high sparsity coefficients',
+      },
+    ],
+    recommendations: [
+      'Default: 5000 steps (critical for preventing dead neurons)',
+      'Set to 10% of total_steps for a safe default',
+      'JumpReLU benefits even more from sparsity warmup due to L0 penalty',
+      'If > 50% dead neurons: increase sparsity_warmup_steps',
+    ],
+    relatedParams: ['l1_alpha', 'sparsity_coeff', 'warmup_steps'],
   },
 
   weight_decay: {

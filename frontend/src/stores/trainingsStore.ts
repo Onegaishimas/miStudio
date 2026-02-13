@@ -68,6 +68,7 @@ export interface TrainingConfig {
   batch_size: number;
   total_steps: number;
   warmup_steps?: number;
+  sparsity_warmup_steps?: number;
 
   // Optimization
   weight_decay?: number;
@@ -178,7 +179,7 @@ const defaultConfig: TrainingConfig = {
   hook_types: ['residual'],
 
   // Sparsity - SAELens-compatible normalization (constant_norm_rescale) + standard l1_coefficient
-  l1_alpha: 0.045, // Empirically tuned: LOWER l1 = WEAKER penalty = MORE activation → closer to 5% target
+  l1_alpha: 0.0005, // Calibrated for .sum(dim=-1).mean() L1 formulation (SAELens baseline for 16K features)
   target_l0: 0.05, // 5% activation rate
   top_k_sparsity: undefined, // Optional: hard sparsity constraint
   normalize_activations: 'constant_norm_rescale', // SAELens standard normalization
@@ -190,24 +191,25 @@ const defaultConfig: TrainingConfig = {
   sparsity_coeff: 0.0006, // L0 sparsity coefficient (6e-4 per Gemma Scope paper)
   normalize_decoder: true, // Normalize decoder columns to unit norm
 
-  // Training - optimized defaults for RTX 3080 Ti (12GB VRAM)
-  learning_rate: 0.0001,
-  batch_size: 64, // Increased from 32 for 2x throughput (uses ~8.5GB VRAM)
-  total_steps: 100000,
-  warmup_steps: 10000,
+  // Training - optimized for SAE quality (larger batch = more stable gradients)
+  learning_rate: 0.0003, // SAELens / Gemma Scope standard (3e-4)
+  batch_size: 2048, // Larger batch for stable gradient estimates and better dead neuron detection
+  total_steps: 50000, // Fewer steps needed with 2048 batch (same token budget as 512 x 200k)
+  warmup_steps: 2000, // LR warmup steps (shorter since sparsity warmup handles the rest)
+  sparsity_warmup_steps: 5000, // Ramp sparsity penalty from 0 to full over 5k steps (prevents dead neurons)
 
   // Optimization
-  weight_decay: 0.01,
+  weight_decay: 0.0, // No weight decay for SAE training (fights sparsity objective)
   grad_clip_norm: 1.0,
 
   // Checkpointing - reduced frequency for faster training and less disk usage
-  checkpoint_interval: 2000, // Increased from 1000 (50 checkpoints vs 100)
+  checkpoint_interval: 2000, // Increased from 1000 (25 checkpoints for 50k steps)
   log_interval: 100,
 
   // Dead neuron handling
   dead_neuron_threshold: 10000,
   resample_dead_neurons: true,
-  resample_interval: 15000, // 15K optimal: gives neurons time to stabilize (10K too frequent → thrashing)
+  resample_interval: 5000, // Resample every 5k steps after warmup
 };
 
 /**

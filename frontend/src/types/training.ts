@@ -104,8 +104,10 @@ export interface HyperparametersConfig {
   batch_size: number;
   /** Total training steps */
   total_steps: number;
-  /** Linear warmup steps */
+  /** Linear warmup steps for learning rate */
   warmup_steps?: number;
+  /** Sparsity warmup steps: linearly ramp L1/L0 penalty from 0 to full value. Prevents dead neurons. */
+  sparsity_warmup_steps?: number;
 
   // Optimization
   /** Weight decay (L2 regularization) */

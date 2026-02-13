@@ -105,7 +105,11 @@ class TrainingHyperparameters(BaseModel):
     learning_rate: float = Field(..., gt=0, description="Initial learning rate")
     batch_size: int = Field(..., gt=0, description="Training batch size")
     total_steps: int = Field(..., gt=0, description="Total training steps")
-    warmup_steps: int = Field(0, ge=0, description="Linear warmup steps")
+    warmup_steps: int = Field(0, ge=0, description="Linear warmup steps for learning rate")
+    sparsity_warmup_steps: int = Field(
+        5000, ge=0, le=100000,
+        description="Steps to linearly ramp sparsity penalty (L1/L0) from 0 to full value. Prevents dead neurons from forming before features are learned."
+    )
 
     # Optimization
     weight_decay: float = Field(0.0, ge=0, description="Weight decay (L2 regularization)")

@@ -718,6 +718,23 @@ def train_sae_task(
         # Training loop
         best_loss = float('inf')
 
+        # Sparsity warmup: store base sparsity coefficients before training
+        sparsity_warmup_steps = hp.get('sparsity_warmup_steps', 0)
+        base_sparsity_coeffs = {}  # Key: sae_key, Value: original l1_alpha or sparsity_coeff
+        architecture_type = hp.get('architecture_type', 'standard')
+        for sae_key, model in models.items():
+            if architecture_type == 'jumprelu':
+                base_sparsity_coeffs[sae_key] = model.sparsity_coeff
+            else:
+                base_sparsity_coeffs[sae_key] = model.l1_alpha
+        if sparsity_warmup_steps > 0:
+            logger.info(f"Sparsity warmup enabled: ramping from 0 to full over {sparsity_warmup_steps} steps")
+
+        # Dead neuron tracking: exponential moving average of per-feature activation frequency
+        # This is more reliable than per-batch detection which can miss infrequent features
+        feature_activation_ema = {}  # Key: sae_key, Value: tensor [latent_dim]
+        ema_window_tokens = 50000  # Approximate token window for EMA decay
+
         for step in range(total_steps):
             # Check for pause/stop signals
             with self.get_db() as db:
@@ -856,6 +873,16 @@ def train_sae_task(
                 layer_dead_neurons = {}
                 layer_fvu = {}
 
+                # Apply sparsity warmup: linearly scale L1/L0 penalty from 0 to full
+                if sparsity_warmup_steps > 0:
+                    sparsity_scale = min(1.0, step / sparsity_warmup_steps)
+                    for sae_key, model_ref in models.items():
+                        base_coeff = base_sparsity_coeffs[sae_key]
+                        if architecture_type == 'jumprelu':
+                            model_ref.sparsity_coeff = base_coeff * sparsity_scale
+                        else:
+                            model_ref.l1_alpha = base_coeff * sparsity_scale
+
                 for layer_idx, hook_type in layer_hook_combinations:
                     sae_key = (layer_idx, hook_type)
                     x = layer_activations[sae_key]
@@ -929,7 +956,17 @@ def train_sae_task(
                     # Store SAE metrics (keyed by (layer_idx, hook_type) tuple)
                     layer_losses[sae_key] = loss.item() * grad_accum_steps  # Undo accumulation scaling
                     layer_sparsities[sae_key] = (z != 0).float().mean().item()
-                    layer_dead_neurons[sae_key] = (z == 0).all(dim=0).sum().item()
+
+                    # Update EMA-based dead neuron tracking
+                    with torch.no_grad():
+                        fired = (z > 0).any(dim=0).float()  # [latent_dim] — 1 if any sample activated this feature
+                        if sae_key not in feature_activation_ema:
+                            feature_activation_ema[sae_key] = torch.zeros(hp['latent_dim'], device=z.device)
+                        ema_decay = max(0.0, 1.0 - batch_size / ema_window_tokens)
+                        feature_activation_ema[sae_key] = feature_activation_ema[sae_key] * ema_decay + fired
+                        # Dead neurons: EMA below threshold means feature essentially never fires
+                        layer_dead_neurons[sae_key] = (feature_activation_ema[sae_key] < 0.01).sum().item()
+
                     # Store FVU if available (JumpReLU SAE computes this)
                     # Convert tensor to float for database storage
                     fvu_val = losses.get('fvu', None)
@@ -1077,7 +1114,8 @@ def train_sae_task(
                     latent_dim=hp['latent_dim'],
                     target_l0=hp.get('target_l0', 0.05),
                     warmup_steps=hp.get('warmup_steps', 0),
-                    training_id=training_id
+                    training_id=training_id,
+                    sparsity_warmup_steps=sparsity_warmup_steps,
                 )
                 if quality_warnings:
                     for warning in quality_warnings:
@@ -1089,17 +1127,22 @@ def train_sae_task(
                     resample_interval = hp.get('resample_interval', 5000)
 
                     # Perform resampling at specified intervals after warmup
-                    if step > 0 and step % resample_interval == 0 and step >= hp.get('warmup_steps', 0):
+                    # Wait until after both LR warmup and sparsity warmup are done
+                    effective_warmup = max(hp.get('warmup_steps', 0), sparsity_warmup_steps)
+                    if step > 0 and step % resample_interval == 0 and step >= effective_warmup:
                         for layer_idx, hook_type in layer_hook_combinations:
                             sae_key = (layer_idx, hook_type)
                             model = models[sae_key]
 
-                            # Get current batch activations to identify dead neurons
+                            # Use EMA-based dead neuron detection (more reliable than per-batch)
                             x = layer_activations[sae_key]
                             with torch.no_grad():
-                                z = model.encode(x)
-                                # Identify dead neurons (never activated in current batch)
-                                dead_mask = (z == 0).all(dim=0)  # [latent_dim]
+                                if sae_key in feature_activation_ema:
+                                    dead_mask = feature_activation_ema[sae_key] < 0.01
+                                else:
+                                    # Fallback: per-batch detection
+                                    z = model.encode(x)
+                                    dead_mask = (z == 0).all(dim=0)
                                 num_dead = dead_mask.sum().item()
 
                                 if num_dead > 0:

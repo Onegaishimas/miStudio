@@ -593,10 +593,21 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             </span>
           </div>
           <div>
-            <span className="text-slate-400">L1 Alpha: </span>
-            <span className="text-slate-100 font-medium">
-              {training.hyperparameters?.l1_alpha ?? 'N/A'}
-            </span>
+            {training.hyperparameters?.architecture_type === 'jumprelu' && training.hyperparameters?.sparsity_coeff != null ? (
+              <>
+                <span className="text-slate-400">Sparsity Coeff: </span>
+                <span className="text-slate-100 font-medium">
+                  {training.hyperparameters.sparsity_coeff}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-slate-400">L1 Alpha: </span>
+                <span className="text-slate-100 font-medium">
+                  {training.hyperparameters?.l1_alpha ?? 'N/A'}
+                </span>
+              </>
+            )}
           </div>
           {training.hyperparameters?.top_k_sparsity && (
             <div>
@@ -1258,8 +1269,17 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               <div>
                 <h4 className="text-sm font-semibold text-emerald-400 mb-2">Sparsity Configuration</h4>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">L1 Alpha</div>
+                  {/* For JumpReLU, show sparsity_coeff prominently; L1 Alpha is secondary */}
+                  {training.hyperparameters.architecture_type === 'jumprelu' && training.hyperparameters.sparsity_coeff != null && (
+                    <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
+                      <div className="text-xs text-slate-400 mb-1">Sparsity Coeff (L0)</div>
+                      <div className="text-sm text-emerald-400 font-medium">
+                        {training.hyperparameters.sparsity_coeff}
+                      </div>
+                    </div>
+                  )}
+                  <div className={`bg-slate-800/50 rounded-lg p-2 ${training.hyperparameters.architecture_type === 'jumprelu' ? 'opacity-50' : ''}`}>
+                    <div className="text-xs text-slate-400 mb-1">L1 Alpha{training.hyperparameters.architecture_type === 'jumprelu' ? ' (unused)' : ''}</div>
                     <div className="text-sm text-slate-100 font-medium">
                       {training.hyperparameters.l1_alpha}
                     </div>
@@ -1279,6 +1299,35 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                         {training.hyperparameters.top_k_sparsity}%
                       </div>
                     </div>
+                  )}
+                  {/* JumpReLU-specific parameters */}
+                  {training.hyperparameters.architecture_type === 'jumprelu' && (
+                    <>
+                      {training.hyperparameters.initial_threshold != null && (
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-xs text-slate-400 mb-1">Initial Threshold</div>
+                          <div className="text-sm text-slate-100 font-medium">
+                            {training.hyperparameters.initial_threshold}
+                          </div>
+                        </div>
+                      )}
+                      {training.hyperparameters.bandwidth != null && (
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-xs text-slate-400 mb-1">Bandwidth</div>
+                          <div className="text-sm text-slate-100 font-medium">
+                            {training.hyperparameters.bandwidth}
+                          </div>
+                        </div>
+                      )}
+                      {training.hyperparameters.normalize_decoder != null && (
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-xs text-slate-400 mb-1">Normalize Decoder</div>
+                          <div className="text-sm text-slate-100 font-medium">
+                            {training.hyperparameters.normalize_decoder ? 'Yes' : 'No'}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1305,11 +1354,19 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                       {training.hyperparameters.total_steps.toLocaleString()}
                     </div>
                   </div>
-                  {training.hyperparameters.warmup_steps && (
+                  {training.hyperparameters.warmup_steps != null && (
                     <div className="bg-slate-800/50 rounded-lg p-2">
                       <div className="text-xs text-slate-400 mb-1">Warmup Steps</div>
                       <div className="text-sm text-slate-100 font-medium">
                         {training.hyperparameters.warmup_steps.toLocaleString()}
+                      </div>
+                    </div>
+                  )}
+                  {training.hyperparameters.sparsity_warmup_steps != null && training.hyperparameters.sparsity_warmup_steps > 0 && (
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <div className="text-xs text-slate-400 mb-1">Sparsity Warmup</div>
+                      <div className="text-sm text-slate-100 font-medium">
+                        {training.hyperparameters.sparsity_warmup_steps.toLocaleString()} steps
                       </div>
                     </div>
                   )}

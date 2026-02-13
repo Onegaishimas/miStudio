@@ -535,6 +535,7 @@ export const TrainingPanel: React.FC = () => {
           batch_size: config.batch_size,
           total_steps: config.total_steps,
           warmup_steps: config.warmup_steps,
+          sparsity_warmup_steps: config.sparsity_warmup_steps,
           target_l0: config.target_l0,
           weight_decay: config.weight_decay,
           grad_clip_norm: config.grad_clip_norm,
@@ -604,6 +605,7 @@ export const TrainingPanel: React.FC = () => {
           batch_size: config.batch_size,
           total_steps: config.total_steps,
           warmup_steps: config.warmup_steps,
+          sparsity_warmup_steps: config.sparsity_warmup_steps,
           weight_decay: config.weight_decay,
           grad_clip_norm: config.grad_clip_norm,
           checkpoint_interval: config.checkpoint_interval,
@@ -1423,6 +1425,27 @@ export const TrainingPanel: React.FC = () => {
                   />
                 </div>
 
+                {/* Sparsity Warmup Steps */}
+                <div>
+                  <HyperparameterLabel
+                    paramName="sparsity_warmup_steps"
+                    label="Sparsity Warmup Steps"
+                    htmlFor="sparsity-warmup-steps"
+                    className="mb-2"
+                  />
+                  <input
+                    id="sparsity-warmup-steps"
+                    type="number"
+                    value={config.sparsity_warmup_steps ?? 5000}
+                    onChange={(e) => updateConfig({ sparsity_warmup_steps: parseInt(e.target.value) })}
+                    min={0}
+                    max={100000}
+                    step={1000}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Ramps sparsity penalty from 0 to full. Prevents dead neurons.</p>
+                </div>
+
                 {/* Weight Decay */}
                 <div>
                   <HyperparameterLabel
@@ -1434,7 +1457,7 @@ export const TrainingPanel: React.FC = () => {
                   <input
                     id="weight-decay"
                     type="number"
-                    value={config.weight_decay ?? 0.01}
+                    value={config.weight_decay ?? 0.0}
                     onChange={(e) => updateConfig({ weight_decay: parseFloat(e.target.value) })}
                     min={0}
                     max={0.1}

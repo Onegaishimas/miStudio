@@ -20,13 +20,15 @@ class TrainingValidator:
         """
         Calculate recommended l1_alpha based on latent dimension.
 
-        Formula: l1_alpha = 5.0 / sqrt(latent_dim / 8192)
+        Formula: l1_alpha = 5e-4 * sqrt(16384 / latent_dim)
 
-        This formula is calibrated to SAELens standard with activation normalization
-        and .mean() L1 penalty (not .sum(dim=-1).mean()).
+        Calibrated for the .sum(dim=-1).mean() L1 penalty formulation used by
+        SparseAutoencoder.forward():
+            l1_penalty = z.abs().sum(dim=-1).mean()
+            loss = reconstruction_loss + l1_alpha * l1_penalty
 
-        With normalization + .mean(), the L1 penalty is normalized by the number of features,
-        so we need much larger coefficients than the old .sum() method.
+        The sum accumulates across all latent features, so the penalty magnitude
+        scales with the number of active features. Larger SAEs need less l1_alpha.
 
         Args:
             latent_dim: SAE latent dimension (width)
@@ -35,17 +37,18 @@ class TrainingValidator:
             Recommended l1_alpha value
 
         Examples:
-            latent_dim=8192  → l1_alpha = 5.000000
-            latent_dim=16384 → l1_alpha = 3.535534
-            latent_dim=32768 → l1_alpha = 2.500000
+            latent_dim=6144  → l1_alpha ≈ 8.2e-4 (GPT-2 / Pythia-160m)
+            latent_dim=8192  → l1_alpha ≈ 7.1e-4
+            latent_dim=16384 → l1_alpha = 5.0e-4 (baseline)
+            latent_dim=32768 → l1_alpha ≈ 3.5e-4
+            latent_dim=65536 → l1_alpha = 2.5e-4
 
         Reference:
-            SAELens standard values with normalization: 1.0 - 10.0
-            - Small SAEs (2k-4k):  l1_alpha = 7-10
-            - Medium SAEs (~8k):   l1_alpha = 3-7
-            - Large SAEs (16k+):   l1_alpha = 1-3
+            SAELens baseline: ~5e-4 for 16K features with .sum().mean() L1
         """
-        return 5.0 / math.sqrt(latent_dim / 8192.0)
+        BASE_LATENT_DIM = 16384
+        BASE_L1_ALPHA = 5e-4
+        return BASE_L1_ALPHA * math.sqrt(BASE_LATENT_DIM / latent_dim)
 
     @staticmethod
     def validate_sparsity_config(
@@ -54,9 +57,8 @@ class TrainingValidator:
         """
         Validate sparsity configuration for training quality.
 
-        Checks if l1_alpha is appropriate for the latent dimension and
-        provides warnings/errors if the configuration is likely to produce
-        poor quality features (too dense or too sparse).
+        For Standard/Skip/Transcoder: validates l1_alpha against recommended values.
+        For JumpReLU: validates sparsity_coeff instead (l1_alpha is irrelevant).
 
         Args:
             hyperparameters: Training hyperparameters dictionary
@@ -70,58 +72,79 @@ class TrainingValidator:
         l1_alpha = hyperparameters.get('l1_alpha')
         latent_dim = hyperparameters.get('latent_dim')
         target_l0 = hyperparameters.get('target_l0')
-
-        if l1_alpha is None:
-            errors.append(
-                "l1_alpha is required. This is the sparsity penalty coefficient "
-                "that enforces sparse feature learning."
-            )
-            return warnings, errors
+        architecture_type = hyperparameters.get('architecture_type', 'standard')
 
         if latent_dim is None:
             errors.append("latent_dim is required for sparsity validation.")
             return warnings, errors
 
-        # Calculate recommended l1_alpha
-        recommended_l1_alpha = TrainingValidator.calculate_recommended_l1_alpha(latent_dim)
+        # JumpReLU uses sparsity_coeff (L0 penalty), not l1_alpha (L1 penalty)
+        if architecture_type == 'jumprelu':
+            sparsity_coeff = hyperparameters.get('sparsity_coeff')
+            if sparsity_coeff is None and l1_alpha is not None:
+                # sparsity_coeff falls back to l1_alpha in create_sae
+                sparsity_coeff = l1_alpha
+            if sparsity_coeff is not None:
+                # Recommended range: 1e-4 to 1e-3 (Gemma Scope default: 6e-4)
+                if sparsity_coeff > 0.01:
+                    warnings.append(
+                        f"⚠️  sparsity_coeff ({sparsity_coeff:.6f}) is very high for JumpReLU. "
+                        f"Recommended range: 1e-4 to 1e-3 (Gemma Scope default: 6e-4). "
+                        f"High sparsity_coeff will cause excessive dead neurons."
+                    )
+                elif sparsity_coeff < 1e-5:
+                    warnings.append(
+                        f"⚠️  sparsity_coeff ({sparsity_coeff:.6f}) is very low for JumpReLU. "
+                        f"Recommended range: 1e-4 to 1e-3. "
+                        f"Low sparsity_coeff will produce dense, uninterpretable features."
+                    )
+        else:
+            # Standard/Skip/Transcoder: validate l1_alpha
+            if l1_alpha is None:
+                errors.append(
+                    "l1_alpha is required. This is the sparsity penalty coefficient "
+                    "that enforces sparse feature learning."
+                )
+                return warnings, errors
 
-        # Check if l1_alpha is too low (will produce dense features)
-        if l1_alpha < recommended_l1_alpha * 0.1:
-            warnings.append(
-                f"⚠️  l1_alpha ({l1_alpha:.6f}) is very low for latent_dim ({latent_dim}). "
-                f"Recommended: {recommended_l1_alpha:.6f}. "
-                f"This will likely produce DENSE features (L0 > 0.20) which are not interpretable. "
-                f"Consider increasing l1_alpha to at least {recommended_l1_alpha * 0.5:.6f}."
-            )
-        elif l1_alpha < recommended_l1_alpha * 0.5:
-            warnings.append(
-                f"⚠️  l1_alpha ({l1_alpha:.6f}) is low for latent_dim ({latent_dim}). "
-                f"Recommended: {recommended_l1_alpha:.6f}. "
-                f"Features may be denser than ideal (L0 > 0.10). "
-                f"Consider using {recommended_l1_alpha:.6f} for better sparsity."
-            )
+            # Calculate recommended l1_alpha for .sum(dim=-1).mean() formulation
+            recommended_l1_alpha = TrainingValidator.calculate_recommended_l1_alpha(latent_dim)
 
-        # Check if l1_alpha is DANGEROUSLY high (will cause "race to zero")
-        if l1_alpha > recommended_l1_alpha * 5:
-            errors.append(
-                f"🚨 CRITICAL: l1_alpha ({l1_alpha:.6f}) is {l1_alpha/recommended_l1_alpha:.1f}x higher than recommended ({recommended_l1_alpha:.6f})! "
-                f"This WILL cause 'race to zero' degenerate training where the SAE learns to output all zeros. "
-                f"Encoder biases will drift negative, making ALL features dead. "
-                f"STRONGLY RECOMMENDED: Use l1_alpha ≤ {recommended_l1_alpha * 2:.6f}."
-            )
-        elif l1_alpha > recommended_l1_alpha * 3:
-            warnings.append(
-                f"⚠️  l1_alpha ({l1_alpha:.6f}) is {l1_alpha/recommended_l1_alpha:.1f}x higher than recommended ({recommended_l1_alpha:.6f}). "
-                f"This is likely too high and will cause excessive dead neurons (>50%). "
-                f"Risk of 'race to zero' degenerate solution. "
-                f"Recommended: Decrease to {recommended_l1_alpha:.6f}."
-            )
-        elif l1_alpha > recommended_l1_alpha * 2:
-            warnings.append(
-                f"⚠️  l1_alpha ({l1_alpha:.6f}) is {l1_alpha/recommended_l1_alpha:.1f}x higher than recommended ({recommended_l1_alpha:.6f}). "
-                f"This may cause many dead neurons (30-50%). "
-                f"Monitor dead_neurons and L0 sparsity closely during training."
-            )
+            # Check if l1_alpha is too low (will produce dense features)
+            if l1_alpha < recommended_l1_alpha * 0.1:
+                warnings.append(
+                    f"⚠️  l1_alpha ({l1_alpha:.6f}) is very low for latent_dim ({latent_dim}). "
+                    f"Recommended: {recommended_l1_alpha:.6f}. "
+                    f"This will likely produce DENSE features (L0 > 0.20) which are not interpretable. "
+                    f"Consider increasing l1_alpha to at least {recommended_l1_alpha * 0.5:.6f}."
+                )
+            elif l1_alpha < recommended_l1_alpha * 0.5:
+                warnings.append(
+                    f"⚠️  l1_alpha ({l1_alpha:.6f}) is low for latent_dim ({latent_dim}). "
+                    f"Recommended: {recommended_l1_alpha:.6f}. "
+                    f"Features may be denser than ideal (L0 > 0.10). "
+                    f"Consider using {recommended_l1_alpha:.6f} for better sparsity."
+                )
+
+            # Check if l1_alpha is DANGEROUSLY high (will cause "race to zero")
+            if l1_alpha > recommended_l1_alpha * 10:
+                errors.append(
+                    f"🚨 CRITICAL: l1_alpha ({l1_alpha:.6f}) is {l1_alpha/recommended_l1_alpha:.0f}x higher than recommended ({recommended_l1_alpha:.6f})! "
+                    f"This WILL cause 'race to zero' degenerate training where the SAE learns to output all zeros. "
+                    f"STRONGLY RECOMMENDED: Use l1_alpha ≤ {recommended_l1_alpha * 3:.6f}."
+                )
+            elif l1_alpha > recommended_l1_alpha * 5:
+                warnings.append(
+                    f"⚠️  l1_alpha ({l1_alpha:.6f}) is {l1_alpha/recommended_l1_alpha:.0f}x higher than recommended ({recommended_l1_alpha:.6f}). "
+                    f"This is likely too high and will cause excessive dead neurons (>50%). "
+                    f"Recommended: Decrease to {recommended_l1_alpha:.6f}."
+                )
+            elif l1_alpha > recommended_l1_alpha * 3:
+                warnings.append(
+                    f"⚠️  l1_alpha ({l1_alpha:.6f}) is {l1_alpha/recommended_l1_alpha:.1f}x higher than recommended ({recommended_l1_alpha:.6f}). "
+                    f"This may cause many dead neurons (30-50%). "
+                    f"Monitor dead_neurons and L0 sparsity closely during training."
+                )
 
         # Validate target_l0 if provided
         if target_l0 is not None:
@@ -151,7 +174,8 @@ class TrainingValidator:
         latent_dim: int,
         target_l0: float = 0.05,
         warmup_steps: int = 1000,
-        training_id: str = None
+        training_id: str = None,
+        sparsity_warmup_steps: int = 0
     ) -> List[str]:
         """
         Check training quality metrics during training.
@@ -166,16 +190,18 @@ class TrainingValidator:
             dead_neurons: Current count of dead neurons
             latent_dim: SAE latent dimension
             target_l0: Target L0 sparsity
-            warmup_steps: Number of warmup steps (skip checks during warmup)
+            warmup_steps: Number of LR warmup steps (skip checks during warmup)
             training_id: Training ID for tracking L0 history
+            sparsity_warmup_steps: Number of sparsity warmup steps
 
         Returns:
             List of warning messages
         """
         warnings = []
 
-        # Skip quality checks during warmup period
-        if step < warmup_steps:
+        # Skip quality checks during warmup period (both LR and sparsity warmup)
+        effective_warmup = max(warmup_steps, sparsity_warmup_steps)
+        if step < effective_warmup:
             return warnings
 
         # Track L0 history for race-to-zero detection

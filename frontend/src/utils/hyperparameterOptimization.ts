@@ -142,13 +142,19 @@ export function getRecommendedHyperparameters(latentDim: number): {
   learningRate: number;
   batchSize: number;
   totalSteps: number;
+  warmupSteps: number;
+  sparsityWarmupSteps: number;
+  weightDecay: number;
 } {
   return {
     l1Alpha: calculateOptimalL1Alpha(latentDim),
     hiddenDim: Math.floor(latentDim / 32), // 32x expansion ratio
     targetL0: 0.05, // 5% sparsity
-    learningRate: 0.0001,
-    batchSize: 64,
+    learningRate: 0.0003, // SAELens / Gemma Scope standard
+    batchSize: 2048, // Larger batch for stable gradients
     totalSteps: latentDim >= 65536 ? 100000 : 50000,
+    warmupSteps: 2000, // LR warmup
+    sparsityWarmupSteps: 5000, // Sparsity penalty warmup (critical for dead neuron prevention)
+    weightDecay: 0.0, // No weight decay for SAE training
   };
 }
