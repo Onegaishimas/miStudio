@@ -1374,11 +1374,11 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               </div>
 
               {/* Optimization Section */}
-              {(training.hyperparameters.weight_decay || training.hyperparameters.grad_clip_norm) && (
+              {(training.hyperparameters.weight_decay != null || training.hyperparameters.grad_clip_norm != null) && (
                 <div>
                   <h4 className="text-sm font-semibold text-emerald-400 mb-2">Optimization</h4>
                   <div className="grid grid-cols-2 gap-3">
-                    {training.hyperparameters.weight_decay && (
+                    {training.hyperparameters.weight_decay != null && (
                       <div className="bg-slate-800/50 rounded-lg p-2">
                         <div className="text-xs text-slate-400 mb-1">Weight Decay</div>
                         <div className="text-sm text-slate-100 font-medium">
@@ -1386,7 +1386,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                         </div>
                       </div>
                     )}
-                    {training.hyperparameters.grad_clip_norm && (
+                    {training.hyperparameters.grad_clip_norm != null && (
                       <div className="bg-slate-800/50 rounded-lg p-2">
                         <div className="text-xs text-slate-400 mb-1">Gradient Clip Norm</div>
                         <div className="text-sm text-slate-100 font-medium">
