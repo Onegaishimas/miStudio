@@ -85,17 +85,17 @@ class TrainingValidator:
                 # sparsity_coeff falls back to l1_alpha in create_sae
                 sparsity_coeff = l1_alpha
             if sparsity_coeff is not None:
-                # Recommended range: 1e-4 to 1e-3 (Gemma Scope default: 6e-4)
-                if sparsity_coeff > 0.01:
+                # L0 is now normalized to fraction [0,1]. Recommended range: 0.1 to 2.0
+                if sparsity_coeff > 5.0:
                     warnings.append(
-                        f"⚠️  sparsity_coeff ({sparsity_coeff:.6f}) is very high for JumpReLU. "
-                        f"Recommended range: 1e-4 to 1e-3 (Gemma Scope default: 6e-4). "
+                        f"⚠️  sparsity_coeff ({sparsity_coeff}) is very high for JumpReLU. "
+                        f"Recommended range: 0.1 to 2.0 (default: 0.4). "
                         f"High sparsity_coeff will cause excessive dead neurons."
                     )
-                elif sparsity_coeff < 1e-5:
+                elif sparsity_coeff < 0.01:
                     warnings.append(
-                        f"⚠️  sparsity_coeff ({sparsity_coeff:.6f}) is very low for JumpReLU. "
-                        f"Recommended range: 1e-4 to 1e-3. "
+                        f"⚠️  sparsity_coeff ({sparsity_coeff}) is very low for JumpReLU. "
+                        f"Recommended range: 0.1 to 2.0 (default: 0.4). "
                         f"Low sparsity_coeff will produce dense, uninterpretable features."
                     )
         else:

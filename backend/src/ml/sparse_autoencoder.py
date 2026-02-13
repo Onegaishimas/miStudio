@@ -697,7 +697,9 @@ class JumpReLUSAE(nn.Module):
     Args:
         d_model: Input/output dimension (model hidden size)
         d_sae: SAE latent dimension (number of features)
-        sparsity_coeff: L0 sparsity penalty coefficient (λ)
+        sparsity_coeff: L0 sparsity penalty coefficient (λ). Applied to L0 as a
+            fraction [0,1] via differentiable sigmoid surrogate. Default 0.4 gives
+            loss_l0 ≈ 0.02 at 5% target sparsity. Range: 0.1-2.0.
         initial_threshold: Initial JumpReLU threshold value
         bandwidth: KDE bandwidth for threshold gradient estimation
         normalize_decoder: Whether to normalize decoder columns to unit norm
@@ -712,7 +714,7 @@ class JumpReLUSAE(nn.Module):
         self,
         d_model: int,
         d_sae: int,
-        sparsity_coeff: float = 6e-4,
+        sparsity_coeff: float = 0.4,
         initial_threshold: float = 0.001,
         bandwidth: float = 0.001,
         normalize_decoder: bool = True,
@@ -818,15 +820,17 @@ class JumpReLUSAE(nn.Module):
             return x / norm_coeff
         return x
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor, return_pre_activations: bool = False):
         """
         Encode input to sparse feature representation.
 
         Args:
             x: Input activations [batch, d_model] or [batch, seq, d_model]
+            return_pre_activations: If True, also return pre-activations z
 
         Returns:
             f: Sparse features [batch, d_sae] or [batch, seq, d_sae]
+            z: (optional) Pre-activations before JumpReLU [batch, d_sae]
         """
         # Pre-activations: z = W_enc @ x + b_enc
         z = F.linear(x, self.W_enc, self.b_enc)
@@ -834,6 +838,8 @@ class JumpReLUSAE(nn.Module):
         # Apply JumpReLU activation
         f = self.activation(z)
 
+        if return_pre_activations:
+            return f, z
         return f
 
     def decode(self, f: torch.Tensor) -> torch.Tensor:
@@ -872,8 +878,8 @@ class JumpReLUSAE(nn.Module):
         # Normalize inputs
         x_normalized, norm_coeff = self.normalize(x)
 
-        # Encode to sparse features
-        f = self.encode(x_normalized)
+        # Encode to sparse features (get pre-activations for L0 surrogate)
+        f, z = self.encode(x_normalized, return_pre_activations=True)
 
         # Decode back to input space (still normalized)
         x_hat_norm = self.decode(f)
@@ -887,16 +893,25 @@ class JumpReLUSAE(nn.Module):
             # Reconstruction loss (MSE)
             loss_reconstruction = F.mse_loss(x_hat, x, reduction='mean')
 
-            # L0 sparsity: count of non-zero features per sample
-            # This is the key difference from standard SAE
-            l0_per_sample = (f != 0).float().sum(dim=-1)  # [batch] or [batch, seq]
-            l0_mean = l0_per_sample.mean()  # Average active features
+            # L0 sparsity (actual count, non-differentiable, for metrics only)
+            with torch.no_grad():
+                l0_per_sample = (f != 0).float().sum(dim=-1)  # [batch] or [batch, seq]
+                l0_mean = l0_per_sample.mean()  # Average active features
+                l0_sparsity = (f != 0).float().mean()  # Fraction for logging
 
-            # L0 sparsity as fraction (for logging compatibility)
-            l0_sparsity = (f != 0).float().mean()
+            # Differentiable L0 surrogate using sigmoid approximation of Heaviside
+            # σ((z - θ) / ε) ≈ H(z - θ), but with smooth gradients
+            # This provides gradient signal to both encoder (via z) and thresholds (via θ)
+            threshold = self.activation.threshold
+            bandwidth = self.activation.bandwidth
+            l0_surrogate = torch.sigmoid((z - threshold) / bandwidth)
 
-            # L0 penalty: λ * mean(||f||₀)
-            loss_l0 = self.sparsity_coeff * l0_mean
+            # Normalize by latent_dim → fraction [0, 1] instead of count [0, d_sae]
+            # This makes sparsity_coeff independent of SAE width
+            l0_surrogate_fraction = l0_surrogate.mean(dim=-1).mean()
+
+            # L0 penalty: λ * L0_fraction (differentiable)
+            loss_l0 = self.sparsity_coeff * l0_surrogate_fraction
 
             # Total loss
             loss_total = loss_reconstruction + loss_l0
@@ -919,7 +934,7 @@ class JumpReLUSAE(nn.Module):
                 'loss_l0': loss_l0,
                 'loss_zero': loss_zero,
                 'l0_sparsity': l0_sparsity,
-                'l0_mean': l0_mean,  # Average number of active features
+                'l0_mean': l0_mean,  # Average active feature count (for metrics)
                 'l1_penalty': l1_penalty,  # For compatibility
                 'fvu': fvu,
                 'threshold_mean': self.activation.threshold.mean(),
@@ -1094,11 +1109,11 @@ def create_sae(
         normalize_activations = kwargs.pop('normalize_activations', None)
         if normalize_activations is None:
             normalize_activations = 'constant_norm_rescale'
-        # JumpReLU uses L0 loss with sparsity_coeff instead of L1
-        # Map l1_alpha to sparsity_coeff for consistency
+        # JumpReLU uses L0 loss with sparsity_coeff (applied to normalized L0 fraction)
+        # Do NOT fall back to l1_alpha — they are on completely different scales
         sparsity_coeff = kwargs.pop('sparsity_coeff', None)
         if sparsity_coeff is None:
-            sparsity_coeff = l1_alpha
+            sparsity_coeff = 0.4  # Default for fraction-based L0
         return JumpReLUSAE(
             d_model=hidden_dim,
             d_sae=latent_dim,

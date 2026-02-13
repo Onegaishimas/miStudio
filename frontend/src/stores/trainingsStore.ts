@@ -188,7 +188,7 @@ const defaultConfig: TrainingConfig = {
   // These are only used when architecture_type === 'jumprelu'
   initial_threshold: 0.001, // Initial threshold for JumpReLU activation
   bandwidth: 0.001, // KDE bandwidth for STE gradient estimation
-  sparsity_coeff: 0.0006, // L0 sparsity coefficient (6e-4 per Gemma Scope paper)
+  sparsity_coeff: 0.4, // L0 sparsity coefficient (applied to normalized L0 fraction)
   normalize_decoder: true, // Normalize decoder columns to unit norm
 
   // Training - optimized for SAE quality (larger batch = more stable gradients)

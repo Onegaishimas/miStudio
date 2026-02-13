@@ -93,8 +93,8 @@ class TrainingHyperparameters(BaseModel):
     sparsity_coeff: Optional[float] = Field(
         None,
         gt=0,
-        le=1.0,
-        description="L0 sparsity coefficient for JumpReLU (default: 6e-4 per Gemma Scope). Overrides l1_alpha for JumpReLU."
+        le=10.0,
+        description="L0 sparsity coefficient for JumpReLU (default: 0.4). Applied to normalized L0 fraction [0,1]. Range: 0.1-2.0 typical."
     )
     normalize_decoder: bool = Field(
         True,
