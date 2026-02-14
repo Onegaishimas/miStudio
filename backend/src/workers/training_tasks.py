@@ -735,6 +735,27 @@ def train_sae_task(
         feature_activation_ema = {}  # Key: sae_key, Value: tensor [latent_dim]
         ema_window_tokens = 50000  # Approximate token window for EMA decay
 
+        # Data-driven threshold calibration for JumpReLU
+        # Sets thresholds from actual pre-activation distribution so features start active
+        if architecture_type == 'jumprelu' and use_cached_activations:
+            target_l0_frac = hp.get('target_l0', 0.05) or 0.05
+            cal_size = min(4096, num_samples)
+            logger.info(f"JumpReLU threshold calibration: sampling {cal_size} activations (target L0: {target_l0_frac*100:.1f}%)")
+            for sae_key, model in models.items():
+                layer_idx, hook_type = sae_key
+                cal_indices = torch.randint(0, num_samples, (cal_size,), device=device)
+                cal_batch = cached_activations[sae_key][cal_indices]
+                thresholds = model.calibrate_thresholds(cal_batch, target_l0_frac)
+                actual_l0 = ((cal_batch @ model.W_enc.T + model.b_enc) > thresholds.unsqueeze(0)).float().mean().item()
+                logger.info(
+                    f"  L{layer_idx}/{hook_type}: threshold mean={thresholds.mean().item():.4f}, "
+                    f"range=[{thresholds.min().item():.4f}, {thresholds.max().item():.4f}], "
+                    f"calibrated L0={actual_l0:.4f}"
+                )
+            # Update base_sparsity_coeffs since model params may have changed
+            for sae_key, model in models.items():
+                base_sparsity_coeffs[sae_key] = model.sparsity_coeff
+
         for step in range(total_steps):
             # Check for pause/stop signals
             with self.get_db() as db:
@@ -866,6 +887,20 @@ def train_sae_task(
                                     f"Failed to capture activations for layer {layer_idx}/{hook_type}. "
                                     f"Hook registration failed. Available keys: {list(hook_manager.activations.keys())}"
                                 )
+
+                # Data-driven threshold calibration for on-the-fly mode (step 0 only)
+                if step == 0 and architecture_type == 'jumprelu' and not use_cached_activations:
+                    target_l0_frac = hp.get('target_l0', 0.05) or 0.05
+                    logger.info(f"JumpReLU threshold calibration from first batch (target L0: {target_l0_frac*100:.1f}%)")
+                    for sae_key, model in models.items():
+                        x_cal = layer_activations[sae_key]
+                        thresholds = model.calibrate_thresholds(x_cal, target_l0_frac)
+                        logger.info(
+                            f"  {sae_key}: threshold mean={thresholds.mean().item():.4f}, "
+                            f"range=[{thresholds.min().item():.4f}, {thresholds.max().item():.4f}]"
+                        )
+                    for sae_key, model in models.items():
+                        base_sparsity_coeffs[sae_key] = model.sparsity_coeff
 
                 # Train all SAEs (one per layer/hook_type combination)
                 layer_losses = {}  # Key: (layer_idx, hook_type)

@@ -610,14 +610,23 @@ class JumpReLUFunction(Function):
     """
 
     @staticmethod
-    def forward(ctx, z: torch.Tensor, threshold: torch.Tensor, bandwidth: float = 0.001):
+    def forward(
+        ctx,
+        z: torch.Tensor,
+        threshold: torch.Tensor,
+        bandwidth: float = 0.001,
+        ste_bandwidth: float = 0.5,
+    ):
         """
         Forward pass for JumpReLU activation.
 
         Args:
             z: Pre-activations [batch, latent_dim]
             threshold: Per-feature thresholds [latent_dim]
-            bandwidth: KDE bandwidth for STE gradient estimation (ε)
+            bandwidth: KDE bandwidth for threshold gradient estimation (ε)
+            ste_bandwidth: Sigmoid STE bandwidth for z gradients — controls
+                how much reconstruction gradient leaks through to inactive
+                features. Larger values = more gradient to dead features.
 
         Returns:
             Activated features with threshold gating
@@ -632,6 +641,7 @@ class JumpReLUFunction(Function):
         # Save for backward pass
         ctx.save_for_backward(z, threshold, gate)
         ctx.bandwidth = bandwidth
+        ctx.ste_bandwidth = ste_bandwidth
 
         return output
 
@@ -640,35 +650,33 @@ class JumpReLUFunction(Function):
         """
         Backward pass using Straight-Through Estimator.
 
-        For z: Standard gradient through gate
-        For θ: KDE approximation of step function derivative
+        For z: Sigmoid STE — smooth approximation of the hard gate that allows
+            reconstruction gradients to flow to inactive (dead) features.
+            Without this, dead features get ZERO gradient from reconstruction
+            loss and can never recover (the root cause of dead neuron collapse).
+        For θ: KDE approximation of step function derivative (unchanged).
         """
         z, threshold, gate = ctx.saved_tensors
         bandwidth = ctx.bandwidth
+        ste_bandwidth = ctx.ste_bandwidth
 
-        # Gradient w.r.t. z: pass through where gate is active
-        # grad_z = grad_output * gate
-        grad_z = grad_output * gate
+        # Gradient w.r.t. z: sigmoid STE for smooth gradient flow
+        # Forward uses hard Heaviside H(z-θ), backward uses σ((z-θ)/b)
+        # Active features (z >> θ): sigmoid ≈ 1.0, same as hard gate
+        # Near-threshold features: sigmoid ≈ 0.5, partial gradient
+        # Inactive features (z << θ): sigmoid > 0, allowing recovery
+        ste_gate = torch.sigmoid((z - threshold) / ste_bandwidth)
+        grad_z = grad_output * ste_gate
 
         # Gradient w.r.t. threshold using KDE (Gaussian kernel)
-        # The derivative of Heaviside is approximated by a Gaussian kernel
-        # centered at the threshold with bandwidth ε
         # d/dθ H(z - θ) ≈ -1/(ε√(2π)) * exp(-(z-θ)²/(2ε²))
-        # This gives gradient that pushes threshold toward where z values are
-
-        # Compute distance from threshold
         delta = z - threshold
-
-        # Gaussian kernel density estimate
-        # K(u) = 1/(ε√(2π)) * exp(-u²/(2ε²))
         kernel = torch.exp(-0.5 * (delta / bandwidth) ** 2) / (bandwidth * math.sqrt(2 * math.pi))
 
-        # Gradient of threshold: negative because increasing θ decreases activation
-        # Sum over batch dimension, keeping feature dimension
         # grad_θ = -sum_batch(grad_output * z * kernel)
         grad_threshold = -(grad_output * z * kernel).sum(dim=0)
 
-        return grad_z, grad_threshold, None  # None for bandwidth (not a tensor)
+        return grad_z, grad_threshold, None, None  # None for bandwidth, ste_bandwidth
 
 
 class JumpReLU(nn.Module):
@@ -696,11 +704,13 @@ class JumpReLU(nn.Module):
         num_features: int,
         initial_threshold: float = 0.5,
         bandwidth: float = 0.01,
+        ste_bandwidth: float = 0.5,
     ):
         super().__init__()
 
         self.num_features = num_features
         self.bandwidth = bandwidth
+        self.ste_bandwidth = ste_bandwidth
 
         # Learnable thresholds initialized to small positive value
         # Using log-space to ensure thresholds stay positive
@@ -723,7 +733,7 @@ class JumpReLU(nn.Module):
         Returns:
             Activated features with threshold gating
         """
-        return JumpReLUFunction.apply(z, self.threshold, self.bandwidth)
+        return JumpReLUFunction.apply(z, self.threshold, self.bandwidth, self.ste_bandwidth)
 
     def extra_repr(self) -> str:
         return f'num_features={self.num_features}, bandwidth={self.bandwidth}'
@@ -804,10 +814,13 @@ class JumpReLUSAE(nn.Module):
         self.b_dec = nn.Parameter(torch.zeros(d_model))
 
         # JumpReLU activation with learnable thresholds
+        # ste_bandwidth=0.5 gives sigmoid STE in backward pass so dead features
+        # get reconstruction gradient and can recover (see JumpReLUFunction.backward)
         self.activation = JumpReLU(
             num_features=d_sae,
             initial_threshold=initial_threshold,
             bandwidth=bandwidth,
+            ste_bandwidth=0.5,
         )
 
         # Initialize weights following Gemma Scope methodology
@@ -875,6 +888,36 @@ class JumpReLUSAE(nn.Module):
         if self.normalize_activations == 'constant_norm_rescale':
             return x / norm_coeff
         return x
+
+    def calibrate_thresholds(self, x: torch.Tensor, target_l0: float = 0.05) -> torch.Tensor:
+        """
+        Set per-feature thresholds from the actual pre-activation distribution.
+
+        Instead of using a fixed initial_threshold (e.g. 0.5) that may leave
+        most features dead from the start, this computes the (1 - target_l0)
+        percentile of pre-activations per feature and sets thresholds there.
+
+        Args:
+            x: Calibration activations [batch, d_model] (raw, pre-normalization)
+            target_l0: Target fraction of active features (default: 0.05 = 5%)
+
+        Returns:
+            Calibrated threshold tensor [d_sae]
+        """
+        with torch.no_grad():
+            x_normalized, _ = self.normalize(x)
+            z = F.linear(x_normalized, self.W_enc, self.b_enc)
+
+            # Set threshold at (1 - target_l0) percentile per feature
+            # E.g., target_l0=0.05 → 95th percentile → ~5% of samples activate
+            percentile = 1.0 - target_l0
+            thresholds = torch.quantile(z, percentile, dim=0)
+
+            # Clamp to positive (log-space parameterization requires θ > 0)
+            thresholds = torch.clamp(thresholds, min=1e-4)
+
+            self.activation.log_threshold.data = torch.log(thresholds)
+        return thresholds
 
     def encode(self, x: torch.Tensor, return_pre_activations: bool = False):
         """
