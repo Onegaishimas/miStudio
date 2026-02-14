@@ -751,43 +751,38 @@ export const HYPERPARAMETER_DOCS: Record<string, HyperparameterDoc> = {
   },
 
   sparsity_coeff: {
-    name: 'L0 Sparsity Coefficient (λ₀)',
+    name: 'L0 Sparsity Coefficient (λ)',
     purpose: 'Controls the strength of the L0 sparsity penalty in JumpReLU. This is the key sparsity hyperparameter for JumpReLU (replaces l1_alpha).',
     description:
-      'JumpReLU uses a differentiable sigmoid surrogate for L0 loss, normalized to a fraction [0,1]. Loss = reconstruction_loss + λ₀ × L0_fraction. The sparsity_coeff (λ₀) controls how much the model is penalized for activating features. With normalized L0, sparsity_coeff is independent of SAE width.',
+      'JumpReLU uses L0 loss: L = E[||x - x̂||² + λ · ||f||₀], matching the Gemma Scope / SAELens formulation. The L0 is the raw count of active features per sample (not normalized). λ controls the sparsity-reconstruction tradeoff.',
     examples: [
       {
-        value: 0.1,
-        effect: 'Weak L0 penalty → Dense features (L0 > 10%)',
+        value: 1e-5,
+        effect: 'Weak L0 penalty → More features active',
         useCase: 'Prioritizing reconstruction over sparsity',
       },
       {
-        value: 0.4,
-        effect: 'Default L0 penalty → Balanced sparsity (L0 ≈ 3-5%)',
+        value: 1e-4,
+        effect: 'Default → Balanced sparsity',
         useCase: 'Standard JumpReLU training',
       },
       {
-        value: 1.0,
-        effect: 'Moderate L0 penalty → Sparser features (L0 ≈ 1-3%)',
-        useCase: 'When you need very sparse features',
-      },
-      {
-        value: 3.0,
-        effect: 'Strong L0 penalty → Risk of dead features',
-        useCase: 'NOT RECOMMENDED: May collapse features',
+        value: 1e-3,
+        effect: 'Strong L0 penalty → Fewer active features',
+        useCase: 'When you need very sparse, interpretable features',
       },
     ],
     recommendations: [
-      'Default: 0.4 (applied to normalized L0 fraction)',
+      'Default: 1e-4 (applied to raw L0 count, Gemma Scope formulation)',
       'This replaces l1_alpha for JumpReLU architecture',
       'Lower values → more features active → better reconstruction',
       'Higher values → fewer features active → better interpretability',
-      'Range: 0.1-2.0. Independent of latent_dim (unlike old raw-count L0)',
+      'Tune to achieve desired L0 count for your model and latent_dim',
     ],
     relatedParams: ['initial_threshold', 'l1_alpha', 'target_l0'],
     warnings: [
-      'Values > 5.0 may cause feature collapse',
-      'L0 uses differentiable sigmoid surrogate for proper gradient flow',
+      'Coefficient scale depends on latent_dim and model — tune empirically',
+      'L0 uses STE (Straight-Through Estimator) for gradient flow through Heaviside',
     ],
   },
 

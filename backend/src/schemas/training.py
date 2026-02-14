@@ -94,7 +94,7 @@ class TrainingHyperparameters(BaseModel):
         None,
         gt=0,
         le=10.0,
-        description="L0 sparsity coefficient for JumpReLU (default: 0.4). Applied to normalized L0 fraction [0,1]. Range: 0.1-2.0 typical."
+        description="L0 sparsity coefficient (λ) for JumpReLU. Applied to raw L0 count per sample (Gemma Scope formulation). Default: 1e-4. Typical range: 1e-5 to 1e-3."
     )
     normalize_decoder: bool = Field(
         True,

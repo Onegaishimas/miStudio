@@ -79,24 +79,20 @@ class TrainingValidator:
             return warnings, errors
 
         # JumpReLU uses sparsity_coeff (L0 penalty), not l1_alpha (L1 penalty)
+        # L0 is raw count per sample (Gemma Scope / SAELens formulation)
         if architecture_type == 'jumprelu':
             sparsity_coeff = hyperparameters.get('sparsity_coeff')
             if sparsity_coeff is None and l1_alpha is not None:
                 # sparsity_coeff falls back to l1_alpha in create_sae
                 sparsity_coeff = l1_alpha
             if sparsity_coeff is not None:
-                # L0 is now normalized to fraction [0,1]. Recommended range: 0.1 to 2.0
-                if sparsity_coeff > 5.0:
+                # With count-based L0, typical range is 1e-5 to 1e-2
+                # Only warn at extremes — users should be free to tune
+                if sparsity_coeff > 1.0:
                     warnings.append(
-                        f"⚠️  sparsity_coeff ({sparsity_coeff}) is very high for JumpReLU. "
-                        f"Recommended range: 0.1 to 2.0 (default: 0.4). "
-                        f"High sparsity_coeff will cause excessive dead neurons."
-                    )
-                elif sparsity_coeff < 0.01:
-                    warnings.append(
-                        f"⚠️  sparsity_coeff ({sparsity_coeff}) is very low for JumpReLU. "
-                        f"Recommended range: 0.1 to 2.0 (default: 0.4). "
-                        f"Low sparsity_coeff will produce dense, uninterpretable features."
+                        f"⚠️  sparsity_coeff ({sparsity_coeff}) is very high for count-based L0. "
+                        f"Typical range: 1e-5 to 1e-3 (default: 1e-4). "
+                        f"High values will cause excessive dead neurons."
                     )
         else:
             # Standard/Skip/Transcoder: validate l1_alpha

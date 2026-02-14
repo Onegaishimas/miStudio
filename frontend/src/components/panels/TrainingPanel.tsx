@@ -170,7 +170,7 @@ export const TrainingPanel: React.FC = () => {
 
     // Add JumpReLU-specific parameters if applicable
     if (config.architecture_type === SAEArchitectureType.JUMPRELU) {
-      const sparsityCoeff = (config as any).sparsity_coeff ?? 0.4;
+      const sparsityCoeff = (config as any).sparsity_coeff ?? 0.0001;
       const initialThreshold = (config as any).initial_threshold ?? 0.5;
       const bandwidth = (config as any).bandwidth ?? 0.01;
       descParts.push(`SparsityCoeff: ${sparsityCoeff}`);
@@ -1245,15 +1245,15 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="sparsity-coeff"
                         type="number"
-                        value={(config as any).sparsity_coeff ?? 0.4}
+                        value={(config as any).sparsity_coeff ?? 0.0001}
                         onChange={(e) => updateConfig({ sparsity_coeff: parseFloat(e.target.value) } as any)}
-                        min={0.01}
+                        min={0.000001}
                         max={10.0}
-                        step={0.1}
+                        step={0.00001}
                         className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        L0 penalty applied to normalized sparsity fraction. Default: 0.4. Range: 0.1-2.0.
+                        L0 penalty coefficient (λ) applied to raw feature count (Gemma Scope formulation). Default: 1e-4.
                       </p>
                     </div>
 
