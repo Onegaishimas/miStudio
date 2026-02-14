@@ -390,8 +390,8 @@ def train_sae_task(
                 normalize_activations=hp.get('normalize_activations', 'constant_norm_rescale'),
                 top_k_sparsity=hp.get('top_k_sparsity', None),
                 # JumpReLU-specific parameters
-                initial_threshold=hp.get('initial_threshold', 0.001),
-                bandwidth=hp.get('bandwidth', 0.001),
+                initial_threshold=hp.get('initial_threshold', 0.5),
+                bandwidth=hp.get('bandwidth', 0.01),
                 sparsity_coeff=hp.get('sparsity_coeff'),
                 normalize_decoder=hp.get('normalize_decoder', True),
             ).to(device)

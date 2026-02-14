@@ -186,8 +186,8 @@ const defaultConfig: TrainingConfig = {
 
   // JumpReLU-specific parameters (Gemma Scope architecture)
   // These are only used when architecture_type === 'jumprelu'
-  initial_threshold: 0.001, // Initial threshold for JumpReLU activation
-  bandwidth: 0.001, // KDE bandwidth for STE gradient estimation
+  initial_threshold: 0.5, // Initial threshold for JumpReLU activation (matches pre-activation scale ~0.5)
+  bandwidth: 0.01, // KDE bandwidth for STE gradient estimation (10x wider for better gradient coverage)
   sparsity_coeff: 0.4, // L0 sparsity coefficient (applied to normalized L0 fraction)
   normalize_decoder: true, // Normalize decoder columns to unit norm
 

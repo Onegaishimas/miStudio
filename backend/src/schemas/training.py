@@ -79,16 +79,16 @@ class TrainingHyperparameters(BaseModel):
 
     # JumpReLU-specific parameters (Gemma Scope architecture)
     initial_threshold: Optional[float] = Field(
-        0.001,
+        0.5,
         gt=0,
-        le=1.0,
-        description="Initial threshold value for JumpReLU activation (default: 0.001)"
+        le=5.0,
+        description="Initial threshold value for JumpReLU activation (default: 0.5). Should be close to expected pre-activation magnitude."
     )
     bandwidth: Optional[float] = Field(
-        0.001,
+        0.01,
         gt=0,
         le=1.0,
-        description="KDE bandwidth (epsilon) for STE gradient estimation in JumpReLU (default: 0.001)"
+        description="KDE bandwidth (epsilon) for STE gradient estimation in JumpReLU (default: 0.01)"
     )
     sparsity_coeff: Optional[float] = Field(
         None,

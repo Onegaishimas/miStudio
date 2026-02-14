@@ -171,8 +171,8 @@ export const TrainingPanel: React.FC = () => {
     // Add JumpReLU-specific parameters if applicable
     if (config.architecture_type === SAEArchitectureType.JUMPRELU) {
       const sparsityCoeff = (config as any).sparsity_coeff ?? 0.4;
-      const initialThreshold = (config as any).initial_threshold ?? 0.001;
-      const bandwidth = (config as any).bandwidth ?? 0.001;
+      const initialThreshold = (config as any).initial_threshold ?? 0.5;
+      const bandwidth = (config as any).bandwidth ?? 0.01;
       descParts.push(`SparsityCoeff: ${sparsityCoeff}`);
       descParts.push(`Thresh: ${initialThreshold}`);
       descParts.push(`BW: ${bandwidth}`);
@@ -1268,15 +1268,15 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="initial-threshold"
                         type="number"
-                        value={(config as any).initial_threshold ?? 0.001}
+                        value={(config as any).initial_threshold ?? 0.5}
                         onChange={(e) => updateConfig({ initial_threshold: parseFloat(e.target.value) } as any)}
-                        min={0.00001}
-                        max={1.0}
-                        step={0.0001}
+                        min={0.001}
+                        max={5.0}
+                        step={0.1}
                         className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        Starting threshold for JumpReLU activation. Each feature learns its own optimal threshold.
+                        Starting threshold for JumpReLU activation. Should match pre-activation magnitude (~0.5 with constant_norm_rescale).
                       </p>
                     </div>
 
@@ -1291,15 +1291,15 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="bandwidth"
                         type="number"
-                        value={(config as any).bandwidth ?? 0.001}
+                        value={(config as any).bandwidth ?? 0.01}
                         onChange={(e) => updateConfig({ bandwidth: parseFloat(e.target.value) } as any)}
-                        min={0.00001}
-                        max={0.1}
-                        step={0.0001}
+                        min={0.001}
+                        max={0.5}
+                        step={0.001}
                         className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        Smoothness of STE gradient estimation. Default: 0.001.
+                        Smoothness of STE gradient estimation. Wider = more features get gradient. Default: 0.01.
                       </p>
                     </div>
 

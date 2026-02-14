@@ -687,15 +687,15 @@ class JumpReLU(nn.Module):
 
     Args:
         num_features: Number of features (latent_dim)
-        initial_threshold: Initial threshold value (default: 0.001)
-        bandwidth: KDE bandwidth for STE gradient estimation (default: 0.001)
+        initial_threshold: Initial threshold value (default: 0.5)
+        bandwidth: KDE bandwidth for STE gradient estimation (default: 0.01)
     """
 
     def __init__(
         self,
         num_features: int,
-        initial_threshold: float = 0.001,
-        bandwidth: float = 0.001,
+        initial_threshold: float = 0.5,
+        bandwidth: float = 0.01,
     ):
         super().__init__()
 
@@ -753,10 +753,11 @@ class JumpReLUSAE(nn.Module):
         d_model: Input/output dimension (model hidden size)
         d_sae: SAE latent dimension (number of features)
         sparsity_coeff: L0 sparsity penalty coefficient (λ). Applied to L0 as a
-            fraction [0,1] via differentiable sigmoid surrogate. Default 0.4 gives
-            loss_l0 ≈ 0.02 at 5% target sparsity. Range: 0.1-2.0.
-        initial_threshold: Initial JumpReLU threshold value
-        bandwidth: KDE bandwidth for threshold gradient estimation
+            fraction [0,1] via STE. Default 0.4 gives loss_l0 ≈ 0.02 at 5% target
+            sparsity. Range: 0.1-2.0.
+        initial_threshold: Initial JumpReLU threshold value (default: 0.5, should match
+            pre-activation magnitude with constant_norm_rescale normalization)
+        bandwidth: KDE bandwidth for STE gradient estimation (default: 0.01)
         normalize_decoder: Whether to normalize decoder columns to unit norm
         tied_weights: Whether to tie encoder/decoder weights (not recommended)
 
@@ -770,8 +771,8 @@ class JumpReLUSAE(nn.Module):
         d_model: int,
         d_sae: int,
         sparsity_coeff: float = 0.4,
-        initial_threshold: float = 0.001,
-        bandwidth: float = 0.001,
+        initial_threshold: float = 0.5,
+        bandwidth: float = 0.01,
         normalize_decoder: bool = True,
         tied_weights: bool = False,
         normalize_activations: str = 'constant_norm_rescale',
@@ -1151,10 +1152,10 @@ def create_sae(
         # (hp.get() may pass explicit None values which we should treat as "use default")
         initial_threshold = kwargs.pop('initial_threshold', None)
         if initial_threshold is None:
-            initial_threshold = 0.001
+            initial_threshold = 0.5
         bandwidth = kwargs.pop('bandwidth', None)
         if bandwidth is None:
-            bandwidth = 0.001
+            bandwidth = 0.01
         normalize_decoder = kwargs.pop('normalize_decoder', None)
         if normalize_decoder is None:
             normalize_decoder = True
