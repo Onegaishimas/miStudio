@@ -233,6 +233,51 @@ export const TrainingPanel: React.FC = () => {
     fetchExtractions();
   }, [config.model_id]);
 
+  // Filter extractions to only those matching selected datasets
+  const filteredExtractions = useMemo(() => {
+    if (!config.dataset_ids || config.dataset_ids.length === 0) return availableExtractions;
+    return availableExtractions.filter(
+      (ext: any) => ext.dataset_id && config.dataset_ids?.includes(ext.dataset_id)
+    );
+  }, [availableExtractions, config.dataset_ids]);
+
+  // Check if selected extraction covers all selected datasets
+  const extractionCoverageWarning = useMemo(() => {
+    if (!config.extraction_id || config.extraction_id.trim() === '') return null;
+    if (!config.dataset_ids || config.dataset_ids.length <= 1) return null;
+
+    const selectedExtraction = availableExtractions.find(
+      (ext: any) => ext.extraction_id === config.extraction_id
+    );
+    if (!selectedExtraction?.dataset_id) return null;
+
+    const uncoveredIds = config.dataset_ids.filter(id => id !== selectedExtraction.dataset_id);
+    if (uncoveredIds.length === 0) return null;
+
+    // Look up dataset names
+    const coveredDataset = datasets.find(d => d.id === selectedExtraction.dataset_id);
+    const uncoveredDatasets = uncoveredIds
+      .map(id => datasets.find(d => d.id === id))
+      .filter(Boolean);
+
+    return {
+      coveredName: coveredDataset?.name || selectedExtraction.dataset_id,
+      uncoveredNames: uncoveredDatasets.map(d => d!.name || d!.id),
+    };
+  }, [config.extraction_id, config.dataset_ids, availableExtractions, datasets]);
+
+  // Clear extraction_id if the selected extraction is no longer in the filtered list
+  useEffect(() => {
+    if (config.extraction_id && config.extraction_id.trim() !== '' && filteredExtractions.length > 0) {
+      const stillAvailable = filteredExtractions.some(
+        (ext: any) => ext.extraction_id === config.extraction_id
+      );
+      if (!stillAvailable) {
+        updateConfig({ extraction_id: '' });
+      }
+    }
+  }, [filteredExtractions, config.extraction_id, updateConfig]);
+
   // Subscribe to WebSocket updates for all trainings
   useTrainingWebSocket(trainings.map((t) => t.id));
 
@@ -407,8 +452,9 @@ export const TrainingPanel: React.FC = () => {
     return null;
   }, [selectedModel, firstSelectedDataset]);
 
-  // Validation - require at least one dataset
-  const isFormValid = config.model_id && config.dataset_ids && config.dataset_ids.length > 0 && config.training_layers && config.training_layers.length > 0 && !vocabMismatch;
+  // Validation - require at least one dataset; if cached activations checkbox is checked, require an extraction selection
+  const extractionValid = config.extraction_id === undefined || (config.extraction_id && config.extraction_id.trim() !== '');
+  const isFormValid = config.model_id && config.dataset_ids && config.dataset_ids.length > 0 && config.training_layers && config.training_layers.length > 0 && !vocabMismatch && extractionValid;
 
   // Selection handlers
   const handleToggleSelection = (trainingId: string) => {
@@ -855,44 +901,64 @@ export const TrainingPanel: React.FC = () => {
                   </p>
                   {(config.extraction_id !== undefined) && (
                     <>
-                      {availableExtractions.length > 0 ? (
-                        <select
-                          id="extraction-id"
-                          value={config.extraction_id || ''}
-                          onChange={(e) => updateConfig({ extraction_id: e.target.value || undefined })}
-                          className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
-                        >
-                          <option value="">Select an extraction...</option>
-                          {availableExtractions.map((extraction) => {
-                            const layerCount = extraction.layer_indices?.length || 0;
-                            const sampleCount = extraction.num_samples_processed || extraction.samples_processed || 0;
-                            const createdDateTime = extraction.created_at
-                              ? new Date(extraction.created_at).toLocaleString()
-                              : 'Unknown date/time';
+                      {filteredExtractions.length > 0 ? (
+                        <>
+                          <select
+                            id="extraction-id"
+                            value={config.extraction_id || ''}
+                            onChange={(e) => updateConfig({ extraction_id: e.target.value || undefined })}
+                            className={`w-full px-3 py-2 bg-slate-800 border rounded-md text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors ${
+                              config.extraction_id === '' ? 'border-amber-600/50' : 'border-slate-700'
+                            }`}
+                          >
+                            <option value="">Select an extraction...</option>
+                            {filteredExtractions.map((extraction) => {
+                              const layerCount = extraction.layer_indices?.length || 0;
+                              const sampleCount = extraction.num_samples_processed || extraction.samples_processed || 0;
+                              const createdDateTime = extraction.created_at
+                                ? new Date(extraction.created_at).toLocaleString()
+                                : 'Unknown date/time';
 
-                            // Look up model name from models store
-                            const extractionModel = models.find(m => m.id === extraction.model_id);
-                            const modelName = extractionModel?.name || extraction.model_id || 'Unknown model';
+                              // Look up dataset name
+                              const extractionDataset = datasets.find(d => d.id === extraction.dataset_id);
+                              const datasetName = extractionDataset?.name || 'Unknown dataset';
 
-                            return (
-                              <option key={extraction.extraction_id} value={extraction.extraction_id}>
-                                {extraction.extraction_id} | {modelName} | {layerCount} layer{layerCount !== 1 ? 's' : ''}, {sampleCount.toLocaleString()} samples | {createdDateTime}
-                              </option>
-                            );
-                          })}
-                        </select>
+                              return (
+                                <option key={extraction.extraction_id} value={extraction.extraction_id}>
+                                  {datasetName} | {layerCount} layer{layerCount !== 1 ? 's' : ''}, {sampleCount.toLocaleString()} samples | {createdDateTime}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          {config.extraction_id === '' && (
+                            <p className="text-xs text-amber-500 mt-1">Please select an extraction to use cached activations.</p>
+                          )}
+                          {extractionCoverageWarning && (
+                            <div className="mt-2 p-2 bg-amber-900/20 border border-amber-600/40 rounded-md flex gap-2">
+                              <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                              <div className="text-xs text-amber-400">
+                                <p>This extraction only covers <span className="font-semibold text-amber-300">{extractionCoverageWarning.coveredName}</span>.</p>
+                                <p className="mt-0.5">Not included: {extractionCoverageWarning.uncoveredNames.join(', ')}. Training will use only the extraction&apos;s dataset.</p>
+                              </div>
+                            </div>
+                          )}
+                        </>
                       ) : isLoadingExtractions ? (
                         <div className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 text-sm flex items-center gap-2">
                           <Loader size={14} className="animate-spin" />
                           <span>Loading available extractions...</span>
                         </div>
+                      ) : config.model_id && config.dataset_ids && config.dataset_ids.length > 0 ? (
+                        <div className="text-sm text-slate-400 italic">
+                          No completed extractions for the selected model and dataset{config.dataset_ids.length > 1 ? 's' : ''}. Run an extraction first in the Extractions panel.
+                        </div>
                       ) : config.model_id ? (
                         <div className="text-sm text-slate-400 italic">
-                          No completed extractions available for this model. Please complete an extraction first in the Extractions panel.
+                          Select datasets to see available extractions.
                         </div>
                       ) : (
                         <div className="text-sm text-slate-400 italic">
-                          Select a model first to see available extractions.
+                          Select a model and datasets first to see available extractions.
                         </div>
                       )}
                     </>

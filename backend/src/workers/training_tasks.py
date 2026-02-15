@@ -511,6 +511,22 @@ def train_sae_task(
                 if extraction.status != "completed":
                     raise ValueError(f"Extraction {training.extraction_id} is not completed (status: {extraction.status})")
 
+                # Validate extraction dataset coverage
+                training_dataset_ids = training.dataset_ids if training.dataset_ids else [training.dataset_id]
+                if extraction.dataset_id not in training_dataset_ids:
+                    logger.warning(
+                        f"Extraction {extraction.id} was created for dataset '{extraction.dataset_id}', "
+                        f"which is not in the training's selected datasets {training_dataset_ids}. "
+                        f"Training will use only the extraction's cached activations."
+                    )
+                elif len(training_dataset_ids) > 1:
+                    uncovered = [ds_id for ds_id in training_dataset_ids if ds_id != extraction.dataset_id]
+                    logger.warning(
+                        f"Extraction {extraction.id} covers only dataset '{extraction.dataset_id}'. "
+                        f"Datasets not covered by cached activations: {uncovered}. "
+                        f"Training will use only the extraction's cached activations."
+                    )
+
             extraction_path = settings.resolve_data_path(extraction.output_path)
             logger.info(f"Loading activations from: {extraction_path}")
 
@@ -520,6 +536,18 @@ def train_sae_task(
                 extraction_metadata = json.load(f)
 
             logger.info(f"Extraction metadata: {extraction_metadata['num_samples_processed']} samples")
+
+            # Validate that extraction layer_indices cover all requested training layers
+            extraction_layers = set(extraction_metadata.get('layer_indices', []))
+            requested_layers = set(hp.get('training_layers', []))
+            missing_layers = requested_layers - extraction_layers
+            if missing_layers:
+                raise ValueError(
+                    f"Extraction is missing layers {sorted(missing_layers)}. "
+                    f"Available layers in extraction: {sorted(extraction_layers)}. "
+                    f"Requested training layers: {sorted(requested_layers)}. "
+                    f"Please re-extract with the required layers or adjust training_layers."
+                )
 
             # Get available hook types from extraction
             available_hook_types = extraction_metadata.get('hook_types', ['residual'])
