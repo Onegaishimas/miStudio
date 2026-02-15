@@ -600,6 +600,14 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   {training.hyperparameters.sparsity_coeff}
                 </span>
               </>
+            ) : training.hyperparameters?.top_k_sparsity ? (
+              <>
+                <span className="text-slate-400">L1 Alpha: </span>
+                <span className="text-slate-500 font-medium line-through">
+                  {training.hyperparameters?.l1_alpha ?? 'N/A'}
+                </span>
+                <span className="text-slate-500 text-xs ml-1">(disabled by Top-K)</span>
+              </>
             ) : (
               <>
                 <span className="text-slate-400">L1 Alpha: </span>
@@ -613,7 +621,10 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             <div>
               <span className="text-slate-400">Top-K: </span>
               <span className="text-emerald-400 font-medium">
-                {training.hyperparameters.top_k_sparsity}%
+                K={Math.round((training.hyperparameters.top_k_sparsity / 100) * (training.hyperparameters.latent_dim || 0))}
+              </span>
+              <span className="text-slate-500 text-xs ml-1">
+                ({training.hyperparameters.top_k_sparsity.toFixed(2)}%)
               </span>
             </div>
           )}
@@ -1294,9 +1305,12 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   )}
                   {training.hyperparameters.top_k_sparsity && (
                     <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
-                      <div className="text-xs text-slate-400 mb-1">Top-K Sparsity</div>
+                      <div className="text-xs text-slate-400 mb-1">Top-K Active Features</div>
                       <div className="text-sm text-emerald-400 font-medium">
-                        {training.hyperparameters.top_k_sparsity}%
+                        K = {Math.round((training.hyperparameters.top_k_sparsity / 100) * (training.hyperparameters.latent_dim || 0))}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {training.hyperparameters.top_k_sparsity.toFixed(2)}% of {(training.hyperparameters.latent_dim || 0).toLocaleString()}
                       </div>
                     </div>
                   )}

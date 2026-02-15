@@ -77,6 +77,7 @@ export const TrainingPanel: React.FC = () => {
   const [selectedTrainingIds, setSelectedTrainingIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [latentMultiplier, setLatentMultiplier] = useState(8);
+  const [topKValue, setTopKValue] = useState<number | null>(null);
   const [availableExtractions, setAvailableExtractions] = useState<any[]>([]);
   const [isLoadingExtractions, setIsLoadingExtractions] = useState(false);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
@@ -377,6 +378,27 @@ export const TrainingPanel: React.FC = () => {
       updateConfig({ latent_dim: calculatedLatentDim });
     }
   }, [config.hidden_dim, latentMultiplier]);
+
+  // Sync topKValue (K features) ↔ top_k_sparsity (percentage) for backend
+  useEffect(() => {
+    if (topKValue !== null && config.latent_dim > 0) {
+      const percentage = (topKValue / config.latent_dim) * 100;
+      updateConfig({ top_k_sparsity: percentage } as any);
+    } else if (topKValue === null) {
+      updateConfig({ top_k_sparsity: undefined } as any);
+    }
+  }, [topKValue, config.latent_dim]);
+
+  // Initialize topKValue from existing top_k_sparsity (e.g., when loading a template)
+  useEffect(() => {
+    const topKSparsity = (config as any).top_k_sparsity;
+    if (topKSparsity && config.latent_dim > 0) {
+      const k = Math.round((topKSparsity / 100) * config.latent_dim);
+      if (k !== topKValue) {
+        setTopKValue(k);
+      }
+    }
+  }, []); // Only on mount
 
   // Check for tokenizer/model vocabulary mismatch (check first dataset)
   const selectedDatasets = (config.dataset_ids || []).map(id => datasets.find(d => d.id === id)).filter(Boolean);
@@ -1122,8 +1144,8 @@ export const TrainingPanel: React.FC = () => {
                 </div>
 
                 {/* L1 Alpha with Auto-Calculate */}
-                {/* Note: L1 is irrelevant for JumpReLU which uses sparsity_coeff instead */}
-                <div className={config.architecture_type === SAEArchitectureType.JUMPRELU ? 'opacity-40' : ''}>
+                {/* Note: L1 is irrelevant for JumpReLU (uses sparsity_coeff) and when TopK is active */}
+                <div className={config.architecture_type === SAEArchitectureType.JUMPRELU || topKValue !== null ? 'opacity-40' : ''}>
                   <HyperparameterLabel
                     paramName="l1_alpha"
                     label="L1 Sparsity Coefficient"
@@ -1139,7 +1161,7 @@ export const TrainingPanel: React.FC = () => {
                       min={0.00001}
                       max={10.0}
                       step={0.00001}
-                      disabled={config.architecture_type === SAEArchitectureType.JUMPRELU}
+                      disabled={config.architecture_type === SAEArchitectureType.JUMPRELU || topKValue !== null}
                       className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors disabled:bg-slate-900 disabled:text-slate-500 disabled:cursor-not-allowed"
                     />
                     <button
@@ -1148,17 +1170,21 @@ export const TrainingPanel: React.FC = () => {
                         const optimal = calculateOptimalL1Alpha(config.latent_dim, config.target_l0 ?? 0.05);
                         updateConfig({ l1_alpha: optimal });
                       }}
-                      disabled={config.architecture_type === SAEArchitectureType.JUMPRELU}
+                      disabled={config.architecture_type === SAEArchitectureType.JUMPRELU || topKValue !== null}
                       className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-sm rounded-md transition-colors whitespace-nowrap"
-                      title={config.architecture_type === SAEArchitectureType.JUMPRELU
-                        ? 'L1 is not used for JumpReLU - use L0 Sparsity Coefficient instead'
-                        : `Calculate optimal L1 alpha for ${config.latent_dim} latent dimensions`}
+                      title={
+                        topKValue !== null
+                          ? 'L1 is disabled when Top-K is active (Top-K guarantees exact sparsity)'
+                          : config.architecture_type === SAEArchitectureType.JUMPRELU
+                            ? 'L1 is not used for JumpReLU - use L0 Sparsity Coefficient instead'
+                            : `Calculate optimal L1 alpha for ${config.latent_dim} latent dimensions`
+                      }
                     >
                       Auto
                     </button>
                   </div>
-                  {/* Sparsity Warnings - only show for non-JumpReLU architectures */}
-                  {config.architecture_type !== SAEArchitectureType.JUMPRELU && (() => {
+                  {/* Sparsity Warnings - only show when L1 is actually used */}
+                  {config.architecture_type !== SAEArchitectureType.JUMPRELU && topKValue === null && (() => {
                     const warnings = validateSparsityConfig(config.l1_alpha, config.latent_dim, config.target_l0 ?? 0.05);
                     return warnings.length > 0 ? (
                       <div className="mt-2 space-y-1">
@@ -1171,10 +1197,15 @@ export const TrainingPanel: React.FC = () => {
                       </div>
                     ) : null;
                   })()}
-                  {/* JumpReLU notice */}
+                  {/* L1 disabled notice */}
                   {config.architecture_type === SAEArchitectureType.JUMPRELU && (
                     <p className="mt-1 text-xs text-slate-500 italic">
                       L1 is not used for JumpReLU. Use "L0 Sparsity Coefficient" below instead.
+                    </p>
+                  )}
+                  {topKValue !== null && config.architecture_type !== SAEArchitectureType.JUMPRELU && (
+                    <p className="mt-1 text-xs text-slate-500 italic">
+                      L1 penalty is disabled when Top-K is active. Top-K guarantees exact sparsity.
                     </p>
                   )}
                 </div>
@@ -1199,28 +1230,52 @@ export const TrainingPanel: React.FC = () => {
                   />
                 </div>
 
-                {/* Top-K Sparsity */}
+                {/* Top-K Sparsity (input K directly) */}
                 <div>
                   <HyperparameterLabel
                     paramName="top_k_sparsity"
-                    label="Top-K Sparsity % (Hard)"
+                    label="Top-K Active Features"
                     htmlFor="top-k-sparsity"
                     className="mb-2"
                   />
-                  <input
-                    id="top-k-sparsity"
-                    type="number"
-                    value={(config as any).top_k_sparsity ?? ''}
-                    onChange={(e) => updateConfig({ top_k_sparsity: e.target.value ? parseFloat(e.target.value) : undefined } as any)}
-                    min={0.1}
-                    max={100}
-                    step={0.1}
-                    placeholder="Optional (e.g., 5 for 5%)"
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
-                  />
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="top-k-sparsity"
+                      type="number"
+                      value={topKValue ?? ''}
+                      onChange={(e) => {
+                        if (e.target.value === '') {
+                          setTopKValue(null);
+                        } else {
+                          const k = Math.max(1, Math.min(config.latent_dim, parseInt(e.target.value) || 0));
+                          setTopKValue(k);
+                        }
+                      }}
+                      min={1}
+                      max={config.latent_dim}
+                      step={1}
+                      placeholder="e.g., 64"
+                      className="w-32 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                    />
+                    {topKValue !== null && config.latent_dim > 0 && (
+                      <span className="text-slate-400 text-sm font-mono">
+                        of {config.latent_dim.toLocaleString()} features{' '}
+                        <span className="text-emerald-400">({((topKValue / config.latent_dim) * 100).toFixed(2)}%)</span>
+                      </span>
+                    )}
+                  </div>
                   <p className="mt-1 text-xs text-slate-400">
-                    Guarantees exact sparsity by keeping only top-K neurons. Leave empty for L1 penalty (soft sparsity).
+                    {topKValue !== null
+                      ? `Exactly ${topKValue} feature${topKValue !== 1 ? 's' : ''} will activate per sample. L1 penalty is disabled when Top-K is set.`
+                      : 'Number of features to keep active per sample (hard sparsity). Leave empty to use L1 penalty instead.'
+                    }
                   </p>
+                  {topKValue !== null && topKValue > config.latent_dim * 0.10 && (
+                    <p className="mt-1 text-xs text-yellow-400 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                      K is &gt;10% of features — this is quite dense. Typical range: 32-128 for {config.latent_dim.toLocaleString()} features.
+                    </p>
+                  )}
                 </div>
 
                 {/* JumpReLU-specific parameters - only shown when JumpReLU is selected */}
