@@ -488,7 +488,11 @@ def train_sae_task(
         steps_per_min_target = 100  # Minimum acceptable throughput
 
         # Check if using cached activations or need to extract on-the-fly
-        use_cached_activations = training.extraction_id is not None
+        # Support multi-extraction: extraction_ids (list) takes precedence over extraction_id (singular)
+        extraction_ids = training.extraction_ids if training.extraction_ids else (
+            [training.extraction_id] if training.extraction_id else None
+        )
+        use_cached_activations = extraction_ids is not None and len(extraction_ids) > 0
         cached_activations = {}
         dataset = None
         base_model = None
@@ -497,124 +501,114 @@ def train_sae_task(
         hook_types = None
 
         if use_cached_activations:
-            # Load cached activations from extraction
-            logger.info(f"Using cached activations from extraction: {training.extraction_id}")
             from ..models.activation_extraction import ActivationExtraction
 
+            logger.info(f"Using cached activations from {len(extraction_ids)} extraction(s): {extraction_ids}")
+
+            # Load and validate all extractions
+            extractions = []
             with self.get_db() as db:
-                extraction = db.query(ActivationExtraction).filter(
-                    ActivationExtraction.id == training.extraction_id
-                ).first()
-                if not extraction:
-                    raise ValueError(f"Extraction {training.extraction_id} not found")
+                for ext_id in extraction_ids:
+                    extraction = db.query(ActivationExtraction).filter(
+                        ActivationExtraction.id == ext_id
+                    ).first()
+                    if not extraction:
+                        raise ValueError(f"Extraction {ext_id} not found")
+                    if extraction.status != "completed":
+                        raise ValueError(f"Extraction {ext_id} is not completed (status: {extraction.status})")
+                    extractions.append(extraction)
 
-                if extraction.status != "completed":
-                    raise ValueError(f"Extraction {training.extraction_id} is not completed (status: {extraction.status})")
+            # Load activations from each extraction and concatenate
+            all_activation_parts = {}  # {(layer, hook): [tensor1, tensor2, ...]}
+            actual_hidden_dim = None
 
-                # Validate extraction dataset coverage
-                training_dataset_ids = training.dataset_ids if training.dataset_ids else [training.dataset_id]
-                if extraction.dataset_id not in training_dataset_ids:
-                    logger.warning(
-                        f"Extraction {extraction.id} was created for dataset '{extraction.dataset_id}', "
-                        f"which is not in the training's selected datasets {training_dataset_ids}. "
-                        f"Training will use only the extraction's cached activations."
-                    )
-                elif len(training_dataset_ids) > 1:
-                    uncovered = [ds_id for ds_id in training_dataset_ids if ds_id != extraction.dataset_id]
-                    logger.warning(
-                        f"Extraction {extraction.id} covers only dataset '{extraction.dataset_id}'. "
-                        f"Datasets not covered by cached activations: {uncovered}. "
-                        f"Training will use only the extraction's cached activations."
-                    )
+            for ext_idx, extraction in enumerate(extractions):
+                extraction_path = settings.resolve_data_path(extraction.output_path)
+                logger.info(f"Loading extraction {ext_idx + 1}/{len(extractions)}: {extraction.id} (dataset: {extraction.dataset_id})")
 
-            extraction_path = settings.resolve_data_path(extraction.output_path)
-            logger.info(f"Loading activations from: {extraction_path}")
+                # Load metadata
+                metadata_path = extraction_path / "metadata.json"
+                with open(metadata_path, 'r') as f:
+                    extraction_metadata = json.load(f)
 
-            # Load metadata
-            metadata_path = extraction_path / "metadata.json"
-            with open(metadata_path, 'r') as f:
-                extraction_metadata = json.load(f)
+                logger.info(f"  Metadata: {extraction_metadata['num_samples_processed']} samples")
 
-            logger.info(f"Extraction metadata: {extraction_metadata['num_samples_processed']} samples")
-
-            # Validate that extraction layer_indices cover all requested training layers
-            extraction_layers = set(extraction_metadata.get('layer_indices', []))
-            requested_layers = set(hp.get('training_layers', []))
-            missing_layers = requested_layers - extraction_layers
-            if missing_layers:
-                raise ValueError(
-                    f"Extraction is missing layers {sorted(missing_layers)}. "
-                    f"Available layers in extraction: {sorted(extraction_layers)}. "
-                    f"Requested training layers: {sorted(requested_layers)}. "
-                    f"Please re-extract with the required layers or adjust training_layers."
-                )
-
-            # Get available hook types from extraction
-            available_hook_types = extraction_metadata.get('hook_types', ['residual'])
-            logger.info(f"Available hook types in extraction: {available_hook_types}")
-
-            # Validate that all requested hook types are available in extraction
-            for ht in hook_types_config:
-                if ht not in available_hook_types:
+                # Validate layer coverage
+                extraction_layers = set(extraction_metadata.get('layer_indices', []))
+                requested_layers = set(hp.get('training_layers', []))
+                missing_layers = requested_layers - extraction_layers
+                if missing_layers:
                     raise ValueError(
-                        f"Requested hook_type '{ht}' not available in extraction. "
-                        f"Available hook types: {available_hook_types}. "
-                        f"Please re-extract activations with the desired hook type or choose from available types."
-                    )
-            logger.info(f"Using hook_types: {hook_types_config} for multi-hook training")
-
-            # Load activation files for each (layer, hook_type) combination
-            for layer_idx, hook_type in layer_hook_combinations:
-                activation_file = extraction_path / f"layer_{layer_idx}_{hook_type}.npy"
-                if not activation_file.exists():
-                    # List available files for better error message
-                    available_files = list(extraction_path.glob(f"layer_{layer_idx}_*.npy"))
-                    available_types = [f.stem.split('_')[-1] for f in available_files]
-                    raise ValueError(
-                        f"Activation file not found for layer {layer_idx} with hook_type '{hook_type}': {activation_file}. "
-                        f"Available hook types for layer {layer_idx}: {available_types}. "
-                        f"Available layers in extraction: {extraction_metadata.get('layer_indices', 'unknown')}"
+                        f"Extraction {extraction.id} is missing layers {sorted(missing_layers)}. "
+                        f"Available: {sorted(extraction_layers)}. Requested: {sorted(requested_layers)}."
                     )
 
-                logger.info(f"Loading layer {layer_idx}/{hook_type} activations from {activation_file}")
-                # Use memory-mapped loading for large files to avoid RAM exhaustion
-                # Shape: (num_samples, seq_len, hidden_dim)
-                layer_acts_mmap = np.load(activation_file, mmap_mode='r')
-                logger.info(f"  Memory-mapped shape: {layer_acts_mmap.shape}, dtype: {layer_acts_mmap.dtype}")
+                # Validate hook types
+                available_hook_types = extraction_metadata.get('hook_types', ['residual'])
+                for ht in hook_types_config:
+                    if ht not in available_hook_types:
+                        raise ValueError(
+                            f"Extraction {extraction.id}: hook_type '{ht}' not available. "
+                            f"Available: {available_hook_types}."
+                        )
 
-                # Average over sequence dimension in chunks to save RAM
-                # (num_samples, seq_len, hidden_dim) -> (num_samples, hidden_dim)
-                num_samples_in_file, seq_len, hidden_dim = layer_acts_mmap.shape
-                chunk_size = 1000  # Process 1000 samples at a time
-                layer_acts_mean = np.zeros((num_samples_in_file, hidden_dim), dtype=np.float32)
+                # Load activation files for each (layer, hook_type) combination
+                for layer_idx, hook_type in layer_hook_combinations:
+                    activation_file = extraction_path / f"layer_{layer_idx}_{hook_type}.npy"
+                    if not activation_file.exists():
+                        available_files = list(extraction_path.glob(f"layer_{layer_idx}_*.npy"))
+                        available_types = [f.stem.split('_')[-1] for f in available_files]
+                        raise ValueError(
+                            f"Activation file not found: {activation_file}. "
+                            f"Available for layer {layer_idx}: {available_types}"
+                        )
 
-                logger.info(f"  Averaging over sequence dimension in chunks of {chunk_size}...")
-                for start_idx in range(0, num_samples_in_file, chunk_size):
-                    end_idx = min(start_idx + chunk_size, num_samples_in_file)
-                    chunk = layer_acts_mmap[start_idx:end_idx]  # Load chunk into RAM
-                    layer_acts_mean[start_idx:end_idx] = chunk.mean(axis=1).astype(np.float32)
+                    logger.info(f"  Loading layer {layer_idx}/{hook_type} from {activation_file}")
+                    layer_acts_mmap = np.load(activation_file, mmap_mode='r')
 
-                # Convert to torch tensor and move to GPU
-                layer_acts_tensor = torch.from_numpy(layer_acts_mean).to(device)
-                cached_activations[(layer_idx, hook_type)] = layer_acts_tensor
-                logger.info(f"  Loaded shape: {layer_acts_mmap.shape} -> averaged to {layer_acts_tensor.shape} on GPU")
+                    # Average over sequence dimension in chunks
+                    num_samples_in_file, seq_len, hidden_dim = layer_acts_mmap.shape
+                    if actual_hidden_dim is None:
+                        actual_hidden_dim = hidden_dim
+                    elif hidden_dim != actual_hidden_dim:
+                        raise ValueError(
+                            f"Extraction {extraction.id} has hidden_dim={hidden_dim} but expected {actual_hidden_dim}"
+                        )
 
-            # Get sample count and hidden dimension from first cached activation
+                    chunk_size = 1000
+                    layer_acts_mean = np.zeros((num_samples_in_file, hidden_dim), dtype=np.float32)
+                    for start_idx in range(0, num_samples_in_file, chunk_size):
+                        end_idx = min(start_idx + chunk_size, num_samples_in_file)
+                        chunk = layer_acts_mmap[start_idx:end_idx]
+                        layer_acts_mean[start_idx:end_idx] = chunk.mean(axis=1).astype(np.float32)
+
+                    key = (layer_idx, hook_type)
+                    if key not in all_activation_parts:
+                        all_activation_parts[key] = []
+                    all_activation_parts[key].append(torch.from_numpy(layer_acts_mean))
+                    logger.info(f"    Shape: {layer_acts_mmap.shape} -> averaged to ({num_samples_in_file}, {hidden_dim})")
+
+            # Concatenate activations from all extractions and move to GPU
+            for key in layer_hook_combinations:
+                parts = all_activation_parts[key]
+                if len(parts) == 1:
+                    cached_activations[key] = parts[0].to(device)
+                else:
+                    cached_activations[key] = torch.cat(parts, dim=0).to(device)
+                logger.info(f"  Combined {key}: {cached_activations[key].shape}")
+
+            # Get sample count and hidden dimension
             first_key = layer_hook_combinations[0]
             num_samples = cached_activations[first_key].shape[0]
-            actual_hidden_dim = cached_activations[first_key].shape[1]
 
-            # CRITICAL: Override hp['hidden_dim'] with actual dimension from extraction
-            # This ensures SAE is initialized with correct dimensions
+            # Override hidden_dim with actual dimension from extraction
             if hp['hidden_dim'] != actual_hidden_dim:
                 logger.warning(
-                    f"User-provided hidden_dim ({hp['hidden_dim']}) does not match "
-                    f"extraction's actual hidden dimension ({actual_hidden_dim}). "
-                    f"Using extraction's actual dimension."
+                    f"User-provided hidden_dim ({hp['hidden_dim']}) != extraction ({actual_hidden_dim}). Using extraction's."
                 )
                 hp['hidden_dim'] = actual_hidden_dim
 
-            logger.info(f"Cached activations ready: {num_samples} samples, hidden_dim={actual_hidden_dim}, across {num_sae_models} SAEs (all on GPU)")
+            logger.info(f"Cached activations ready: {num_samples} total samples from {len(extractions)} extraction(s), hidden_dim={actual_hidden_dim}")
 
         else:
             # Load dataset(s) and base model for on-the-fly activation extraction

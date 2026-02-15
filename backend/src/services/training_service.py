@@ -56,12 +56,16 @@ class TrainingService:
         # Create training record
         # dataset_id is kept for backward compat (first dataset in list)
         primary_dataset_id = training_data.dataset_ids[0] if training_data.dataset_ids else ""
+        # extraction_ids takes precedence; extraction_id kept for backward compat (FK)
+        extraction_ids = training_data.extraction_ids or ([training_data.extraction_id] if training_data.extraction_id else None)
+        primary_extraction_id = extraction_ids[0] if extraction_ids else training_data.extraction_id
         db_training = Training(
             id=training_id,
             model_id=training_data.model_id,
             dataset_id=primary_dataset_id,  # Backward compat
-            dataset_ids=training_data.dataset_ids,  # New multi-dataset field
-            extraction_id=training_data.extraction_id,
+            dataset_ids=training_data.dataset_ids,  # Multi-dataset field
+            extraction_id=primary_extraction_id,  # Backward compat FK
+            extraction_ids=extraction_ids,  # Multi-extraction field
             status=TrainingStatus.PENDING.value,
             progress=0.0,
             current_step=0,

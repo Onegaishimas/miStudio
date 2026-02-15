@@ -161,8 +161,10 @@ export interface Training {
   dataset_ids: string[];
   /** Primary dataset ID (backward compat, first in dataset_ids) */
   dataset_id: string;
-  /** Activation extraction ID (if using pre-extracted activations) */
+  /** Activation extraction ID (backward compat, first in extraction_ids) */
   extraction_id?: string | null;
+  /** Extraction IDs for cached activations (one per dataset) */
+  extraction_ids?: string[] | null;
 
   // Status and progress
   /** Current training status */
@@ -300,8 +302,8 @@ export interface TrainingCreateRequest {
   model_id: string;
   /** Dataset IDs for training data (supports multiple datasets) */
   dataset_ids: string[];
-  /** Activation extraction ID (optional) */
-  extraction_id?: string;
+  /** Extraction IDs for cached activations (one per dataset) */
+  extraction_ids?: string[];
   /** Training hyperparameters */
   hyperparameters: HyperparametersConfig;
 }

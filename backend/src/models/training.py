@@ -47,7 +47,8 @@ class Training(Base):
         String(255),
         ForeignKey("activation_extractions.id", ondelete="RESTRICT"),
         nullable=True
-    )
+    )  # Backward compat: first extraction in list
+    extraction_ids = Column(JSONB, nullable=True, default=list)  # Array of extraction IDs for multi-dataset cached activations
 
     # Status and progress
     status = Column(String(50), nullable=False, default=TrainingStatus.PENDING.value)

@@ -227,7 +227,8 @@ class TrainingCreate(BaseModel):
 
     model_id: str = Field(..., min_length=1, description="Model ID to train SAE on")
     dataset_ids: List[str] = Field(..., min_length=1, description="Dataset IDs for training data (supports multiple datasets)")
-    extraction_id: Optional[str] = Field(None, description="Activation extraction ID (if using pre-extracted activations)")
+    extraction_id: Optional[str] = Field(None, description="Activation extraction ID (backward compat, use extraction_ids)")
+    extraction_ids: Optional[List[str]] = Field(None, description="Extraction IDs for cached activations (one per dataset)")
     hyperparameters: TrainingHyperparameters = Field(..., description="Training hyperparameters")
 
     @field_validator("model_id")
@@ -254,6 +255,16 @@ class TrainingCreate(BaseModel):
             raise ValueError("extraction_id must start with 'ext_m_'")
         return v
 
+    @field_validator("extraction_ids")
+    @classmethod
+    def validate_extraction_ids(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        """Validate extraction IDs format."""
+        if v is not None:
+            for ext_id in v:
+                if not ext_id.startswith("ext_m_"):
+                    raise ValueError(f"extraction_id '{ext_id}' must start with 'ext_m_'")
+        return v
+
 
 class TrainingUpdate(BaseModel):
     """Schema for updating a training job (primarily for status changes)."""
@@ -276,7 +287,8 @@ class TrainingResponse(BaseModel):
     model_id: str = Field(..., description="Model ID")
     dataset_ids: List[str] = Field(..., description="Dataset IDs for training")
     dataset_id: str = Field(..., description="Primary dataset ID (first in list, for backward compat)")
-    extraction_id: Optional[str] = Field(None, description="Extraction ID if using pre-extracted activations")
+    extraction_id: Optional[str] = Field(None, description="Extraction ID (backward compat, first in extraction_ids)")
+    extraction_ids: Optional[List[str]] = Field(None, description="Extraction IDs for cached activations (one per dataset)")
 
     status: TrainingStatus = Field(..., description="Current training status")
     progress: float = Field(..., description="Training progress (0-100)")
@@ -316,6 +328,7 @@ class TrainingResponse(BaseModel):
                 "dataset_ids": ["ds_dataset456", "ds_dataset789"],
                 "dataset_id": "ds_dataset456",
                 "extraction_id": None,
+                "extraction_ids": None,
                 "status": "running",
                 "progress": 45.5,
                 "current_step": 45500,
