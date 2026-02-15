@@ -19,7 +19,7 @@ from celery import Task
 from datasets import load_from_disk, concatenate_datasets
 
 from .base_task import DatabaseTask
-from ..ml.sparse_autoencoder import create_sae, project_decoder_gradients, JumpReLUSAE
+from ..ml.sparse_autoencoder import create_sae, project_decoder_gradients, JumpReLUSAE, TopKSAE
 from ..models.training import Training, TrainingStatus
 from ..models.dataset import Dataset
 from ..models.model import Model
@@ -378,37 +378,48 @@ def train_sae_task(
         optimizers = {}
         schedulers = {}
 
+        # Load framework defaults for this architecture type
+        from ..core.framework_defaults import get_framework_defaults
+        architecture_type = hp.get('architecture_type', 'standard')
+        # Backward compat: map 'standard' to 'standard_saelens'
+        if architecture_type == 'standard':
+            architecture_type = 'standard_saelens'
+        fw = get_framework_defaults(architecture_type)
+        logger.info(f"Framework: {fw['display_name']} ({fw['paper']}), sparsity_type={fw['sparsity_type']}")
+
         for layer_idx, hook_type in layer_hook_combinations:
             # Create SAE for this layer/hook_type combination
-            architecture_type = hp.get('architecture_type', 'standard')
+            l1_alpha = hp.get('l1_alpha') or fw.get('default_l1_alpha', 5e-4)
             model = create_sae(
                 architecture_type=architecture_type,
                 hidden_dim=hp['hidden_dim'],
                 latent_dim=hp['latent_dim'],
-                l1_alpha=hp['l1_alpha'],
+                l1_alpha=l1_alpha,
                 ghost_gradient_penalty=hp.get('ghost_gradient_penalty', 0.0),
-                normalize_activations=hp.get('normalize_activations', 'constant_norm_rescale'),
+                normalize_activations=hp.get('normalize_activations', fw['normalize_activations']),
                 top_k_sparsity=hp.get('top_k_sparsity', None),
+                # TopK-specific parameters
+                top_k=hp.get('top_k'),
+                aux_k=hp.get('aux_k'),
+                aux_loss_alpha=hp.get('aux_loss_alpha'),
                 # JumpReLU-specific parameters
                 initial_threshold=hp.get('initial_threshold', 0.5),
                 bandwidth=hp.get('bandwidth', 0.01),
                 sparsity_coeff=hp.get('sparsity_coeff'),
-                normalize_decoder=hp.get('normalize_decoder', True),
+                normalize_decoder=hp.get('normalize_decoder', fw['normalize_decoder']),
             ).to(device)
             models[(layer_idx, hook_type)] = model
 
-            # Initialize optimizer for this SAE
-            # JumpReLU uses Adam with betas=(0.0, 0.999) per Gemma Scope paper
-            if architecture_type == 'jumprelu':
-                adam_betas = (0.0, 0.999)
-            else:
-                adam_betas = (0.9, 0.999)  # Default Adam betas
+            # Initialize optimizer using framework defaults
+            adam_betas = fw['optimizer_betas']
+            adam_eps = hp.get('adam_epsilon') or fw['adam_epsilon']
 
             optimizer = optim.Adam(
                 model.parameters(),
                 lr=hp['learning_rate'],
-                weight_decay=hp.get('weight_decay', 0.0),
+                weight_decay=hp.get('weight_decay', fw['weight_decay']),
                 betas=adam_betas,
+                eps=adam_eps,
             )
             optimizers[(layer_idx, hook_type)] = optimizer
 
@@ -423,12 +434,13 @@ def train_sae_task(
             scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
             schedulers[(layer_idx, hook_type)] = scheduler
 
-            # Log model details for debugging
-            top_k = hp.get('top_k_sparsity', None)
-            if top_k is not None and hasattr(model, 'k') and model.k is not None:
-                logger.info(f"  Layer {layer_idx}/{hook_type}: SAE ({architecture_type}) initialized — TopK active: K={model.k} ({top_k}% of {hp['latent_dim']}), L1 disabled")
+            # Log model details
+            if isinstance(model, TopKSAE):
+                logger.info(f"  Layer {layer_idx}/{hook_type}: TopKSAE — K={model.k}, aux_k={model.aux_k}, alpha={model.aux_loss_alpha}")
+            elif isinstance(model, JumpReLUSAE):
+                logger.info(f"  Layer {layer_idx}/{hook_type}: JumpReLUSAE — sparsity_coeff={model.sparsity_coeff}")
             else:
-                logger.info(f"  Layer {layer_idx}/{hook_type}: SAE ({architecture_type}) initialized — l1_alpha={hp['l1_alpha']}")
+                logger.info(f"  Layer {layer_idx}/{hook_type}: {architecture_type} — l1_alpha={l1_alpha}")
 
         # Initialize gradient scalers for mixed precision training (one per layer/hook_type)
         scalers = {}
@@ -724,16 +736,20 @@ def train_sae_task(
         best_loss = float('inf')
 
         # Sparsity warmup: store base sparsity coefficients before training
-        sparsity_warmup_steps = hp.get('sparsity_warmup_steps', 0)
-        base_sparsity_coeffs = {}  # Key: sae_key, Value: original l1_alpha or sparsity_coeff
-        architecture_type = hp.get('architecture_type', 'standard')
+        # TopK has structural sparsity (no penalty to warm up)
+        sparsity_type = fw['sparsity_type']
+        sparsity_warmup_steps = hp.get('sparsity_warmup_steps', fw.get('sparsity_warmup_steps', 0))
+        if sparsity_type == 'topk':
+            sparsity_warmup_steps = 0  # TopK: no sparsity penalty to warm up
+        base_sparsity_coeffs = {}
         for sae_key, model in models.items():
-            if architecture_type == 'jumprelu':
+            if sparsity_type == 'l0':
                 base_sparsity_coeffs[sae_key] = model.sparsity_coeff
-            else:
+            elif sparsity_type == 'l1':
                 base_sparsity_coeffs[sae_key] = model.l1_alpha
+            # topk: no sparsity coefficient to store
         if sparsity_warmup_steps > 0:
-            logger.info(f"Sparsity warmup enabled: ramping from 0 to full over {sparsity_warmup_steps} steps")
+            logger.info(f"Sparsity warmup enabled ({sparsity_type}): ramping from 0 to full over {sparsity_warmup_steps} steps")
 
         # Dead neuron tracking: exponential moving average of per-feature activation frequency
         # This is more reliable than per-batch detection which can miss infrequent features
@@ -914,14 +930,16 @@ def train_sae_task(
                 layer_fvu = {}
 
                 # Apply sparsity warmup: linearly scale L1/L0 penalty from 0 to full
+                # TopK: no warmup (structural sparsity, sparsity_warmup_steps forced to 0)
                 if sparsity_warmup_steps > 0:
                     sparsity_scale = min(1.0, step / sparsity_warmup_steps)
                     for sae_key, model_ref in models.items():
-                        base_coeff = base_sparsity_coeffs[sae_key]
-                        if architecture_type == 'jumprelu':
-                            model_ref.sparsity_coeff = base_coeff * sparsity_scale
-                        else:
-                            model_ref.l1_alpha = base_coeff * sparsity_scale
+                        base_coeff = base_sparsity_coeffs.get(sae_key)
+                        if base_coeff is not None:
+                            if sparsity_type == 'l0':
+                                model_ref.sparsity_coeff = base_coeff * sparsity_scale
+                            elif sparsity_type == 'l1':
+                                model_ref.l1_alpha = base_coeff * sparsity_scale
 
                 for layer_idx, hook_type in layer_hook_combinations:
                     sae_key = (layer_idx, hook_type)
@@ -936,11 +954,10 @@ def train_sae_task(
                         optimizer.zero_grad()
 
                     # Forward pass with mixed precision (FP16) if GPU available
+                    is_transcoder = (architecture_type == 'transcoder')
                     if scaler is not None:
                         with autocast():
-                            # Handle different architecture types
-                            architecture_type = hp.get('architecture_type', 'standard')
-                            if architecture_type == 'transcoder':
+                            if is_transcoder:
                                 x_reconstructed, z, losses = model(x, x, return_loss=True)
                             else:
                                 x_reconstructed, z, losses = model(x, return_loss=True)
@@ -953,8 +970,7 @@ def train_sae_task(
                         scaler.scale(loss).backward()
                     else:
                         # CPU training - no mixed precision
-                        architecture_type = hp.get('architecture_type', 'standard')
-                        if architecture_type == 'transcoder':
+                        if is_transcoder:
                             x_reconstructed, z, losses = model(x, x, return_loss=True)
                         else:
                             x_reconstructed, z, losses = model(x, return_loss=True)
@@ -1162,7 +1178,8 @@ def train_sae_task(
                         logger.warning(warning)
 
                 # Dead neuron resampling (if enabled)
-                if hp.get('resample_dead_neurons', False):
+                # Skip for TopK — it uses aux loss for dead feature recovery instead
+                if hp.get('resample_dead_neurons', False) and sparsity_type != 'topk':
                     dead_neuron_threshold = hp.get('dead_neuron_threshold', 10000)
                     resample_interval = hp.get('resample_interval', 5000)
 
