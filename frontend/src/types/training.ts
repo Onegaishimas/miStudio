@@ -44,14 +44,20 @@ export enum TrainingStatus {
 }
 
 /**
- * SAE architecture types.
+ * SAE training framework types.
+ * Each framework has its own optimizer settings, loss formulation,
+ * and tailored hyperparameters based on published papers.
+ *
  * Matches backend SAEArchitectureType enum.
  */
 export enum SAEArchitectureType {
-  STANDARD = 'standard',
-  SKIP = 'skip',
-  TRANSCODER = 'transcoder',
-  JUMPRELU = 'jumprelu',  // Gemma Scope architecture with learnable thresholds
+  STANDARD_SAELENS = 'standard_saelens',    // Bricken et al. 2023 — L1 penalty, constant_norm_rescale
+  STANDARD_ANTHROPIC = 'standard_anthropic', // Templeton et al. 2024 — L1 penalty, anthropic_rescale, L1~5.0
+  JUMPRELU = 'jumprelu',                     // Rajamanoharan et al. 2024 — L0 via STE, learnable thresholds
+  TOPK = 'topk',                             // Gao et al. 2024 — structural sparsity, no penalty, aux loss
+  SKIP = 'skip',                             // Community variant — L1 + residual skip connection
+  TRANSCODER = 'transcoder',                 // Dunefsky et al. 2024 — predicts MLP output from MLP input
+  STANDARD = 'standard',                     // Backward compat alias → maps to standard_saelens
 }
 
 /**
@@ -79,23 +85,35 @@ export interface HyperparametersConfig {
   /** Hook types to train SAEs on (default: ['residual']). Multiple hook types create separate SAEs per layer/hook combination. */
   hook_types?: HookType[];
 
-  // Sparsity
-  /** L1 sparsity penalty coefficient */
-  l1_alpha: number;
+  // Sparsity (L1-based frameworks: standard_saelens, standard_anthropic, skip, transcoder)
+  /** L1 sparsity penalty coefficient. Optional — not used by TopK. */
+  l1_alpha?: number;
   /** Target L0 sparsity (fraction of active features, 0-1) */
   target_l0?: number;
-  /** Top-K sparsity percentage (e.g., 5 for 5%). Guarantees exact sparsity. */
+  /** @deprecated Use top_k (integer count) instead. Percentage-based TopK sparsity. */
   top_k_sparsity?: number;
 
-  // JumpReLU-specific parameters (Gemma Scope architecture)
-  /** Initial threshold value for JumpReLU activation (default: 0.001) */
+  // TopK-specific parameters (Gao et al. 2024)
+  /** Number of active features per sample for TopK architecture */
+  top_k?: number;
+  /** Number of dead features for auxiliary loss (default: top_k) */
+  aux_k?: number;
+  /** Auxiliary dead feature loss coefficient (default: 1/32) */
+  aux_loss_alpha?: number;
+  /** Adam optimizer epsilon (TopK uses 6.25e-10) */
+  adam_epsilon?: number;
+
+  // JumpReLU-specific parameters (Rajamanoharan et al. 2024)
+  /** Initial threshold value for JumpReLU activation (default: 0.5) */
   initial_threshold?: number;
-  /** KDE bandwidth for STE gradient estimation in JumpReLU (default: 0.001) */
+  /** KDE bandwidth for STE gradient estimation in JumpReLU (default: 0.01) */
   bandwidth?: number;
-  /** L0 sparsity coefficient for JumpReLU (default: 6e-4). Overrides l1_alpha for JumpReLU. */
+  /** L0 sparsity coefficient for JumpReLU (default: 1e-4). */
   sparsity_coeff?: number;
-  /** Whether to normalize decoder columns to unit norm (required for JumpReLU) */
+  /** Whether to normalize decoder columns to unit norm */
   normalize_decoder?: boolean;
+  /** Activation normalization method (constant_norm_rescale, anthropic_rescale, none) */
+  normalize_activations?: string;
 
   // Training
   /** Initial learning rate */

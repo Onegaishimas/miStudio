@@ -30,6 +30,7 @@ import type {
   CheckpointListResponse,
 } from '../types/training';
 import { SAEArchitectureType } from '../types/training';
+import { getFrameworkConfig } from '../config/frameworkConfigs';
 
 /**
  * Training configuration form state.
@@ -51,13 +52,20 @@ export interface TrainingConfig {
   // Hook types (default: ['residual']). Multiple types create separate SAEs per layer/hook combination.
   hook_types: ('residual' | 'mlp' | 'attention')[];
 
-  // Sparsity
-  l1_alpha: number;
+  // Sparsity (L1-based frameworks)
+  l1_alpha?: number;
   target_l0?: number;
+  /** @deprecated Use top_k instead */
   top_k_sparsity?: number;
   normalize_activations?: string;
 
-  // JumpReLU-specific parameters (Gemma Scope architecture)
+  // TopK-specific parameters (Gao et al. 2024)
+  top_k?: number;
+  aux_k?: number;
+  aux_loss_alpha?: number;
+  adam_epsilon?: number;
+
+  // JumpReLU-specific parameters (Rajamanoharan et al. 2024)
   initial_threshold?: number;
   bandwidth?: number;
   sparsity_coeff?: number;
@@ -165,51 +173,54 @@ type TrainingStore = TrainingStoreState & TrainingStoreActions;
  */
 const defaultConfig: TrainingConfig = {
   model_id: '',
-  dataset_ids: [],  // Supports multiple datasets
+  dataset_ids: [],
   extraction_id: undefined,
 
   // SAE Architecture - typical values for 768-dim transformer hidden states
   hidden_dim: 768,
-  latent_dim: 8192, // 8-16x expansion ratio
-  architecture_type: SAEArchitectureType.STANDARD,
+  latent_dim: 8192,
+  architecture_type: SAEArchitectureType.STANDARD_SAELENS,
 
-  // Layer configuration - default to layer 0 (single-layer training)
+  // Layer configuration
   training_layers: [0],
-  // Hook types - default to residual (most common for SAE training)
   hook_types: ['residual'],
 
-  // Sparsity - SAELens-compatible normalization (constant_norm_rescale) + standard l1_coefficient
-  l1_alpha: 0.0005, // Calibrated for .sum(dim=-1).mean() L1 formulation (SAELens baseline for 16K features)
-  target_l0: 0.05, // 5% activation rate
-  top_k_sparsity: undefined, // Optional: hard sparsity constraint
-  normalize_activations: 'constant_norm_rescale', // SAELens standard normalization
+  // Sparsity — defaults match Standard (SAELens) framework
+  l1_alpha: 5e-4,
+  target_l0: 0.05,
+  normalize_activations: 'constant_norm_rescale',
 
-  // JumpReLU-specific parameters (Gemma Scope architecture)
-  // These are only used when architecture_type === 'jumprelu'
-  initial_threshold: 0.5, // Initial threshold for JumpReLU activation (matches pre-activation scale ~0.5)
-  bandwidth: 0.01, // KDE bandwidth for STE gradient estimation (10x wider for better gradient coverage)
-  sparsity_coeff: 0.0001, // L0 sparsity coefficient λ — applied to raw L0 count (Gemma Scope formulation)
-  normalize_decoder: true, // Normalize decoder columns to unit norm
+  // JumpReLU-specific (applied when framework switches to jumprelu)
+  initial_threshold: 0.5,
+  bandwidth: 0.01,
+  sparsity_coeff: 1e-4,
+  normalize_decoder: true,
 
-  // Training - optimized for SAE quality (larger batch = more stable gradients)
-  learning_rate: 0.0003, // SAELens / Gemma Scope standard (3e-4)
-  batch_size: 2048, // Larger batch for stable gradient estimates and better dead neuron detection
-  total_steps: 50000, // Fewer steps needed with 2048 batch (same token budget as 512 x 200k)
-  warmup_steps: 2000, // LR warmup steps (shorter since sparsity warmup handles the rest)
-  sparsity_warmup_steps: 5000, // Ramp sparsity penalty from 0 to full over 5k steps (prevents dead neurons)
+  // TopK-specific (applied when framework switches to topk)
+  top_k: undefined,
+  aux_k: undefined,
+  aux_loss_alpha: undefined,
+  adam_epsilon: undefined,
+
+  // Training
+  learning_rate: 4e-4,
+  batch_size: 2048,
+  total_steps: 50000,
+  warmup_steps: 2000,
+  sparsity_warmup_steps: 5000,
 
   // Optimization
-  weight_decay: 0.0, // No weight decay for SAE training (fights sparsity objective)
+  weight_decay: 0.0,
   grad_clip_norm: 1.0,
 
-  // Checkpointing - reduced frequency for faster training and less disk usage
-  checkpoint_interval: 2000, // Increased from 1000 (25 checkpoints for 50k steps)
+  // Checkpointing
+  checkpoint_interval: 2000,
   log_interval: 100,
 
   // Dead neuron handling
   dead_neuron_threshold: 10000,
   resample_dead_neurons: true,
-  resample_interval: 5000, // Resample every 5k steps after warmup
+  resample_interval: 5000,
 };
 
 /**
@@ -586,13 +597,67 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
 
   /**
    * Update training configuration form.
+   * When architecture_type changes, automatically applies framework defaults
+   * for learning_rate, sparsity params, and normalization.
    *
    * @param updates - Partial configuration updates
    */
   updateConfig: (updates: Partial<TrainingConfig>) => {
-    set((state) => ({
-      config: { ...state.config, ...updates },
-    }));
+    set((state) => {
+      const newConfig = { ...state.config, ...updates };
+
+      // When architecture_type changes, apply framework-specific defaults
+      if (updates.architecture_type && updates.architecture_type !== state.config.architecture_type) {
+        const fw = getFrameworkConfig(updates.architecture_type);
+        const fwDefaults = fw.defaults;
+
+        // Apply framework defaults for optimizer and sparsity params
+        newConfig.learning_rate = fwDefaults.learning_rate;
+        newConfig.normalize_activations = fwDefaults.normalize_activations;
+        newConfig.sparsity_warmup_steps = fwDefaults.sparsity_warmup_steps;
+
+        if (fwDefaults.normalize_decoder !== undefined) {
+          newConfig.normalize_decoder = fwDefaults.normalize_decoder;
+        }
+        if (fwDefaults.resample_dead_neurons !== undefined) {
+          newConfig.resample_dead_neurons = fwDefaults.resample_dead_neurons;
+        }
+
+        // Apply sparsity-type-specific defaults
+        if (fw.sparsityType === 'l1') {
+          newConfig.l1_alpha = fwDefaults.l1_alpha;
+          // Clear non-L1 fields
+          newConfig.top_k = undefined;
+          newConfig.aux_k = undefined;
+          newConfig.aux_loss_alpha = undefined;
+          newConfig.adam_epsilon = undefined;
+          newConfig.sparsity_coeff = undefined;
+          newConfig.initial_threshold = undefined;
+          newConfig.bandwidth = undefined;
+        } else if (fw.sparsityType === 'l0') {
+          newConfig.sparsity_coeff = fwDefaults.sparsity_coeff;
+          newConfig.initial_threshold = fwDefaults.initial_threshold;
+          newConfig.bandwidth = fwDefaults.bandwidth;
+          // Clear non-L0 fields
+          newConfig.l1_alpha = undefined;
+          newConfig.top_k = undefined;
+          newConfig.aux_k = undefined;
+          newConfig.aux_loss_alpha = undefined;
+          newConfig.adam_epsilon = undefined;
+        } else if (fw.sparsityType === 'topk') {
+          newConfig.top_k = fwDefaults.top_k;
+          newConfig.aux_loss_alpha = fwDefaults.aux_loss_alpha;
+          newConfig.adam_epsilon = fwDefaults.adam_epsilon;
+          // Clear non-TopK fields
+          newConfig.l1_alpha = undefined;
+          newConfig.sparsity_coeff = undefined;
+          newConfig.initial_threshold = undefined;
+          newConfig.bandwidth = undefined;
+        }
+      }
+
+      return { config: newConfig };
+    });
   },
 
   /**

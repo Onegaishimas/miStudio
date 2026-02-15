@@ -3,6 +3,7 @@
  */
 
 import { SAEArchitectureType } from '../types/training';
+import { getFrameworkDisplayName } from '../config/frameworkConfigs';
 
 /**
  * Generate a descriptive template name from configuration parameters.
@@ -41,12 +42,8 @@ export function generateTemplateName(
     .replace(/[^a-zA-Z0-9-]/g, '')
     .slice(0, 20);
 
-  // Format architecture name
-  const archName = architecture === SAEArchitectureType.STANDARD
-    ? 'Standard'
-    : architecture === SAEArchitectureType.SKIP
-    ? 'Skip'
-    : 'Transcoder';
+  // Format architecture name using framework display name
+  const archName = getFrameworkDisplayName(architecture).replace(/[^a-zA-Z0-9]/g, '');
 
   // Determine differentiator based on key hyperparameters
   let differentiator: string;
