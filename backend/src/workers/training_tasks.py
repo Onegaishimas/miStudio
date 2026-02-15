@@ -423,7 +423,12 @@ def train_sae_task(
             scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
             schedulers[(layer_idx, hook_type)] = scheduler
 
-            logger.info(f"  Layer {layer_idx}/{hook_type}: SAE model initialized")
+            # Log model details for debugging
+            top_k = hp.get('top_k_sparsity', None)
+            if top_k is not None and hasattr(model, 'k') and model.k is not None:
+                logger.info(f"  Layer {layer_idx}/{hook_type}: SAE ({architecture_type}) initialized — TopK active: K={model.k} ({top_k}% of {hp['latent_dim']}), L1 disabled")
+            else:
+                logger.info(f"  Layer {layer_idx}/{hook_type}: SAE ({architecture_type}) initialized — l1_alpha={hp['l1_alpha']}")
 
         # Initialize gradient scalers for mixed precision training (one per layer/hook_type)
         scalers = {}

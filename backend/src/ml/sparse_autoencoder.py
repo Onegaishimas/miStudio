@@ -245,8 +245,46 @@ class SparseAutoencoder(nn.Module):
                 # Penalty for dead neurons (encourages positive pre-activations)
                 ghost_penalty = (dead_mask * F.relu(-pre_activation)).mean()
 
+            # TopK auxiliary loss: encourage dead features to activate
+            # When TopK is active, L1 is disabled (TopK guarantees exact sparsity).
+            # Instead, add an auxiliary loss that reconstructs using only dead features,
+            # giving them gradient signal to learn useful directions.
+            aux_loss = torch.tensor(0.0, device=z.device)
+            if self.k is not None:
+                # Identify dead features in this batch (never in top-K for any sample)
+                dead_mask_batch = (z == 0).all(dim=0)  # [latent_dim]
+                num_dead = dead_mask_batch.sum().item()
+
+                if num_dead > 0 and num_dead < self.latent_dim:
+                    # Get pre-TopK activations (re-encode without TopK)
+                    z_pre = F.relu(self.encoder(x_normalized))
+
+                    # Select dead feature activations and apply TopK among them
+                    z_dead = z_pre[:, dead_mask_batch]  # [batch, num_dead]
+                    k_dead = min(self.k, num_dead)
+                    if k_dead > 0:
+                        topk_vals, topk_idx = torch.topk(z_dead, k_dead, dim=-1)
+                        z_dead_sparse = torch.zeros_like(z_dead)
+                        z_dead_sparse.scatter_(-1, topk_idx, topk_vals)
+
+                        # Reconstruct from dead features only
+                        # dead_W shape: [num_dead, hidden_dim]
+                        if self.tied_weights:
+                            dead_W = self.encoder.weight[dead_mask_batch, :]  # [num_dead, hidden_dim]
+                        else:
+                            dead_W = self.decoder.weight[:, dead_mask_batch].t()  # [hidden_dim, num_dead].T
+                        # x_dead_recon: [batch, num_dead] @ [num_dead, hidden_dim] = [batch, hidden_dim]
+                        x_dead_recon = z_dead_sparse @ dead_W
+                        # Residual = what the alive features couldn't reconstruct
+                        residual = x_normalized - x_reconstructed_norm.detach()
+                        aux_loss = F.mse_loss(x_dead_recon, residual, reduction='mean')
+
             # Total loss
-            loss_total = loss_reconstruction + self.l1_alpha * l1_penalty + self.ghost_gradient_penalty * ghost_penalty
+            if self.k is not None:
+                # TopK: no L1 (sparsity enforced by TopK), add auxiliary dead feature loss
+                loss_total = loss_reconstruction + (1.0 / 32) * aux_loss
+            else:
+                loss_total = loss_reconstruction + self.l1_alpha * l1_penalty + self.ghost_gradient_penalty * ghost_penalty
 
             losses = {
                 'loss': loss_total,
@@ -255,6 +293,7 @@ class SparseAutoencoder(nn.Module):
                 'l1_penalty': l1_penalty,
                 'l0_sparsity': l0_sparsity,
                 'ghost_penalty': ghost_penalty,
+                'aux_loss': aux_loss,
             }
 
         return x_reconstructed, z, losses
@@ -382,7 +421,11 @@ class SkipAutoencoder(SparseAutoencoder):
             x_zero = self.skip_scale * x
             loss_zero = F.mse_loss(x_zero, x, reduction='mean')
 
-            loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
+            # TopK: no L1 (sparsity enforced by TopK)
+            if self.k is not None:
+                loss_total = loss_reconstruction
+            else:
+                loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
 
             losses = {
                 'loss': loss_total,
@@ -512,8 +555,11 @@ class Transcoder(nn.Module):
             x_zero = self.decoder.bias.expand_as(x_target)
             loss_zero = F.mse_loss(x_zero, x_target, reduction='mean')
 
-            # Total loss
-            loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
+            # TopK: no L1 (sparsity enforced by TopK)
+            if self.k is not None:
+                loss_total = loss_reconstruction
+            else:
+                loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
 
             losses = {
                 'loss': loss_total,
