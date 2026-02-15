@@ -85,7 +85,7 @@ describe('TrainingCard', () => {
     hyperparameters: {
       hidden_dim: 768,
       latent_dim: 8192,
-      architecture_type: SAEArchitectureType.STANDARD,
+      architecture_type: SAEArchitectureType.STANDARD_SAELENS,
       l1_alpha: 0.001,
       target_l0: 0.05,
       learning_rate: 0.0003,
@@ -338,8 +338,8 @@ describe('TrainingCard', () => {
 
       // Loss: 0.123 → formatted as "0.1230" with toFixed(4)
       expect(screen.getByText('0.1230')).toBeInTheDocument();
-      // L0 Sparsity: 0.045 → formatted as "0.0450" with toFixed(4)
-      expect(screen.getByText('0.0450')).toBeInTheDocument();
+      // L0 Sparsity: 0.045 * 8192 = ~369 (absolute count via formatL0Absolute)
+      expect(screen.getByText('~369')).toBeInTheDocument();
       // Check metric labels
       expect(screen.getByText('Loss')).toBeInTheDocument();
       expect(screen.getByText('L0 Sparsity')).toBeInTheDocument();
@@ -584,7 +584,7 @@ describe('TrainingCard', () => {
           />
         );
 
-        expect(screen.queryByText('Loss Curve')).not.toBeInTheDocument();
+        expect(screen.queryByText('Training Logs')).not.toBeInTheDocument();
       });
 
       it('should toggle metrics section when button is clicked', () => {
@@ -601,12 +601,12 @@ describe('TrainingCard', () => {
         const metricsButton = screen.getByRole('button', { name: /show live metrics/i });
         fireEvent.click(metricsButton);
 
-        expect(screen.getByText('Loss Curve')).toBeInTheDocument();
+        expect(screen.getByText('Training Logs')).toBeInTheDocument();
 
         // Click again to hide
         const hideButton = screen.getByRole('button', { name: /hide live metrics/i });
         fireEvent.click(hideButton);
-        expect(screen.queryByText('Loss Curve')).not.toBeInTheDocument();
+        expect(screen.queryByText('Training Logs')).not.toBeInTheDocument();
       });
     });
 

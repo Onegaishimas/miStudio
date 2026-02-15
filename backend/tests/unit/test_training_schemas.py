@@ -35,7 +35,7 @@ class TestTrainingHyperparametersValidation:
 
         assert hp.hidden_dim == 768
         assert hp.latent_dim == 16384
-        assert hp.architecture_type == SAEArchitectureType.STANDARD
+        assert hp.architecture_type == SAEArchitectureType.STANDARD_SAELENS
         assert hp.l1_alpha == 0.001
         assert hp.learning_rate == 0.0003
         assert hp.batch_size == 4096
@@ -429,7 +429,7 @@ class TestSAEArchitectureType:
     """Test SAE architecture type enum."""
 
     def test_architecture_type_standard(self):
-        """Test standard architecture type."""
+        """Test standard architecture type normalizes to standard_saelens."""
         hp = TrainingHyperparameters(
             hidden_dim=768,
             latent_dim=16384,
@@ -440,8 +440,9 @@ class TestSAEArchitectureType:
             total_steps=100000,
         )
 
-        assert hp.architecture_type == SAEArchitectureType.STANDARD
-        assert hp.architecture_type.value == "standard"
+        # "standard" is normalized to "standard_saelens" by field_validator
+        assert hp.architecture_type == SAEArchitectureType.STANDARD_SAELENS
+        assert hp.architecture_type.value == "standard_saelens"
 
     def test_architecture_type_skip(self):
         """Test skip architecture type."""
@@ -474,18 +475,18 @@ class TestSAEArchitectureType:
         assert hp.architecture_type.value == "transcoder"
 
     def test_architecture_type_from_string(self):
-        """Test creating architecture type from string."""
+        """Test creating architecture type from string normalizes standard."""
         hp = TrainingHyperparameters(
             hidden_dim=768,
             latent_dim=16384,
-            architecture_type="standard",  # String
+            architecture_type="standard",  # String — normalized to standard_saelens
             l1_alpha=0.001,
             learning_rate=0.0003,
             batch_size=4096,
             total_steps=100000,
         )
 
-        assert hp.architecture_type == SAEArchitectureType.STANDARD
+        assert hp.architecture_type == SAEArchitectureType.STANDARD_SAELENS
 
     def test_invalid_architecture_type(self):
         """Test that invalid architecture type raises error."""
@@ -713,7 +714,7 @@ class TestTrainingHyperparametersDefaults:
         assert hp.log_interval == 100
 
     def test_default_architecture_type(self):
-        """Test default architecture_type is STANDARD."""
+        """Test default architecture_type normalizes to STANDARD_SAELENS."""
         hp = TrainingHyperparameters(
             hidden_dim=768,
             latent_dim=16384,
@@ -723,7 +724,7 @@ class TestTrainingHyperparametersDefaults:
             total_steps=100000,
         )
 
-        assert hp.architecture_type == SAEArchitectureType.STANDARD
+        assert hp.architecture_type == SAEArchitectureType.STANDARD_SAELENS
 
     def test_default_resample_dead_neurons(self):
         """Test default resample_dead_neurons is True."""

@@ -23,19 +23,19 @@ describe('trainingsStore', () => {
       selectedTraining: null,
       config: {
         model_id: '',
-        dataset_id: '',
+        dataset_ids: [],
         hidden_dim: 768,
         latent_dim: 8192,
-        architecture_type: SAEArchitectureType.STANDARD,
-        l1_alpha: 0.001,
+        architecture_type: SAEArchitectureType.STANDARD_SAELENS,
+        l1_alpha: 5e-4,
         target_l0: 0.05,
-        learning_rate: 0.0003,
-        batch_size: 32,
-        total_steps: 100000,
-        warmup_steps: 10000,
-        weight_decay: 0.01,
+        learning_rate: 4e-4,
+        batch_size: 2048,
+        total_steps: 50000,
+        warmup_steps: 2000,
+        weight_decay: 0.0,
         grad_clip_norm: 1.0,
-        checkpoint_interval: 1000,
+        checkpoint_interval: 2000,
         log_interval: 100,
         dead_neuron_threshold: 10000,
         resample_dead_neurons: true,
@@ -83,9 +83,9 @@ describe('trainingsStore', () => {
       const { config } = useTrainingsStore.getState();
       expect(config.hidden_dim).toBe(768);
       expect(config.latent_dim).toBe(8192);
-      expect(config.architecture_type).toBe(SAEArchitectureType.STANDARD);
-      expect(config.learning_rate).toBe(0.0003);
-      expect(config.batch_size).toBe(32);
+      expect(config.architecture_type).toBe(SAEArchitectureType.STANDARD_SAELENS);
+      expect(config.learning_rate).toBe(4e-4);
+      expect(config.batch_size).toBe(2048);
     });
 
     it('should have default pagination values', () => {
@@ -417,14 +417,16 @@ describe('trainingsStore', () => {
 
     const mockRequest: TrainingCreateRequest = {
       model_id: 'm_gpt2',
-      dataset_id: 'ds_dataset1',
-      hidden_dim: 768,
-      latent_dim: 8192,
-      architecture_type: SAEArchitectureType.STANDARD,
-      l1_alpha: 0.001,
-      learning_rate: 0.0003,
-      batch_size: 4096,
-      total_steps: 100000,
+      dataset_ids: ['ds_dataset1'],
+      hyperparameters: {
+        hidden_dim: 768,
+        latent_dim: 8192,
+        architecture_type: 'standard_saelens',
+        l1_alpha: 0.001,
+        learning_rate: 0.0003,
+        batch_size: 4096,
+        total_steps: 100000,
+      },
     };
 
     it('should create training successfully', async () => {
@@ -763,10 +765,10 @@ describe('trainingsStore', () => {
       useTrainingsStore.setState({
         config: {
           model_id: 'm_custom',
-          dataset_id: 'ds_custom',
+          dataset_ids: ['ds_custom'],
           hidden_dim: 2048,
           latent_dim: 16384,
-          architecture_type: SAEArchitectureType.GATED,
+          architecture_type: SAEArchitectureType.TOPK,
           l1_alpha: 0.002,
           target_l0: 0.1,
           learning_rate: 0.0001,
@@ -787,14 +789,15 @@ describe('trainingsStore', () => {
 
       const state = useTrainingsStore.getState();
       expect(state.config.hidden_dim).toBe(768);
-      expect(state.config.learning_rate).toBe(0.0001);
-      expect(state.config.architecture_type).toBe(SAEArchitectureType.STANDARD);
+      expect(state.config.learning_rate).toBe(4e-4);
+      expect(state.config.architecture_type).toBe(SAEArchitectureType.STANDARD_SAELENS);
     });
 
     it('should set config from training', () => {
       const mockTraining: Training = {
         id: 'train_123',
         model_id: 'm_gpt2',
+        dataset_ids: ['ds_dataset1'],
         dataset_id: 'ds_dataset1',
         status: TrainingStatus.COMPLETED,
         progress: 100,
@@ -803,8 +806,7 @@ describe('trainingsStore', () => {
         hyperparameters: {
           hidden_dim: 1024,
           latent_dim: 16384,
-          architecture_type: 'gated',
-          l1_alpha: 0.002,
+          architecture_type: 'topk',
           learning_rate: 0.0001,
           batch_size: 64,
           total_steps: 100000,
@@ -818,7 +820,7 @@ describe('trainingsStore', () => {
 
       const state = useTrainingsStore.getState();
       expect(state.config.model_id).toBe('m_gpt2');
-      expect(state.config.dataset_id).toBe('ds_dataset1');
+      expect(state.config.dataset_ids).toEqual(['ds_dataset1']);
       expect(state.config.hidden_dim).toBe(1024);
       expect(state.config.latent_dim).toBe(16384);
       expect(state.config.learning_rate).toBe(0.0001);
@@ -1006,6 +1008,7 @@ describe('trainingsStore', () => {
       const failedTraining: Training = {
         id: 'train_failed123',
         model_id: 'm_gpt2',
+        dataset_ids: ['ds_dataset1'],
         dataset_id: 'ds_dataset1',
         status: TrainingStatus.FAILED,
         progress: 25.0,
@@ -1014,7 +1017,7 @@ describe('trainingsStore', () => {
         hyperparameters: {
           hidden_dim: 768,
           latent_dim: 8192,
-          architecture_type: 'standard',
+          architecture_type: 'standard_saelens',
           l1_alpha: 0.001,
           learning_rate: 0.0003,
           batch_size: 4096,
@@ -1046,7 +1049,7 @@ describe('trainingsStore', () => {
       expect(result).toEqual(retriedTraining);
       expect(mockedAxios.post).toHaveBeenCalledWith('/api/v1/trainings', {
         model_id: failedTraining.model_id,
-        dataset_id: failedTraining.dataset_id,
+        dataset_ids: failedTraining.dataset_ids,
         extraction_id: undefined,
         hyperparameters: failedTraining.hyperparameters,
       });

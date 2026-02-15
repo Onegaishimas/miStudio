@@ -63,23 +63,27 @@ describe('TrainingPanel', () => {
 
   const mockConfig = {
     model_id: '',
-    dataset_id: '',
+    dataset_ids: [] as string[],
     hidden_dim: 768,
     latent_dim: 8192,
-    architecture_type: SAEArchitectureType.STANDARD,
-    l1_alpha: 0.001,
+    architecture_type: SAEArchitectureType.STANDARD_SAELENS,
+    l1_alpha: 5e-4,
     target_l0: 0.05,
-    learning_rate: 0.0003,
-    batch_size: 32,
-    total_steps: 100000,
-    warmup_steps: 10000,
-    weight_decay: 0.01,
+    normalize_activations: 'constant_norm_rescale',
+    normalize_decoder: true,
+    learning_rate: 4e-4,
+    batch_size: 2048,
+    total_steps: 50000,
+    warmup_steps: 2000,
+    sparsity_warmup_steps: 5000,
+    weight_decay: 0.0,
     grad_clip_norm: 1.0,
-    checkpoint_interval: 1000,
+    checkpoint_interval: 2000,
     log_interval: 100,
     dead_neuron_threshold: 10000,
     resample_dead_neurons: true,
     training_layers: [0, 1, 2],
+    hook_types: ['residual'],
   };
 
   const mockModels = [
@@ -239,9 +243,9 @@ describe('TrainingPanel', () => {
     it('should render configuration form', () => {
       render(<TrainingPanel />);
       expect(screen.getByText('Training Configuration')).toBeInTheDocument();
-      expect(screen.getByText('Dataset')).toBeInTheDocument();
+      expect(screen.getByText(/Datasets/)).toBeInTheDocument();
       expect(screen.getByText('Model')).toBeInTheDocument();
-      expect(screen.getByText('SAE Architecture')).toBeInTheDocument();
+      expect(screen.getByText('Training Framework')).toBeInTheDocument();
     });
 
     it('should render training jobs section', () => {
@@ -251,49 +255,47 @@ describe('TrainingPanel', () => {
   });
 
   describe('Configuration Form', () => {
-    it('should populate dataset dropdown with ready datasets', () => {
+    it('should display dataset buttons for ready datasets', () => {
       render(<TrainingPanel />);
-      const datasetSelects = screen.getAllByRole('combobox');
-      const datasetSelect = datasetSelects[0] as HTMLSelectElement;
-      // 1 default option + 2 datasets
-      expect(datasetSelect.options.length).toBe(3);
-      expect(datasetSelect.options[1].value).toBe('ds_dataset1');
-      expect(datasetSelect.options[2].value).toBe('ds_dataset2');
+      // Datasets are now multi-select buttons, not a dropdown
+      expect(screen.getByText('Test Dataset 1')).toBeInTheDocument();
+      expect(screen.getByText('Test Dataset 2')).toBeInTheDocument();
     });
 
     it('should populate model dropdown with ready models', () => {
       render(<TrainingPanel />);
       const selects = screen.getAllByRole('combobox');
-      const modelSelect = selects[1] as HTMLSelectElement;
+      const modelSelect = selects[0] as HTMLSelectElement;
       // 1 default option + 2 models
       expect(modelSelect.options.length).toBe(3);
       expect(modelSelect.options[1].value).toBe('m_gpt2');
       expect(modelSelect.options[2].value).toBe('m_bert');
     });
 
-    it('should populate architecture dropdown with options', () => {
+    it('should populate architecture dropdown with framework options', () => {
       render(<TrainingPanel />);
       const selects = screen.getAllByRole('combobox');
-      const archSelect = selects[2] as HTMLSelectElement;
-      expect(archSelect.options.length).toBe(4);
-      expect(archSelect.options[0].value).toBe(SAEArchitectureType.STANDARD);
-      expect(archSelect.options[1].value).toBe(SAEArchitectureType.SKIP);
-      expect(archSelect.options[2].value).toBe(SAEArchitectureType.TRANSCODER);
-      expect(archSelect.options[3].value).toBe(SAEArchitectureType.JUMPRELU);
+      const archSelect = selects[1] as HTMLSelectElement;
+      expect(archSelect.options.length).toBe(6);
+      expect(archSelect.options[0].value).toBe(SAEArchitectureType.STANDARD_SAELENS);
+      expect(archSelect.options[1].value).toBe(SAEArchitectureType.STANDARD_ANTHROPIC);
+      expect(archSelect.options[2].value).toBe(SAEArchitectureType.JUMPRELU);
+      expect(archSelect.options[3].value).toBe(SAEArchitectureType.TOPK);
+      expect(archSelect.options[4].value).toBe(SAEArchitectureType.SKIP);
+      expect(archSelect.options[5].value).toBe(SAEArchitectureType.TRANSCODER);
     });
 
-    it('should call updateConfig when dataset is selected', () => {
+    it('should call updateConfig when dataset button is clicked', () => {
       render(<TrainingPanel />);
-      const selects = screen.getAllByRole('combobox');
-      const datasetSelect = selects[0];
-      fireEvent.change(datasetSelect, { target: { value: 'ds_dataset1' } });
-      expect(mockUpdateConfig).toHaveBeenCalledWith({ dataset_id: 'ds_dataset1' });
+      const datasetButton = screen.getByText('Test Dataset 1');
+      fireEvent.click(datasetButton);
+      expect(mockUpdateConfig).toHaveBeenCalledWith({ dataset_ids: ['ds_dataset1'] });
     });
 
     it('should call updateConfig when model is selected', () => {
       render(<TrainingPanel />);
       const selects = screen.getAllByRole('combobox');
-      const modelSelect = selects[1];
+      const modelSelect = selects[0];
       fireEvent.change(modelSelect, { target: { value: 'm_gpt2' } });
       expect(mockUpdateConfig).toHaveBeenCalledWith({ model_id: 'm_gpt2' });
     });
@@ -301,7 +303,7 @@ describe('TrainingPanel', () => {
     it('should call updateConfig when architecture is changed', () => {
       render(<TrainingPanel />);
       const selects = screen.getAllByRole('combobox');
-      const archSelect = selects[2];
+      const archSelect = selects[1];
       fireEvent.change(archSelect, { target: { value: SAEArchitectureType.SKIP } });
       expect(mockUpdateConfig).toHaveBeenCalledWith({
         architecture_type: SAEArchitectureType.SKIP,
@@ -311,7 +313,7 @@ describe('TrainingPanel', () => {
     it('should have Start Training button disabled when form is invalid', () => {
       (useTrainingsStore as any).mockReturnValue({
         trainings: [],
-        config: { ...mockConfig, model_id: '', dataset_id: '' },
+        config: { ...mockConfig, model_id: '', dataset_ids: [] },
         updateConfig: mockUpdateConfig,
         fetchTrainings: mockFetchTrainings,
         fetchTraining: mockFetchTraining,
@@ -332,7 +334,7 @@ describe('TrainingPanel', () => {
     it('should have Start Training button enabled when form is valid', () => {
       (useTrainingsStore as any).mockReturnValue({
         trainings: [],
-        config: { ...mockConfig, model_id: 'm_gpt2', dataset_id: 'ds_dataset1' },
+        config: { ...mockConfig, model_id: 'm_gpt2', dataset_ids: ['ds_dataset1'] },
         updateConfig: mockUpdateConfig,
         fetchTrainings: mockFetchTrainings,
         fetchTraining: mockFetchTraining,
@@ -398,7 +400,7 @@ describe('TrainingPanel', () => {
       const validConfig = {
         ...mockConfig,
         model_id: 'm_gpt2',
-        dataset_id: 'ds_dataset1',
+        dataset_ids: ['ds_dataset1'],
       };
 
       (useTrainingsStore as any).mockReturnValue({
@@ -423,29 +425,30 @@ describe('TrainingPanel', () => {
       fireEvent.click(startButton);
 
       await waitFor(() => {
-        expect(mockCreateTraining).toHaveBeenCalledWith({
-          model_id: 'm_gpt2',
-          dataset_id: 'ds_dataset1',
-          hyperparameters: {
-            hidden_dim: 768,
-            latent_dim: 8192,
-            architecture_type: SAEArchitectureType.STANDARD,
-            training_layers: [0, 1, 2],
-            l1_alpha: 0.001,
-            target_l0: 0.05,
-            top_k_sparsity: undefined,
-            learning_rate: 0.0003,
-            batch_size: 32,
-            total_steps: 100000,
-            warmup_steps: 10000,
-            weight_decay: 0.01,
-            grad_clip_norm: 1.0,
-            checkpoint_interval: 1000,
-            log_interval: 100,
-            dead_neuron_threshold: 10000,
-            resample_dead_neurons: true,
-          },
-        });
+        expect(mockCreateTraining).toHaveBeenCalledWith(
+          expect.objectContaining({
+            model_id: 'm_gpt2',
+            dataset_ids: ['ds_dataset1'],
+            hyperparameters: expect.objectContaining({
+              hidden_dim: 768,
+              latent_dim: 8192,
+              architecture_type: SAEArchitectureType.STANDARD_SAELENS,
+              training_layers: [0, 1, 2],
+              l1_alpha: 5e-4,
+              target_l0: 0.05,
+              learning_rate: 4e-4,
+              batch_size: 2048,
+              total_steps: 50000,
+              warmup_steps: 2000,
+              weight_decay: 0.0,
+              grad_clip_norm: 1.0,
+              checkpoint_interval: 2000,
+              log_interval: 100,
+              dead_neuron_threshold: 10000,
+              resample_dead_neurons: true,
+            }),
+          })
+        );
       });
     });
 
@@ -453,7 +456,7 @@ describe('TrainingPanel', () => {
       const validConfig = {
         ...mockConfig,
         model_id: 'm_gpt2',
-        dataset_id: 'ds_dataset1',
+        dataset_ids: ['ds_dataset1'],
       };
 
       (useTrainingsStore as any).mockReturnValue({
