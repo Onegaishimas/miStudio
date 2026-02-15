@@ -13,6 +13,7 @@ import json
 import numpy as np
 
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.cuda.amp import autocast, GradScaler
 from celery import Task
