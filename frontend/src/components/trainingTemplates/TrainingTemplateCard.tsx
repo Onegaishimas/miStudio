@@ -7,6 +7,7 @@
 import React from 'react';
 import { Settings, Star, Edit2, Trash2, Copy } from 'lucide-react';
 import { TrainingTemplate } from '../../types/trainingTemplate';
+import { getFrameworkDisplayName } from '../../config/frameworkConfigs';
 
 interface TrainingTemplateCardProps {
   template: TrainingTemplate;
@@ -124,7 +125,7 @@ export function TrainingTemplateCard({
             {/* Architecture Info */}
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Architecture:</span>
-              <span className="text-slate-300 font-mono capitalize">{template.encoder_type}</span>
+              <span className="text-slate-300 font-mono">{getFrameworkDisplayName(template.encoder_type)}</span>
             </div>
 
             {/* Dimensions */}

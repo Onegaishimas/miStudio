@@ -38,6 +38,7 @@ import { useDeletionProgressWebSocket } from '../../hooks/useDeletionProgressWeb
 import { useWebSocketContext } from '../../contexts/WebSocketContext';
 import { TrainingStatus, SAEArchitectureType } from '../../types/training';
 import type { TrainingCreateRequest } from '../../types/training';
+import { getFrameworkConfig, getFrameworkOptions, isFieldVisible } from '../../config/frameworkConfigs';
 import { TrainingCard } from '../training/TrainingCard';
 import { TemplateSelector } from '../training/TemplateSelector';
 import DeletionProgressModal from '../training/DeletionProgressModal';
@@ -77,7 +78,6 @@ export const TrainingPanel: React.FC = () => {
   const [selectedTrainingIds, setSelectedTrainingIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [latentMultiplier, setLatentMultiplier] = useState(8);
-  const [topKValue, setTopKValue] = useState<number | null>(null);
   const [availableExtractions, setAvailableExtractions] = useState<any[]>([]);
   const [isLoadingExtractions, setIsLoadingExtractions] = useState(false);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
@@ -136,10 +136,13 @@ export const TrainingPanel: React.FC = () => {
 
     // Architecture short name
     const archMap: Record<string, string> = {
+      'standard_saelens': 'SAELens',
+      'standard_anthropic': 'Anthropic',
       'standard': 'Std',
       'skip': 'Skip',
       'transcoder': 'Trans',
       'jumprelu': 'JumpReLU',
+      'topk': 'TopK',
     };
     const archShort = archMap[config.architecture_type] || config.architecture_type;
 
@@ -160,33 +163,30 @@ export const TrainingPanel: React.FC = () => {
       : String(config.total_steps);
     const layerList = layers.join(', ');
 
+    const fw = getFrameworkConfig(config.architecture_type);
     const descParts = [
       `Hidden: ${config.hidden_dim} → Latent: ${config.latent_dim} (${multiplier}x)`,
-      `L1: ${config.l1_alpha}`,
       `LR: ${config.learning_rate}`,
       `Batch: ${config.batch_size}`,
       `Steps: ${stepsK}`,
       `Layers: ${layerList}`,
     ];
 
-    // Add JumpReLU-specific parameters if applicable
-    if (config.architecture_type === SAEArchitectureType.JUMPRELU) {
-      const sparsityCoeff = (config as any).sparsity_coeff ?? 0.0001;
-      const initialThreshold = (config as any).initial_threshold ?? 0.5;
-      const bandwidth = (config as any).bandwidth ?? 0.01;
-      descParts.push(`SparsityCoeff: ${sparsityCoeff}`);
-      descParts.push(`Thresh: ${initialThreshold}`);
-      descParts.push(`BW: ${bandwidth}`);
+    // Add framework-specific sparsity params
+    if (fw.sparsityType === 'l1' && config.l1_alpha != null) {
+      descParts.push(`L1: ${config.l1_alpha}`);
+    } else if (fw.sparsityType === 'l0') {
+      descParts.push(`SparsityCoeff: ${config.sparsity_coeff ?? 1e-4}`);
+      descParts.push(`Thresh: ${config.initial_threshold ?? 0.5}`);
+      descParts.push(`BW: ${config.bandwidth ?? 0.01}`);
+    } else if (fw.sparsityType === 'topk') {
+      descParts.push(`K: ${config.top_k ?? 64}`);
+      descParts.push(`AuxAlpha: ${config.aux_loss_alpha ?? 1/32}`);
     }
 
     // Add target L0 if set
-    if (config.target_l0) {
+    if (config.target_l0 && fw.sparsityType !== 'topk') {
       descParts.push(`L0: ${config.target_l0}`);
-    }
-
-    // Add top-k if set
-    if ((config as any).top_k_sparsity) {
-      descParts.push(`TopK: ${(config as any).top_k_sparsity}%`);
     }
 
     const description = descParts.join(' | ');
@@ -379,27 +379,6 @@ export const TrainingPanel: React.FC = () => {
     }
   }, [config.hidden_dim, latentMultiplier]);
 
-  // Sync topKValue (K features) ↔ top_k_sparsity (percentage) for backend
-  useEffect(() => {
-    if (topKValue !== null && config.latent_dim > 0) {
-      const percentage = (topKValue / config.latent_dim) * 100;
-      updateConfig({ top_k_sparsity: percentage } as any);
-    } else if (topKValue === null) {
-      updateConfig({ top_k_sparsity: undefined } as any);
-    }
-  }, [topKValue, config.latent_dim]);
-
-  // Initialize topKValue from existing top_k_sparsity (e.g., when loading a template)
-  useEffect(() => {
-    const topKSparsity = (config as any).top_k_sparsity;
-    if (topKSparsity && config.latent_dim > 0) {
-      const k = Math.round((topKSparsity / 100) * config.latent_dim);
-      if (k !== topKValue) {
-        setTopKValue(k);
-      }
-    }
-  }, []); // Only on mount
-
   // Check for tokenizer/model vocabulary mismatch (check first dataset)
   const selectedDatasets = (config.dataset_ids || []).map(id => datasets.find(d => d.id === id)).filter(Boolean);
   const firstSelectedDataset = selectedDatasets[0];
@@ -541,6 +520,7 @@ export const TrainingPanel: React.FC = () => {
 
     try {
       // Create template from current config
+      const fwConfig = getFrameworkConfig(config.architecture_type);
       await createTemplate({
         name: templateName.trim(),
         description: templateDescription.trim() || undefined,
@@ -552,22 +532,36 @@ export const TrainingPanel: React.FC = () => {
           latent_dim: config.latent_dim,
           architecture_type: config.architecture_type,
           training_layers: config.training_layers,
-          l1_alpha: config.l1_alpha,
           learning_rate: config.learning_rate,
           batch_size: config.batch_size,
           total_steps: config.total_steps,
           warmup_steps: config.warmup_steps,
-          sparsity_warmup_steps: config.sparsity_warmup_steps,
-          target_l0: config.target_l0,
           weight_decay: config.weight_decay,
           grad_clip_norm: config.grad_clip_norm,
           checkpoint_interval: config.checkpoint_interval,
-          // JumpReLU-specific parameters
-          ...(config.architecture_type === SAEArchitectureType.JUMPRELU && {
-            initial_threshold: (config as any).initial_threshold,
-            bandwidth: (config as any).bandwidth,
-            sparsity_coeff: (config as any).sparsity_coeff,
-            normalize_decoder: (config as any).normalize_decoder,
+          normalize_activations: config.normalize_activations,
+          // L1 frameworks
+          ...(fwConfig.sparsityType === 'l1' && {
+            l1_alpha: config.l1_alpha,
+            target_l0: config.target_l0,
+            sparsity_warmup_steps: config.sparsity_warmup_steps,
+            normalize_decoder: config.normalize_decoder,
+            resample_dead_neurons: config.resample_dead_neurons,
+          }),
+          // JumpReLU
+          ...(fwConfig.sparsityType === 'l0' && {
+            sparsity_coeff: config.sparsity_coeff,
+            initial_threshold: config.initial_threshold,
+            bandwidth: config.bandwidth,
+            normalize_decoder: config.normalize_decoder,
+            sparsity_warmup_steps: config.sparsity_warmup_steps,
+          }),
+          // TopK
+          ...(fwConfig.sparsityType === 'topk' && {
+            top_k: config.top_k,
+            aux_k: config.aux_k,
+            aux_loss_alpha: config.aux_loss_alpha,
+            adam_epsilon: config.adam_epsilon,
           }),
         },
         is_favorite: false,
@@ -603,6 +597,7 @@ export const TrainingPanel: React.FC = () => {
     console.log('[TrainingPanel] Starting training with config:', config);
     setIsStarting(true);
     try {
+      const fwConfig = getFrameworkConfig(config.architecture_type);
       const request: TrainingCreateRequest = {
         model_id: config.model_id,
         dataset_ids: config.dataset_ids,
@@ -613,16 +608,7 @@ export const TrainingPanel: React.FC = () => {
           architecture_type: config.architecture_type,
           training_layers: config.training_layers || [0],
           hook_types: config.hook_types || ['residual'],
-          l1_alpha: config.l1_alpha,
-          target_l0: config.target_l0,
-          top_k_sparsity: (config as any).top_k_sparsity,
-          // JumpReLU-specific parameters (only sent when JumpReLU is selected)
-          ...(config.architecture_type === SAEArchitectureType.JUMPRELU && {
-            initial_threshold: (config as any).initial_threshold,
-            bandwidth: (config as any).bandwidth,
-            sparsity_coeff: (config as any).sparsity_coeff,
-            normalize_decoder: (config as any).normalize_decoder,
-          }),
+          normalize_activations: config.normalize_activations,
           learning_rate: config.learning_rate,
           batch_size: config.batch_size,
           total_steps: config.total_steps,
@@ -633,7 +619,27 @@ export const TrainingPanel: React.FC = () => {
           checkpoint_interval: config.checkpoint_interval,
           log_interval: config.log_interval,
           dead_neuron_threshold: config.dead_neuron_threshold,
-          resample_dead_neurons: config.resample_dead_neurons,
+          // L1 frameworks
+          ...(fwConfig.sparsityType === 'l1' && {
+            l1_alpha: config.l1_alpha,
+            target_l0: config.target_l0,
+            normalize_decoder: config.normalize_decoder,
+            resample_dead_neurons: config.resample_dead_neurons,
+          }),
+          // JumpReLU
+          ...(fwConfig.sparsityType === 'l0' && {
+            sparsity_coeff: config.sparsity_coeff,
+            initial_threshold: config.initial_threshold,
+            bandwidth: config.bandwidth,
+            normalize_decoder: config.normalize_decoder,
+          }),
+          // TopK
+          ...(fwConfig.sparsityType === 'topk' && {
+            top_k: config.top_k,
+            aux_k: config.aux_k,
+            aux_loss_alpha: config.aux_loss_alpha,
+            adam_epsilon: config.adam_epsilon,
+          }),
         },
       };
 
@@ -761,10 +767,10 @@ export const TrainingPanel: React.FC = () => {
               </select>
             </div>
 
-            {/* Architecture Type Selection - Third in flow */}
+            {/* Training Framework Selection - Third in flow */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                SAE Architecture
+                Training Framework
               </label>
               <select
                 value={config.architecture_type}
@@ -773,11 +779,15 @@ export const TrainingPanel: React.FC = () => {
                 }
                 className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
               >
-                <option value={SAEArchitectureType.STANDARD}>Standard</option>
-                <option value={SAEArchitectureType.SKIP}>Skip Connection</option>
-                <option value={SAEArchitectureType.TRANSCODER}>Transcoder</option>
-                <option value={SAEArchitectureType.JUMPRELU}>JumpReLU (Gemma Scope)</option>
+                {getFrameworkOptions().map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
+              <p className="mt-1 text-xs text-slate-500">
+                {getFrameworkConfig(config.architecture_type).description}
+              </p>
             </div>
 
           </div>
@@ -1143,149 +1153,206 @@ export const TrainingPanel: React.FC = () => {
                   </div>
                 </div>
 
-                {/* L1 Alpha with Auto-Calculate */}
-                {/* Note: L1 is irrelevant for JumpReLU (uses sparsity_coeff) and when TopK is active */}
-                <div className={config.architecture_type === SAEArchitectureType.JUMPRELU || topKValue !== null ? 'opacity-40' : ''}>
-                  <HyperparameterLabel
-                    paramName="l1_alpha"
-                    label="L1 Sparsity Coefficient"
-                    htmlFor="l1-alpha"
-                    className="mb-2"
-                  />
-                  <div className="flex gap-2">
-                    <input
-                      id="l1-alpha"
-                      type="number"
-                      value={config.l1_alpha}
-                      onChange={(e) => updateConfig({ l1_alpha: parseFloat(e.target.value) })}
-                      min={0.00001}
-                      max={10.0}
-                      step={0.00001}
-                      disabled={config.architecture_type === SAEArchitectureType.JUMPRELU || topKValue !== null}
-                      className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors disabled:bg-slate-900 disabled:text-slate-500 disabled:cursor-not-allowed"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const optimal = calculateOptimalL1Alpha(config.latent_dim, config.target_l0 ?? 0.05);
-                        updateConfig({ l1_alpha: optimal });
-                      }}
-                      disabled={config.architecture_type === SAEArchitectureType.JUMPRELU || topKValue !== null}
-                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-sm rounded-md transition-colors whitespace-nowrap"
-                      title={
-                        topKValue !== null
-                          ? 'L1 is disabled when Top-K is active (Top-K guarantees exact sparsity)'
-                          : config.architecture_type === SAEArchitectureType.JUMPRELU
-                            ? 'L1 is not used for JumpReLU - use L0 Sparsity Coefficient instead'
-                            : `Calculate optimal L1 alpha for ${config.latent_dim} latent dimensions`
-                      }
-                    >
-                      Auto
-                    </button>
-                  </div>
-                  {/* Sparsity Warnings - only show when L1 is actually used */}
-                  {config.architecture_type !== SAEArchitectureType.JUMPRELU && topKValue === null && (() => {
-                    const warnings = validateSparsityConfig(config.l1_alpha, config.latent_dim, config.target_l0 ?? 0.05);
-                    return warnings.length > 0 ? (
-                      <div className="mt-2 space-y-1">
-                        {warnings.map((warning, idx) => (
-                          <div key={idx} className="flex items-start gap-2 text-xs text-yellow-400">
-                            <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                            <span>{warning}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null;
-                  })()}
-                  {/* L1 disabled notice */}
-                  {config.architecture_type === SAEArchitectureType.JUMPRELU && (
-                    <p className="mt-1 text-xs text-slate-500 italic">
-                      L1 is not used for JumpReLU. Use "L0 Sparsity Coefficient" below instead.
-                    </p>
-                  )}
-                  {topKValue !== null && config.architecture_type !== SAEArchitectureType.JUMPRELU && (
-                    <p className="mt-1 text-xs text-slate-500 italic">
-                      L1 penalty is disabled when Top-K is active. Top-K guarantees exact sparsity.
-                    </p>
-                  )}
-                </div>
+                {/* === Framework-Specific Sparsity Section === */}
 
-                {/* Target L0 */}
-                <div>
-                  <HyperparameterLabel
-                    paramName="target_l0"
-                    label="Target L0 Sparsity"
-                    htmlFor="target-l0"
-                    className="mb-2"
-                  />
-                  <input
-                    id="target-l0"
-                    type="number"
-                    value={config.target_l0 ?? 0.05}
-                    onChange={(e) => updateConfig({ target_l0: parseFloat(e.target.value) })}
-                    min={0.001}
-                    max={1.0}
-                    step={0.001}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                  />
-                </div>
-
-                {/* Top-K Sparsity (input K directly) */}
-                <div>
-                  <HyperparameterLabel
-                    paramName="top_k_sparsity"
-                    label="Top-K Active Features"
-                    htmlFor="top-k-sparsity"
-                    className="mb-2"
-                  />
-                  <div className="flex items-center gap-3">
-                    <input
-                      id="top-k-sparsity"
-                      type="number"
-                      value={topKValue ?? ''}
-                      onChange={(e) => {
-                        if (e.target.value === '') {
-                          setTopKValue(null);
-                        } else {
-                          const k = Math.max(1, Math.min(config.latent_dim, parseInt(e.target.value) || 0));
-                          setTopKValue(k);
-                        }
-                      }}
-                      min={1}
-                      max={config.latent_dim}
-                      step={1}
-                      placeholder="e.g., 64"
-                      className="w-32 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                {/* L1 Alpha — visible for L1 frameworks */}
+                {isFieldVisible(config.architecture_type, 'l1_alpha') && (
+                  <div>
+                    <HyperparameterLabel
+                      paramName="l1_alpha"
+                      label="L1 Sparsity Coefficient"
+                      htmlFor="l1-alpha"
+                      className="mb-2"
                     />
-                    {topKValue !== null && config.latent_dim > 0 && (
-                      <span className="text-slate-400 text-sm font-mono">
-                        of {config.latent_dim.toLocaleString()} features{' '}
-                        <span className="text-emerald-400">({((topKValue / config.latent_dim) * 100).toFixed(2)}%)</span>
-                      </span>
+                    <div className="flex gap-2">
+                      <input
+                        id="l1-alpha"
+                        type="number"
+                        value={config.l1_alpha ?? 5e-4}
+                        onChange={(e) => updateConfig({ l1_alpha: parseFloat(e.target.value) })}
+                        min={0.00001}
+                        max={100.0}
+                        step={config.architecture_type === SAEArchitectureType.STANDARD_ANTHROPIC ? 0.1 : 0.00001}
+                        className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      />
+                      {config.architecture_type !== SAEArchitectureType.STANDARD_ANTHROPIC && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const optimal = calculateOptimalL1Alpha(config.latent_dim, config.target_l0 ?? 0.05);
+                            updateConfig({ l1_alpha: optimal });
+                          }}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-md transition-colors whitespace-nowrap"
+                          title={`Calculate optimal L1 alpha for ${config.latent_dim} latent dimensions`}
+                        >
+                          Auto
+                        </button>
+                      )}
+                    </div>
+                    {/* Sparsity Warnings */}
+                    {config.l1_alpha != null && (() => {
+                      const warnings = validateSparsityConfig(config.l1_alpha, config.latent_dim, config.target_l0 ?? 0.05);
+                      return warnings.length > 0 ? (
+                        <div className="mt-2 space-y-1">
+                          {warnings.map((warning, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-xs text-yellow-400">
+                              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                              <span>{warning}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+                    {config.architecture_type === SAEArchitectureType.STANDARD_ANTHROPIC && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Anthropic normalization uses L1 ~5.0 (not ~5e-4). Scale is different from SAELens.
+                      </p>
                     )}
                   </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {topKValue !== null
-                      ? `Exactly ${topKValue} feature${topKValue !== 1 ? 's' : ''} will activate per sample. L1 penalty is disabled when Top-K is set.`
-                      : 'Number of features to keep active per sample (hard sparsity). Leave empty to use L1 penalty instead.'
-                    }
-                  </p>
-                  {topKValue !== null && topKValue > config.latent_dim * 0.10 && (
-                    <p className="mt-1 text-xs text-yellow-400 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                      K is &gt;10% of features — this is quite dense. Typical range: 32-128 for {config.latent_dim.toLocaleString()} features.
-                    </p>
-                  )}
-                </div>
+                )}
 
-                {/* JumpReLU-specific parameters - only shown when JumpReLU is selected */}
-                {config.architecture_type === SAEArchitectureType.JUMPRELU && (
+                {/* Target L0 — visible for L1 frameworks */}
+                {isFieldVisible(config.architecture_type, 'target_l0') && (
+                  <div>
+                    <HyperparameterLabel
+                      paramName="target_l0"
+                      label="Target L0 Sparsity"
+                      htmlFor="target-l0"
+                      className="mb-2"
+                    />
+                    <input
+                      id="target-l0"
+                      type="number"
+                      value={config.target_l0 ?? 0.05}
+                      onChange={(e) => updateConfig({ target_l0: parseFloat(e.target.value) })}
+                      min={0.001}
+                      max={1.0}
+                      step={0.001}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                  </div>
+                )}
+
+                {/* TopK Parameters — visible for TopK framework */}
+                {isFieldVisible(config.architecture_type, 'top_k') && (
                   <>
-                    {/* JumpReLU Section Header */}
+                    <div className="col-span-2 mt-4 mb-2">
+                      <div className="flex items-center gap-2 pb-2 border-b border-slate-700">
+                        <span className="text-sm font-semibold text-emerald-400">TopK Parameters</span>
+                        <span className="text-xs text-slate-500">(Gao et al. 2024)</span>
+                      </div>
+                    </div>
+
+                    {/* Top K */}
+                    <div>
+                      <HyperparameterLabel
+                        paramName="top_k"
+                        label="K (Active Features)"
+                        htmlFor="top-k"
+                        className="mb-2"
+                      />
+                      <div className="flex items-center gap-3">
+                        <input
+                          id="top-k"
+                          type="number"
+                          value={config.top_k ?? 64}
+                          onChange={(e) => updateConfig({ top_k: parseInt(e.target.value) || 64 })}
+                          min={1}
+                          max={config.latent_dim}
+                          step={1}
+                          className="w-32 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        />
+                        {config.top_k && config.latent_dim > 0 && (
+                          <span className="text-slate-400 text-sm font-mono">
+                            of {config.latent_dim.toLocaleString()} features{' '}
+                            <span className="text-emerald-400">({((config.top_k / config.latent_dim) * 100).toFixed(2)}%)</span>
+                          </span>
+                        )}
+                      </div>
+                      {config.top_k && config.top_k > config.latent_dim * 0.10 && (
+                        <p className="mt-1 text-xs text-yellow-400 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                          K is &gt;10% of features — quite dense. Typical range: 32-256.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Aux K */}
+                    <div>
+                      <HyperparameterLabel
+                        paramName="aux_k"
+                        label="Aux K (Dead Features)"
+                        htmlFor="aux-k"
+                        className="mb-2"
+                      />
+                      <input
+                        id="aux-k"
+                        type="number"
+                        value={config.aux_k ?? ''}
+                        onChange={(e) => updateConfig({ aux_k: e.target.value ? parseInt(e.target.value) : undefined })}
+                        min={1}
+                        max={config.latent_dim}
+                        step={1}
+                        placeholder={`Default: ${config.top_k ?? 64}`}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                      />
+                      <p className="mt-1 text-xs text-slate-400">
+                        Number of dead features for auxiliary loss. Defaults to K.
+                      </p>
+                    </div>
+
+                    {/* Aux Loss Alpha */}
+                    <div>
+                      <HyperparameterLabel
+                        paramName="aux_loss_alpha"
+                        label="Aux Loss Coefficient"
+                        htmlFor="aux-loss-alpha"
+                        className="mb-2"
+                      />
+                      <input
+                        id="aux-loss-alpha"
+                        type="number"
+                        value={config.aux_loss_alpha ?? 1/32}
+                        onChange={(e) => updateConfig({ aux_loss_alpha: parseFloat(e.target.value) })}
+                        min={0}
+                        max={1.0}
+                        step={0.001}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      />
+                      <p className="mt-1 text-xs text-slate-400">
+                        Coefficient for auxiliary dead feature loss. Default: 1/32 ≈ 0.03125.
+                      </p>
+                    </div>
+
+                    {/* Adam Epsilon */}
+                    <div>
+                      <HyperparameterLabel
+                        paramName="adam_epsilon"
+                        label="Adam Epsilon"
+                        htmlFor="adam-epsilon"
+                        className="mb-2"
+                      />
+                      <input
+                        id="adam-epsilon"
+                        type="text"
+                        value={config.adam_epsilon ?? 6.25e-10}
+                        onChange={(e) => updateConfig({ adam_epsilon: parseFloat(e.target.value) || 6.25e-10 })}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      />
+                      <p className="mt-1 text-xs text-slate-400">
+                        TopK uses very small epsilon (6.25e-10) per Gao et al. Default Adam: 1e-8.
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* JumpReLU Parameters — visible for JumpReLU framework */}
+                {isFieldVisible(config.architecture_type, 'sparsity_coeff') && (
+                  <>
                     <div className="col-span-2 mt-4 mb-2">
                       <div className="flex items-center gap-2 pb-2 border-b border-slate-700">
                         <span className="text-sm font-semibold text-emerald-400">JumpReLU Parameters</span>
-                        <span className="text-xs text-slate-500">(Gemma Scope Architecture)</span>
+                        <span className="text-xs text-slate-500">(Rajamanoharan et al. 2024)</span>
                       </div>
                     </div>
 
@@ -1300,15 +1367,15 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="sparsity-coeff"
                         type="number"
-                        value={(config as any).sparsity_coeff ?? 0.0001}
-                        onChange={(e) => updateConfig({ sparsity_coeff: parseFloat(e.target.value) } as any)}
+                        value={config.sparsity_coeff ?? 1e-4}
+                        onChange={(e) => updateConfig({ sparsity_coeff: parseFloat(e.target.value) })}
                         min={0.000001}
                         max={10.0}
                         step={0.00001}
                         className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        L0 penalty coefficient (λ) applied to raw feature count (Gemma Scope formulation). Default: 1e-4.
+                        L0 penalty coefficient (λ) applied to raw feature count. Default: 1e-4.
                       </p>
                     </div>
 
@@ -1323,15 +1390,15 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="initial-threshold"
                         type="number"
-                        value={(config as any).initial_threshold ?? 0.5}
-                        onChange={(e) => updateConfig({ initial_threshold: parseFloat(e.target.value) } as any)}
+                        value={config.initial_threshold ?? 0.5}
+                        onChange={(e) => updateConfig({ initial_threshold: parseFloat(e.target.value) })}
                         min={0.001}
                         max={5.0}
                         step={0.1}
                         className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        Starting threshold for JumpReLU activation. Should match pre-activation magnitude (~0.5 with constant_norm_rescale).
+                        Starting threshold for JumpReLU activation. Should match pre-activation magnitude (~0.5).
                       </p>
                     </div>
 
@@ -1346,8 +1413,8 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="bandwidth"
                         type="number"
-                        value={(config as any).bandwidth ?? 0.01}
-                        onChange={(e) => updateConfig({ bandwidth: parseFloat(e.target.value) } as any)}
+                        value={config.bandwidth ?? 0.01}
+                        onChange={(e) => updateConfig({ bandwidth: parseFloat(e.target.value) })}
                         min={0.001}
                         max={0.5}
                         step={0.001}
@@ -1357,28 +1424,30 @@ export const TrainingPanel: React.FC = () => {
                         Smoothness of STE gradient estimation. Wider = more features get gradient. Default: 0.01.
                       </p>
                     </div>
-
-                    {/* Normalize Decoder */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={(config as any).normalize_decoder ?? true}
-                            onChange={(e) => updateConfig({ normalize_decoder: e.target.checked } as any)}
-                            className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
-                          />
-                          <span className="text-sm font-medium text-slate-300">
-                            Normalize Decoder Columns
-                          </span>
-                        </label>
-                        <HyperparameterTooltip paramName="normalize_decoder" />
-                      </div>
-                      <p className="text-xs text-slate-400">
-                        Required for JumpReLU. Normalizes decoder columns to unit norm after each step.
-                      </p>
-                    </div>
                   </>
+                )}
+
+                {/* Normalize Decoder — visible for L1 and JumpReLU frameworks */}
+                {isFieldVisible(config.architecture_type, 'normalize_decoder') && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={config.normalize_decoder ?? true}
+                          onChange={(e) => updateConfig({ normalize_decoder: e.target.checked })}
+                          className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                        />
+                        <span className="text-sm font-medium text-slate-300">
+                          Normalize Decoder Columns
+                        </span>
+                      </label>
+                      <HyperparameterTooltip paramName="normalize_decoder" />
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Normalizes decoder columns to unit norm after each step.
+                    </p>
+                  </div>
                 )}
 
                 {/* Normalize Activations */}
@@ -1396,6 +1465,7 @@ export const TrainingPanel: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   >
                     <option value="constant_norm_rescale">Constant Norm Rescale (SAELens)</option>
+                    <option value="anthropic_rescale">Anthropic Rescale (E[||x||²]=d_model)</option>
                     <option value="none">None</option>
                   </select>
                 </div>
@@ -1480,26 +1550,28 @@ export const TrainingPanel: React.FC = () => {
                   />
                 </div>
 
-                {/* Sparsity Warmup Steps */}
-                <div>
-                  <HyperparameterLabel
-                    paramName="sparsity_warmup_steps"
-                    label="Sparsity Warmup Steps"
-                    htmlFor="sparsity-warmup-steps"
-                    className="mb-2"
-                  />
-                  <input
-                    id="sparsity-warmup-steps"
-                    type="number"
-                    value={config.sparsity_warmup_steps ?? 5000}
-                    onChange={(e) => updateConfig({ sparsity_warmup_steps: parseInt(e.target.value) })}
-                    min={0}
-                    max={100000}
-                    step={1000}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Ramps sparsity penalty from 0 to full. Prevents dead neurons.</p>
-                </div>
+                {/* Sparsity Warmup Steps — hidden for TopK */}
+                {isFieldVisible(config.architecture_type, 'sparsity_warmup_steps') && (
+                  <div>
+                    <HyperparameterLabel
+                      paramName="sparsity_warmup_steps"
+                      label="Sparsity Warmup Steps"
+                      htmlFor="sparsity-warmup-steps"
+                      className="mb-2"
+                    />
+                    <input
+                      id="sparsity-warmup-steps"
+                      type="number"
+                      value={config.sparsity_warmup_steps ?? 5000}
+                      onChange={(e) => updateConfig({ sparsity_warmup_steps: parseInt(e.target.value) })}
+                      min={0}
+                      max={100000}
+                      step={1000}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Ramps sparsity penalty from 0 to full. Prevents dead neurons.</p>
+                  </div>
+                )}
 
                 {/* Weight Decay */}
                 <div>
@@ -1583,69 +1655,75 @@ export const TrainingPanel: React.FC = () => {
                   />
                 </div>
 
-                {/* Dead Neuron Threshold */}
-                <div>
-                  <HyperparameterLabel
-                    paramName="dead_neuron_threshold"
-                    label="Dead Neuron Threshold"
-                    htmlFor="dead-neuron-threshold"
-                    className="mb-2"
-                  />
-                  <input
-                    id="dead-neuron-threshold"
-                    type="number"
-                    value={config.dead_neuron_threshold ?? 10000}
-                    onChange={(e) =>
-                      updateConfig({ dead_neuron_threshold: parseInt(e.target.value) })
-                    }
-                    min={1000}
-                    max={100000}
-                    step={1000}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                  />
-                </div>
-
-                {/* Resample Interval */}
-                <div>
-                  <HyperparameterLabel
-                    paramName="resample_interval"
-                    label="Resample Interval"
-                    htmlFor="resample-interval"
-                    className="mb-2"
-                  />
-                  <input
-                    id="resample-interval"
-                    type="number"
-                    value={config.resample_interval ?? 5000}
-                    onChange={(e) =>
-                      updateConfig({ resample_interval: parseInt(e.target.value) })
-                    }
-                    min={1000}
-                    max={50000}
-                    step={1000}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                  />
-                </div>
-
-                {/* Resample Dead Neurons */}
-                <div className="col-span-2">
-                  <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={config.resample_dead_neurons ?? true}
-                        onChange={(e) =>
-                          updateConfig({ resample_dead_neurons: e.target.checked })
-                        }
-                        className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
-                      />
-                      <span className="text-sm font-medium text-slate-300">
-                        Resample dead neurons during training
-                      </span>
-                    </label>
-                    <HyperparameterTooltip paramName="resample_dead_neurons" />
+                {/* Dead Neuron Threshold — hidden for TopK */}
+                {isFieldVisible(config.architecture_type, 'dead_neuron_threshold') && (
+                  <div>
+                    <HyperparameterLabel
+                      paramName="dead_neuron_threshold"
+                      label="Dead Neuron Threshold"
+                      htmlFor="dead-neuron-threshold"
+                      className="mb-2"
+                    />
+                    <input
+                      id="dead-neuron-threshold"
+                      type="number"
+                      value={config.dead_neuron_threshold ?? 10000}
+                      onChange={(e) =>
+                        updateConfig({ dead_neuron_threshold: parseInt(e.target.value) })
+                      }
+                      min={1000}
+                      max={100000}
+                      step={1000}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
                   </div>
-                </div>
+                )}
+
+                {/* Resample Interval — hidden for TopK/JumpReLU */}
+                {isFieldVisible(config.architecture_type, 'resample_interval') && (
+                  <div>
+                    <HyperparameterLabel
+                      paramName="resample_interval"
+                      label="Resample Interval"
+                      htmlFor="resample-interval"
+                      className="mb-2"
+                    />
+                    <input
+                      id="resample-interval"
+                      type="number"
+                      value={config.resample_interval ?? 5000}
+                      onChange={(e) =>
+                        updateConfig({ resample_interval: parseInt(e.target.value) })
+                      }
+                      min={1000}
+                      max={50000}
+                      step={1000}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                  </div>
+                )}
+
+                {/* Resample Dead Neurons — hidden for TopK/JumpReLU */}
+                {isFieldVisible(config.architecture_type, 'resample_dead_neurons') && (
+                  <div className="col-span-2">
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={config.resample_dead_neurons ?? true}
+                          onChange={(e) =>
+                            updateConfig({ resample_dead_neurons: e.target.checked })
+                          }
+                          className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                        />
+                        <span className="text-sm font-medium text-slate-300">
+                          Resample dead neurons during training
+                        </span>
+                      </label>
+                      <HyperparameterTooltip paramName="resample_dead_neurons" />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -13,6 +13,7 @@ import {
   TrainingTemplateUpdate,
 } from '../../types/trainingTemplate';
 import { SAEArchitectureType } from '../../types/training';
+import { getFrameworkOptions } from '../../config/frameworkConfigs';
 
 interface TrainingTemplateFormProps {
   template?: TrainingTemplate;
@@ -35,7 +36,7 @@ export function TrainingTemplateForm({
   const [modelId, setModelId] = useState(template?.model_id || '');
   const [datasetId, setDatasetId] = useState(template?.dataset_id || '');
   const [encoderType, setEncoderType] = useState<SAEArchitectureType>(
-    (template?.encoder_type as SAEArchitectureType) || SAEArchitectureType.STANDARD
+    (template?.encoder_type as SAEArchitectureType) || SAEArchitectureType.STANDARD_SAELENS
   );
 
   // Form state - Hyperparameters
@@ -94,7 +95,7 @@ export function TrainingTemplateForm({
       setDescription(template.description || '');
       setModelId(template.model_id || '');
       setDatasetId(template.dataset_id || '');
-      setEncoderType((template.encoder_type as SAEArchitectureType) || SAEArchitectureType.STANDARD);
+      setEncoderType((template.encoder_type as SAEArchitectureType) || SAEArchitectureType.STANDARD_SAELENS);
       setHiddenDim(template.hyperparameters.hidden_dim);
       setLatentDim(template.hyperparameters.latent_dim);
       setL1Alpha(template.hyperparameters.l1_alpha ?? 0);
@@ -229,7 +230,7 @@ export function TrainingTemplateForm({
         setDescription('');
         setModelId('');
         setDatasetId('');
-        setEncoderType(SAEArchitectureType.STANDARD);
+        setEncoderType(SAEArchitectureType.STANDARD_SAELENS);
         setHiddenDim(768);
         setLatentDim(16384);
         setL1Alpha(0.01);
@@ -358,36 +359,37 @@ export function TrainingTemplateForm({
             SAE Architecture
           </h3>
 
-          {/* Encoder Type */}
+          {/* Training Framework */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
-              Architecture Type <span className="text-red-400">*</span>
+              Training Framework <span className="text-red-400">*</span>
             </label>
             <div className="flex flex-wrap gap-3">
-              {Object.values(SAEArchitectureType).map((type) => (
+              {getFrameworkOptions().map((opt) => (
                 <label
-                  key={type}
-                  className={`flex-1 min-w-[120px] px-4 py-3 bg-slate-800 border rounded cursor-pointer transition-all ${
-                    encoderType === type
+                  key={opt.value}
+                  className={`flex-1 min-w-[140px] px-4 py-3 bg-slate-800 border rounded cursor-pointer transition-all ${
+                    encoderType === opt.value
                       ? 'border-emerald-500 bg-emerald-500/10'
                       : 'border-slate-700 hover:border-slate-600'
                   }`}
+                  title={opt.description}
                 >
                   <input
                     type="radio"
                     name="encoder-type"
-                    value={type}
-                    checked={encoderType === type}
+                    value={opt.value}
+                    checked={encoderType === opt.value}
                     onChange={(e) => setEncoderType(e.target.value as SAEArchitectureType)}
                     disabled={isSubmitting}
                     className="sr-only"
                   />
                   <span
-                    className={`text-sm font-medium capitalize ${
-                      encoderType === type ? 'text-emerald-400' : 'text-slate-300'
+                    className={`text-sm font-medium ${
+                      encoderType === opt.value ? 'text-emerald-400' : 'text-slate-300'
                     }`}
                   >
-                    {type}
+                    {opt.label}
                   </span>
                 </label>
               ))}

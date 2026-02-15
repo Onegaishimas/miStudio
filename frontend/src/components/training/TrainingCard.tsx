@@ -47,6 +47,7 @@ import type { Dataset } from '../../types/dataset';
 import { COMPONENTS } from '../../config/brand';
 import { formatL0Absolute } from '../../utils/formatters';
 import { fetchTrainingMetrics } from '../../api/trainings';
+import { getFrameworkDisplayName, getFrameworkConfig } from '../../config/frameworkConfigs';
 
 interface TrainingCardProps {
   training: Training;
@@ -523,7 +524,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               </span>
             </div>
             <p className="text-sm text-slate-400">
-              Encoder: {training.hyperparameters?.architecture_type || 'N/A'}
+              Framework: {training.hyperparameters?.architecture_type ? getFrameworkDisplayName(training.hyperparameters.architecture_type) : 'N/A'}
               {training.hyperparameters?.training_layers && training.hyperparameters.training_layers.length > 0 && (
                 <>
                   {' • '}
@@ -593,41 +594,39 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             </span>
           </div>
           <div>
-            {training.hyperparameters?.architecture_type === 'jumprelu' && training.hyperparameters?.sparsity_coeff != null ? (
-              <>
-                <span className="text-slate-400">Sparsity Coeff: </span>
-                <span className="text-slate-100 font-medium">
-                  {training.hyperparameters.sparsity_coeff}
-                </span>
-              </>
-            ) : training.hyperparameters?.top_k_sparsity ? (
-              <>
-                <span className="text-slate-400">L1 Alpha: </span>
-                <span className="text-slate-500 font-medium line-through">
-                  {training.hyperparameters?.l1_alpha ?? 'N/A'}
-                </span>
-                <span className="text-slate-500 text-xs ml-1">(disabled by Top-K)</span>
-              </>
-            ) : (
-              <>
-                <span className="text-slate-400">L1 Alpha: </span>
-                <span className="text-slate-100 font-medium">
-                  {training.hyperparameters?.l1_alpha ?? 'N/A'}
-                </span>
-              </>
-            )}
+            {(() => {
+              const archType = training.hyperparameters?.architecture_type || 'standard_saelens';
+              const fw = getFrameworkConfig(archType);
+              if (fw.sparsityType === 'l0') {
+                return (
+                  <>
+                    <span className="text-slate-400">Sparsity Coeff: </span>
+                    <span className="text-slate-100 font-medium">
+                      {training.hyperparameters?.sparsity_coeff ?? 'N/A'}
+                    </span>
+                  </>
+                );
+              } else if (fw.sparsityType === 'topk') {
+                return (
+                  <>
+                    <span className="text-slate-400">Top-K: </span>
+                    <span className="text-emerald-400 font-medium">
+                      K={training.hyperparameters?.top_k ?? 64}
+                    </span>
+                  </>
+                );
+              } else {
+                return (
+                  <>
+                    <span className="text-slate-400">L1 Alpha: </span>
+                    <span className="text-slate-100 font-medium">
+                      {training.hyperparameters?.l1_alpha ?? 'N/A'}
+                    </span>
+                  </>
+                );
+              }
+            })()}
           </div>
-          {training.hyperparameters?.top_k_sparsity && (
-            <div>
-              <span className="text-slate-400">Top-K: </span>
-              <span className="text-emerald-400 font-medium">
-                K={Math.round((training.hyperparameters.top_k_sparsity / 100) * (training.hyperparameters.latent_dim || 0))}
-              </span>
-              <span className="text-slate-500 text-xs ml-1">
-                ({training.hyperparameters.top_k_sparsity.toFixed(2)}%)
-              </span>
-            </div>
-          )}
           <div>
             <span className="text-slate-400">Hidden Dim: </span>
             <span className="text-slate-100 font-medium">
@@ -1234,9 +1233,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 <h4 className="text-sm font-semibold text-emerald-400 mb-2">SAE Architecture</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Architecture Type</div>
+                    <div className="text-xs text-slate-400 mb-1">Training Framework</div>
                     <div className="text-sm text-slate-100 font-medium">
-                      {training.hyperparameters.architecture_type}
+                      {getFrameworkDisplayName(training.hyperparameters.architecture_type)}
                     </div>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2">
@@ -1276,73 +1275,100 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 </div>
               </div>
 
-              {/* Sparsity Section */}
+              {/* Sparsity Section — framework-aware */}
               <div>
                 <h4 className="text-sm font-semibold text-emerald-400 mb-2">Sparsity Configuration</h4>
                 <div className="grid grid-cols-2 gap-3">
-                  {/* For JumpReLU, show sparsity_coeff prominently; L1 Alpha is secondary */}
-                  {training.hyperparameters.architecture_type === 'jumprelu' && training.hyperparameters.sparsity_coeff != null && (
-                    <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
-                      <div className="text-xs text-slate-400 mb-1">Sparsity Coeff (L0)</div>
-                      <div className="text-sm text-emerald-400 font-medium">
-                        {training.hyperparameters.sparsity_coeff}
-                      </div>
-                    </div>
-                  )}
-                  <div className={`bg-slate-800/50 rounded-lg p-2 ${training.hyperparameters.architecture_type === 'jumprelu' ? 'opacity-50' : ''}`}>
-                    <div className="text-xs text-slate-400 mb-1">L1 Alpha{training.hyperparameters.architecture_type === 'jumprelu' ? ' (unused)' : ''}</div>
-                    <div className="text-sm text-slate-100 font-medium">
-                      {training.hyperparameters.l1_alpha}
-                    </div>
-                  </div>
-                  {training.hyperparameters.target_l0 && (
-                    <div className="bg-slate-800/50 rounded-lg p-2">
-                      <div className="text-xs text-slate-400 mb-1">Target L0</div>
-                      <div className="text-sm text-slate-100 font-medium">
-                        {training.hyperparameters.target_l0}
-                      </div>
-                    </div>
-                  )}
-                  {training.hyperparameters.top_k_sparsity && (
-                    <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
-                      <div className="text-xs text-slate-400 mb-1">Top-K Active Features</div>
-                      <div className="text-sm text-emerald-400 font-medium">
-                        K = {Math.round((training.hyperparameters.top_k_sparsity / 100) * (training.hyperparameters.latent_dim || 0))}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {training.hyperparameters.top_k_sparsity.toFixed(2)}% of {(training.hyperparameters.latent_dim || 0).toLocaleString()}
-                      </div>
-                    </div>
-                  )}
-                  {/* JumpReLU-specific parameters */}
-                  {training.hyperparameters.architecture_type === 'jumprelu' && (
-                    <>
-                      {training.hyperparameters.initial_threshold != null && (
-                        <div className="bg-slate-800/50 rounded-lg p-2">
-                          <div className="text-xs text-slate-400 mb-1">Initial Threshold</div>
-                          <div className="text-sm text-slate-100 font-medium">
-                            {training.hyperparameters.initial_threshold}
+                  {(() => {
+                    const archType = training.hyperparameters.architecture_type || 'standard_saelens';
+                    const fw = getFrameworkConfig(archType);
+
+                    if (fw.sparsityType === 'topk') {
+                      return (
+                        <>
+                          <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
+                            <div className="text-xs text-slate-400 mb-1">Top-K Active Features</div>
+                            <div className="text-sm text-emerald-400 font-medium">
+                              K = {(training.hyperparameters as any).top_k ?? 64}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {training.hyperparameters.bandwidth != null && (
-                        <div className="bg-slate-800/50 rounded-lg p-2">
-                          <div className="text-xs text-slate-400 mb-1">Bandwidth</div>
-                          <div className="text-sm text-slate-100 font-medium">
-                            {training.hyperparameters.bandwidth}
+                          {(training.hyperparameters as any).aux_loss_alpha != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-400 mb-1">Aux Loss Alpha</div>
+                              <div className="text-sm text-slate-100 font-medium">
+                                {(training.hyperparameters as any).aux_loss_alpha}
+                              </div>
+                            </div>
+                          )}
+                          {(training.hyperparameters as any).adam_epsilon != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-400 mb-1">Adam Epsilon</div>
+                              <div className="text-sm text-slate-100 font-medium">
+                                {(training.hyperparameters as any).adam_epsilon}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    } else if (fw.sparsityType === 'l0') {
+                      return (
+                        <>
+                          {training.hyperparameters.sparsity_coeff != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
+                              <div className="text-xs text-slate-400 mb-1">Sparsity Coeff (L0)</div>
+                              <div className="text-sm text-emerald-400 font-medium">
+                                {training.hyperparameters.sparsity_coeff}
+                              </div>
+                            </div>
+                          )}
+                          {training.hyperparameters.initial_threshold != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-400 mb-1">Initial Threshold</div>
+                              <div className="text-sm text-slate-100 font-medium">
+                                {training.hyperparameters.initial_threshold}
+                              </div>
+                            </div>
+                          )}
+                          {training.hyperparameters.bandwidth != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-400 mb-1">Bandwidth</div>
+                              <div className="text-sm text-slate-100 font-medium">
+                                {training.hyperparameters.bandwidth}
+                              </div>
+                            </div>
+                          )}
+                          {training.hyperparameters.normalize_decoder != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-400 mb-1">Normalize Decoder</div>
+                              <div className="text-sm text-slate-100 font-medium">
+                                {training.hyperparameters.normalize_decoder ? 'Yes' : 'No'}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    } else {
+                      // L1 frameworks
+                      return (
+                        <>
+                          <div className="bg-slate-800/50 rounded-lg p-2">
+                            <div className="text-xs text-slate-400 mb-1">L1 Alpha</div>
+                            <div className="text-sm text-slate-100 font-medium">
+                              {training.hyperparameters.l1_alpha ?? 'N/A'}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {training.hyperparameters.normalize_decoder != null && (
-                        <div className="bg-slate-800/50 rounded-lg p-2">
-                          <div className="text-xs text-slate-400 mb-1">Normalize Decoder</div>
-                          <div className="text-sm text-slate-100 font-medium">
-                            {training.hyperparameters.normalize_decoder ? 'Yes' : 'No'}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+                          {training.hyperparameters.target_l0 != null && (
+                            <div className="bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-400 mb-1">Target L0</div>
+                              <div className="text-sm text-slate-100 font-medium">
+                                {training.hyperparameters.target_l0}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    }
+                  })()}
                 </div>
               </div>
 
