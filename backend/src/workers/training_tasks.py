@@ -732,6 +732,32 @@ def train_sae_task(
             logger.info(f"Dataset: {num_samples} samples, Model: {model_record.repo_id}")
         logger.info(f"Starting training loop: {total_steps} steps, batch_size={batch_size}")
 
+        # Initialize decoder bias (b_dec) to the mean of the data.
+        # This is critical for the centering formulation: encode(x - b_dec).
+        # Without this, b_dec starts at 0 and the encoder must learn the data mean
+        # during training, causing massive feature death in early steps.
+        # SAELens initializes b_dec to the geometric median; we use the mean
+        # (faster, equivalent for high-dimensional data).
+        if use_cached_activations:
+            logger.info("Initializing decoder bias (b_dec) to data mean for proper centering...")
+            for sae_key, model in models.items():
+                layer_idx, hook_type = sae_key
+                # Compute mean of cached activations for this layer
+                data_mean = cached_activations[sae_key].mean(dim=0)
+                with torch.no_grad():
+                    if hasattr(model, 'b_pre'):
+                        # TopKSAE: b_pre is the centering bias
+                        model.b_pre.data = data_mean
+                        logger.info(f"  L{layer_idx}/{hook_type}: b_pre initialized (norm={data_mean.norm().item():.4f})")
+                    elif hasattr(model, 'b_dec'):
+                        # JumpReLUSAE: b_dec is the centering bias
+                        model.b_dec.data = data_mean
+                        logger.info(f"  L{layer_idx}/{hook_type}: b_dec initialized (norm={data_mean.norm().item():.4f})")
+                    elif hasattr(model, 'decoder_bias'):
+                        # SparseAutoencoder / SkipAutoencoder: decoder_bias is b_dec
+                        model.decoder_bias.data = data_mean
+                        logger.info(f"  L{layer_idx}/{hook_type}: decoder_bias initialized (norm={data_mean.norm().item():.4f})")
+
         # Training loop
         best_loss = float('inf')
 
