@@ -1029,9 +1029,21 @@ def train_sae_task(
                         else:
                             optimizer.step()
 
-                        # JumpReLU: Normalize decoder columns to unit norm after each step
-                        if isinstance(model, JumpReLUSAE):
-                            model.normalize_decoder()
+                        # Normalize decoder columns to unit norm after each step.
+                        # Critical for L1-based SAEs: without this, a few features develop
+                        # large decoder norms and dominate reconstruction, making other
+                        # features expendable under L1 penalty → cascade feature death.
+                        if hp.get('normalize_decoder', True):
+                            if isinstance(model, JumpReLUSAE):
+                                model.normalize_decoder()
+                            elif isinstance(model, TopKSAE):
+                                # TopK: normalize decoder weight columns
+                                with torch.no_grad():
+                                    model.decoder.weight.data = F.normalize(model.decoder.weight.data, dim=0, p=2)
+                            elif hasattr(model, 'decoder') and model.decoder is not None:
+                                # SparseAutoencoder / SkipAutoencoder: decoder.weight is [hidden_dim, latent_dim]
+                                with torch.no_grad():
+                                    model.decoder.weight.data = F.normalize(model.decoder.weight.data, dim=0, p=2)
 
                         scheduler.step()
 

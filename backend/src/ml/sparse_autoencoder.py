@@ -90,13 +90,26 @@ class SparseAutoencoder(nn.Module):
         self._initialize_weights(init_scale)
 
     def _initialize_weights(self, scale: float) -> None:
-        """Initialize weights with small random values."""
-        nn.init.normal_(self.encoder.weight, mean=0.0, std=scale)
-        nn.init.zeros_(self.encoder.bias)
+        """
+        Initialize weights following SAELens methodology.
 
+        Decoder columns are initialized with Kaiming uniform and normalized to unit norm.
+        Encoder is initialized as the transpose of the decoder (W_enc = W_dec^T) so that
+        encoder-decoder pairs start aligned, giving decent reconstruction from step 0.
+        """
         if not self.tied_weights:
-            nn.init.normal_(self.decoder.weight, mean=0.0, std=scale)
+            # Decoder: Kaiming uniform, then normalize columns to unit norm
+            nn.init.kaiming_uniform_(self.decoder.weight, nonlinearity='relu')
+            with torch.no_grad():
+                self.decoder.weight.data = F.normalize(self.decoder.weight.data, dim=0, p=2)
 
+            # Encoder: transpose of decoder (SAELens standard initialization)
+            # This ensures encoder-decoder pairs start aligned
+            self.encoder.weight.data = self.decoder.weight.data.T.contiguous().clone()
+        else:
+            nn.init.kaiming_uniform_(self.encoder.weight, nonlinearity='relu')
+
+        nn.init.zeros_(self.encoder.bias)
         nn.init.zeros_(self.decoder_bias)
 
     def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
