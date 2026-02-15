@@ -54,7 +54,7 @@ class SparseAutoencoder(nn.Module):
         init_scale: float = 0.1,
         ghost_gradient_penalty: float = 0.0,
         normalize_activations: str = 'constant_norm_rescale',
-        top_k_sparsity: Optional[float] = None,
+        top_k_sparsity: Optional[float] = None,  # DEPRECATED: use TopKSAE instead
     ):
         super().__init__()
 
@@ -66,9 +66,9 @@ class SparseAutoencoder(nn.Module):
         self.normalize_activations = normalize_activations
         self.top_k_sparsity = top_k_sparsity
 
-        # Calculate k for Top-K if enabled (convert percentage to fraction)
+        # Legacy TopK support (deprecated — use TopKSAE class instead)
         if top_k_sparsity is not None:
-            fraction = top_k_sparsity / 100.0  # Convert percentage to fraction
+            fraction = top_k_sparsity / 100.0
             self.k = max(1, int(fraction * latent_dim))
         else:
             self.k = None
@@ -111,18 +111,23 @@ class SparseAutoencoder(nn.Module):
             norm_coeff: Normalization coefficients for denormalization
         """
         if self.normalize_activations == 'constant_norm_rescale':
-            # SAELens standard: E(||x||) = sqrt(hidden_dim)
+            # SAELens standard: scale so ||x|| = sqrt(hidden_dim)
             import math
             x_norm = x.norm(dim=-1, keepdim=True)
-
-            # Safety: Prevent division by zero
             x_norm = torch.clamp(x_norm, min=1e-6)
-
             norm_coeff = math.sqrt(self.hidden_dim) / x_norm
             x_normalized = x * norm_coeff
             return x_normalized, norm_coeff
+        elif self.normalize_activations == 'anthropic_rescale':
+            # Anthropic (Templeton et al. 2024): scale so E[||x||²] = d_model
+            # Equivalent to: x * sqrt(d_model / ||x||²)
+            import math
+            x_sq_norm = (x ** 2).sum(dim=-1, keepdim=True)
+            x_sq_norm = torch.clamp(x_sq_norm, min=1e-6)
+            norm_coeff = torch.sqrt(torch.tensor(self.hidden_dim, dtype=x.dtype, device=x.device) / x_sq_norm)
+            x_normalized = x * norm_coeff
+            return x_normalized, norm_coeff
         elif self.normalize_activations == 'none':
-            # No normalization
             return x, torch.ones_like(x[:, :1])
         else:
             raise ValueError(f"Unknown normalization method: {self.normalize_activations}")
@@ -138,7 +143,7 @@ class SparseAutoencoder(nn.Module):
         Returns:
             x_denormalized: Original scale activations
         """
-        if self.normalize_activations == 'constant_norm_rescale':
+        if self.normalize_activations in ('constant_norm_rescale', 'anthropic_rescale'):
             return x / norm_coeff
         else:
             return x
@@ -586,6 +591,226 @@ class Transcoder(nn.Module):
 
 
 # =============================================================================
+# TopK SAE Implementation (Gao et al. 2024, OpenAI / arXiv:2406.04093)
+# =============================================================================
+
+class TopKSAE(nn.Module):
+    """
+    Top-K Sparse Autoencoder (Gao et al. 2024, OpenAI).
+
+    Uses structural sparsity (TopK selection) instead of penalty-based sparsity.
+    Exactly K features activate per sample — no L1 or L0 penalty needed.
+    Includes auxiliary loss for dead feature recovery.
+
+    Architecture:
+        z = ReLU(W_enc @ (x - b_pre) + b_enc)     (pre-activations)
+        f = TopK(z, k)                              (keep top-K, zero rest)
+        x_hat = W_dec @ f + b_pre                   (reconstruction)
+
+    Loss:
+        L_main = ||x - x_hat||²
+        L_aux = alpha * ||e - e_hat_dead||²         (dead feature aux loss)
+        L_total = L_main + L_aux
+
+    Args:
+        hidden_dim: Input/output dimension (model hidden size)
+        latent_dim: SAE latent dimension (number of features)
+        k: Number of top features to keep active per sample
+        aux_k: Number of dead features for aux loss (default: k * 2)
+        aux_loss_alpha: Weight for auxiliary dead feature loss (default: 1/32)
+        normalize_activations: Normalization method
+        init_scale: Initialization scale for weights
+
+    Reference:
+        Gao et al. 2024, "Scaling and evaluating sparse autoencoders"
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        latent_dim: int,
+        k: int,
+        aux_k: Optional[int] = None,
+        aux_loss_alpha: float = 1.0 / 32,
+        normalize_activations: str = 'constant_norm_rescale',
+        init_scale: float = 0.1,
+    ):
+        super().__init__()
+
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+        self.k = k
+        self.aux_k = aux_k if aux_k is not None else min(k * 2, latent_dim)
+        self.aux_loss_alpha = aux_loss_alpha
+        self.normalize_activations = normalize_activations
+
+        # Pre-encoder bias (subtracted from input, added to reconstruction)
+        self.b_pre = nn.Parameter(torch.zeros(hidden_dim))
+
+        # Encoder: (x - b_pre) → z
+        self.encoder = nn.Linear(hidden_dim, latent_dim, bias=True)
+
+        # Decoder: z → x_hat
+        self.decoder = nn.Linear(latent_dim, hidden_dim, bias=False)
+
+        # Initialize weights
+        self._initialize_weights(init_scale)
+
+    def _initialize_weights(self, scale: float) -> None:
+        """Initialize weights with small random values."""
+        nn.init.normal_(self.encoder.weight, mean=0.0, std=scale)
+        nn.init.zeros_(self.encoder.bias)
+        nn.init.normal_(self.decoder.weight, mean=0.0, std=scale)
+
+    @property
+    def decoder_bias(self):
+        """Compatibility: decoder bias is b_pre for TopK."""
+        return self.b_pre
+
+    def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Normalize activations."""
+        if self.normalize_activations == 'constant_norm_rescale':
+            x_norm = x.norm(dim=-1, keepdim=True)
+            x_norm = torch.clamp(x_norm, min=1e-6)
+            norm_coeff = math.sqrt(self.hidden_dim) / x_norm
+            return x * norm_coeff, norm_coeff
+        elif self.normalize_activations == 'anthropic_rescale':
+            x_sq_norm = (x ** 2).sum(dim=-1, keepdim=True)
+            x_sq_norm = torch.clamp(x_sq_norm, min=1e-6)
+            norm_coeff = torch.sqrt(torch.tensor(self.hidden_dim, dtype=x.dtype, device=x.device) / x_sq_norm)
+            return x * norm_coeff, norm_coeff
+        elif self.normalize_activations == 'none':
+            return x, torch.ones_like(x[:, :1])
+        else:
+            raise ValueError(f"Unknown normalization method: {self.normalize_activations}")
+
+    def denormalize(self, x: torch.Tensor, norm_coeff: torch.Tensor) -> torch.Tensor:
+        """Denormalize activations."""
+        if self.normalize_activations in ('constant_norm_rescale', 'anthropic_rescale'):
+            return x / norm_coeff
+        return x
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Encode with TopK selection.
+
+        Args:
+            x: Input (already normalized, b_pre subtracted) [batch, hidden_dim]
+
+        Returns:
+            z_topk: Sparse activations with only top-K nonzero [batch, latent_dim]
+        """
+        z = F.relu(self.encoder(x))
+
+        # TopK selection: keep only top-K activations per sample
+        topk_values, topk_indices = torch.topk(z, self.k, dim=-1)
+        z_topk = torch.zeros_like(z)
+        z_topk.scatter_(-1, topk_indices, topk_values)
+
+        return z_topk
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode sparse features to reconstruction."""
+        return self.decoder(z)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_loss: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Forward pass with TopK sparsity and auxiliary dead feature loss.
+
+        Args:
+            x: Input activations [batch, hidden_dim]
+            return_loss: Whether to compute losses
+
+        Returns:
+            x_reconstructed: Reconstructed activations [batch, hidden_dim]
+            z: Sparse latent activations [batch, latent_dim]
+            losses: Loss components dict
+        """
+        # Normalize inputs
+        x_normalized, norm_coeff = self.normalize(x)
+
+        # Subtract pre-encoder bias
+        x_centered = x_normalized - self.b_pre
+
+        # Encode with TopK
+        z = self.encode(x_centered)
+
+        # Decode and add back b_pre
+        x_reconstructed_norm = self.decode(z) + self.b_pre
+
+        # Denormalize output
+        x_reconstructed = self.denormalize(x_reconstructed_norm, norm_coeff)
+
+        losses = {}
+        if return_loss:
+            # Main reconstruction loss
+            loss_reconstruction = F.mse_loss(x_reconstructed, x, reduction='mean')
+
+            # L0 sparsity (exact: always k/latent_dim)
+            l0_sparsity = (z > 0).float().mean()
+
+            # L1 for logging compatibility
+            l1_penalty = z.abs().sum(dim=-1).mean()
+
+            # Zero ablation loss
+            x_zero_norm = self.b_pre.expand_as(x_normalized)
+            x_zero = self.denormalize(x_zero_norm, norm_coeff)
+            loss_zero = F.mse_loss(x_zero, x, reduction='mean')
+
+            # Auxiliary dead feature loss (Gao et al. 2024)
+            # Encourages dead features to learn useful directions
+            aux_loss = torch.tensor(0.0, device=z.device)
+            dead_mask = (z == 0).all(dim=0)  # [latent_dim]
+            num_dead = dead_mask.sum().item()
+
+            if num_dead > 0 and num_dead < self.latent_dim:
+                # Re-encode without TopK to get all pre-activations
+                z_pre = F.relu(self.encoder(x_centered))
+
+                # Select dead feature activations and apply TopK among them
+                z_dead = z_pre[:, dead_mask]  # [batch, num_dead]
+                k_dead = min(self.aux_k, num_dead)
+                if k_dead > 0:
+                    topk_vals, topk_idx = torch.topk(z_dead, k_dead, dim=-1)
+                    z_dead_sparse = torch.zeros_like(z_dead)
+                    z_dead_sparse.scatter_(-1, topk_idx, topk_vals)
+
+                    # Reconstruct from dead features
+                    dead_W = self.decoder.weight[:, dead_mask]  # [hidden_dim, num_dead]
+                    x_dead_recon = z_dead_sparse @ dead_W.t()
+
+                    # Residual = what alive features couldn't reconstruct
+                    residual = x_centered - (self.decode(z)).detach()
+                    aux_loss = F.mse_loss(x_dead_recon, residual, reduction='mean')
+
+            loss_total = loss_reconstruction + self.aux_loss_alpha * aux_loss
+
+            losses = {
+                'loss': loss_total,
+                'loss_reconstruction': loss_reconstruction,
+                'loss_zero': loss_zero,
+                'l1_penalty': l1_penalty,
+                'l0_sparsity': l0_sparsity,
+                'aux_loss': aux_loss,
+                'ghost_penalty': torch.tensor(0.0, device=z.device),
+            }
+
+        return x_reconstructed, z, losses
+
+    def get_feature_magnitudes(self, z: torch.Tensor) -> torch.Tensor:
+        """Get per-feature activation magnitudes."""
+        return z.mean(dim=0)
+
+    def get_dead_neurons(self, z: torch.Tensor, threshold: float = 1e-6) -> torch.Tensor:
+        """Identify dead neurons."""
+        return self.get_feature_magnitudes(z) < threshold
+
+
+# =============================================================================
 # JumpReLU Implementation (Gemma Scope / arXiv:2407.14435)
 # =============================================================================
 
@@ -924,6 +1149,12 @@ class JumpReLUSAE(nn.Module):
             norm_coeff = math.sqrt(self.d_model) / x_norm
             x_normalized = x * norm_coeff
             return x_normalized, norm_coeff
+        elif self.normalize_activations == 'anthropic_rescale':
+            x_sq_norm = (x ** 2).sum(dim=-1, keepdim=True)
+            x_sq_norm = torch.clamp(x_sq_norm, min=1e-6)
+            norm_coeff = torch.sqrt(torch.tensor(self.d_model, dtype=x.dtype, device=x.device) / x_sq_norm)
+            x_normalized = x * norm_coeff
+            return x_normalized, norm_coeff
         elif self.normalize_activations == 'none':
             return x, torch.ones_like(x[..., :1])
         else:
@@ -931,7 +1162,7 @@ class JumpReLUSAE(nn.Module):
 
     def denormalize(self, x: torch.Tensor, norm_coeff: torch.Tensor) -> torch.Tensor:
         """Denormalize activations."""
-        if self.normalize_activations == 'constant_norm_rescale':
+        if self.normalize_activations in ('constant_norm_rescale', 'anthropic_rescale'):
             return x / norm_coeff
         return x
 
@@ -1187,10 +1418,11 @@ def create_sae(
     Factory function to create SAE models.
 
     Args:
-        architecture_type: One of 'standard', 'skip', 'transcoder'
+        architecture_type: One of 'standard', 'standard_saelens', 'standard_anthropic',
+                          'skip', 'transcoder', 'jumprelu', 'topk'
         hidden_dim: Hidden dimension (or input_dim for transcoder)
         latent_dim: Latent dimension
-        l1_alpha: L1 sparsity penalty
+        l1_alpha: L1 sparsity penalty (not used for topk/jumprelu)
         **kwargs: Additional architecture-specific parameters
 
     Returns:
@@ -1201,12 +1433,23 @@ def create_sae(
     """
     architecture_type = architecture_type.lower()
 
-    # JumpReLU-specific parameters to filter out for non-JumpReLU architectures
-    jumprelu_params = {'initial_threshold', 'bandwidth', 'sparsity_coeff', 'normalize_decoder', 'tied_weights'}
-
+    # Backward compatibility: map 'standard' to 'standard_saelens'
     if architecture_type == 'standard':
-        # Filter out JumpReLU-specific and unsupported parameters
-        standard_kwargs = {k: v for k, v in kwargs.items() if k not in jumprelu_params}
+        architecture_type = 'standard_saelens'
+
+    # Parameters specific to non-standard architectures (filter these out for standard/skip)
+    jumprelu_params = {'initial_threshold', 'bandwidth', 'sparsity_coeff', 'normalize_decoder', 'tied_weights'}
+    topk_params = {'top_k', 'aux_k', 'aux_loss_alpha', 'adam_epsilon'}
+    non_standard_params = jumprelu_params | topk_params
+
+    if architecture_type in ('standard_saelens', 'standard_anthropic'):
+        # Standard SAE — SAELens or Anthropic normalization variant
+        standard_kwargs = {k: v for k, v in kwargs.items() if k not in non_standard_params}
+
+        # Anthropic variant uses anthropic_rescale normalization
+        if architecture_type == 'standard_anthropic':
+            standard_kwargs['normalize_activations'] = 'anthropic_rescale'
+
         return SparseAutoencoder(
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
@@ -1214,9 +1457,8 @@ def create_sae(
             **standard_kwargs
         )
     elif architecture_type == 'skip':
-        # SkipAutoencoder doesn't support ghost_gradient_penalty or JumpReLU params
         skip_kwargs = {k: v for k, v in kwargs.items()
-                       if k != 'ghost_gradient_penalty' and k not in jumprelu_params}
+                       if k != 'ghost_gradient_penalty' and k not in non_standard_params}
         return SkipAutoencoder(
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
@@ -1224,10 +1466,9 @@ def create_sae(
             **skip_kwargs
         )
     elif architecture_type == 'transcoder':
-        # Transcoder doesn't support ghost_gradient_penalty or JumpReLU params
         output_dim = kwargs.pop('output_dim', hidden_dim)
         transcoder_kwargs = {k: v for k, v in kwargs.items()
-                             if k != 'ghost_gradient_penalty' and k not in jumprelu_params}
+                             if k != 'ghost_gradient_penalty' and k not in non_standard_params}
         return Transcoder(
             input_dim=hidden_dim,
             output_dim=output_dim,
@@ -1235,10 +1476,34 @@ def create_sae(
             l1_alpha=l1_alpha,
             **transcoder_kwargs
         )
+    elif architecture_type == 'topk':
+        # TopK SAE (Gao et al. 2024, OpenAI)
+        top_k = kwargs.pop('top_k', None)
+        if top_k is None:
+            # Backward compat: convert top_k_sparsity percentage to integer
+            top_k_sparsity = kwargs.pop('top_k_sparsity', None)
+            if top_k_sparsity is not None:
+                top_k = max(1, int((top_k_sparsity / 100.0) * latent_dim))
+            else:
+                top_k = 64  # Reasonable default
+        aux_k = kwargs.pop('aux_k', None)
+        aux_loss_alpha = kwargs.pop('aux_loss_alpha', None)
+        if aux_loss_alpha is None:
+            aux_loss_alpha = 1.0 / 32
+        normalize_activations = kwargs.pop('normalize_activations', None)
+        if normalize_activations is None:
+            normalize_activations = 'constant_norm_rescale'
+
+        return TopKSAE(
+            hidden_dim=hidden_dim,
+            latent_dim=latent_dim,
+            k=top_k,
+            aux_k=aux_k,
+            aux_loss_alpha=aux_loss_alpha,
+            normalize_activations=normalize_activations,
+        )
     elif architecture_type == 'jumprelu':
-        # JumpReLU SAE with learnable thresholds (Gemma Scope architecture)
-        # Extract JumpReLU-specific parameters with None handling
-        # (hp.get() may pass explicit None values which we should treat as "use default")
+        # JumpReLU SAE (Rajamanoharan et al. 2024, Gemma Scope)
         initial_threshold = kwargs.pop('initial_threshold', None)
         if initial_threshold is None:
             initial_threshold = 0.5
@@ -1254,11 +1519,9 @@ def create_sae(
         normalize_activations = kwargs.pop('normalize_activations', None)
         if normalize_activations is None:
             normalize_activations = 'constant_norm_rescale'
-        # JumpReLU uses L0 loss with sparsity_coeff (applied to normalized L0 fraction)
-        # Do NOT fall back to l1_alpha — they are on completely different scales
         sparsity_coeff = kwargs.pop('sparsity_coeff', None)
         if sparsity_coeff is None:
-            sparsity_coeff = 1e-4  # Default for count-based L0 (Gemma Scope formulation)
+            sparsity_coeff = 1e-4
         return JumpReLUSAE(
             d_model=hidden_dim,
             d_sae=latent_dim,
@@ -1272,5 +1535,6 @@ def create_sae(
     else:
         raise ValueError(
             f"Unknown architecture_type: {architecture_type}. "
-            f"Must be one of: 'standard', 'skip', 'transcoder', 'jumprelu'"
+            f"Must be one of: 'standard_saelens', 'standard_anthropic', "
+            f"'skip', 'transcoder', 'topk', 'jumprelu'"
         )
