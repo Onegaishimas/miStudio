@@ -39,11 +39,12 @@ class TrainingTemplateCreate(TrainingTemplateBase):
             raise ValueError("model_id must start with 'm_'")
         return v
 
-    @field_validator("encoder_type")
+    @field_validator("encoder_type", mode="before")
     @classmethod
-    def validate_encoder_type(cls, v: SAEArchitectureType) -> SAEArchitectureType:
-        """Ensure encoder_type matches architecture_type in hyperparameters."""
-        # This will be cross-validated in the API endpoint
+    def validate_encoder_type(cls, v):
+        """Normalize encoder_type for backward compatibility."""
+        if v == "standard":
+            return "standard_saelens"
         return v
 
 

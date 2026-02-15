@@ -15,11 +15,18 @@ from ..models.training import TrainingStatus
 
 
 class SAEArchitectureType(str, Enum):
-    """SAE architecture types."""
+    """SAE architecture types — each maps to a specific training framework."""
+
+    # Paper-grounded frameworks
+    STANDARD_SAELENS = "standard_saelens"    # Bricken et al. 2023 — L1 + constant_norm_rescale
+    STANDARD_ANTHROPIC = "standard_anthropic"  # Templeton et al. 2024 — L1 + anthropic normalization
+    JUMPRELU = "jumprelu"                     # Rajamanoharan et al. 2024 — L0 via STE
+    TOPK = "topk"                             # Gao et al. 2024 — structural TopK, aux dead loss
+    SKIP = "skip"                             # Community variant — L1 + skip connections
+    TRANSCODER = "transcoder"                 # Dunefsky et al. 2024 — MLP input→output
+
+    # Backward compatibility alias (maps to standard_saelens)
     STANDARD = "standard"
-    SKIP = "skip"
-    TRANSCODER = "transcoder"
-    JUMPRELU = "jumprelu"  # Gemma Scope architecture with learnable thresholds
 
 
 class TrainingHyperparameters(BaseModel):
@@ -29,8 +36,8 @@ class TrainingHyperparameters(BaseModel):
     hidden_dim: int = Field(..., gt=0, description="Hidden dimension (input/output size)")
     latent_dim: int = Field(..., gt=0, description="Latent dimension (SAE width)")
     architecture_type: SAEArchitectureType = Field(
-        SAEArchitectureType.STANDARD,
-        description="SAE architecture: standard, skip, or transcoder"
+        SAEArchitectureType.STANDARD_SAELENS,
+        description="SAE training framework"
     )
 
     # Layer configuration
@@ -54,11 +61,11 @@ class TrainingHyperparameters(BaseModel):
     )
 
     # Sparsity
-    l1_alpha: float = Field(
-        ...,
-        gt=0.0000001,  # Lower bound adjusted for new L1 penalty formulation
+    l1_alpha: Optional[float] = Field(
+        None,
+        gt=0.0000001,
         le=100.0,
-        description="L1 sparsity penalty coefficient (after bug fix: ~0.000002 for latent_dim=2048, SAELens standard was 1.0-10.0 with old formulation)"
+        description="L1 sparsity penalty coefficient. Required for L1-based frameworks (standard_saelens, standard_anthropic, skip, transcoder). Not used by TopK or JumpReLU."
     )
     target_l0: Optional[float] = Field(
         None,
@@ -70,11 +77,34 @@ class TrainingHyperparameters(BaseModel):
         None,
         gt=0,
         le=100.0,
-        description="Top-K sparsity percentage (e.g., 5 for 5%). Guarantees exact sparsity level."
+        description="DEPRECATED: Use top_k (integer) with architecture_type='topk' instead. Kept for backward compat."
     )
     normalize_activations: Optional[str] = Field(
         "constant_norm_rescale",
-        description="Activation normalization method: 'constant_norm_rescale' (SAELens standard) or 'none'"
+        description="Activation normalization: 'constant_norm_rescale' (SAELens), 'anthropic_rescale' (Anthropic), or 'none'"
+    )
+
+    # TopK-specific parameters (Gao et al. 2024, OpenAI)
+    top_k: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Number of top features to keep active per sample (TopK architecture only)"
+    )
+    aux_k: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Number of dead features for auxiliary loss reconstruction (default: top_k * 2)"
+    )
+    aux_loss_alpha: Optional[float] = Field(
+        None,
+        gt=0,
+        le=1.0,
+        description="Weight for auxiliary dead feature loss (default: 1/32 per Gao et al.)"
+    )
+    adam_epsilon: Optional[float] = Field(
+        None,
+        gt=0,
+        description="Adam optimizer epsilon. TopK uses 6.25e-10 per paper."
     )
 
     # JumpReLU-specific parameters (Gemma Scope architecture)
@@ -124,6 +154,14 @@ class TrainingHyperparameters(BaseModel):
     resample_dead_neurons: bool = Field(True, description="Resample dead neurons during training")
     resample_interval: int = Field(5000, gt=0, description="Resample dead neurons every N steps")
 
+    @field_validator("architecture_type", mode="before")
+    @classmethod
+    def normalize_architecture_type(cls, v):
+        """Map legacy 'standard' to 'standard_saelens' for backward compatibility."""
+        if v == "standard":
+            return "standard_saelens"
+        return v
+
     @field_validator("training_layers")
     @classmethod
     def validate_training_layers(cls, v: List[int]) -> List[int]:
@@ -167,10 +205,10 @@ class TrainingHyperparameters(BaseModel):
             "example": {
                 "hidden_dim": 768,
                 "latent_dim": 16384,
-                "architecture_type": "standard",
+                "architecture_type": "standard_saelens",
                 "training_layers": [0, 6, 12],
                 "hook_types": ["residual", "mlp"],
-                "l1_alpha": 0.001,
+                "l1_alpha": 0.0005,
                 "target_l0": 0.05,
                 "normalize_activations": "constant_norm_rescale",
                 "learning_rate": 0.0003,
