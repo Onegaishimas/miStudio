@@ -31,7 +31,7 @@ class SparseAutoencoder(nn.Module):
     Standard Sparse Autoencoder for learning interpretable features.
 
     Architecture:
-        x → ReLU(W_enc @ x + b_enc) → z (latent)
+        x → ReLU(W_enc @ (x - b_dec) + b_enc) → z (latent)
         z → W_dec @ z + b_dec → x_reconstructed
 
     Loss:
@@ -76,13 +76,14 @@ class SparseAutoencoder(nn.Module):
         # Encoder: x → z
         self.encoder = nn.Linear(hidden_dim, latent_dim, bias=True)
 
-        # Decoder: z → x
+        # Decoder: z → x (bias=False — decoder_bias is the shared b_dec)
         if tied_weights:
             self.decoder = None  # Will use encoder.weight.T
         else:
-            self.decoder = nn.Linear(latent_dim, hidden_dim, bias=True)
+            self.decoder = nn.Linear(latent_dim, hidden_dim, bias=False)
 
-        # Decoder bias (always separate, even with tied weights)
+        # Shared decoder bias (b_dec): subtracted from input before encoding,
+        # added to decoder output. Learns the data mean so encoder sees centered residuals.
         self.decoder_bias = nn.Parameter(torch.zeros(hidden_dim))
 
         # Initialize weights
@@ -95,7 +96,6 @@ class SparseAutoencoder(nn.Module):
 
         if not self.tied_weights:
             nn.init.normal_(self.decoder.weight, mean=0.0, std=scale)
-            nn.init.zeros_(self.decoder.bias)
 
         nn.init.zeros_(self.decoder_bias)
 
@@ -152,13 +152,19 @@ class SparseAutoencoder(nn.Module):
         """
         Encode input to latent representation.
 
+        Centers input by subtracting decoder bias (b_dec) before encoding,
+        following the standard SAE formulation from Bricken et al. 2023:
+            z = ReLU(W_enc @ (x - b_dec) + b_enc)
+
         Args:
             x: Input tensor [batch, hidden_dim]
 
         Returns:
             z: Latent activations [batch, latent_dim] (after ReLU, with optional Top-K)
         """
-        z = F.relu(self.encoder(x))
+        # Center by decoder bias so encoder sees zero-mean residuals
+        x_centered = x - self.decoder_bias
+        z = F.relu(self.encoder(x_centered))
 
         # Apply Top-K sparsity if enabled
         if self.k is not None:
@@ -339,7 +345,7 @@ class SkipAutoencoder(SparseAutoencoder):
     Skip-connection Sparse Autoencoder with residual connections.
 
     Architecture:
-        x → ReLU(W_enc @ x + b_enc) → z
+        x → ReLU(W_enc @ (x - b_dec) + b_enc) → z
         x_reconstructed = x + W_dec @ z + b_dec  (residual connection)
 
     The skip connection allows the SAE to learn only the "important"
@@ -448,7 +454,7 @@ class Transcoder(nn.Module):
     Transcoder SAE for layer-to-layer activation mapping.
 
     Architecture:
-        x_layer_i → ReLU(W_enc @ x_i + b_enc) → z
+        x_layer_i → ReLU(W_enc @ (x_i - b_enc_center) + b_enc) → z
         z → W_dec @ z + b_dec → x_layer_j
 
     Useful for understanding how information flows between transformer layers.
@@ -485,6 +491,9 @@ class Transcoder(nn.Module):
         else:
             self.k = None
 
+        # Encoder centering bias (learns mean of input activations)
+        self.b_enc_center = nn.Parameter(torch.zeros(input_dim))
+
         # Encoder: x_i → z
         self.encoder = nn.Linear(input_dim, latent_dim, bias=True)
 
@@ -500,10 +509,13 @@ class Transcoder(nn.Module):
         nn.init.zeros_(self.encoder.bias)
         nn.init.normal_(self.decoder.weight, mean=0.0, std=scale)
         nn.init.zeros_(self.decoder.bias)
+        nn.init.zeros_(self.b_enc_center)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """Encode layer i activations to latent."""
-        z = F.relu(self.encoder(x))
+        # Center by encoder centering bias before encoding
+        x_centered = x - self.b_enc_center
+        z = F.relu(self.encoder(x_centered))
 
         # Apply Top-K sparsity if enabled
         if self.k is not None:
@@ -1183,7 +1195,9 @@ class JumpReLUSAE(nn.Module):
         """
         with torch.no_grad():
             x_normalized, _ = self.normalize(x)
-            z = F.linear(x_normalized, self.W_enc, self.b_enc)
+            # Center by decoder bias before encoding (must match encode())
+            x_centered = x_normalized - self.b_dec
+            z = F.linear(x_centered, self.W_enc, self.b_enc)
 
             # Set threshold at (1 - target_l0) percentile per feature
             # E.g., target_l0=0.05 → 95th percentile → ~5% of samples activate
@@ -1200,6 +1214,10 @@ class JumpReLUSAE(nn.Module):
         """
         Encode input to sparse feature representation.
 
+        Centers input by subtracting decoder bias (b_dec) before encoding,
+        following the standard SAE formulation:
+            z = W_enc @ (x - b_dec) + b_enc
+
         Args:
             x: Input activations [batch, d_model] or [batch, seq, d_model]
             return_pre_activations: If True, also return pre-activations z
@@ -1208,8 +1226,10 @@ class JumpReLUSAE(nn.Module):
             f: Sparse features [batch, d_sae] or [batch, seq, d_sae]
             z: (optional) Pre-activations before JumpReLU [batch, d_sae]
         """
-        # Pre-activations: z = W_enc @ x + b_enc
-        z = F.linear(x, self.W_enc, self.b_enc)
+        # Center by decoder bias so encoder sees zero-mean residuals
+        x_centered = x - self.b_dec
+        # Pre-activations: z = W_enc @ (x - b_dec) + b_enc
+        z = F.linear(x_centered, self.W_enc, self.b_enc)
 
         # Apply JumpReLU activation
         f = self.activation(z)

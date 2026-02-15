@@ -640,5 +640,4 @@ class TestCheckpointServiceFileIO:
             assert torch.allclose(new_sae.encoder.weight, original_sae.encoder.weight)
             assert torch.allclose(new_sae.encoder.bias, original_sae.encoder.bias)
             assert torch.allclose(new_sae.decoder.weight, original_sae.decoder.weight)
-            assert torch.allclose(new_sae.decoder.bias, original_sae.decoder.bias)
             assert torch.allclose(new_sae.decoder_bias, original_sae.decoder_bias)
