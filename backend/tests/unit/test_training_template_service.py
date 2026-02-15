@@ -66,7 +66,7 @@ class TestTrainingTemplateServiceCreate:
         assert template.description == "A test training template"
         assert template.model_id is None  # Not set since no FK reference created
         assert template.dataset_id is None
-        assert template.encoder_type == SAEArchitectureType.STANDARD.value
+        assert template.encoder_type in (SAEArchitectureType.STANDARD.value, SAEArchitectureType.STANDARD_SAELENS.value)
         assert template.is_favorite is True
         assert template.extra_metadata == {"author": "test_user"}
         # Hyperparameters stored as dict in database

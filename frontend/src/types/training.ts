@@ -181,8 +181,14 @@ export interface Training {
   hyperparameters: HyperparametersConfig;
 
   // Current metrics (latest values)
-  /** Current reconstruction loss */
+  /** Current total loss */
   current_loss?: number | null;
+  /** Current reconstruction loss component */
+  current_reconstruction_loss?: number | null;
+  /** Current L1 loss component (l1_alpha * l1_penalty) */
+  current_l1_loss?: number | null;
+  /** Current L1 alpha (sparsity coefficient, may be warming up) */
+  current_l1_alpha?: number | null;
   /** Current L0 sparsity (fraction of active features) */
   current_l0_sparsity?: number | null;
   /** Current dead neuron count */
@@ -398,6 +404,9 @@ export interface TrainingProgressEvent {
   total_steps: number;
   progress: number;
   loss: number;
+  reconstruction_loss?: number | null;
+  l1_loss?: number | null;
+  l1_alpha?: number | null;
   l0_sparsity: number;
   dead_neurons: number;
   learning_rate: number;

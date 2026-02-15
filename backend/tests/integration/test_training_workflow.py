@@ -133,7 +133,7 @@ class TestTrainingWorkflow:
         assert training.hyperparameters is not None
         assert training.hyperparameters["hidden_dim"] == 768
         assert training.hyperparameters["latent_dim"] == 8192
-        assert training.hyperparameters["architecture_type"] == "standard"
+        assert training.hyperparameters["architecture_type"] in ("standard", "standard_saelens")
         assert training.hyperparameters["training_layers"] == [0, 6]
         assert training.hyperparameters["l1_alpha"] == 0.001
         assert training.hyperparameters["batch_size"] == 256

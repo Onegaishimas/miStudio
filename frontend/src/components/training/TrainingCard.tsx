@@ -92,12 +92,16 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
   // Uses step numbers for deduplication (unique per training iteration)
   const [metricsHistory, setMetricsHistory] = useState<{
     loss: number[];
+    reconstruction_loss: number[];
+    l1_loss: number[];
     l0_sparsity: number[];
     dead_neurons: number[];  // Historical dead neuron counts
     timestamps: string[];
     steps: number[];  // Track step numbers for deduplication
   }>({
     loss: [],
+    reconstruction_loss: [],
+    l1_loss: [],
     l0_sparsity: [],
     dead_neurons: [],
     timestamps: [],
@@ -352,6 +356,8 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
 
           setMetricsHistory({
             loss: dedupedMetrics.map((m) => m.loss),
+            reconstruction_loss: dedupedMetrics.map(() => 0),  // Not available from historical data
+            l1_loss: dedupedMetrics.map(() => 0),  // Not available from historical data
             l0_sparsity: dedupedMetrics.map((m) => m.l0_sparsity ?? 0),
             dead_neurons: dedupedMetrics.map((m) => m.dead_neurons ?? 0),
             timestamps: dedupedMetrics.map((m) => m.timestamp),
@@ -390,6 +396,8 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
         const newTimestamp = new Date().toISOString();
 
         const newLoss = [...prev.loss, currentLossValue];
+        const newReconLoss = [...prev.reconstruction_loss, training.current_reconstruction_loss ?? 0];
+        const newL1Loss = [...prev.l1_loss, training.current_l1_loss ?? 0];
         const newL0 = [...prev.l0_sparsity, training.current_l0_sparsity ?? 0];
         const newDeadNeurons = [...prev.dead_neurons, training.current_dead_neurons ?? 0];
         const newTimestamps = [...prev.timestamps, newTimestamp];
@@ -398,6 +406,8 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
         // Keep only last 20 points
         return {
           loss: newLoss.slice(-20),
+          reconstruction_loss: newReconLoss.slice(-20),
+          l1_loss: newL1Loss.slice(-20),
           l0_sparsity: newL0.slice(-20),
           dead_neurons: newDeadNeurons.slice(-20),
           timestamps: newTimestamps.slice(-20),
@@ -405,7 +415,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
         };
       });
     }
-  }, [training.current_loss, training.current_l0_sparsity, training.current_dead_neurons, training.current_step]);
+  }, [training.current_loss, training.current_reconstruction_loss, training.current_l1_loss, training.current_l0_sparsity, training.current_dead_neurons, training.current_step]);
 
 
   // Handle save checkpoint
@@ -451,7 +461,10 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
       const time = new Date(metricsHistory.timestamps[idx]).toLocaleTimeString();
       const latentDim = training.hyperparameters?.latent_dim || 'N/A';
 
-      return `[${time}] step=${step}, loss=${loss.toFixed(4)}, L0=${sparsity.toFixed(4)}, dead=${Math.floor(historicalDeadNeurons)}/${latentDim}, lr=${learningRate.toExponential(2)}`;
+      const reconLoss = metricsHistory.reconstruction_loss[idx];
+      const l1Loss = metricsHistory.l1_loss[idx];
+      const lossDetail = (reconLoss || l1Loss) ? ` (recon=${reconLoss?.toFixed(6) ?? '?'}, L1=${l1Loss?.toFixed(6) ?? '?'})` : '';
+      return `[${time}] step=${step}, loss=${loss.toFixed(6)}${lossDetail}, L0=${sparsity.toFixed(4)}, dead=${Math.floor(historicalDeadNeurons)}/${latentDim}, lr=${learningRate.toExponential(2)}`;
     });
 
     const logText = logLines.join('\n');
@@ -685,8 +698,18 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             <div className="bg-slate-800/50 rounded-lg p-2">
               <div className="text-xs text-slate-400 mb-1">Loss</div>
               <div className="text-lg font-semibold text-emerald-400">
-                {hasMetrics ? currentLoss.toFixed(4) : '—'}
+                {hasMetrics ? currentLoss.toFixed(6) : '—'}
               </div>
+              {hasMetrics && (training.current_reconstruction_loss != null || training.current_l1_loss != null) && (
+                <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                  {training.current_reconstruction_loss != null && (
+                    <span>recon={training.current_reconstruction_loss.toFixed(6)}</span>
+                  )}
+                  {training.current_l1_loss != null && (
+                    <span> L1={training.current_l1_loss.toFixed(6)}</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* L0 Sparsity - Neuronpedia-aligned display */}
@@ -959,14 +982,20 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                         if (idx < 0) return null;
 
                         const loss = metricsHistory.loss[idx];
+                        const reconLoss = metricsHistory.reconstruction_loss[idx];
+                        const l1Loss = metricsHistory.l1_loss[idx];
                         const sparsity = metricsHistory.l0_sparsity[idx];
                         const historicalDeadNeurons = metricsHistory.dead_neurons[idx] ?? deadNeurons;
                         const time = new Date(metricsHistory.timestamps[idx]).toLocaleTimeString();
+                        const hasDecomposition = reconLoss > 0 || l1Loss > 0;
 
                         return (
                           <div key={step} className="text-slate-300">
                             <span className="text-slate-500">[{time}]</span>{' '}
-                            loss={loss.toFixed(4)},
+                            loss={loss.toFixed(6)}
+                            {hasDecomposition && (
+                              <span className="text-slate-500"> (recon={reconLoss?.toFixed(6)}, L1={l1Loss?.toFixed(6)})</span>
+                            )},
                             L0={sparsity.toFixed(4)},
                             dead={Math.floor(historicalDeadNeurons)}/{training.hyperparameters?.latent_dim || 'N/A'},
                             lr={learningRate.toExponential(2)},

@@ -755,18 +755,41 @@ def train_sae_task(
             logger.info(f"Dataset: {num_samples} samples, Model: {model_record.repo_id}")
         logger.info(f"Starting training loop: {total_steps} steps, batch_size={batch_size}")
 
-        # Initialize decoder bias (b_dec) to the mean of the data.
-        # This is critical for the centering formulation: encode(x - b_dec).
+        # Initialize decoder bias (b_dec) to the mean of NORMALIZED data.
+        # This is critical for the centering formulation: encode(normalize(x) - b_dec).
         # Without this, b_dec starts at 0 and the encoder must learn the data mean
         # during training, causing massive feature death in early steps.
         # SAELens initializes b_dec to the geometric median; we use the mean
         # (faster, equivalent for high-dimensional data).
+        #
+        # IMPORTANT: Since normalization (constant_norm_rescale / anthropic_rescale)
+        # is applied BEFORE centering in the forward pass, b_dec must be initialized
+        # from the NORMALIZED activations, not the raw activations.
         if use_cached_activations:
-            logger.info("Initializing decoder bias (b_dec) to data mean for proper centering...")
+            logger.info("Initializing decoder bias (b_dec) to normalized data mean for proper centering...")
             for sae_key, model in models.items():
                 layer_idx, hook_type = sae_key
-                # Compute mean of cached activations for this layer
-                data_mean = cached_activations[sae_key].mean(dim=0)
+                raw_acts = cached_activations[sae_key]
+
+                # Compute mean in the NORMALIZED space (matching forward pass order)
+                # The model normalizes BEFORE centering, so b_dec must be in normalized space
+                if hasattr(model, 'normalize'):
+                    # Use the model's own normalize method for consistency
+                    # Process in chunks to avoid memory spikes with large datasets
+                    chunk_size = 4096
+                    n_samples = raw_acts.shape[0]
+                    running_sum = torch.zeros(raw_acts.shape[1], device=raw_acts.device)
+                    for i in range(0, n_samples, chunk_size):
+                        chunk = raw_acts[i:i+chunk_size]
+                        normed_chunk, _ = model.normalize(chunk)
+                        running_sum += normed_chunk.sum(dim=0)
+                    data_mean = running_sum / n_samples
+                    logger.info(f"  L{layer_idx}/{hook_type}: computed mean from normalized activations")
+                else:
+                    # Fallback: use raw mean if model has no normalize method
+                    data_mean = raw_acts.mean(dim=0)
+                    logger.info(f"  L{layer_idx}/{hook_type}: no normalize method, using raw mean")
+
                 with torch.no_grad():
                     if hasattr(model, 'b_pre'):
                         # TopKSAE: b_pre is the centering bias
@@ -825,6 +848,39 @@ def train_sae_task(
             # Update base_sparsity_coeffs since model params may have changed
             for sae_key, model in models.items():
                 base_sparsity_coeffs[sae_key] = model.sparsity_coeff
+
+        # ======================================================================
+        # PRE-TRAINING DIAGNOSTIC: Run one forward pass to check loss components
+        # ======================================================================
+        if use_cached_activations:
+            logger.info("=" * 70)
+            logger.info("PRE-TRAINING DIAGNOSTIC: Initial loss decomposition")
+            logger.info("=" * 70)
+            with torch.no_grad():
+                diag_key = layer_hook_combinations[0]
+                diag_model = models[diag_key]
+                diag_batch = cached_activations[diag_key][:min(batch_size, 256)]
+                _, diag_z, diag_losses = diag_model(diag_batch, return_loss=True)
+                diag_recon = diag_losses.get('loss_reconstruction')
+                diag_l1_raw = diag_losses.get('l1_penalty')
+                diag_l0 = diag_losses.get('l0_sparsity')
+                diag_total = diag_losses.get('loss')
+                l1_alpha_val = getattr(diag_model, 'l1_alpha', 0.0)
+                logger.info(f"  Layer {diag_key[0]}/{diag_key[1]}:")
+                logger.info(f"    Total loss:          {diag_total.item():.6f}")
+                if diag_recon is not None:
+                    logger.info(f"    Reconstruction loss: {diag_recon.item():.6f}")
+                if diag_l1_raw is not None:
+                    logger.info(f"    L1 penalty (raw):    {diag_l1_raw.item():.4f}")
+                    logger.info(f"    L1 alpha (current):  {l1_alpha_val}")
+                    logger.info(f"    L1 loss (weighted):  {l1_alpha_val * diag_l1_raw.item():.6f}")
+                if diag_l0 is not None:
+                    logger.info(f"    L0 sparsity:         {diag_l0.item():.4f} ({diag_l0.item()*100:.1f}% features active)")
+                logger.info(f"    Active features:     {(diag_z != 0).any(dim=0).sum().item()}/{hp['latent_dim']}")
+                logger.info(f"    Batch z stats:       mean={diag_z[diag_z>0].mean().item():.4f}, max={diag_z.max().item():.4f}")
+                if sparsity_warmup_steps > 0:
+                    logger.info(f"    Sparsity warmup:     L1 will ramp from 0 to {l1_alpha_val} over {sparsity_warmup_steps} steps")
+            logger.info("=" * 70)
 
         for step in range(total_steps):
             # Check for pause/stop signals
@@ -974,6 +1030,8 @@ def train_sae_task(
 
                 # Train all SAEs (one per layer/hook_type combination)
                 layer_losses = {}  # Key: (layer_idx, hook_type)
+                layer_recon_losses = {}  # Reconstruction loss component
+                layer_l1_losses = {}  # L1 penalty * l1_alpha component
                 layer_sparsities = {}
                 layer_dead_neurons = {}
                 layer_fvu = {}
@@ -1074,6 +1132,17 @@ def train_sae_task(
                     layer_losses[sae_key] = loss.item() * grad_accum_steps  # Undo accumulation scaling
                     layer_sparsities[sae_key] = (z != 0).float().mean().item()
 
+                    # Extract loss components for detailed logging
+                    recon_loss_val = losses.get('loss_reconstruction')
+                    l1_penalty_val = losses.get('l1_penalty')
+                    layer_recon_losses[sae_key] = recon_loss_val.item() if recon_loss_val is not None and hasattr(recon_loss_val, 'item') else None
+                    if l1_penalty_val is not None and hasattr(l1_penalty_val, 'item'):
+                        # Weighted L1 loss = l1_alpha * raw_penalty (matches what's in total loss)
+                        current_l1_alpha = getattr(model, 'l1_alpha', 0.0)
+                        layer_l1_losses[sae_key] = current_l1_alpha * l1_penalty_val.item()
+                    else:
+                        layer_l1_losses[sae_key] = None
+
                     # Update EMA-based dead neuron tracking
                     with torch.no_grad():
                         fired = (z > 0).any(dim=0).float()  # [latent_dim] — 1 if any sample activated this feature
@@ -1099,6 +1168,11 @@ def train_sae_task(
                 # Calculate avg FVU only if any layer has FVU (JumpReLU)
                 fvu_values = [v for v in layer_fvu.values() if v is not None]
                 avg_fvu = float(sum(fvu_values) / len(fvu_values)) if fvu_values else None
+                # Calculate avg reconstruction and L1 losses
+                recon_values = [v for v in layer_recon_losses.values() if v is not None]
+                avg_recon_loss = float(sum(recon_values) / len(recon_values)) if recon_values else None
+                l1_values = [v for v in layer_l1_losses.values() if v is not None]
+                avg_l1_loss = float(sum(l1_values) / len(l1_values)) if l1_values else None
 
                 # Clear GPU cache after every step
                 if torch.cuda.is_available():
@@ -1170,19 +1244,27 @@ def train_sae_task(
                     gpu_memory_reserved = torch.cuda.memory_reserved(device) / (1024 ** 2)  # MB
                     gpu_memory_mb = gpu_memory_allocated
 
+                    # Build loss decomposition string
+                    loss_parts = f"loss={avg_loss:.6f}"
+                    if avg_recon_loss is not None:
+                        loss_parts += f" (recon={avg_recon_loss:.6f}"
+                        if avg_l1_loss is not None:
+                            loss_parts += f", L1={avg_l1_loss:.6f}"
+                        loss_parts += ")"
+
                     # Calculate throughput
                     if step >= 100:
                         elapsed_time = time.time() - step_start_time
                         actual_steps_per_min = (step / elapsed_time) * 60
                         logger.info(
-                            f"Step {step}: avg_loss={avg_loss:.4f}, avg_sparsity={avg_sparsity:.4f}, "
+                            f"Step {step}: {loss_parts}, L0={avg_sparsity:.4f}, "
                             f"throughput={actual_steps_per_min:.1f} steps/min, "
-                            f"GPU memory: allocated={gpu_memory_allocated:.2f}MB"
+                            f"GPU mem={gpu_memory_allocated:.0f}MB"
                         )
                     else:
                         logger.info(
-                            f"Step {step}: avg_loss={avg_loss:.4f}, avg_sparsity={avg_sparsity:.4f}, "
-                            f"GPU memory: allocated={gpu_memory_allocated:.2f}MB"
+                            f"Step {step}: {loss_parts}, L0={avg_sparsity:.4f}, "
+                            f"GPU mem={gpu_memory_allocated:.0f}MB"
                         )
 
                 # Log aggregated metrics (layer_idx=None)
@@ -1302,6 +1384,12 @@ def train_sae_task(
 
                                         logger.info(f"  Resampled {min(num_dead, len(topk_indices))} neurons using high-loss examples")
 
+                # Compute current l1_alpha for reporting (after warmup scaling)
+                current_l1_alpha = None
+                if sparsity_type == 'l1':
+                    first_model = models[layer_hook_combinations[0]]
+                    current_l1_alpha = getattr(first_model, 'l1_alpha', None)
+
                 # Emit training:progress WebSocket event
                 from ..workers.websocket_emitter import emit_training_progress
                 emit_training_progress(
@@ -1313,6 +1401,9 @@ def train_sae_task(
                         "total_steps": total_steps,
                         "progress": (step / total_steps) * 100.0,
                         "loss": avg_loss,
+                        "reconstruction_loss": avg_recon_loss,
+                        "l1_loss": avg_l1_loss,
+                        "l1_alpha": current_l1_alpha,
                         "l0_sparsity": avg_sparsity,
                         "dead_neurons": int(avg_dead_neurons),
                         "learning_rate": current_lr,
