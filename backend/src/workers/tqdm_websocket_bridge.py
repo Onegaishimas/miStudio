@@ -193,13 +193,10 @@ class TqdmWebSocketCallback(tqdm_original):
                 # Update database progress (throttled same as WebSocket)
                 try:
                     from uuid import UUID
-                    from ..db.session import get_db
+                    from ..core.database import get_sync_db
                     from ..models.dataset import Dataset
 
-                    # Create a new database session for this update
-                    db_gen = get_db()
-                    db = next(db_gen)
-                    try:
+                    with get_sync_db() as db:
                         if self.tokenization_id:
                             # Update tokenization progress
                             from ..models.dataset import DatasetTokenization
@@ -214,12 +211,6 @@ class TqdmWebSocketCallback(tqdm_original):
                             if dataset_obj:
                                 dataset_obj.progress = mapped_progress / 100.0  # Store as 0.0-1.0 fraction
                                 db.commit()
-                    finally:
-                        # Always close the database session
-                        try:
-                            next(db_gen)
-                        except StopIteration:
-                            pass
                 except Exception as e:
                     # Don't let database errors break the operation
                     logger.warning(f"Failed to update database progress: {e}")
