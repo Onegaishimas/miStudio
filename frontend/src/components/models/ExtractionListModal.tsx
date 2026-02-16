@@ -296,12 +296,12 @@ export function ExtractionListModal({
 
                       {/* Model + Dataset + Split */}
                       <div className="flex items-center gap-2 mb-1 text-xs text-slate-300">
-                        <span>{models.find((m) => m.id === extraction.model_id)?.name || extraction.model_id}</span>
+                        <span>{models.find((m) => m.id === extraction.model_id)?.name || extraction.model_id || 'Unknown Model'}</span>
                         <span className="text-slate-500">+</span>
                         <span>
                           {(() => {
                             const dataset = datasets.find((d) => d.id === extraction.dataset_id);
-                            const datasetName = dataset?.name || extraction.dataset_id;
+                            const datasetName = dataset?.name || extraction.dataset_id || 'Unknown Dataset';
                             const split = dataset?.metadata?.download?.split ? ` (${dataset.metadata.download.split})` : '';
                             return `${datasetName}${split}`;
                           })()}

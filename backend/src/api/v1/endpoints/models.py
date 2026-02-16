@@ -851,8 +851,24 @@ async def list_model_extractions(
             })
         else:
             # Filesystem-only extraction (old extraction without database record)
+            # Resolve dataset_id from dataset_path by matching against known datasets
+            resolved_dataset_id = None
+            fs_dataset_path = fs_ext.get("dataset_path", "")
+            if fs_dataset_path:
+                with get_sync_db() as sync_db:
+                    from sqlalchemy import text
+                    ds_rows = sync_db.execute(
+                        text("SELECT id, raw_path FROM datasets WHERE raw_path IS NOT NULL")
+                    ).fetchall()
+                    for ds_row in ds_rows:
+                        if fs_dataset_path.startswith(ds_row[1]):
+                            resolved_dataset_id = ds_row[0]
+                            break
+
             extraction_map[ext_id] = {
                 "extraction_id": ext_id,
+                "model_id": model_id,
+                "dataset_id": resolved_dataset_id,
                 "status": "completed",  # Must be completed if metadata.json exists
                 "progress": 100.0,
                 "created_at": fs_ext.get("created_at"),
