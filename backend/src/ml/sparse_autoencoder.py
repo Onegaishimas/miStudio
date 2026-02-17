@@ -1058,9 +1058,9 @@ class JumpReLUSAE(nn.Module):
     Args:
         d_model: Input/output dimension (model hidden size)
         d_sae: SAE latent dimension (number of features)
-        sparsity_coeff: L0 sparsity penalty coefficient (λ). Applied to raw L0 count
-            per sample (matching Gemma Scope / SAELens formulation). Typical range:
-            1e-5 to 1e-3 depending on model and target sparsity.
+        sparsity_coeff: L0 sparsity penalty coefficient (λ). Applied to L0 fraction
+            (active features / d_sae), normalized to [0, 1]. Default 0.4 gives
+            loss_l0 ≈ 0.02 at 5% target L0. Typical range: 0.1 to 1.0.
         initial_threshold: Initial JumpReLU threshold value (default: 0.5, should match
             pre-activation magnitude with constant_norm_rescale normalization)
         bandwidth: KDE bandwidth for STE gradient estimation (default: 0.01)
@@ -1076,7 +1076,7 @@ class JumpReLUSAE(nn.Module):
         self,
         d_model: int,
         d_sae: int,
-        sparsity_coeff: float = 1e-4,
+        sparsity_coeff: float = 0.4,
         initial_threshold: float = 0.5,
         bandwidth: float = 0.01,
         normalize_decoder: bool = True,
@@ -1315,12 +1315,13 @@ class JumpReLUSAE(nn.Module):
             bandwidth = self.activation.bandwidth
             l0_differentiable = StraightThroughL0.apply(z, threshold, bandwidth)
 
-            # L0 as raw count per sample, mean over batch — matches Gemma Scope / SAELens
-            # L = E_batch[ ||x - x̂||² + λ · ||f||₀ ]
-            l0_count = l0_differentiable.sum(dim=-1).mean()
+            # L0 as fraction of active features [0, 1], averaged over batch
+            # Normalized by d_sae so sparsity_coeff is scale-invariant across latent dims
+            # L = E_batch[ ||x - x̂||² + λ · (active_features / d_sae) ]
+            l0_fraction = l0_differentiable.mean()  # Mean over both batch and d_sae dims
 
-            # L0 penalty: λ * L0_count (differentiable via STE backward)
-            loss_l0 = self.sparsity_coeff * l0_count
+            # L0 penalty: λ * L0_fraction (differentiable via STE backward)
+            loss_l0 = self.sparsity_coeff * l0_fraction
 
             # Total loss
             loss_total = loss_reconstruction + loss_l0
@@ -1334,9 +1335,6 @@ class JumpReLUSAE(nn.Module):
             x_zero = self.b_dec.expand_as(x)
             loss_zero = F.mse_loss(x_zero, x, reduction='mean')
 
-            # L1 penalty for compatibility with existing code
-            l1_penalty = f.abs().sum(dim=-1).mean()
-
             losses = {
                 'loss': loss_total,
                 'loss_reconstruction': loss_reconstruction,
@@ -1344,7 +1342,6 @@ class JumpReLUSAE(nn.Module):
                 'loss_zero': loss_zero,
                 'l0_sparsity': l0_sparsity,
                 'l0_mean': l0_mean,  # Average active feature count (for metrics)
-                'l1_penalty': l1_penalty,  # For compatibility
                 'fvu': fvu,
                 'threshold_mean': self.activation.threshold.mean(),
                 'threshold_min': self.activation.threshold.min(),

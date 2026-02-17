@@ -956,24 +956,36 @@ def train_sae_task(
                 diag_batch = cached_activations[diag_key][:min(batch_size, 256)]
                 _, diag_z, diag_losses = diag_model(diag_batch, return_loss=True)
                 diag_recon = diag_losses.get('loss_reconstruction')
-                diag_l1_raw = diag_losses.get('l1_penalty')
-                diag_l0 = diag_losses.get('l0_sparsity')
+                diag_l0_sparsity = diag_losses.get('l0_sparsity')
                 diag_total = diag_losses.get('loss')
-                l1_alpha_val = getattr(diag_model, 'l1_alpha', 0.0)
                 logger.info(f"  Layer {diag_key[0]}/{diag_key[1]}:")
                 logger.info(f"    Total loss:          {diag_total.item():.6f}")
                 if diag_recon is not None:
                     logger.info(f"    Reconstruction loss: {diag_recon.item():.6f}")
-                if diag_l1_raw is not None:
-                    logger.info(f"    L1 penalty (raw):    {diag_l1_raw.item():.4f}")
-                    logger.info(f"    L1 alpha (current):  {l1_alpha_val}")
-                    logger.info(f"    L1 loss (weighted):  {l1_alpha_val * diag_l1_raw.item():.6f}")
-                if diag_l0 is not None:
-                    logger.info(f"    L0 sparsity:         {diag_l0.item():.4f} ({diag_l0.item()*100:.1f}% features active)")
+                if sparsity_type == 'l0':
+                    diag_loss_l0 = diag_losses.get('loss_l0')
+                    coeff_val = getattr(diag_model, 'sparsity_coeff', 0.0)
+                    if diag_loss_l0 is not None:
+                        logger.info(f"    L0 loss (weighted):  {diag_loss_l0.item():.6f}")
+                    logger.info(f"    Sparsity coeff:      {coeff_val}")
+                elif sparsity_type == 'l1':
+                    diag_l1_raw = diag_losses.get('l1_penalty')
+                    l1_alpha_val = getattr(diag_model, 'l1_alpha', 0.0)
+                    if diag_l1_raw is not None:
+                        logger.info(f"    L1 penalty (raw):    {diag_l1_raw.item():.4f}")
+                        logger.info(f"    L1 alpha (current):  {l1_alpha_val}")
+                        logger.info(f"    L1 loss (weighted):  {l1_alpha_val * diag_l1_raw.item():.6f}")
+                if diag_l0_sparsity is not None:
+                    logger.info(f"    L0 sparsity:         {diag_l0_sparsity.item():.4f} ({diag_l0_sparsity.item()*100:.1f}% features active)")
                 logger.info(f"    Active features:     {(diag_z != 0).any(dim=0).sum().item()}/{hp['latent_dim']}")
                 logger.info(f"    Batch z stats:       mean={diag_z[diag_z>0].mean().item():.4f}, max={diag_z.max().item():.4f}")
                 if sparsity_warmup_steps > 0:
-                    logger.info(f"    Sparsity warmup:     L1 will ramp from 0 to {l1_alpha_val} over {sparsity_warmup_steps} steps")
+                    if sparsity_type == 'l0':
+                        coeff_val = getattr(diag_model, 'sparsity_coeff', 0.0)
+                        logger.info(f"    Sparsity warmup:     L0 coeff will ramp from 0 to {coeff_val} over {sparsity_warmup_steps} steps")
+                    elif sparsity_type == 'l1':
+                        l1_alpha_val = getattr(diag_model, 'l1_alpha', 0.0)
+                        logger.info(f"    Sparsity warmup:     L1 alpha will ramp from 0 to {l1_alpha_val} over {sparsity_warmup_steps} steps")
             logger.info("=" * 70)
 
         for step in range(total_steps):
@@ -1130,7 +1142,7 @@ def train_sae_task(
                 # Train all SAEs (one per layer/hook_type combination)
                 layer_losses = {}  # Key: (layer_idx, hook_type)
                 layer_recon_losses = {}  # Reconstruction loss component
-                layer_l1_losses = {}  # L1 penalty * l1_alpha component
+                layer_l1_losses = {}  # Sparsity loss: L1*alpha for L1 types, loss_l0 for JumpReLU
                 layer_sparsities = {}
                 layer_dead_neurons = {}
                 layer_fvu = {}
@@ -1246,10 +1258,16 @@ def train_sae_task(
 
                     # Extract loss components for detailed logging
                     recon_loss_val = losses.get('loss_reconstruction')
-                    l1_penalty_val = losses.get('l1_penalty')
                     layer_recon_losses[sae_key] = recon_loss_val.item() if recon_loss_val is not None and hasattr(recon_loss_val, 'item') else None
-                    if l1_penalty_val is not None and hasattr(l1_penalty_val, 'item'):
-                        # Weighted L1 loss = l1_alpha * raw_penalty (matches what's in total loss)
+
+                    # Extract sparsity loss: L0 for JumpReLU, L1 for standard/skip/transcoder
+                    loss_l0_val = losses.get('loss_l0')
+                    l1_penalty_val = losses.get('l1_penalty')
+                    if loss_l0_val is not None and hasattr(loss_l0_val, 'item'):
+                        # JumpReLU: loss_l0 is already the weighted penalty (sparsity_coeff * l0_fraction)
+                        layer_l1_losses[sae_key] = loss_l0_val.item()
+                    elif l1_penalty_val is not None and hasattr(l1_penalty_val, 'item'):
+                        # L1-based SAEs: weighted L1 loss = l1_alpha * raw_penalty
                         current_l1_alpha = getattr(model, 'l1_alpha', 0.0)
                         layer_l1_losses[sae_key] = current_l1_alpha * l1_penalty_val.item()
                     else:
@@ -1366,7 +1384,8 @@ def train_sae_task(
                     if avg_recon_loss is not None:
                         loss_parts += f" (recon={avg_recon_loss:.6f}"
                         if avg_l1_loss is not None:
-                            loss_parts += f", L1={avg_l1_loss:.6f}"
+                            sparsity_label = "L0" if sparsity_type == "l0" else "L1"
+                            loss_parts += f", {sparsity_label}={avg_l1_loss:.6f}"
                         loss_parts += ")"
 
                     # Calculate throughput
