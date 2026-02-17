@@ -589,40 +589,38 @@ def train_sae_task(
                     logger.info(f"    Shape: {layer_acts_mmap.shape} = {total_tokens:,} token activations")
 
             # Determine GPU memory budget for cached activations
-            # Accurately estimate SAE model + optimizer + gradient memory
+            # SAE models are already on GPU. Use actual free memory for accurate budgeting.
             num_layer_hooks = len(layer_hook_combinations)
             latent_dim = hp['latent_dim']
 
+            # Get ACTUAL free GPU memory (accounts for CUDA context, driver, loaded SAE models)
             try:
-                gpu_mem_total = torch.cuda.get_device_properties(device).total_mem
+                gpu_free, gpu_total = torch.cuda.mem_get_info(device)
             except Exception:
-                gpu_mem_total = 24 * 1024**3  # Conservative fallback: 24 GB
+                gpu_free = 16 * 1024**3
+                gpu_total = 24 * 1024**3
 
-            # SAE memory per model: encoder weight (hidden×latent) + decoder weight (hidden×latent)
-            # Adam optimizer: 2 momentum buffers per param (same size as params)
-            # Gradients: 1 copy per param
-            # Total per SAE: (1 model + 2 adam + 1 grad) × param_bytes = 4 × param_bytes
+            # SAE models are already loaded. Pending allocations (happen lazily during training):
+            # - Adam optimizer: 2 momentum buffers per param × float32
+            # - Gradients: 1 buffer per param × float32
+            # Total pending: 3 × param_bytes per SAE
             sae_params_per_model = 2 * actual_hidden_dim * latent_dim  # encoder + decoder weights
-            sae_bytes_per_model = sae_params_per_model * 4 * 4  # 4 copies × 4 bytes/float32
-            total_sae_bytes = num_layer_hooks * sae_bytes_per_model
+            pending_sae_bytes = num_layer_hooks * sae_params_per_model * 4 * 3  # 3 buffers × float32
 
-            # Training overhead: batch forward/backward intermediates
-            # Forward pass creates latent-dim tensors (batch_size × latent_dim) which are large
-            # Plus reconstruction, loss intermediates, mixed precision buffers
+            # Training overhead: batch forward/backward intermediates + fragmentation margin
             batch_intermediate_bytes = (
                 batch_size * (actual_hidden_dim + latent_dim) * 4  # fwd tensors per SAE
                 * num_layer_hooks * 3  # all SAEs × (fwd + bwd + margin)
             )
-            cuda_overhead = 1 * 1024**3  # 1 GB for CUDA context + fragmentation
+            training_overhead = max(1 * 1024**3, batch_intermediate_bytes)  # at least 1 GB
 
-            gpu_mem_reserved = total_sae_bytes + batch_intermediate_bytes + cuda_overhead
-            gpu_mem_for_activations = gpu_mem_total - gpu_mem_reserved
+            gpu_mem_for_activations = gpu_free - pending_sae_bytes - training_overhead
 
             logger.info(
-                f"GPU memory budget: {gpu_mem_total / 1024**3:.1f} GB total, "
-                f"{total_sae_bytes / 1024**3:.2f} GB for {num_layer_hooks} SAE(s) "
-                f"({actual_hidden_dim}→{latent_dim}), "
-                f"{gpu_mem_reserved / 1024**3:.2f} GB reserved, "
+                f"GPU memory budget: {gpu_total / 1024**3:.1f} GB total, "
+                f"{gpu_free / 1024**3:.2f} GB free (after SAE models + CUDA context), "
+                f"{pending_sae_bytes / 1024**3:.2f} GB pending (optimizer+gradients), "
+                f"{training_overhead / 1024**3:.2f} GB training overhead, "
                 f"{max(0, gpu_mem_for_activations) / 1024**3:.2f} GB for activations"
             )
 
