@@ -567,7 +567,6 @@ def train_sae_task(
                     logger.info(f"  Loading layer {layer_idx}/{hook_type} from {activation_file}")
                     layer_acts_mmap = np.load(activation_file, mmap_mode='r')
 
-                    # Average over sequence dimension in chunks
                     num_samples_in_file, seq_len, hidden_dim = layer_acts_mmap.shape
                     if actual_hidden_dim is None:
                         actual_hidden_dim = hidden_dim
@@ -576,27 +575,119 @@ def train_sae_task(
                             f"Extraction {extraction.id} has hidden_dim={hidden_dim} but expected {actual_hidden_dim}"
                         )
 
-                    chunk_size = 1000
-                    layer_acts_mean = np.zeros((num_samples_in_file, hidden_dim), dtype=np.float32)
-                    for start_idx in range(0, num_samples_in_file, chunk_size):
-                        end_idx = min(start_idx + chunk_size, num_samples_in_file)
-                        chunk = layer_acts_mmap[start_idx:end_idx]
-                        layer_acts_mean[start_idx:end_idx] = chunk.mean(axis=1).astype(np.float32)
-
+                    total_tokens = num_samples_in_file * seq_len
                     key = (layer_idx, hook_type)
                     if key not in all_activation_parts:
                         all_activation_parts[key] = []
-                    all_activation_parts[key].append(torch.from_numpy(layer_acts_mean))
-                    logger.info(f"    Shape: {layer_acts_mmap.shape} -> averaged to ({num_samples_in_file}, {hidden_dim})")
+                    all_activation_parts[key].append({
+                        'file': activation_file,
+                        'num_samples': num_samples_in_file,
+                        'seq_len': seq_len,
+                        'total_tokens': total_tokens,
+                    })
+                    logger.info(f"    Shape: {layer_acts_mmap.shape} = {total_tokens:,} token activations")
 
-            # Concatenate activations from all extractions and move to GPU
+            # Determine GPU memory budget for cached activations
+            # Reserve memory for: SAE models (~100MB), optimizer states, batch processing
+            num_layer_hooks = len(layer_hook_combinations)
+            try:
+                gpu_mem_total = torch.cuda.get_device_properties(device).total_mem
+                gpu_mem_reserved = 4 * 1024**3  # Reserve 4 GB for models, optimizer, batch ops
+                gpu_mem_available = gpu_mem_total - gpu_mem_reserved
+            except Exception:
+                gpu_mem_available = 16 * 1024**3  # Conservative fallback: 16 GB
+
+            bytes_per_token = actual_hidden_dim * 4  # float32
+            max_tokens_total = gpu_mem_available // bytes_per_token
+            max_tokens_per_layer = max_tokens_total // num_layer_hooks
+
+            # Count total available tokens across all extractions (use first layer as reference)
+            first_key = layer_hook_combinations[0]
+            total_available_tokens = sum(p['total_tokens'] for p in all_activation_parts[first_key])
+
+            # Determine how many tokens to load per layer
+            tokens_to_load = min(total_available_tokens, max_tokens_per_layer)
+            logger.info(
+                f"GPU memory budget: {gpu_mem_available / 1024**3:.1f} GB available, "
+                f"{bytes_per_token} bytes/token, {num_layer_hooks} layer-hooks"
+            )
+            logger.info(
+                f"Token budget: {tokens_to_load:,} / {total_available_tokens:,} tokens per layer "
+                f"({tokens_to_load / total_available_tokens * 100:.1f}% of available)"
+            )
+
+            # Generate a shared random token selection (same tokens for all layers)
+            # This ensures all layers see the same token positions for consistency
+            if tokens_to_load < total_available_tokens:
+                rng = np.random.RandomState(42)
+                selected_indices = np.sort(rng.choice(total_available_tokens, size=tokens_to_load, replace=False))
+                logger.info(f"Subsampled {tokens_to_load:,} random token positions (seed=42)")
+            else:
+                selected_indices = None  # Load all tokens
+
+            # Load and flatten activations: (N, seq_len, d) -> (N*seq_len, d) per-token
+            # SAE training requires individual token activations, NOT sequence averages.
+            # Averaging over the sequence dimension destroys per-token variance and causes
+            # degenerate training where b_dec alone explains the data (L0->0, all features die).
             for key in layer_hook_combinations:
-                parts = all_activation_parts[key]
-                if len(parts) == 1:
-                    cached_activations[key] = parts[0].to(device)
+                parts_info = all_activation_parts[key]
+
+                # Build a flat array of all token activations from all extractions
+                all_flat_parts = []
+                cumulative_offset = 0
+                for part_info in parts_info:
+                    mmap = np.load(part_info['file'], mmap_mode='r')
+                    n, s, d = mmap.shape
+
+                    if selected_indices is not None:
+                        # Determine which indices fall within this file's range
+                        file_end = cumulative_offset + part_info['total_tokens']
+                        local_mask = (selected_indices >= cumulative_offset) & (selected_indices < file_end)
+                        local_indices = selected_indices[local_mask] - cumulative_offset
+                        cumulative_offset = file_end
+
+                        if len(local_indices) == 0:
+                            continue
+
+                        # Convert flat indices to (sample, token) pairs
+                        sample_indices = local_indices // s
+                        token_indices = local_indices % s
+
+                        # Load sample-by-sample in sorted order for sequential mmap access
+                        unique_samples = np.unique(sample_indices)
+                        chunk_size = 200  # samples per mmap read
+                        chunk_parts = []
+                        for ci in range(0, len(unique_samples), chunk_size):
+                            ci_end = min(ci + chunk_size, len(unique_samples))
+                            sample_batch = unique_samples[ci:ci_end]
+                            s_min, s_max = sample_batch[0], sample_batch[-1]
+                            # Read contiguous range from mmap (fast sequential I/O)
+                            block = mmap[s_min:s_max + 1]  # (range, seq_len, d)
+                            # Extract the specific (sample, token) pairs from this block
+                            for s_idx in sample_batch:
+                                token_mask = sample_indices == s_idx
+                                toks = token_indices[token_mask]
+                                chunk_parts.append(block[s_idx - s_min, toks].astype(np.float32))
+                        if chunk_parts:
+                            all_flat_parts.append(np.concatenate(chunk_parts, axis=0))
+                    else:
+                        # Load all tokens — flatten (N, seq_len, d) to (N*seq_len, d) in chunks
+                        cumulative_offset += part_info['total_tokens']
+                        chunk_size = 500  # samples at a time
+                        chunk_parts = []
+                        for ci in range(0, n, chunk_size):
+                            ci_end = min(ci + chunk_size, n)
+                            chunk = mmap[ci:ci_end].reshape(-1, d).astype(np.float32)
+                            chunk_parts.append(chunk)
+                        all_flat_parts.append(np.concatenate(chunk_parts, axis=0))
+
+                if all_flat_parts:
+                    combined = np.concatenate(all_flat_parts, axis=0) if len(all_flat_parts) > 1 else all_flat_parts[0]
+                    cached_activations[key] = torch.from_numpy(combined).to(device)
                 else:
-                    cached_activations[key] = torch.cat(parts, dim=0).to(device)
-                logger.info(f"  Combined {key}: {cached_activations[key].shape}")
+                    raise ValueError(f"No activations loaded for {key}")
+
+                logger.info(f"  {key}: {cached_activations[key].shape} on GPU ({cached_activations[key].nbytes / 1024**3:.2f} GB)")
 
             # Get sample count and hidden dimension
             first_key = layer_hook_combinations[0]
@@ -609,7 +700,10 @@ def train_sae_task(
                 )
                 hp['hidden_dim'] = actual_hidden_dim
 
-            logger.info(f"Cached activations ready: {num_samples} total samples from {len(extractions)} extraction(s), hidden_dim={actual_hidden_dim}")
+            logger.info(
+                f"Cached activations ready: {num_samples:,} token activations from "
+                f"{len(extractions)} extraction(s), hidden_dim={actual_hidden_dim}"
+            )
 
         else:
             # Load dataset(s) and base model for on-the-fly activation extraction
