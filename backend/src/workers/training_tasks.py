@@ -495,6 +495,7 @@ def train_sae_task(
         )
         use_cached_activations = extraction_ids is not None and len(extraction_ids) > 0
         cached_activations = {}
+        use_gpu_activations = True  # Default; may be set to False for cached activations on large models
         dataset = None
         base_model = None
         tokenizer = None
@@ -588,33 +589,72 @@ def train_sae_task(
                     logger.info(f"    Shape: {layer_acts_mmap.shape} = {total_tokens:,} token activations")
 
             # Determine GPU memory budget for cached activations
-            # Reserve memory for: SAE models (~100MB), optimizer states, batch processing
+            # Accurately estimate SAE model + optimizer + gradient memory
             num_layer_hooks = len(layer_hook_combinations)
+            latent_dim = hp['latent_dim']
+
             try:
                 gpu_mem_total = torch.cuda.get_device_properties(device).total_mem
-                gpu_mem_reserved = 4 * 1024**3  # Reserve 4 GB for models, optimizer, batch ops
-                gpu_mem_available = gpu_mem_total - gpu_mem_reserved
             except Exception:
-                gpu_mem_available = 16 * 1024**3  # Conservative fallback: 16 GB
+                gpu_mem_total = 24 * 1024**3  # Conservative fallback: 24 GB
+
+            # SAE memory per model: encoder weight (hidden×latent) + decoder weight (hidden×latent)
+            # Adam optimizer: 2 momentum buffers per param (same size as params)
+            # Gradients: 1 copy per param
+            # Total per SAE: (1 model + 2 adam + 1 grad) × param_bytes = 4 × param_bytes
+            sae_params_per_model = 2 * actual_hidden_dim * latent_dim  # encoder + decoder weights
+            sae_bytes_per_model = sae_params_per_model * 4 * 4  # 4 copies × 4 bytes/float32
+            total_sae_bytes = num_layer_hooks * sae_bytes_per_model
+
+            # Training overhead: batch forward/backward intermediates
+            # Forward pass creates latent-dim tensors (batch_size × latent_dim) which are large
+            # Plus reconstruction, loss intermediates, mixed precision buffers
+            batch_intermediate_bytes = (
+                batch_size * (actual_hidden_dim + latent_dim) * 4  # fwd tensors per SAE
+                * num_layer_hooks * 3  # all SAEs × (fwd + bwd + margin)
+            )
+            cuda_overhead = 1 * 1024**3  # 1 GB for CUDA context + fragmentation
+
+            gpu_mem_reserved = total_sae_bytes + batch_intermediate_bytes + cuda_overhead
+            gpu_mem_for_activations = gpu_mem_total - gpu_mem_reserved
+
+            logger.info(
+                f"GPU memory budget: {gpu_mem_total / 1024**3:.1f} GB total, "
+                f"{total_sae_bytes / 1024**3:.2f} GB for {num_layer_hooks} SAE(s) "
+                f"({actual_hidden_dim}→{latent_dim}), "
+                f"{gpu_mem_reserved / 1024**3:.2f} GB reserved, "
+                f"{max(0, gpu_mem_for_activations) / 1024**3:.2f} GB for activations"
+            )
 
             bytes_per_token = actual_hidden_dim * 4  # float32
-            max_tokens_total = gpu_mem_available // bytes_per_token
-            max_tokens_per_layer = max_tokens_total // num_layer_hooks
 
             # Count total available tokens across all extractions (use first layer as reference)
             first_key = layer_hook_combinations[0]
             total_available_tokens = sum(p['total_tokens'] for p in all_activation_parts[first_key])
 
-            # Determine how many tokens to load per layer
-            tokens_to_load = min(total_available_tokens, max_tokens_per_layer)
-            logger.info(
-                f"GPU memory budget: {gpu_mem_available / 1024**3:.1f} GB available, "
-                f"{bytes_per_token} bytes/token, {num_layer_hooks} layer-hooks"
-            )
-            logger.info(
-                f"Token budget: {tokens_to_load:,} / {total_available_tokens:,} tokens per layer "
-                f"({tokens_to_load / total_available_tokens * 100:.1f}% of available)"
-            )
+            # Decide activation storage: GPU (fast indexing) vs CPU (memory-safe, batch streaming)
+            # GPU path: all activations on GPU, instant batch sampling
+            # CPU path: activations in pinned CPU memory, batch transferred per step (~5-10ms overhead)
+            min_useful_tokens = min(total_available_tokens, max(50_000, batch_size * 20))
+            max_gpu_tokens_per_layer = max(0, int(gpu_mem_for_activations * 0.9 / bytes_per_token / num_layer_hooks))
+
+            if max_gpu_tokens_per_layer >= min_useful_tokens:
+                # GPU path: load (possibly subsampled) activations to GPU
+                use_gpu_activations = True
+                tokens_to_load = min(total_available_tokens, max_gpu_tokens_per_layer)
+                logger.info(
+                    f"Activation storage: GPU — {tokens_to_load:,} / {total_available_tokens:,} "
+                    f"tokens per layer ({tokens_to_load / total_available_tokens * 100:.1f}%)"
+                )
+            else:
+                # CPU path: keep all activations on CPU, stream batches to GPU per step
+                use_gpu_activations = False
+                tokens_to_load = total_available_tokens
+                logger.info(
+                    f"Activation storage: CPU (streaming) — GPU can hold {max_gpu_tokens_per_layer:,} "
+                    f"tokens/layer but need {min_useful_tokens:,} minimum. "
+                    f"Loading all {tokens_to_load:,} tokens to CPU with batch streaming."
+                )
 
             # Generate a shared random token selection (same tokens for all layers)
             # This ensures all layers see the same token positions for consistency
@@ -683,11 +723,23 @@ def train_sae_task(
 
                 if all_flat_parts:
                     combined = np.concatenate(all_flat_parts, axis=0) if len(all_flat_parts) > 1 else all_flat_parts[0]
-                    cached_activations[key] = torch.from_numpy(combined).to(device)
+                    if use_gpu_activations:
+                        cached_activations[key] = torch.from_numpy(combined).to(device)
+                        storage_label = "GPU"
+                    else:
+                        # CPU path: pinned memory for faster GPU transfers during batch streaming
+                        tensor = torch.from_numpy(np.ascontiguousarray(combined))
+                        try:
+                            tensor = tensor.pin_memory()
+                            storage_label = "CPU (pinned)"
+                        except RuntimeError:
+                            storage_label = "CPU"
+                        cached_activations[key] = tensor
+                        del combined  # free numpy copy
                 else:
                     raise ValueError(f"No activations loaded for {key}")
 
-                logger.info(f"  {key}: {cached_activations[key].shape} on GPU ({cached_activations[key].nbytes / 1024**3:.2f} GB)")
+                logger.info(f"  {key}: {cached_activations[key].shape} on {storage_label} ({cached_activations[key].nbytes / 1024**3:.2f} GB)")
 
             # Get sample count and hidden dimension
             first_key = layer_hook_combinations[0]
@@ -869,12 +921,14 @@ def train_sae_task(
                 # The model normalizes BEFORE centering, so b_dec must be in normalized space
                 if hasattr(model, 'normalize'):
                     # Use the model's own normalize method for consistency
-                    # Process in chunks to avoid memory spikes with large datasets
+                    # Process in chunks to avoid memory spikes (works for both GPU and CPU activations)
                     chunk_size = 4096
                     n_samples = raw_acts.shape[0]
-                    running_sum = torch.zeros(raw_acts.shape[1], device=raw_acts.device)
+                    running_sum = torch.zeros(raw_acts.shape[1], device=device)
                     for i in range(0, n_samples, chunk_size):
                         chunk = raw_acts[i:i+chunk_size]
+                        if chunk.device != device:
+                            chunk = chunk.to(device)
                         normed_chunk, _ = model.normalize(chunk)
                         running_sum += normed_chunk.sum(dim=0)
                     data_mean = running_sum / n_samples
@@ -882,6 +936,8 @@ def train_sae_task(
                 else:
                     # Fallback: use raw mean if model has no normalize method
                     data_mean = raw_acts.mean(dim=0)
+                    if data_mean.device != device:
+                        data_mean = data_mean.to(device)
                     logger.info(f"  L{layer_idx}/{hook_type}: no normalize method, using raw mean")
 
                 with torch.no_grad():
@@ -930,8 +986,10 @@ def train_sae_task(
             logger.info(f"JumpReLU threshold calibration: sampling {cal_size} activations (target L0: {target_l0_frac*100:.1f}%)")
             for sae_key, model in models.items():
                 layer_idx, hook_type = sae_key
-                cal_indices = torch.randint(0, num_samples, (cal_size,), device=device)
+                cal_indices = torch.randint(0, num_samples, (cal_size,))
                 cal_batch = cached_activations[sae_key][cal_indices]
+                if cal_batch.device != device:
+                    cal_batch = cal_batch.to(device)
                 thresholds = model.calibrate_thresholds(cal_batch, target_l0_frac)
                 actual_l0 = ((cal_batch @ model.W_enc.T + model.b_enc) > thresholds.unsqueeze(0)).float().mean().item()
                 logger.info(
@@ -954,6 +1012,8 @@ def train_sae_task(
                 diag_key = layer_hook_combinations[0]
                 diag_model = models[diag_key]
                 diag_batch = cached_activations[diag_key][:min(batch_size, 256)]
+                if diag_batch.device != device:
+                    diag_batch = diag_batch.to(device)
                 _, diag_z, diag_losses = diag_model(diag_batch, return_loss=True)
                 diag_recon = diag_losses.get('loss_reconstruction')
                 diag_l0_sparsity = diag_losses.get('l0_sparsity')
@@ -1012,14 +1072,16 @@ def train_sae_task(
                 layer_activations = {}
 
                 if use_cached_activations:
-                    # Sample from cached activations (already on GPU)
-                    batch_indices = torch.randint(0, num_samples, (batch_size,), device=device)
+                    # Sample from cached activations (GPU or CPU depending on memory budget)
+                    batch_indices = torch.randint(0, num_samples, (batch_size,))
 
                     for layer_idx, hook_type in layer_hook_combinations:
-                        # Get cached activations: shape (num_samples, hidden_dim) already on GPU
                         cached = cached_activations[(layer_idx, hook_type)]
-                        # Sample batch directly on GPU - super fast!
-                        layer_activations[(layer_idx, hook_type)] = cached[batch_indices]  # Shape: (batch_size, hidden_dim)
+                        batch = cached[batch_indices]
+                        # Transfer to GPU if activations are on CPU (streaming mode)
+                        if batch.device != device:
+                            batch = batch.to(device, non_blocking=True)
+                        layer_activations[(layer_idx, hook_type)] = batch
 
                         # VALIDATION: Check activation statistics on first step
                         if step == 1:
@@ -1028,7 +1090,7 @@ def train_sae_task(
                             act_min = cached.min().item()
                             act_max = cached.max().item()
                             logger.info(f"Layer {layer_idx}/{hook_type} cached activations sampled successfully:")
-                            logger.info(f"  Cached shape on GPU: {cached.shape}")
+                            logger.info(f"  Cached shape on {cached.device}: {cached.shape}")
                             logger.info(f"  Mean: {act_mean:.4f}, Std: {act_std:.4f}")
                             logger.info(f"  Range: [{act_min:.4f}, {act_max:.4f}]")
 
