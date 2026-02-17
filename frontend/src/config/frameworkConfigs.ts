@@ -110,7 +110,7 @@ export const FRAMEWORK_CONFIGS: Record<string, FrameworkConfig> = {
     sparsityType: 'l0',
     defaults: {
       learning_rate: 7e-5,
-      sparsity_coeff: 1e-4,
+      sparsity_coeff: 0.4,
       initial_threshold: 0.5,
       bandwidth: 0.01,
       normalize_activations: 'constant_norm_rescale',
