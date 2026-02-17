@@ -54,7 +54,6 @@ class SparseAutoencoder(nn.Module):
         init_scale: float = 0.1,
         ghost_gradient_penalty: float = 0.0,
         normalize_activations: str = 'constant_norm_rescale',
-        top_k_sparsity: Optional[float] = None,  # DEPRECATED: use TopKSAE instead
     ):
         super().__init__()
 
@@ -64,14 +63,6 @@ class SparseAutoencoder(nn.Module):
         self.tied_weights = tied_weights
         self.ghost_gradient_penalty = ghost_gradient_penalty
         self.normalize_activations = normalize_activations
-        self.top_k_sparsity = top_k_sparsity
-
-        # Legacy TopK support (deprecated — use TopKSAE class instead)
-        if top_k_sparsity is not None:
-            fraction = top_k_sparsity / 100.0
-            self.k = max(1, int(fraction * latent_dim))
-        else:
-            self.k = None
 
         # Encoder: x → z
         self.encoder = nn.Linear(hidden_dim, latent_dim, bias=True)
@@ -173,24 +164,11 @@ class SparseAutoencoder(nn.Module):
             x: Input tensor [batch, hidden_dim]
 
         Returns:
-            z: Latent activations [batch, latent_dim] (after ReLU, with optional Top-K)
+            z: Latent activations [batch, latent_dim] (after ReLU)
         """
         # Center by decoder bias so encoder sees zero-mean residuals
         x_centered = x - self.decoder_bias
         z = F.relu(self.encoder(x_centered))
-
-        # Apply Top-K sparsity if enabled
-        if self.k is not None:
-            # Keep only top-K activations per sample
-            # Get top-K values and indices
-            topk_values, topk_indices = torch.topk(z, self.k, dim=-1)
-
-            # Create sparse tensor with only top-K activations
-            z_sparse = torch.zeros_like(z)
-            z_sparse.scatter_(-1, topk_indices, topk_values)
-
-            return z_sparse
-
         return z
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
@@ -269,46 +247,8 @@ class SparseAutoencoder(nn.Module):
                 # Penalty for dead neurons (encourages positive pre-activations)
                 ghost_penalty = (dead_mask * F.relu(-pre_activation)).mean()
 
-            # TopK auxiliary loss: encourage dead features to activate
-            # When TopK is active, L1 is disabled (TopK guarantees exact sparsity).
-            # Instead, add an auxiliary loss that reconstructs using only dead features,
-            # giving them gradient signal to learn useful directions.
-            aux_loss = torch.tensor(0.0, device=z.device)
-            if self.k is not None:
-                # Identify dead features in this batch (never in top-K for any sample)
-                dead_mask_batch = (z == 0).all(dim=0)  # [latent_dim]
-                num_dead = dead_mask_batch.sum().item()
-
-                if num_dead > 0 and num_dead < self.latent_dim:
-                    # Get pre-TopK activations (re-encode without TopK)
-                    z_pre = F.relu(self.encoder(x_normalized))
-
-                    # Select dead feature activations and apply TopK among them
-                    z_dead = z_pre[:, dead_mask_batch]  # [batch, num_dead]
-                    k_dead = min(self.k, num_dead)
-                    if k_dead > 0:
-                        topk_vals, topk_idx = torch.topk(z_dead, k_dead, dim=-1)
-                        z_dead_sparse = torch.zeros_like(z_dead)
-                        z_dead_sparse.scatter_(-1, topk_idx, topk_vals)
-
-                        # Reconstruct from dead features only
-                        # dead_W shape: [num_dead, hidden_dim]
-                        if self.tied_weights:
-                            dead_W = self.encoder.weight[dead_mask_batch, :]  # [num_dead, hidden_dim]
-                        else:
-                            dead_W = self.decoder.weight[:, dead_mask_batch].t()  # [hidden_dim, num_dead].T
-                        # x_dead_recon: [batch, num_dead] @ [num_dead, hidden_dim] = [batch, hidden_dim]
-                        x_dead_recon = z_dead_sparse @ dead_W
-                        # Residual = what the alive features couldn't reconstruct
-                        residual = x_normalized - x_reconstructed_norm.detach()
-                        aux_loss = F.mse_loss(x_dead_recon, residual, reduction='mean')
-
-            # Total loss
-            if self.k is not None:
-                # TopK: no L1 (sparsity enforced by TopK), add auxiliary dead feature loss
-                loss_total = loss_reconstruction + (1.0 / 32) * aux_loss
-            else:
-                loss_total = loss_reconstruction + self.l1_alpha * l1_penalty + self.ghost_gradient_penalty * ghost_penalty
+            # Total loss: reconstruction + L1 sparsity + ghost gradient
+            loss_total = loss_reconstruction + self.l1_alpha * l1_penalty + self.ghost_gradient_penalty * ghost_penalty
 
             losses = {
                 'loss': loss_total,
@@ -317,7 +257,6 @@ class SparseAutoencoder(nn.Module):
                 'l1_penalty': l1_penalty,
                 'l0_sparsity': l0_sparsity,
                 'ghost_penalty': ghost_penalty,
-                'aux_loss': aux_loss,
             }
 
         return x_reconstructed, z, losses
@@ -374,7 +313,6 @@ class SkipAutoencoder(SparseAutoencoder):
         init_scale: float = 0.1,
         skip_scale: float = 1.0,
         normalize_activations: str = 'constant_norm_rescale',
-        top_k_sparsity: Optional[float] = None,
     ):
         super().__init__(
             hidden_dim=hidden_dim,
@@ -383,7 +321,6 @@ class SkipAutoencoder(SparseAutoencoder):
             tied_weights=tied_weights,
             init_scale=init_scale,
             normalize_activations=normalize_activations,
-            top_k_sparsity=top_k_sparsity,
         )
         self.skip_scale = skip_scale
 
@@ -445,11 +382,8 @@ class SkipAutoencoder(SparseAutoencoder):
             x_zero = self.skip_scale * x
             loss_zero = F.mse_loss(x_zero, x, reduction='mean')
 
-            # TopK: no L1 (sparsity enforced by TopK)
-            if self.k is not None:
-                loss_total = loss_reconstruction
-            else:
-                loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
+            # Total loss: reconstruction + L1 sparsity
+            loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
 
             losses = {
                 'loss': loss_total,
@@ -487,7 +421,6 @@ class Transcoder(nn.Module):
         latent_dim: int,
         l1_alpha: float = 0.001,
         init_scale: float = 0.1,
-        top_k_sparsity: Optional[float] = None,
     ):
         super().__init__()
 
@@ -495,14 +428,6 @@ class Transcoder(nn.Module):
         self.output_dim = output_dim
         self.latent_dim = latent_dim
         self.l1_alpha = l1_alpha
-        self.top_k_sparsity = top_k_sparsity
-
-        # Calculate k for Top-K if enabled (convert percentage to fraction)
-        if top_k_sparsity is not None:
-            fraction = top_k_sparsity / 100.0  # Convert percentage to fraction
-            self.k = max(1, int(fraction * latent_dim))
-        else:
-            self.k = None
 
         # Encoder centering bias (learns mean of input activations)
         self.b_enc_center = nn.Parameter(torch.zeros(input_dim))
@@ -529,15 +454,6 @@ class Transcoder(nn.Module):
         # Center by encoder centering bias before encoding
         x_centered = x - self.b_enc_center
         z = F.relu(self.encoder(x_centered))
-
-        # Apply Top-K sparsity if enabled
-        if self.k is not None:
-            # Keep only top-K activations per sample
-            topk_values, topk_indices = torch.topk(z, self.k, dim=-1)
-            z_sparse = torch.zeros_like(z)
-            z_sparse.scatter_(-1, topk_indices, topk_values)
-            return z_sparse
-
         return z
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
@@ -585,11 +501,8 @@ class Transcoder(nn.Module):
             x_zero = self.decoder.bias.expand_as(x_target)
             loss_zero = F.mse_loss(x_zero, x_target, reduction='mean')
 
-            # TopK: no L1 (sparsity enforced by TopK)
-            if self.k is not None:
-                loss_total = loss_reconstruction
-            else:
-                loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
+            # Total loss: reconstruction + L1 sparsity
+            loss_total = loss_reconstruction + self.l1_alpha * l1_penalty
 
             losses = {
                 'loss': loss_total,
@@ -1467,9 +1380,9 @@ def create_sae(
     if architecture_type == 'standard':
         architecture_type = 'standard_saelens'
 
-    # Parameters specific to non-standard architectures (filter these out for standard/skip)
+    # Parameters specific to non-standard architectures (filter these out for standard/skip/transcoder)
     jumprelu_params = {'initial_threshold', 'bandwidth', 'sparsity_coeff', 'normalize_decoder', 'tied_weights'}
-    topk_params = {'top_k', 'aux_k', 'aux_loss_alpha', 'adam_epsilon'}
+    topk_params = {'top_k', 'top_k_sparsity', 'aux_k', 'aux_loss_alpha', 'adam_epsilon'}
     non_standard_params = jumprelu_params | topk_params
 
     if architecture_type in ('standard_saelens', 'standard_anthropic'):

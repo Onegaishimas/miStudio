@@ -159,7 +159,7 @@ class CommunityStandardConfig:
         activation_fn = "relu"
         if arch_type == "jumprelu":
             activation_fn = "jumprelu"
-        elif hyperparams.get("top_k_sparsity") is not None:
+        elif arch_type == "topk" or hyperparams.get("top_k") is not None:
             activation_fn = "topk"
 
         # Generate TransformerLens-compatible hook point name
@@ -172,7 +172,7 @@ class CommunityStandardConfig:
         extra_metadata = {
             "hf_model_name": model_name,  # Original HuggingFace model name for reference
             "ghost_gradient_penalty": hyperparams.get("ghost_gradient_penalty"),
-            "top_k_sparsity": hyperparams.get("top_k_sparsity"),
+            "top_k": hyperparams.get("top_k"),
             "warmup_steps": hyperparams.get("warmup_steps"),
             "weight_decay": hyperparams.get("weight_decay"),
         }
