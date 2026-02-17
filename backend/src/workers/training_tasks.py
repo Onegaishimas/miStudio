@@ -1078,18 +1078,23 @@ def train_sae_task(
 
                             if layer_key in hook_manager.activations and hook_manager.activations[layer_key]:
                                 acts = hook_manager.activations[layer_key][0]  # Shape: (batch_size, seq_len, hidden_dim)
-                                # Average over sequence dimension to get (batch_size, hidden_dim)
-                                # Move to correct device (activations are on CPU from hook)
-                                layer_activations[(layer_idx, hook_type)] = acts.mean(dim=1).detach().to(device)
+                                # Flatten to per-token activations: (batch_size, seq_len, hidden_dim) → (batch_size*seq_len, hidden_dim)
+                                # Then randomly subsample to batch_size tokens.
+                                # This preserves per-token variance instead of averaging over the sequence.
+                                acts_flat = acts.detach().reshape(-1, acts.shape[-1])  # (batch*seq, hidden_dim)
+                                if acts_flat.shape[0] > batch_size:
+                                    token_indices = torch.randperm(acts_flat.shape[0], device=acts_flat.device)[:batch_size]
+                                    acts_flat = acts_flat[token_indices]
+                                layer_activations[(layer_idx, hook_type)] = acts_flat.to(device)
 
                                 # VALIDATION: Check activation statistics on first step
                                 if step == 1:
-                                    act_mean = acts.mean().item()
-                                    act_std = acts.std().item()
-                                    act_min = acts.min().item()
-                                    act_max = acts.max().item()
+                                    act_mean = acts_flat.mean().item()
+                                    act_std = acts_flat.std().item()
+                                    act_min = acts_flat.min().item()
+                                    act_max = acts_flat.max().item()
                                     logger.info(f"Layer {layer_idx}/{hook_type} activations captured successfully:")
-                                    logger.info(f"  Shape: {acts.shape}")
+                                    logger.info(f"  Shape: {acts.shape} → flattened to {acts_flat.shape}")
                                     logger.info(f"  Mean: {act_mean:.4f}, Std: {act_std:.4f}")
                                     logger.info(f"  Range: [{act_min:.4f}, {act_max:.4f}]")
 
@@ -1184,24 +1189,37 @@ def train_sae_task(
                     # Optimizer step (only every grad_accum_steps)
                     if (step + 1) % grad_accum_steps == 0:
                         if scaler is not None:
-                            # Mixed precision: unscale gradients before clipping
+                            # Mixed precision: unscale gradients before clipping.
+                            # CRITICAL: Once unscale_() is called, update() MUST follow
+                            # before the next unscale_() call, even if an error occurs
+                            # (e.g. OOM during step/clip). Use try/finally to guarantee this.
                             scaler.unscale_(optimizer)
+                            try:
+                                # Gradient clipping
+                                grad_clip_norm = hp.get('grad_clip_norm')
+                                if grad_clip_norm:
+                                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
 
-                        # Gradient clipping
-                        grad_clip_norm = hp.get('grad_clip_norm')
-                        if grad_clip_norm:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                                # JumpReLU: Project decoder gradients orthogonal to decoder columns
+                                if isinstance(model, JumpReLUSAE):
+                                    project_decoder_gradients(model)
 
-                        # JumpReLU: Project decoder gradients orthogonal to decoder columns
-                        # This prevents the decoder from learning to increase norms
-                        if isinstance(model, JumpReLUSAE):
-                            project_decoder_gradients(model)
-
-                        # Optimizer step with scaler
-                        if scaler is not None:
-                            scaler.step(optimizer)
-                            scaler.update()
+                                scaler.step(optimizer)
+                            finally:
+                                # Always call update() to reset scaler state to READY.
+                                # Without this, an OOM between unscale_() and update()
+                                # leaves the scaler in UNSCALED state, causing
+                                # "unscale_() has already been called" on the next step.
+                                scaler.update()
                         else:
+                            # CPU training - no mixed precision
+                            grad_clip_norm = hp.get('grad_clip_norm')
+                            if grad_clip_norm:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+
+                            if isinstance(model, JumpReLUSAE):
+                                project_decoder_gradients(model)
+
                             optimizer.step()
 
                         # Normalize decoder columns to unit norm after each step.
@@ -1296,9 +1314,14 @@ def train_sae_task(
                     batch_size = estimate_oom_reduced_batch_size(batch_size)
                     logger.info(f"Reducing batch_size from {old_batch_size} to {batch_size}")
 
-                    # Clear GPU memory
+                    # Clear GPU memory and reset scaler states
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+                        # Recreate all GradScalers to ensure clean state.
+                        # An OOM can interrupt the inner loop at any point,
+                        # potentially leaving a scaler in a dirty state.
+                        for sae_key in scalers:
+                            scalers[sae_key] = GradScaler()
 
                     # Update hyperparameters
                     hp['batch_size'] = batch_size
