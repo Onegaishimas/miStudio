@@ -218,6 +218,10 @@ class TrainingValidator:
         """
         warnings = []
 
+        # Guard against None values (hp.get() returns None when key exists with None value)
+        if target_l0 is None:
+            target_l0 = 0.05
+
         # Skip quality checks during warmup period (both LR and sparsity warmup)
         effective_warmup = max(warmup_steps, sparsity_warmup_steps)
         if step < effective_warmup:

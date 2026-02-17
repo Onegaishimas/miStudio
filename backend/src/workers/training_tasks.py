@@ -1507,8 +1507,8 @@ def train_sae_task(
                     l0_sparsity=avg_sparsity,
                     dead_neurons=int(avg_dead_neurons),
                     latent_dim=hp['latent_dim'],
-                    target_l0=hp.get('target_l0', 0.05),
-                    warmup_steps=hp.get('warmup_steps', 0),
+                    target_l0=hp.get('target_l0') or 0.05,
+                    warmup_steps=hp.get('warmup_steps') or 0,
                     training_id=training_id,
                     sparsity_warmup_steps=sparsity_warmup_steps,
                 )
