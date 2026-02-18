@@ -754,27 +754,28 @@ export const HYPERPARAMETER_DOCS: Record<string, HyperparameterDoc> = {
     name: 'L0 Sparsity Coefficient (λ)',
     purpose: 'Controls the strength of the L0 sparsity penalty in JumpReLU. This is the key sparsity hyperparameter for JumpReLU (replaces l1_alpha).',
     description:
-      'JumpReLU uses L0 loss: L = E[||x - x̂||² + λ · L0_fraction], where L0_fraction is the fraction of active features (0 to 1), normalized by latent_dim. λ controls the sparsity-reconstruction tradeoff.',
+      'JumpReLU uses L0 loss per Gemma Scope paper: L = E[||x - x̂||² + λ · Σᵢ H(zᵢ - θᵢ)], where the L0 term is the count of active features per sample. λ controls the sparsity-reconstruction tradeoff.',
     examples: [
       {
-        value: 0.1,
+        value: 0.0003,
         effect: 'Weak L0 penalty → More features active',
         useCase: 'Prioritizing reconstruction over sparsity',
       },
       {
-        value: 0.4,
-        effect: 'Default → Balanced sparsity (~5% L0)',
+        value: 0.001,
+        effect: 'Default → Balanced sparsity',
         useCase: 'Standard JumpReLU training',
       },
       {
-        value: 1.0,
+        value: 0.005,
         effect: 'Strong L0 penalty → Fewer active features',
         useCase: 'When you need very sparse, interpretable features',
       },
     ],
     recommendations: [
-      'Default: 0.4 (L0 is normalized to fraction [0,1] by latent_dim)',
-      'At 5% target L0: loss_l0 = 0.4 × 0.05 = 0.02',
+      'Default: 1e-3 (Gemma Scope paper uses 6e-4)',
+      'At L0=50 active features: loss_l0 = 1e-3 × 50 = 0.05',
+      'Typical range: 1e-4 to 5e-3',
       'This replaces l1_alpha for JumpReLU architecture',
       'Lower values → more features active → better reconstruction',
       'Higher values → fewer features active → better interpretability',

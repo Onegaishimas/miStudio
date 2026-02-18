@@ -176,7 +176,7 @@ export const TrainingPanel: React.FC = () => {
     if (fw.sparsityType === 'l1' && config.l1_alpha != null) {
       descParts.push(`L1: ${config.l1_alpha}`);
     } else if (fw.sparsityType === 'l0') {
-      descParts.push(`SparsityCoeff: ${config.sparsity_coeff ?? 1e-4}`);
+      descParts.push(`SparsityCoeff: ${config.sparsity_coeff ?? 1e-3}`);
       descParts.push(`Thresh: ${config.initial_threshold ?? 0.5}`);
       descParts.push(`BW: ${config.bandwidth ?? 0.01}`);
     } else if (fw.sparsityType === 'topk') {
@@ -1405,7 +1405,7 @@ export const TrainingPanel: React.FC = () => {
                       <input
                         id="sparsity-coeff"
                         type="number"
-                        value={config.sparsity_coeff ?? 1e-4}
+                        value={config.sparsity_coeff ?? 1e-3}
                         onChange={(e) => updateConfig({ sparsity_coeff: parseFloat(e.target.value) })}
                         min={0.000001}
                         max={10.0}
@@ -1413,7 +1413,7 @@ export const TrainingPanel: React.FC = () => {
                         className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       <p className="mt-1 text-xs text-slate-400">
-                        L0 penalty coefficient (λ) applied to raw feature count. Default: 1e-4.
+                        L0 penalty coefficient (λ) applied to raw feature count. Default: 1e-3 (Gemma Scope: 6e-4).
                       </p>
                     </div>
 

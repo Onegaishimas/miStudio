@@ -193,7 +193,7 @@ const defaultConfig: TrainingConfig = {
   // JumpReLU-specific (applied when framework switches to jumprelu)
   initial_threshold: 0.5,
   bandwidth: 0.01,
-  sparsity_coeff: 1e-4,
+  sparsity_coeff: 1e-3,
   normalize_decoder: true,
 
   // TopK-specific (applied when framework switches to topk)
