@@ -105,14 +105,23 @@ class TrainingValidator:
                 )
 
         elif sparsity_type == 'l0':
-            # JumpReLU: validate sparsity_coeff
+            # JumpReLU: validate sparsity_coeff (count-based L0 per Gemma Scope paper)
+            # L0 penalty = sparsity_coeff * avg_active_feature_count
+            # Paper uses λ ≈ 6e-4. At L0=50: loss_l0 = 6e-4 * 50 = 0.03
             sparsity_coeff = hyperparameters.get('sparsity_coeff')
-            if sparsity_coeff is not None and sparsity_coeff > 1.0:
-                warnings.append(
-                    f"sparsity_coeff ({sparsity_coeff}) is very high for count-based L0. "
-                    f"Typical range: 1e-5 to 1e-3 (default: 1e-4). "
-                    f"High values will cause excessive dead neurons."
-                )
+            if sparsity_coeff is not None:
+                if sparsity_coeff > 0.01:
+                    warnings.append(
+                        f"sparsity_coeff ({sparsity_coeff}) is very high for count-based L0. "
+                        f"At L0=50, loss_l0 = {sparsity_coeff * 50:.2f} which will dominate reconstruction. "
+                        f"Typical range: 1e-4 to 5e-3 (default: 1e-3, Gemma Scope: 6e-4)."
+                    )
+                elif sparsity_coeff > 0.005:
+                    warnings.append(
+                        f"sparsity_coeff ({sparsity_coeff}) is high for count-based L0. "
+                        f"Typical range: 1e-4 to 5e-3 (default: 1e-3, Gemma Scope: 6e-4). "
+                        f"May cause excessive dead neurons."
+                    )
 
         elif sparsity_type == 'l1':
             # L1-based: validate l1_alpha

@@ -54,7 +54,7 @@ FRAMEWORK_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "description": "JumpReLU activation with learnable thresholds and L0 penalty via STE.",
         "optimizer_betas": (0.0, 0.999),
         "adam_epsilon": 1e-8,
-        "default_sparsity_coeff": 0.4,
+        "default_sparsity_coeff": 1e-3,
         "default_learning_rate": 7e-5,
         "normalize_activations": "constant_norm_rescale",
         "normalize_decoder": True,

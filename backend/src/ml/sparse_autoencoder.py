@@ -989,7 +989,7 @@ class JumpReLUSAE(nn.Module):
         self,
         d_model: int,
         d_sae: int,
-        sparsity_coeff: float = 0.4,
+        sparsity_coeff: float = 1e-3,
         initial_threshold: float = 0.5,
         bandwidth: float = 0.01,
         normalize_decoder: bool = True,
@@ -1228,13 +1228,14 @@ class JumpReLUSAE(nn.Module):
             bandwidth = self.activation.bandwidth
             l0_differentiable = StraightThroughL0.apply(z, threshold, bandwidth)
 
-            # L0 as fraction of active features [0, 1], averaged over batch
-            # Normalized by d_sae so sparsity_coeff is scale-invariant across latent dims
-            # L = E_batch[ ||x - x̂||² + λ · (active_features / d_sae) ]
-            l0_fraction = l0_differentiable.mean()  # Mean over both batch and d_sae dims
+            # L0 as count of active features, averaged over batch
+            # Matches Gemma Scope paper: L = E_batch[ ||x - x̂||² + λ · Σᵢ H(zᵢ - θᵢ) ]
+            # Sum over features (count per sample), mean over batch
+            l0_count = l0_differentiable.sum(dim=-1).mean()  # [batch, d_sae] → [batch] → scalar
 
-            # L0 penalty: λ * L0_fraction (differentiable via STE backward)
-            loss_l0 = self.sparsity_coeff * l0_fraction
+            # L0 penalty: λ * L0_count (differentiable via STE backward)
+            # Paper-scale λ ≈ 6e-4 to 1e-3 (Rajamanoharan et al. 2024)
+            loss_l0 = self.sparsity_coeff * l0_count
 
             # Total loss
             loss_total = loss_reconstruction + loss_l0
@@ -1464,7 +1465,7 @@ def create_sae(
             normalize_activations = 'constant_norm_rescale'
         sparsity_coeff = kwargs.pop('sparsity_coeff', None)
         if sparsity_coeff is None:
-            sparsity_coeff = 1e-4
+            sparsity_coeff = 1e-3
         return JumpReLUSAE(
             d_model=hidden_dim,
             d_sae=latent_dim,
