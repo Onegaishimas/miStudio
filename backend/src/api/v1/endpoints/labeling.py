@@ -360,7 +360,7 @@ async def list_available_ollama_models():
         )
 
 
-class FetchOpenAIModelsRequest(BaseModel):
+class FetchModelsRequest(BaseModel):
     api_key: Optional[str] = None
     endpoint_url: str = "https://api.openai.com/v1"
 
@@ -369,19 +369,15 @@ class FetchOpenAIModelsRequest(BaseModel):
     "/labeling/models/openai",
     summary="Fetch available models from OpenAI or compatible endpoint"
 )
-async def fetch_openai_models(request: FetchOpenAIModelsRequest):
+async def fetch_openai_models(request: FetchModelsRequest):
     """
-    Fetch available models from OpenAI API or any OpenAI-compatible endpoint.
-    Proxied through the backend to avoid CORS issues.
+    Fetch available models from any OpenAI-compatible endpoint.
+    Proxied through the backend to avoid CORS and DNS resolution issues.
 
-    Uses the provided API key, or falls back to the server's configured key.
+    API key is optional — endpoints like Ollama and vLLM don't require auth.
+    Falls back to the server's configured OpenAI key if available.
     """
     api_key = request.api_key or getattr(settings, 'openai_api_key', None)
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No API key provided and no server default configured."
-        )
 
     # Normalize endpoint URL
     base_url = request.endpoint_url.rstrip('/')
@@ -389,15 +385,20 @@ async def fetch_openai_models(request: FetchOpenAIModelsRequest):
         base_url = f"{base_url}/v1"
 
     try:
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(
                 f"{base_url}/models",
-                headers={"Authorization": f"Bearer {api_key}"}
+                headers=headers,
             )
             response.raise_for_status()
             data = response.json()
 
             models = []
+
             # OpenAI format: { "data": [{ "id": "gpt-4o-mini", ... }] }
             if "data" in data and isinstance(data["data"], list):
                 for m in data["data"]:
@@ -406,6 +407,16 @@ async def fetch_openai_models(request: FetchOpenAIModelsRequest):
                         models.append({
                             "id": model_id,
                             "owned_by": m.get("owned_by", ""),
+                        })
+
+            # Ollama format: { "models": [{ "name": "gemma2:2b", ... }] }
+            elif "models" in data and isinstance(data["models"], list):
+                for m in data["models"]:
+                    model_name = m.get("name", "") or m.get("id", "")
+                    if model_name:
+                        models.append({
+                            "id": model_name,
+                            "owned_by": m.get("owned_by", "ollama"),
                         })
 
             # Sort: gpt models first, then alphabetical
@@ -430,13 +441,13 @@ async def fetch_openai_models(request: FetchOpenAIModelsRequest):
             detail=f"API returned HTTP {e.response.status_code}: {e.response.text[:200]}"
         )
     except httpx.RequestError as e:
-        logger.error(f"Failed to connect to OpenAI API: {e}")
+        logger.error(f"Failed to connect to endpoint: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Cannot connect to {base_url}. Check the endpoint URL."
         )
     except Exception as e:
-        logger.error(f"Error fetching OpenAI models: {e}")
+        logger.error(f"Error fetching models: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch models: {str(e)}"

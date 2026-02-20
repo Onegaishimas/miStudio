@@ -92,7 +92,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
     }
   }, [isOpen, labelingMethod, availableModels.length, localModel]);
 
-  // Fetch models from OpenAI-compatible endpoint
+  // Fetch models from OpenAI-compatible endpoint (always proxied through backend)
   const fetchCompatibleModels = async () => {
     if (!openaiCompatibleEndpoint) {
       setCompatibleModelsError('Please enter an endpoint URL first');
@@ -103,79 +103,27 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
     setCompatibleModelsError(null);
 
     try {
-      // Normalize endpoint URL (remove trailing slash, ensure /v1 suffix for consistency)
-      let baseUrl = openaiCompatibleEndpoint.trim();
-      if (baseUrl.endsWith('/')) {
-        baseUrl = baseUrl.slice(0, -1);
-      }
-      // Ensure URL ends with /v1 for OpenAI-compatible API standard
-      if (!baseUrl.endsWith('/v1')) {
-        baseUrl = `${baseUrl}/v1`;
-      }
+      const endpoint = openaiCompatibleEndpoint.trim();
 
-      // Query the /v1/models endpoint with timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-      let response;
-      try {
-        response = await fetch(`${baseUrl}/models`, { signal: controller.signal });
-      } catch (fetchError: any) {
-        clearTimeout(timeoutId);
-        // Provide helpful error messages for common issues
-        if (fetchError.name === 'AbortError') {
-          throw new Error('Connection timed out. The oLLM server may be busy or starting up. Please try again.');
-        } else if (fetchError.message?.includes('Failed to fetch') || fetchError.message?.includes('NetworkError')) {
-          throw new Error('Cannot connect to oLLM server. Check if the server is running and the endpoint URL is correct.');
-        }
-        throw fetchError;
-      }
-      clearTimeout(timeoutId);
-
-      // Check for specific error responses
-      if (!response.ok) {
-        // Try to get error details from response
-        let errorDetail = response.statusText;
-        try {
-          const errorData = await response.json();
-          if (errorData.error?.message) {
-            errorDetail = errorData.error.message;
-          }
-          // Handle model_too_large error specially
-          if (errorData.error?.code === 'model_too_large') {
-            throw new Error(`Model too large: ${errorDetail}`);
-          }
-        } catch (jsonErr) {
-          // Ignore JSON parsing errors
-        }
-
-        if (response.status === 502 || response.status === 503 || response.status === 504) {
-          throw new Error(`oLLM server is unavailable (HTTP ${response.status}). The server may be loading a model or experiencing issues. Please try again.`);
-        }
-        throw new Error(`HTTP ${response.status}: ${errorDetail}`);
+      // Resolve relative URLs to absolute using current origin
+      // e.g. "/ollama/v1" → "http://mistudio.mcslab.io/ollama/v1"
+      let resolvedUrl = endpoint;
+      if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+        resolvedUrl = `${window.location.origin}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
       }
 
-      const data = await response.json();
+      // All fetching goes through backend to avoid CORS and K8s DNS issues
+      const data = await fetchAPI<{ models: { id: string }[]; total: number }>('/labeling/models/openai', {
+        method: 'POST',
+        body: JSON.stringify({ endpoint_url: resolvedUrl }),
+      });
 
-      // OpenAI API format: { "data": [{ "id": "model-name", ... }] }
-      // Ollama format: { "models": [{ "name": "model-name", ... }] }
-      let models: string[] = [];
-
-      if (data.data && Array.isArray(data.data)) {
-        // OpenAI/vLLM format
-        models = data.data.map((m: any) => m.id || m.name).filter(Boolean);
-      } else if (data.models && Array.isArray(data.models)) {
-        // Ollama format
-        models = data.models.map((m: any) => m.name || m.id).filter(Boolean);
-      } else {
-        throw new Error('Unexpected response format from endpoint');
-      }
+      const models = (data.models || []).map((m) => m.id).filter(Boolean);
 
       if (models.length === 0) {
-        setCompatibleModelsError('No models found on this endpoint. The oLLM server may need to load a model first.');
+        setCompatibleModelsError('No models found on this endpoint.');
       } else {
         setCompatibleModels(models);
-        // Auto-select first model if current value is default or empty
         if (!openaiCompatibleModel || openaiCompatibleModel === 'gemma2:2b' || openaiCompatibleModel === 'llama3.2') {
           setOpenaiCompatibleModel(models[0]);
         }
