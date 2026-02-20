@@ -947,8 +947,12 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             negative_examples=negative_examples
         )
 
-        # Start with the template
-        prompt = user_prompt_template
+        # Start with the template (fall back to default if None)
+        prompt = user_prompt_template or (
+            "Analyze the following activation examples for this SAE feature and provide a semantic label.\n\n"
+            "{analysis_block}"
+            "{examples_block}"
+        )
 
         # Insert NLP analysis summary before examples_block if available
         # This provides statistical context about ALL examples, not just the displayed ones
@@ -1314,6 +1318,12 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             except Exception as e:
                 logger.warning(f"Failed to compute NLP analysis for feature {feature_id}: {e}")
 
+        # Fall back to defaults when no template is selected
+        effective_system_message = system_message or (
+            "You are an expert in mechanistic interpretability analyzing sparse autoencoder features. "
+            "Provide both category and specific labels in JSON format."
+        )
+
         try:
             # Build user prompt using the new _build_user_prompt method
             user_prompt = self._build_user_prompt(
@@ -1329,7 +1339,7 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             request_payload = {
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": system_message},
+                    {"role": "system", "content": effective_system_message},
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": self.temperature,
