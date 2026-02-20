@@ -93,15 +93,21 @@ class OpenAILabelingService:
             )
 
         # Initialize async client with optional base_url and timeout for OpenAI-compatible endpoints
+        # Limit connection pool to avoid "Too many open files" errors
         import httpx
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=10.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
         client_kwargs = {
             "api_key": self.api_key or "not-needed",
-            "timeout": httpx.Timeout(timeout, connect=10.0)  # timeout for requests, 10s for connection
+            "http_client": http_client,
         }
         if base_url:
             client_kwargs["base_url"] = base_url
         self.client = AsyncOpenAI(**client_kwargs)
         self.timeout = timeout
+        self._api_semaphore = asyncio.Semaphore(10)  # Max 10 concurrent API calls
 
         # Resolve model name
         if model is None or model == "gpt4-mini":
@@ -153,6 +159,7 @@ class OpenAILabelingService:
 
         Some models (o-series reasoning models) reject temperature, top_p, etc.
         On BadRequestError mentioning 'unsupported', retry without those params.
+        Uses a semaphore to limit concurrent connections and avoid fd exhaustion.
         """
         from openai import BadRequestError
 
@@ -165,20 +172,21 @@ class OpenAILabelingService:
             **kwargs,
         }
 
-        try:
-            return await self.client.chat.completions.create(**call_kwargs)
-        except BadRequestError as e:
-            error_msg = str(e).lower()
-            if "unsupported" not in error_msg:
-                raise
+        async with self._api_semaphore:
+            try:
+                return await self.client.chat.completions.create(**call_kwargs)
+            except BadRequestError as e:
+                error_msg = str(e).lower()
+                if "unsupported" not in error_msg:
+                    raise
 
-            # Retry without temperature and top_p for reasoning models
-            logger.warning(
-                f"Model {self.model} rejected sampling params, retrying without temperature/top_p"
-            )
-            call_kwargs.pop("temperature", None)
-            call_kwargs.pop("top_p", None)
-            return await self.client.chat.completions.create(**call_kwargs)
+                # Retry without temperature and top_p for reasoning models
+                logger.warning(
+                    f"Model {self.model} rejected sampling params, retrying without temperature/top_p"
+                )
+                call_kwargs.pop("temperature", None)
+                call_kwargs.pop("top_p", None)
+                return await self.client.chat.completions.create(**call_kwargs)
 
     def _save_request_for_testing(
         self,
