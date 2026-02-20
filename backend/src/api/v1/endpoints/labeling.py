@@ -7,6 +7,7 @@ Provides REST API for independent semantic labeling of extracted SAE features.
 import logging
 from typing import Optional
 import httpx
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -356,4 +357,87 @@ async def list_available_ollama_models():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list Ollama models: {str(e)}"
+        )
+
+
+class FetchOpenAIModelsRequest(BaseModel):
+    api_key: Optional[str] = None
+    endpoint_url: str = "https://api.openai.com/v1"
+
+
+@router.post(
+    "/labeling/models/openai",
+    summary="Fetch available models from OpenAI or compatible endpoint"
+)
+async def fetch_openai_models(request: FetchOpenAIModelsRequest):
+    """
+    Fetch available models from OpenAI API or any OpenAI-compatible endpoint.
+    Proxied through the backend to avoid CORS issues.
+
+    Uses the provided API key, or falls back to the server's configured key.
+    """
+    api_key = request.api_key or getattr(settings, 'openai_api_key', None)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No API key provided and no server default configured."
+        )
+
+    # Normalize endpoint URL
+    base_url = request.endpoint_url.rstrip('/')
+    if not base_url.endswith('/v1'):
+        base_url = f"{base_url}/v1"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{base_url}/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            models = []
+            # OpenAI format: { "data": [{ "id": "gpt-4o-mini", ... }] }
+            if "data" in data and isinstance(data["data"], list):
+                for m in data["data"]:
+                    model_id = m.get("id", "")
+                    if model_id:
+                        models.append({
+                            "id": model_id,
+                            "owned_by": m.get("owned_by", ""),
+                        })
+
+            # Sort: gpt models first, then alphabetical
+            models.sort(key=lambda m: (
+                0 if m["id"].startswith("gpt-") else 1,
+                m["id"]
+            ))
+
+            return {
+                "models": models,
+                "total": len(models)
+            }
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"API returned HTTP {e.response.status_code}: {e.response.text[:200]}"
+        )
+    except httpx.RequestError as e:
+        logger.error(f"Failed to connect to OpenAI API: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Cannot connect to {base_url}. Check the endpoint URL."
+        )
+    except Exception as e:
+        logger.error(f"Error fetching OpenAI models: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch models: {str(e)}"
         )

@@ -11,6 +11,7 @@ import { useLabelingStore } from '../../stores/labelingStore';
 import { useLabelingPromptTemplatesStore } from '../../stores/labelingPromptTemplatesStore';
 import { LabelingMethod } from '../../types/labeling';
 import { getLocalModels } from '../../api/models';
+import { fetchAPI } from '../../api/client';
 
 interface StartLabelingButtonProps {
   extractionId: string;
@@ -37,6 +38,9 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
   const [compatibleModels, setCompatibleModels] = useState<string[]>([]);
   const [loadingCompatibleModels, setLoadingCompatibleModels] = useState(false);
   const [compatibleModelsError, setCompatibleModelsError] = useState<string | null>(null);
+  const [openaiModels, setOpenaiModels] = useState<string[]>([]);
+  const [loadingOpenaiModels, setLoadingOpenaiModels] = useState(false);
+  const [openaiModelsError, setOpenaiModelsError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [maxExamples, setMaxExamples] = useState<number>(25);  // Number of examples per feature (10-50)
   const [apiTimeout, setApiTimeout] = useState<number>(120);  // API timeout in seconds (30-600)
@@ -185,6 +189,41 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
     }
   };
 
+  // Fetch models from OpenAI API (proxied through backend to avoid CORS)
+  const fetchOpenAIModels = async () => {
+    setLoadingOpenaiModels(true);
+    setOpenaiModelsError(null);
+
+    try {
+      const data = await fetchAPI<{ models: { id: string }[]; total: number }>('/labeling/models/openai', {
+        method: 'POST',
+        body: JSON.stringify({
+          api_key: openaiApiKey || undefined,
+          endpoint_url: 'https://api.openai.com/v1',
+        }),
+      });
+
+      const models = (data.models || []).map((m) => m.id).filter(Boolean);
+
+      if (models.length === 0) {
+        setOpenaiModelsError('No models returned from OpenAI API.');
+      } else {
+        setOpenaiModels(models);
+        // Keep current selection if it's in the list, otherwise select first
+        if (!models.includes(openaiModel)) {
+          const preferred = models.find((m) => m === 'gpt-4o-mini') || models[0];
+          setOpenaiModel(preferred);
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch models';
+      setOpenaiModelsError(errorMessage);
+      console.error('Failed to fetch OpenAI models:', err);
+    } finally {
+      setLoadingOpenaiModels(false);
+    }
+  };
+
   const handleStartLabeling = async () => {
     try {
       clearError();
@@ -302,15 +341,47 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                       <label className="block text-sm font-medium text-slate-300 mb-2">
                         OpenAI Model
                       </label>
-                      <select
-                        value={openaiModel}
-                        onChange={(e) => setOpenaiModel(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      >
-                        <option value="gpt-4o-mini">gpt-4o-mini (recommended)</option>
-                        <option value="gpt-4o">gpt-4o</option>
-                        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                      </select>
+                      <div className="flex gap-2">
+                        {openaiModels.length > 0 ? (
+                          <select
+                            value={openaiModel}
+                            onChange={(e) => setOpenaiModel(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          >
+                            {openaiModels.map((model) => (
+                              <option key={model} value={model}>
+                                {model}{model === 'gpt-4o-mini' ? ' (recommended)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            value={openaiModel}
+                            onChange={(e) => setOpenaiModel(e.target.value)}
+                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          >
+                            <option value="gpt-4o-mini">gpt-4o-mini (recommended)</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                          </select>
+                        )}
+                        <button
+                          type="button"
+                          onClick={fetchOpenAIModels}
+                          disabled={loadingOpenaiModels}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                        >
+                          {loadingOpenaiModels ? 'Loading...' : 'Fetch Models'}
+                        </button>
+                      </div>
+                      {openaiModelsError && (
+                        <p className="mt-1 text-xs text-red-400">{openaiModelsError}</p>
+                      )}
+                      {!openaiModelsError && openaiModels.length > 0 && (
+                        <p className="mt-1 text-xs text-slate-400">
+                          {openaiModels.length} model(s) available from OpenAI
+                        </p>
+                      )}
                     </div>
                   )}
 
