@@ -655,7 +655,7 @@ curl -X POST '{endpoint_url}' \\
                     }
                 ],
                 "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
+                "max_completion_tokens": self.max_tokens,
                 "top_p": self.top_p
             }
 
@@ -694,7 +694,7 @@ curl -X POST '{endpoint_url}' \\
                     }
                 ],
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_completion_tokens=self.max_tokens,
                 top_p=self.top_p
             )
             elapsed_time = time.time() - start_time
@@ -1333,7 +1333,7 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
+                "max_completion_tokens": self.max_tokens,
                 "top_p": self.top_p
             }
 
@@ -1360,7 +1360,7 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
                 model=self.model,
                 messages=request_payload["messages"],
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_completion_tokens=self.max_tokens,
                 top_p=self.top_p
             )
             elapsed_time = time.time() - start_time
