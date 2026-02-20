@@ -147,6 +147,39 @@ class OpenAILabelingService:
             logger.info(f"  Using custom user prompt template (length: {len(user_prompt_template)} chars)")
             logger.info(f"  Token Filtering: special={filter_special}, fragments={filter_fragments}, stop_words={filter_stop_words}")
 
+    async def _call_openai(self, messages: list, **kwargs) -> Any:
+        """
+        Call OpenAI API with automatic fallback for unsupported parameters.
+
+        Some models (o-series reasoning models) reject temperature, top_p, etc.
+        On BadRequestError mentioning 'unsupported', retry without those params.
+        """
+        from openai import BadRequestError
+
+        call_kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_completion_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            **kwargs,
+        }
+
+        try:
+            return await self.client.chat.completions.create(**call_kwargs)
+        except BadRequestError as e:
+            error_msg = str(e).lower()
+            if "unsupported" not in error_msg:
+                raise
+
+            # Retry without temperature and top_p for reasoning models
+            logger.warning(
+                f"Model {self.model} rejected sampling params, retrying without temperature/top_p"
+            )
+            call_kwargs.pop("temperature", None)
+            call_kwargs.pop("top_p", None)
+            return await self.client.chat.completions.create(**call_kwargs)
+
     def _save_request_for_testing(
         self,
         request_payload: Dict[str, Any],
@@ -678,11 +711,10 @@ curl -X POST '{endpoint_url}' \\
                 else:
                     logger.debug(f"Skipping request save due to sample rate: {self.save_requests_sample_rate}")
 
-            # Call OpenAI API (new v1+ syntax) - track elapsed time
+            # Call OpenAI API (with automatic fallback for reasoning models)
             import time
             start_time = time.time()
-            response = await self.client.chat.completions.create(
-                model=self.model,
+            response = await self._call_openai(
                 messages=[
                     {
                         "role": "system",
@@ -692,10 +724,7 @@ curl -X POST '{endpoint_url}' \\
                         "role": "user",
                         "content": prompt
                     }
-                ],
-                temperature=self.temperature,
-                max_completion_tokens=self.max_tokens,
-                top_p=self.top_p
+                ]
             )
             elapsed_time = time.time() - start_time
 
@@ -1363,15 +1392,11 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
                 else:
                     logger.debug(f"Skipping request save due to sample rate: {self.save_requests_sample_rate}")
 
-            # Call OpenAI API - track elapsed time
+            # Call OpenAI API (with automatic fallback for reasoning models)
             import time
             start_time = time.time()
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=request_payload["messages"],
-                temperature=self.temperature,
-                max_completion_tokens=self.max_tokens,
-                top_p=self.top_p
+            response = await self._call_openai(
+                messages=request_payload["messages"]
             )
             elapsed_time = time.time() - start_time
 
