@@ -7,7 +7,7 @@ and tokenizing datasets with real-time progress updates via WebSocket.
 
 from datetime import datetime, UTC
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 import signal
 import os
@@ -1395,7 +1395,7 @@ def cancel_dataset_download(self, dataset_id: str, task_id: Optional[str] = None
 
 
 @celery_app.task(name="src.workers.dataset_tasks.delete_dataset_files")
-def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokenized_path: Optional[str] = None):
+def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokenized_paths: Optional[List[str]] = None, tokenized_path: Optional[str] = None):
     """
     Delete dataset files from disk after database deletion.
 
@@ -1405,7 +1405,8 @@ def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokeni
     Args:
         dataset_id: Dataset UUID
         raw_path: Path to raw dataset files (may be Docker-style /data/ path)
-        tokenized_path: Path to tokenized dataset files (may be Docker-style /data/ path)
+        tokenized_paths: List of paths to tokenized dataset files
+        tokenized_path: Deprecated single path (kept for backward compat)
 
     Returns:
         dict with deletion status
@@ -1418,10 +1419,14 @@ def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokeni
     deleted_files = []
     errors = []
 
+    # Normalize: merge singular tokenized_path into the list for backward compat
+    all_tokenized_paths = list(tokenized_paths or [])
+    if tokenized_path and tokenized_path not in all_tokenized_paths:
+        all_tokenized_paths.append(tokenized_path)
+
     try:
         # Resolve Docker-style /data/ paths for native mode compatibility
         resolved_raw_path = str(settings.resolve_data_path(raw_path)) if raw_path else None
-        resolved_tokenized_path = str(settings.resolve_data_path(tokenized_path)) if tokenized_path else None
 
         # Delete raw dataset files
         if resolved_raw_path and os.path.exists(resolved_raw_path):
@@ -1434,16 +1439,18 @@ def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokeni
                 logger.error(error_msg)
                 errors.append(error_msg)
 
-        # Delete tokenized dataset files
-        if resolved_tokenized_path and os.path.exists(resolved_tokenized_path):
-            try:
-                shutil.rmtree(resolved_tokenized_path)
-                deleted_files.append(resolved_tokenized_path)
-                logger.info(f"Deleted tokenized dataset files: {resolved_tokenized_path}")
-            except Exception as e:
-                error_msg = f"Failed to delete tokenized dataset files {resolved_tokenized_path}: {str(e)}"
-                logger.error(error_msg)
-                errors.append(error_msg)
+        # Delete all tokenized dataset files
+        for tok_path in all_tokenized_paths:
+            resolved_tok_path = str(settings.resolve_data_path(tok_path))
+            if os.path.exists(resolved_tok_path):
+                try:
+                    shutil.rmtree(resolved_tok_path)
+                    deleted_files.append(resolved_tok_path)
+                    logger.info(f"Deleted tokenized dataset files: {resolved_tok_path}")
+                except Exception as e:
+                    error_msg = f"Failed to delete tokenized dataset files {resolved_tok_path}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
 
         # Clean up HuggingFace cache directories and lock files
         # These are created during download but not tracked in the database
@@ -1470,10 +1477,10 @@ def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokeni
                         logger.error(error_msg)
                         errors.append(error_msg)
 
-                # Pattern 2: Lock files
-                # e.g., "data_datasets_vietgpt___openwebtext_en_default_*.lock"
-                lock_pattern = str(data_dir / f"data_datasets_{hf_cache_name}_*.lock")
-                lock_files = glob.glob(lock_pattern)
+                # Pattern 2: Lock files (may have leading underscore)
+                # e.g., "_data_datasets_vietgpt___openwebtext_en_default_*.lock"
+                lock_files = glob.glob(str(data_dir / f"data_datasets_{hf_cache_name}_*.lock"))
+                lock_files += glob.glob(str(data_dir / f"_data_datasets_{hf_cache_name}_*.lock"))
                 for lock_file in lock_files:
                     try:
                         os.remove(lock_file)

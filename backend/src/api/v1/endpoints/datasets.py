@@ -337,17 +337,17 @@ async def delete_dataset(
 
     # Queue background file cleanup if there are files to delete
     raw_path = deletion_info.get("raw_path")
-    tokenized_path = deletion_info.get("tokenized_path")
+    tokenized_paths = deletion_info.get("tokenized_paths", [])
 
-    if raw_path or tokenized_path:
+    if raw_path or tokenized_paths:
         logger.info(
             f"Queuing file cleanup for dataset {dataset_id} "
-            f"(raw_path={raw_path}, tokenized_path={tokenized_path})"
+            f"(raw_path={raw_path}, tokenized_paths={tokenized_paths})"
         )
         delete_dataset_files.delay(
             dataset_id=str(dataset_id),
             raw_path=raw_path,
-            tokenized_path=tokenized_path
+            tokenized_paths=tokenized_paths
         )
     else:
         logger.info(f"No files to clean up for dataset {dataset_id}")
