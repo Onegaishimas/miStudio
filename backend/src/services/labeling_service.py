@@ -1051,6 +1051,9 @@ class LabelingService:
 
                     logger.info(f"All {total_features} features labeled and persisted successfully")
 
+                    # Close HTTP client to release file descriptors
+                    labeling_service.close()
+
                     # Create labels list for statistics calculation (now we need to query back from DB)
                     labels = [{"category": f.category, "specific": f.name} for f in features]
 
@@ -1205,6 +1208,9 @@ class LabelingService:
 
                     logger.info(f"All {total_features} features labeled and persisted successfully")
 
+                    # Close HTTP client to release file descriptors
+                    labeling_service.close()
+
                     # Create labels list for statistics calculation (now we need to query back from DB)
                     labels = [{"category": f.category, "specific": f.name} for f in features]
 
@@ -1269,10 +1275,16 @@ class LabelingService:
 
             except Exception as e:
                 logger.error(f"Batch labeling failed: {e}", exc_info=True)
+                # Close HTTP client on error to release file descriptors
+                if 'labeling_service' in locals() and hasattr(labeling_service, 'close'):
+                    labeling_service.close()
                 raise
 
         except Exception as e:
             logger.error(f"Feature labeling failed for job {labeling_job_id}: {e}", exc_info=True)
+            # Close HTTP client on error to release file descriptors
+            if 'labeling_service' in locals() and hasattr(labeling_service, 'close'):
+                labeling_service.close()
 
             # Mark labeling job as failed
             labeling_job.status = LabelingStatus.FAILED.value

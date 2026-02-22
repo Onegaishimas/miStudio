@@ -106,6 +106,7 @@ class OpenAILabelingService:
         if base_url:
             client_kwargs["base_url"] = base_url
         self.client = AsyncOpenAI(**client_kwargs)
+        self._http_client = http_client  # Keep reference for cleanup
         self.timeout = timeout
         self._api_semaphore = asyncio.Semaphore(10)  # Max 10 concurrent API calls
 
@@ -152,6 +153,21 @@ class OpenAILabelingService:
         if user_prompt_template:
             logger.info(f"  Using custom user prompt template (length: {len(user_prompt_template)} chars)")
             logger.info(f"  Token Filtering: special={filter_special}, fragments={filter_fragments}, stop_words={filter_stop_words}")
+
+    def close(self):
+        """Close the underlying HTTP client to release file descriptors."""
+        try:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                # If there's a running loop, schedule close as a task
+                loop.create_task(self._http_client.aclose())
+            except RuntimeError:
+                # No running loop — run synchronously
+                asyncio.run(self._http_client.aclose())
+            logger.info("Closed OpenAI labeling service HTTP client")
+        except Exception as e:
+            logger.warning(f"Error closing HTTP client: {e}")
 
     async def _call_openai(self, messages: list, **kwargs) -> Any:
         """
