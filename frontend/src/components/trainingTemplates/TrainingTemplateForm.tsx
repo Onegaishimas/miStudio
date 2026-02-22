@@ -34,7 +34,7 @@ export function TrainingTemplateForm({
   const [name, setName] = useState(template?.name || '');
   const [description, setDescription] = useState(template?.description || '');
   const [modelId, setModelId] = useState(template?.model_id || '');
-  const [datasetId, setDatasetId] = useState(template?.dataset_id || '');
+  const [datasetId, setDatasetId] = useState(template?.dataset_ids?.[0] || template?.dataset_id || '');
   const [encoderType, setEncoderType] = useState<SAEArchitectureType>(
     (template?.encoder_type as SAEArchitectureType) || SAEArchitectureType.STANDARD_SAELENS
   );
@@ -94,7 +94,7 @@ export function TrainingTemplateForm({
       setName(template.name);
       setDescription(template.description || '');
       setModelId(template.model_id || '');
-      setDatasetId(template.dataset_id || '');
+      setDatasetId(template.dataset_ids?.[0] || template.dataset_id || '');
       setEncoderType((template.encoder_type as SAEArchitectureType) || SAEArchitectureType.STANDARD_SAELENS);
       setHiddenDim(template.hyperparameters.hidden_dim);
       setLatentDim(template.hyperparameters.latent_dim);
@@ -194,13 +194,13 @@ export function TrainingTemplateForm({
         name: name.trim(),
         description: description.trim() || undefined,
         model_id: modelId.trim() || null,
-        dataset_id: datasetId.trim() || null,
+        dataset_ids: datasetId.trim() ? [datasetId.trim()] : undefined,
         encoder_type: encoderType,
         hyperparameters: {
           hidden_dim: hiddenDim,
           latent_dim: latentDim,
           architecture_type: encoderType,
-          l1_alpha: l1Alpha,
+          l1_alpha: l1Alpha > 0 ? l1Alpha : undefined,
           target_l0: targetL0 ? parseFloat(targetL0) : undefined,
           learning_rate: learningRate,
           batch_size: batchSize,
