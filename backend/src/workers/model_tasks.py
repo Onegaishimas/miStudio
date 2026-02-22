@@ -493,23 +493,29 @@ def delete_model_files(model_id: str, file_path: Optional[str] = None, quantized
     Returns:
         dict with deletion status
     """
+    from ..core.config import settings
+
     deleted_files = []
     errors = []
 
     try:
+        # Resolve Docker-style /data/ paths for native mode compatibility
+        resolved_file_path = str(settings.resolve_data_path(file_path)) if file_path else None
+        resolved_quantized_path = str(settings.resolve_data_path(quantized_path)) if quantized_path else None
+
         # Delete raw model files
-        if file_path and os.path.exists(file_path):
+        if resolved_file_path and os.path.exists(resolved_file_path):
             import shutil
-            shutil.rmtree(file_path)
-            deleted_files.append(file_path)
-            logger.info(f"Deleted raw model files: {file_path}")
+            shutil.rmtree(resolved_file_path)
+            deleted_files.append(resolved_file_path)
+            logger.info(f"Deleted raw model files: {resolved_file_path}")
 
         # Delete quantized model files
-        if quantized_path and os.path.exists(quantized_path):
+        if resolved_quantized_path and os.path.exists(resolved_quantized_path):
             import shutil
-            shutil.rmtree(quantized_path)
-            deleted_files.append(quantized_path)
-            logger.info(f"Deleted quantized model files: {quantized_path}")
+            shutil.rmtree(resolved_quantized_path)
+            deleted_files.append(resolved_quantized_path)
+            logger.info(f"Deleted quantized model files: {resolved_quantized_path}")
 
         return {
             "model_id": model_id,

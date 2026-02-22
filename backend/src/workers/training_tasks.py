@@ -1845,6 +1845,7 @@ def delete_training_files(training_id: str, training_dir: Optional[str] = None) 
     import shutil
     from pathlib import Path
     from .websocket_emitter import emit_deletion_progress
+    from ..core.config import settings
 
     logger.info(f"Starting file cleanup for training: {training_id}")
     deleted_files = []
@@ -1854,22 +1855,25 @@ def delete_training_files(training_id: str, training_dir: Optional[str] = None) 
     emit_deletion_progress(training_id, "files", "in_progress", "Deleting training files...")
 
     try:
+        # Resolve Docker-style /data/ paths for native mode compatibility
+        resolved_dir = str(settings.resolve_data_path(training_dir)) if training_dir else None
+
         # Delete training directory
-        if training_dir and Path(training_dir).exists():
+        if resolved_dir and Path(resolved_dir).exists():
             try:
-                shutil.rmtree(training_dir)
-                deleted_files.append(training_dir)
-                logger.info(f"Deleted training directory: {training_dir}")
+                shutil.rmtree(resolved_dir)
+                deleted_files.append(resolved_dir)
+                logger.info(f"Deleted training directory: {resolved_dir}")
                 # Emit success
                 emit_deletion_progress(training_id, "files", "completed", "Deleted training files")
             except Exception as e:
-                error_msg = f"Failed to delete training directory {training_dir}: {str(e)}"
+                error_msg = f"Failed to delete training directory {resolved_dir}: {str(e)}"
                 logger.error(error_msg)
                 errors.append(error_msg)
                 # Emit error
                 emit_deletion_progress(training_id, "files", "completed", f"Error deleting files: {str(e)}")
         elif training_dir:
-            logger.warning(f"Training directory does not exist: {training_dir}")
+            logger.warning(f"Training directory does not exist: {training_dir} (resolved: {resolved_dir})")
             # Still emit completion since there's nothing to delete
             emit_deletion_progress(training_id, "files", "completed", "No files to delete")
         else:
