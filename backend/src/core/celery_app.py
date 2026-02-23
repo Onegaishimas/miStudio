@@ -118,6 +118,12 @@ celery_app.conf.update(
             "queue": "processing",
         },
 
+        # NLP analysis operations: CPU/network bound (HTTP calls to LLM server)
+        # Routed to low_priority so GPU-bound extractions aren't blocked
+        "src.workers.nlp_analysis_tasks.*": {
+            "queue": "low_priority",
+        },
+
         # Maintenance operations: Background tasks
         "src.workers.maintenance_tasks.*": {
             "queue": "low_priority",
