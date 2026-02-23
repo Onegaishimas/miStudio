@@ -347,15 +347,13 @@ class HuggingFaceSAEService:
 
             # Create repo if requested
             if create_repo:
-                try:
-                    api.create_repo(
-                        repo_id=repo_id,
-                        repo_type="model",
-                        private=private,
-                        exist_ok=True
-                    )
-                except Exception as e:
-                    logger.warning(f"Error creating repo (may already exist): {e}")
+                api.create_repo(
+                    repo_id=repo_id,
+                    repo_type="model",
+                    private=private,
+                    exist_ok=True
+                )
+                logger.info(f"Repository ensured: {repo_id}")
 
             # Upload files
             if local_path.is_dir():
