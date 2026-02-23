@@ -452,7 +452,7 @@ export function TrainingTemplateForm({
                 type="number"
                 value={l1Alpha}
                 onChange={(e) => setL1Alpha(parseFloat(e.target.value) || 0)}
-                step="0.0001"
+                step="any"
                 min="0"
                 className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
@@ -694,7 +694,7 @@ export function TrainingTemplateForm({
                         type="number"
                         value={sparsityCoeff}
                         onChange={(e) => setSparsityCoeff(e.target.value)}
-                        step="0.0001"
+                        step="any"
                         min="0"
                         placeholder="0.0006"
                         className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
