@@ -1603,6 +1603,28 @@ class ExtractionService:
 
             extraction_timestamp = extraction_job.id[5:20]
 
+            # Idempotency: delete features from a previous failed run of this same job
+            existing_count = self.db.query(Feature).filter(
+                Feature.extraction_job_id == extraction_job.id
+            ).count()
+            if existing_count > 0:
+                logger.warning(
+                    f"Found {existing_count} existing features for extraction {extraction_job.id} "
+                    f"(likely from a previous failed run). Deleting before re-extraction."
+                )
+                self.db.query(FeatureActivation).filter(
+                    FeatureActivation.feature_id.in_(
+                        self.db.query(Feature.id).filter(
+                            Feature.extraction_job_id == extraction_job.id
+                        )
+                    )
+                ).delete(synchronize_session=False)
+                self.db.query(Feature).filter(
+                    Feature.extraction_job_id == extraction_job.id
+                ).delete(synchronize_session=False)
+                self.db.commit()
+                logger.info(f"Deleted {existing_count} stale features for re-extraction")
+
             for neuron_idx in range(latent_dim):
                 heap_items = feature_activations[neuron_idx]
                 if not heap_items:
@@ -1700,11 +1722,12 @@ class ExtractionService:
                 "sae_architecture": architecture_type
             }
 
-            # Cleanup
+            # Cleanup — use = None instead of del to avoid UnboundLocalError in finally
             if torch.cuda.is_available():
-                sae.cpu()
-                del sae
-                del incremental_heap
+                if sae is not None:
+                    sae.cpu()
+                sae = None
+                incremental_heap = None
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -1754,6 +1777,12 @@ class ExtractionService:
             if torch.cuda.is_available():
                 gc.collect()
                 torch.cuda.empty_cache()
+
+            # Rollback any broken transaction before trying to update status
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
             self.update_extraction_status_sync(
                 extraction_job.id,
