@@ -491,7 +491,7 @@ async def get_all_monitoring_data(
 @router.get("/resource-estimate", response_model=ResourceEstimateResponse)
 async def get_resource_estimate(
     training_id: str = Query(..., description="Training ID to extract features from"),
-    evaluation_samples: int = Query(10000, ge=1000, le=100000, description="Number of samples to evaluate"),
+    evaluation_samples: int = Query(10000, ge=100, le=100000, description="Number of samples to evaluate"),
     top_k_examples: int = Query(100, ge=10, le=1000, description="Number of top examples per feature"),
     batch_size: Optional[int] = Query(None, ge=8, le=256, description="Batch size (optional, will use recommended if not provided)"),
     num_workers: Optional[int] = Query(None, ge=1, le=32, description="Number of CPU workers (optional, will use recommended if not provided)"),

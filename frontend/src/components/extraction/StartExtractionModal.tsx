@@ -658,9 +658,9 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                       type="number"
                       value={evaluationSamples}
                       onChange={(e) => setEvaluationSamples(Number(e.target.value))}
-                      min={1000}
+                      min={100}
                       max={1000000}
-                      step={1000}
+                      step={100}
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
                     />
                     <p className="text-xs text-slate-500 mt-1">Max: 1,000,000</p>

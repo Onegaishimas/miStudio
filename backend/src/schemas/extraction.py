@@ -33,9 +33,9 @@ class ExtractionConfigRequest(BaseModel):
 
     evaluation_samples: int = Field(
         default=10000,
-        ge=1000,
+        ge=100,
         le=1000000,
-        description="Number of dataset samples to evaluate (1,000-1,000,000)"
+        description="Number of dataset samples to evaluate (100-1,000,000)"
     )
     top_k_examples: int = Field(
         default=100,
@@ -219,9 +219,9 @@ class BatchExtractionRequest(BaseModel):
     # Extraction configuration (applied to all SAEs in batch)
     evaluation_samples: int = Field(
         default=10000,
-        ge=1000,
+        ge=100,
         le=100000,
-        description="Number of dataset samples to evaluate per SAE (1,000-100,000)"
+        description="Number of dataset samples to evaluate per SAE (100-100,000)"
     )
     top_k_examples: int = Field(
         default=100,
