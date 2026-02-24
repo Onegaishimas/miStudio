@@ -157,42 +157,23 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
     if (template.context_suffix_tokens !== undefined) {
       setContextSuffixTokens(template.context_suffix_tokens);
     }
-    // Apply filter settings if available in template metadata
-    if (template.extraction_filter_enabled !== undefined) {
-      const filterMode = template.extraction_filter_mode || 'standard';
-      if (filterMode === 'minimal') {
-        setFilterSpecial(true);
-        setFilterSingleChar(false);
-        setFilterPunctuation(false);
-        setFilterNumbers(false);
-        setFilterFragments(false);
-        setFilterStopWords(false);
-      } else if (filterMode === 'conservative') {
-        setFilterSpecial(true);
-        setFilterSingleChar(true);
-        setFilterPunctuation(false);
-        setFilterNumbers(false);
-        setFilterFragments(false);
-        setFilterStopWords(false);
-      } else if (filterMode === 'standard') {
-        setFilterSpecial(true);
-        setFilterSingleChar(true);
-        setFilterPunctuation(true);
-        setFilterNumbers(true);
-        setFilterFragments(true);
-        setFilterStopWords(false);
-      } else if (filterMode === 'aggressive') {
-        setFilterSpecial(true);
-        setFilterSingleChar(true);
-        setFilterPunctuation(true);
-        setFilterNumbers(true);
-        setFilterFragments(true);
-        setFilterStopWords(true);
-      }
+    // Apply filter settings from extra_metadata (individual booleans)
+    const meta = template.extra_metadata || {};
+    if (meta.filter_special !== undefined) {
+      setFilterSpecial(meta.filter_special);
+      setFilterSingleChar(meta.filter_single_char ?? true);
+      setFilterPunctuation(meta.filter_punctuation ?? true);
+      setFilterNumbers(meta.filter_numbers ?? true);
+      setFilterFragments(meta.filter_fragments ?? true);
+      setFilterStopWords(meta.filter_stop_words ?? false);
     }
-    // Apply auto_nlp setting from extra_metadata (defaults to true if not specified)
-    if (template.extra_metadata?.auto_nlp !== undefined) {
-      setAutoNlp(template.extra_metadata.auto_nlp);
+    // Apply dead neuron threshold
+    if (meta.min_activation_frequency !== undefined) {
+      setMinActivationFrequency(meta.min_activation_frequency);
+    }
+    // Apply auto_nlp setting (defaults to true if not specified)
+    if (meta.auto_nlp !== undefined) {
+      setAutoNlp(meta.auto_nlp);
     }
   };
 

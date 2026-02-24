@@ -1,11 +1,18 @@
 /**
  * ExtractionTemplateForm component for creating and editing extraction templates.
  *
- * This component renders a comprehensive form with all template fields.
+ * Configuration fields match StartExtractionModal exactly:
+ * - Evaluation Samples + Top-K grid
+ * - Dead Neuron Filtering (slider + number input)
+ * - Context Window (collapsible, prefix/suffix inputs)
+ * - Token Filtering (collapsible, 6 individual checkboxes)
+ * - Auto-NLP Analysis checkbox
+ *
+ * Filter settings, dead neuron threshold, and auto-NLP are stored in extra_metadata.
  */
 
 import React, { useState, useEffect } from 'react';
-import { Save, X } from 'lucide-react';
+import { Save, X, ChevronDown } from 'lucide-react';
 import {
   ExtractionTemplate,
   ExtractionTemplateCreate,
@@ -28,31 +35,41 @@ export function ExtractionTemplateForm({
 }: ExtractionTemplateFormProps) {
   const isEditMode = !!template;
 
-  // Form state
+  // Template metadata
   const [name, setName] = useState(template?.name || '');
   const [description, setDescription] = useState(template?.description || '');
   const [layerIndicesInput, setLayerIndicesInput] = useState(
     template?.layer_indices.join(', ') || ''
   );
   const [hookTypes, setHookTypes] = useState<string[]>(template?.hook_types || ['residual']);
-  const [maxSamples, setMaxSamples] = useState(template?.max_samples || 1000);
-  const [batchSize, setBatchSize] = useState(template?.batch_size || 32);
-  const [topKExamples, setTopKExamples] = useState(template?.top_k_examples || 10);
   const [isFavorite, setIsFavorite] = useState(template?.is_favorite || false);
-  const [metadataJson, setMetadataJson] = useState(
-    template?.extra_metadata ? JSON.stringify(template.extra_metadata, null, 2) : '{}'
+
+  // Extraction config (matching StartExtractionModal defaults)
+  const [maxSamples, setMaxSamples] = useState(template?.max_samples || 10000);
+  const [batchSize, setBatchSize] = useState(template?.batch_size || 8);
+  const [topKExamples, setTopKExamples] = useState(template?.top_k_examples || 100);
+
+  // Context window
+  const [contextPrefixTokens, setContextPrefixTokens] = useState(template?.context_prefix_tokens ?? 25);
+  const [contextSuffixTokens, setContextSuffixTokens] = useState(template?.context_suffix_tokens ?? 25);
+  const [showContextWindow, setShowContextWindow] = useState(false);
+
+  // Token filtering (6 individual checkboxes, stored in extra_metadata)
+  const [filterSpecial, setFilterSpecial] = useState(template?.extra_metadata?.filter_special ?? true);
+  const [filterSingleChar, setFilterSingleChar] = useState(template?.extra_metadata?.filter_single_char ?? true);
+  const [filterPunctuation, setFilterPunctuation] = useState(template?.extra_metadata?.filter_punctuation ?? true);
+  const [filterNumbers, setFilterNumbers] = useState(template?.extra_metadata?.filter_numbers ?? true);
+  const [filterFragments, setFilterFragments] = useState(template?.extra_metadata?.filter_fragments ?? true);
+  const [filterStopWords, setFilterStopWords] = useState(template?.extra_metadata?.filter_stop_words ?? false);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Dead neuron filtering (stored in extra_metadata)
+  const [minActivationFrequency, setMinActivationFrequency] = useState(
+    template?.extra_metadata?.min_activation_frequency ?? 0.001
   );
 
-  // Filtering configuration state
-  const [filterEnabled, setFilterEnabled] = useState(template?.extraction_filter_enabled || false);
-  const [filterMode, setFilterMode] = useState<'minimal' | 'conservative' | 'standard' | 'aggressive'>(
-    template?.extraction_filter_mode || 'standard'
-  );
-
-  // Context window configuration state
-  const [contextPrefixTokens, setContextPrefixTokens] = useState(template?.context_prefix_tokens || 25);
-  const [contextSuffixTokens, setContextSuffixTokens] = useState(template?.context_suffix_tokens || 25);
-  const [contextPreset, setContextPreset] = useState<'quick' | 'standard' | 'deep' | 'symmetric' | 'custom'>('standard');
+  // NLP processing (stored in extra_metadata)
+  const [autoNlp, setAutoNlp] = useState(template?.extra_metadata?.auto_nlp ?? true);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,19 +80,24 @@ export function ExtractionTemplateForm({
       setName(template.name);
       setDescription(template.description || '');
       setLayerIndicesInput(template.layer_indices.join(', '));
-      setHookTypes(template.hook_types);
+      setHookTypes(template.hook_types as string[]);
       setMaxSamples(template.max_samples);
       setBatchSize(template.batch_size);
       setTopKExamples(template.top_k_examples);
       setIsFavorite(template.is_favorite);
-      setMetadataJson(template.extra_metadata ? JSON.stringify(template.extra_metadata, null, 2) : '{}');
-      setFilterEnabled(template.extraction_filter_enabled || false);
-      setFilterMode(template.extraction_filter_mode || 'standard');
-      const prefixTokens = template.context_prefix_tokens || 25;
-      const suffixTokens = template.context_suffix_tokens || 25;
-      setContextPrefixTokens(prefixTokens);
-      setContextSuffixTokens(suffixTokens);
-      setContextPreset(detectContextPreset(prefixTokens, suffixTokens));
+      setContextPrefixTokens(template.context_prefix_tokens ?? 25);
+      setContextSuffixTokens(template.context_suffix_tokens ?? 25);
+
+      // Load filter settings from extra_metadata
+      const meta = template.extra_metadata || {};
+      setFilterSpecial(meta.filter_special ?? true);
+      setFilterSingleChar(meta.filter_single_char ?? true);
+      setFilterPunctuation(meta.filter_punctuation ?? true);
+      setFilterNumbers(meta.filter_numbers ?? true);
+      setFilterFragments(meta.filter_fragments ?? true);
+      setFilterStopWords(meta.filter_stop_words ?? false);
+      setMinActivationFrequency(meta.min_activation_frequency ?? 0.001);
+      setAutoNlp(meta.auto_nlp ?? true);
     }
   }, [template]);
 
@@ -83,30 +105,13 @@ export function ExtractionTemplateForm({
     try {
       const trimmed = input.trim();
       if (!trimmed) return null;
-
-      // Parse comma-separated numbers
       const indices = trimmed
         .split(',')
         .map((s) => s.trim())
         .filter((s) => s.length > 0)
         .map((s) => parseInt(s, 10));
-
-      // Validate all are numbers
-      if (indices.some(isNaN)) {
-        return null;
-      }
-
-      // Remove duplicates and sort
+      if (indices.some(isNaN)) return null;
       return Array.from(new Set(indices)).sort((a, b) => a - b);
-    } catch {
-      return null;
-    }
-  };
-
-  const validateMetadata = (json: string): Record<string, any> | null => {
-    try {
-      if (!json.trim()) return {};
-      return JSON.parse(json);
     } catch {
       return null;
     }
@@ -118,50 +123,10 @@ export function ExtractionTemplateForm({
     );
   };
 
-  // Context window preset definitions
-  const contextPresets = {
-    quick: { prefix: 3, suffix: 2 },
-    standard: { prefix: 5, suffix: 3 },
-    deep: { prefix: 10, suffix: 5 },
-    symmetric: { prefix: 5, suffix: 5 },
-  };
-
-  // Detect which preset matches current token values
-  const detectContextPreset = (prefix: number, suffix: number): typeof contextPreset => {
-    for (const [presetName, presetValues] of Object.entries(contextPresets)) {
-      if (presetValues.prefix === prefix && presetValues.suffix === suffix) {
-        return presetName as typeof contextPreset;
-      }
-    }
-    return 'custom';
-  };
-
-  // Handle preset selection
-  const handleContextPresetChange = (preset: typeof contextPreset) => {
-    setContextPreset(preset);
-    if (preset !== 'custom') {
-      const values = contextPresets[preset];
-      setContextPrefixTokens(values.prefix);
-      setContextSuffixTokens(values.suffix);
-    }
-  };
-
-  // Handle manual token changes
-  const handleContextPrefixChange = (value: number) => {
-    setContextPrefixTokens(value);
-    setContextPreset(detectContextPreset(value, contextSuffixTokens));
-  };
-
-  const handleContextSuffixChange = (value: number) => {
-    setContextSuffixTokens(value);
-    setContextPreset(detectContextPreset(contextPrefixTokens, value));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Validation
     if (!name.trim()) {
       setError('Template name is required');
       return;
@@ -178,34 +143,13 @@ export function ExtractionTemplateForm({
       return;
     }
 
-    if (maxSamples < 1 || maxSamples > 1000000) {
-      setError('Max samples must be between 1 and 1,000,000');
+    if (maxSamples < 100 || maxSamples > 1000000) {
+      setError('Evaluation samples must be between 100 and 1,000,000');
       return;
     }
 
-    if (batchSize < 1 || batchSize > 1024) {
-      setError('Batch size must be between 1 and 1024');
-      return;
-    }
-
-    if (topKExamples < 1 || topKExamples > 100) {
-      setError('Top-K examples must be between 1 and 100');
-      return;
-    }
-
-    if (contextPrefixTokens < 0 || contextPrefixTokens > 50) {
-      setError('Context prefix tokens must be between 0 and 50');
-      return;
-    }
-
-    if (contextSuffixTokens < 0 || contextSuffixTokens > 50) {
-      setError('Context suffix tokens must be between 0 and 50');
-      return;
-    }
-
-    const metadata = validateMetadata(metadataJson);
-    if (metadata === null) {
-      setError('Invalid JSON in metadata field');
+    if (topKExamples < 1 || topKExamples > 1000) {
+      setError('Top-K examples must be between 1 and 1,000');
       return;
     }
 
@@ -223,9 +167,16 @@ export function ExtractionTemplateForm({
         is_favorite: isFavorite,
         context_prefix_tokens: contextPrefixTokens,
         context_suffix_tokens: contextSuffixTokens,
-        extraction_filter_enabled: filterEnabled,
-        extraction_filter_mode: filterMode,
-        extra_metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        extra_metadata: {
+          filter_special: filterSpecial,
+          filter_single_char: filterSingleChar,
+          filter_punctuation: filterPunctuation,
+          filter_numbers: filterNumbers,
+          filter_fragments: filterFragments,
+          filter_stop_words: filterStopWords,
+          min_activation_frequency: minActivationFrequency,
+          auto_nlp: autoNlp,
+        },
       };
 
       await onSubmit(data);
@@ -236,16 +187,20 @@ export function ExtractionTemplateForm({
         setDescription('');
         setLayerIndicesInput('');
         setHookTypes(['residual']);
-        setMaxSamples(1000);
-        setBatchSize(32);
-        setTopKExamples(10);
+        setMaxSamples(10000);
+        setBatchSize(8);
+        setTopKExamples(100);
         setIsFavorite(false);
-        setContextPrefixTokens(5);
-        setContextSuffixTokens(3);
-        setContextPreset('standard');
-        setFilterEnabled(false);
-        setFilterMode('standard');
-        setMetadataJson('{}');
+        setContextPrefixTokens(25);
+        setContextSuffixTokens(25);
+        setFilterSpecial(true);
+        setFilterSingleChar(true);
+        setFilterPunctuation(true);
+        setFilterNumbers(true);
+        setFilterFragments(true);
+        setFilterStopWords(false);
+        setMinActivationFrequency(0.001);
+        setAutoNlp(true);
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save template';
@@ -311,10 +266,7 @@ export function ExtractionTemplateForm({
 
         {/* Layer Indices */}
         <div>
-          <label
-            htmlFor="layer-indices"
-            className="block text-sm font-medium text-slate-300 mb-2"
-          >
+          <label htmlFor="layer-indices" className="block text-sm font-medium text-slate-300 mb-2">
             Layer Indices <span className="text-red-400">*</span>
           </label>
           <input
@@ -356,60 +308,6 @@ export function ExtractionTemplateForm({
           </div>
         </div>
 
-        {/* Numeric Fields Grid */}
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label htmlFor="max-samples" className="block text-sm font-medium text-slate-300 mb-2">
-              Max Samples
-            </label>
-            <input
-              id="max-samples"
-              type="number"
-              value={maxSamples}
-              onChange={(e) => setMaxSamples(parseInt(e.target.value, 10))}
-              min="1"
-              max="1000000"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              disabled={isSubmitting}
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="batch-size" className="block text-sm font-medium text-slate-300 mb-2">
-              Batch Size
-            </label>
-            <input
-              id="batch-size"
-              type="number"
-              value={batchSize}
-              onChange={(e) => setBatchSize(parseInt(e.target.value, 10))}
-              min="1"
-              max="1024"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              disabled={isSubmitting}
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="top-k" className="block text-sm font-medium text-slate-300 mb-2">
-              Top-K Examples
-            </label>
-            <input
-              id="top-k"
-              type="number"
-              value={topKExamples}
-              onChange={(e) => setTopKExamples(parseInt(e.target.value, 10))}
-              min="1"
-              max="100"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              disabled={isSubmitting}
-              required
-            />
-          </div>
-        </div>
-
         {/* Favorite Toggle */}
         <div>
           <label className="flex items-center gap-2 cursor-pointer">
@@ -424,149 +322,228 @@ export function ExtractionTemplateForm({
           </label>
         </div>
 
-        {/* Context Window Configuration */}
-        <div className="border-t border-slate-700 pt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-100">
-              Context Window Configuration
-            </label>
-            <span className="text-xs text-slate-500">
-              Tokens to capture around max activation
-            </span>
-          </div>
+        {/* Extraction Configuration Section */}
+        <div className="border-t border-slate-700 pt-4">
+          <h3 className="text-sm font-medium text-slate-200 mb-4">Extraction Configuration</h3>
 
-          <div className="space-y-3 bg-slate-800/50 p-4 rounded border border-slate-700/50">
-            {/* Preset Selector */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-slate-300">Preset</label>
-              <select
-                value={contextPreset}
-                onChange={(e) => handleContextPresetChange(e.target.value as typeof contextPreset)}
+          {/* Evaluation Samples + Top-K Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Evaluation Samples</label>
+              <input
+                type="number"
+                value={maxSamples}
+                onChange={(e) => setMaxSamples(Number(e.target.value))}
+                min={100}
+                max={1000000}
+                step={100}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
                 disabled={isSubmitting}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              >
-                <option value="quick">Quick (3 before, 2 after)</option>
-                <option value="standard">Standard (5 before, 3 after) - Recommended</option>
-                <option value="deep">Deep (10 before, 5 after)</option>
-                <option value="symmetric">Symmetric (5 before, 5 after)</option>
-                <option value="custom">Custom</option>
-              </select>
-              <p className="text-xs text-slate-500">
-                {contextPreset === 'quick' && 'Minimal context for quick extraction'}
-                {contextPreset === 'standard' && 'Research-backed asymmetric window (default)'}
-                {contextPreset === 'deep' && 'Extended context for complex features'}
-                {contextPreset === 'symmetric' && 'Equal tokens before and after'}
-                {contextPreset === 'custom' && 'Custom token counts'}
-              </p>
+              />
+              <p className="text-xs text-slate-500 mt-1">Max: 1,000,000</p>
             </div>
-
-            {/* Custom Token Inputs */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="context-prefix" className="block text-xs font-medium text-slate-300 mb-1">
-                  Tokens Before
-                </label>
-                <input
-                  id="context-prefix"
-                  type="number"
-                  value={contextPrefixTokens}
-                  onChange={(e) => handleContextPrefixChange(parseInt(e.target.value, 10))}
-                  min="0"
-                  max="50"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  disabled={isSubmitting}
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="context-suffix" className="block text-xs font-medium text-slate-300 mb-1">
-                  Tokens After
-                </label>
-                <input
-                  id="context-suffix"
-                  type="number"
-                  value={contextSuffixTokens}
-                  onChange={(e) => handleContextSuffixChange(parseInt(e.target.value, 10))}
-                  min="0"
-                  max="50"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  disabled={isSubmitting}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="flex items-start gap-2 p-2 bg-blue-500/10 border border-blue-500/30 rounded">
-              <div className="text-blue-400 text-xs leading-relaxed">
-                <strong>Total window:</strong> {contextPrefixTokens + 1 + contextSuffixTokens} tokens
-                ({contextPrefixTokens} prefix + 1 prime + {contextSuffixTokens} suffix)
-              </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Top-K Examples per Feature</label>
+              <input
+                type="number"
+                value={topKExamples}
+                onChange={(e) => setTopKExamples(Number(e.target.value))}
+                min={10}
+                max={1000}
+                step={10}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                disabled={isSubmitting}
+              />
             </div>
           </div>
-        </div>
 
-        {/* Token Filtering Settings */}
-        <div className="border-t border-slate-700 pt-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="filter-enabled-template"
-              checked={filterEnabled}
-              onChange={(e) => setFilterEnabled(e.target.checked)}
-              disabled={isSubmitting}
-              className="w-4 h-4 text-emerald-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
-            />
-            <label htmlFor="filter-enabled-template" className="text-sm font-medium text-slate-100">
-              Enable Token Filtering
-            </label>
+          {/* Dead Neuron Filtering */}
+          <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-slate-300">Dead Neuron Filtering</label>
+              <span className="text-xs text-emerald-500">
+                {(minActivationFrequency * 100).toFixed(2)}% min frequency
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">
+              Neurons firing less than this threshold are considered &quot;dead&quot; and will be filtered out.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                value={minActivationFrequency * 1000}
+                onChange={(e) => setMinActivationFrequency(Number(e.target.value) / 1000)}
+                min={0}
+                max={10}
+                step={0.1}
+                className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                disabled={isSubmitting}
+              />
+              <input
+                type="number"
+                value={(minActivationFrequency * 100).toFixed(2)}
+                onChange={(e) => setMinActivationFrequency(Number(e.target.value) / 100)}
+                min={0}
+                max={10}
+                step={0.01}
+                className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-emerald-500"
+                disabled={isSubmitting}
+              />
+              <span className="text-xs text-slate-400">%</span>
+            </div>
           </div>
 
-          {filterEnabled && (
-            <div className="ml-6 space-y-3 bg-slate-800/50 p-3 rounded border border-slate-700/50">
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-300">Filter Mode</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['minimal', 'conservative', 'standard', 'aggressive'] as const).map((mode) => (
-                    <label key={mode} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        value={mode}
-                        checked={filterMode === mode}
-                        onChange={(e) => setFilterMode(e.target.value as typeof filterMode)}
-                        disabled={isSubmitting}
-                        className="w-3.5 h-3.5 text-emerald-600 bg-slate-700 border-slate-600 focus:ring-emerald-500"
-                      />
-                      <span className="text-sm text-slate-200 capitalize">{mode}</span>
-                    </label>
-                  ))}
+          {/* Context Window Configuration (collapsible) */}
+          <div className="mt-4 bg-slate-900 rounded-lg border border-slate-700 p-4">
+            <button
+              type="button"
+              onClick={() => setShowContextWindow(!showContextWindow)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-300">Context Window</span>
+                <span className="text-xs text-emerald-500">
+                  ({contextPrefixTokens} prefix + prime + {contextSuffixTokens} suffix)
+                </span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showContextWindow ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showContextWindow && (
+              <div className="mt-4 space-y-3">
+                <p className="text-xs text-slate-400">
+                  Capture tokens before and after the prime token (max activation) to provide context for interpretation.
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Prefix Tokens</label>
+                    <input
+                      type="number"
+                      value={contextPrefixTokens}
+                      onChange={(e) => setContextPrefixTokens(Number(e.target.value))}
+                      min={0}
+                      max={50}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Suffix Tokens</label>
+                    <input
+                      type="number"
+                      value={contextSuffixTokens}
+                      onChange={(e) => setContextSuffixTokens(Number(e.target.value))}
+                      min={0}
+                      max={50}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      disabled={isSubmitting}
+                    />
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  {filterMode === 'minimal' && 'Only filter control characters'}
-                  {filterMode === 'conservative' && 'Filter control characters + whitespace'}
-                  {filterMode === 'standard' && 'Balanced filtering (recommended)'}
-                  {filterMode === 'aggressive' && 'Maximum filtering (punctuation, numbers, etc.)'}
+              </div>
+            )}
+          </div>
+
+          {/* Token Filtering (collapsible, 6 individual checkboxes) */}
+          <div className="mt-4 bg-slate-900 rounded-lg border border-slate-700 p-4">
+            <button
+              type="button"
+              onClick={() => setShowFilters(!showFilters)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-300">Token Filtering</span>
+                <span className="text-xs text-slate-500">
+                  ({[filterSpecial, filterSingleChar, filterPunctuation, filterNumbers, filterFragments, filterStopWords].filter(Boolean).length}/6 enabled)
+                </span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showFilters && (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterSpecial}
+                    onChange={(e) => setFilterSpecial(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Special tokens</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterSingleChar}
+                    onChange={(e) => setFilterSingleChar(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Single characters</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterPunctuation}
+                    onChange={(e) => setFilterPunctuation(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Punctuation</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterNumbers}
+                    onChange={(e) => setFilterNumbers(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Numbers</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterFragments}
+                    onChange={(e) => setFilterFragments(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Word fragments</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterStopWords}
+                    onChange={(e) => setFilterStopWords(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>Stop words</span>
+                </label>
+              </div>
+            )}
+          </div>
+
+          {/* NLP Processing Configuration */}
+          <div className="mt-4 bg-slate-900 rounded-lg border border-slate-700 p-4">
+            <label className="flex items-center gap-3 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoNlp}
+                onChange={(e) => setAutoNlp(e.target.checked)}
+                disabled={isSubmitting}
+                className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+              />
+              <div>
+                <span className="font-medium">Auto-run NLP Analysis</span>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Automatically compute POS tags, NER, patterns, and clusters for feature labels
                 </p>
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Extra Metadata */}
-        <div>
-          <label htmlFor="metadata" className="block text-sm font-medium text-slate-300 mb-2">
-            Extra Metadata (JSON)
-          </label>
-          <textarea
-            id="metadata"
-            value={metadataJson}
-            onChange={(e) => setMetadataJson(e.target.value)}
-            placeholder='{"author": "user", "version": "1.0"}'
-            rows={4}
-            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
-            disabled={isSubmitting}
-          />
-          <p className="text-xs text-slate-500 mt-1">Optional JSON metadata</p>
+            </label>
+          </div>
         </div>
 
         {/* Error Message */}

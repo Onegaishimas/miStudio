@@ -135,23 +135,42 @@ export function ExtractionTemplateCard({
             </div>
 
             <div>
-              <span className="font-medium">Max Samples:</span> {template.max_samples.toLocaleString()}
-            </div>
-
-            <div>
-              <span className="font-medium">Batch Size:</span> {template.batch_size}
+              <span className="font-medium">Samples:</span> {template.max_samples.toLocaleString()}
             </div>
 
             <div>
               <span className="font-medium">Top-K:</span> {template.top_k_examples}
             </div>
+
+            <div>
+              <span className="font-medium">Context:</span> {template.context_prefix_tokens ?? 25}+{template.context_suffix_tokens ?? 25}
+            </div>
           </div>
 
-          {template.extra_metadata && Object.keys(template.extra_metadata).length > 0 && (
-            <div className="mt-3 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded text-xs text-slate-400">
-              <span className="font-medium">Metadata:</span>{' '}
-              {Object.keys(template.extra_metadata).length} field
-              {Object.keys(template.extra_metadata).length !== 1 ? 's' : ''}
+          {template.extra_metadata && (
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+              {template.extra_metadata.filter_special !== undefined && (
+                <span>
+                  Filters: {[
+                    template.extra_metadata.filter_special,
+                    template.extra_metadata.filter_single_char,
+                    template.extra_metadata.filter_punctuation,
+                    template.extra_metadata.filter_numbers,
+                    template.extra_metadata.filter_fragments,
+                    template.extra_metadata.filter_stop_words,
+                  ].filter(Boolean).length}/6
+                </span>
+              )}
+              {template.extra_metadata.min_activation_frequency !== undefined && (
+                <span>
+                  Dead neuron: {(template.extra_metadata.min_activation_frequency * 100).toFixed(2)}%
+                </span>
+              )}
+              {template.extra_metadata.auto_nlp !== undefined && (
+                <span className={template.extra_metadata.auto_nlp ? 'text-emerald-500' : 'text-slate-500'}>
+                  NLP: {template.extra_metadata.auto_nlp ? 'on' : 'off'}
+                </span>
+              )}
             </div>
           )}
         </div>

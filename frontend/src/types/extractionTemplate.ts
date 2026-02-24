@@ -28,27 +28,30 @@ export interface ExtractionTemplate {
   layer_indices: number[];
   /** Types of hooks to attach (residual, mlp, attention) */
   hook_types: HookType[] | string[];
-  /** Maximum number of samples to process (default: 1000) */
+  /** Maximum number of samples to process (default: 10000) */
   max_samples: number;
-  /** Batch size for processing (default: 32) */
+  /** Batch size for processing (default: 8) */
   batch_size: number;
   /** GPU micro-batch size for memory efficiency (defaults to batch_size if not specified) */
   micro_batch_size?: number;
-  /** Number of top examples to save per feature (default: 10) */
+  /** Number of top examples to save per feature (default: 100) */
   top_k_examples: number;
   /** Whether this template is marked as favorite */
   is_favorite: boolean;
-  /** Number of tokens before max activation (context window prefix, default: 5) */
-  context_prefix_tokens?: number;
-  /** Number of tokens after max activation (context window suffix, default: 3) */
-  context_suffix_tokens?: number;
-  /** Enable token filtering during extraction (default: false) */
-  extraction_filter_enabled?: boolean;
-  /** Filter mode: minimal, conservative, standard, or aggressive (default: 'standard') */
-  extraction_filter_mode?: 'minimal' | 'conservative' | 'standard' | 'aggressive';
+  /** Number of tokens before max activation (context window prefix, default: 25) */
+  context_prefix_tokens: number;
+  /** Number of tokens after max activation (context window suffix, default: 25) */
+  context_suffix_tokens: number;
   /**
    * Additional JSON metadata.
    * Supported fields:
+   * - filter_special: boolean - Filter special tokens (default: true)
+   * - filter_single_char: boolean - Filter single characters (default: true)
+   * - filter_punctuation: boolean - Filter punctuation (default: true)
+   * - filter_numbers: boolean - Filter numbers (default: true)
+   * - filter_fragments: boolean - Filter word fragments (default: true)
+   * - filter_stop_words: boolean - Filter stop words (default: false)
+   * - min_activation_frequency: number - Dead neuron threshold (default: 0.001)
    * - auto_nlp: boolean - Whether to auto-run NLP analysis after extraction (default: true)
    */
   extra_metadata?: Record<string, any>;
@@ -71,24 +74,20 @@ export interface ExtractionTemplateCreate {
   layer_indices: number[];
   /** Types of hooks to attach */
   hook_types: (HookType | string)[];
-  /** Maximum number of samples to process (default: 1000) */
+  /** Maximum number of samples to process (default: 10000) */
   max_samples?: number;
-  /** Batch size for processing (default: 32) */
+  /** Batch size for processing (default: 8) */
   batch_size?: number;
   /** GPU micro-batch size for memory efficiency (defaults to batch_size if not specified) */
   micro_batch_size?: number;
-  /** Number of top examples to save per feature (default: 10) */
+  /** Number of top examples to save per feature (default: 100) */
   top_k_examples?: number;
   /** Whether this template is marked as favorite (default: false) */
   is_favorite?: boolean;
-  /** Number of tokens before max activation (context window prefix, default: 5) */
+  /** Number of tokens before max activation (context window prefix, default: 25) */
   context_prefix_tokens?: number;
-  /** Number of tokens after max activation (context window suffix, default: 3) */
+  /** Number of tokens after max activation (context window suffix, default: 25) */
   context_suffix_tokens?: number;
-  /** Enable token filtering during extraction (default: false) */
-  extraction_filter_enabled?: boolean;
-  /** Filter mode: minimal, conservative, standard, or aggressive (default: 'standard') */
-  extraction_filter_mode?: 'minimal' | 'conservative' | 'standard' | 'aggressive';
   /** Additional JSON metadata */
   extra_metadata?: Record<string, any>;
 }
@@ -120,10 +119,6 @@ export interface ExtractionTemplateUpdate {
   context_prefix_tokens?: number;
   /** Number of tokens after max activation (context window suffix) */
   context_suffix_tokens?: number;
-  /** Enable token filtering during extraction */
-  extraction_filter_enabled?: boolean;
-  /** Filter mode: minimal, conservative, standard, or aggressive */
-  extraction_filter_mode?: 'minimal' | 'conservative' | 'standard' | 'aggressive';
   /** Additional JSON metadata */
   extra_metadata?: Record<string, any>;
 }
