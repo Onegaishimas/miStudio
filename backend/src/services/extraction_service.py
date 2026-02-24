@@ -970,8 +970,22 @@ class ExtractionService:
                         logger.info(f"Queued NLP analysis task for extraction {extraction_id} (auto_nlp=True)")
                     except Exception as nlp_err:
                         logger.warning(f"Failed to queue NLP analysis for extraction {extraction_id}: {nlp_err}")
+                        # NLP queue failed — start next batch job directly as fallback
+                        if extraction_job.batch_id and extraction_job.batch_position:
+                            try:
+                                from ..workers.nlp_analysis_tasks import _start_next_batch_job
+                                _start_next_batch_job(self.db, extraction_job)
+                            except Exception as batch_err:
+                                logger.error(f"Failed to start next batch job after NLP queue failure: {batch_err}")
                 else:
                     logger.info(f"Skipping NLP analysis for extraction {extraction_id} (auto_nlp=False)")
+                    # No NLP to trigger the batch chain — start next job directly
+                    if extraction_job.batch_id and extraction_job.batch_position:
+                        try:
+                            from ..workers.nlp_analysis_tasks import _start_next_batch_job
+                            _start_next_batch_job(self.db, extraction_job)
+                        except Exception as batch_err:
+                            logger.error(f"Failed to start next batch job: {batch_err}")
 
             elif status == ExtractionStatus.FAILED.value:
                 event_data["error_message"] = error_message
@@ -980,6 +994,13 @@ class ExtractionService:
                     event="extraction:failed",
                     data=event_data
                 )
+                # Start next batch job even on failure so the chain continues
+                if extraction_job.batch_id and extraction_job.batch_position:
+                    try:
+                        from ..workers.nlp_analysis_tasks import _start_next_batch_job
+                        _start_next_batch_job(self.db, extraction_job)
+                    except Exception as batch_err:
+                        logger.error(f"Failed to start next batch job after extraction failure: {batch_err}")
             else:
                 emit_progress(
                     channel=f"extraction/{extraction_id}",
