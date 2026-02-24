@@ -3,6 +3,8 @@ Periodic task to clean up stuck activation extraction jobs.
 
 This task runs every 10 minutes and marks activation extractions as FAILED if they've been
 stuck in QUEUED, LOADING, or EXTRACTING status for too long without updates.
+
+Threshold: 1 hour without progress.
 """
 
 import logging
@@ -14,6 +16,8 @@ from src.workers.websocket_emitter import emit_extraction_failed
 
 logger = logging.getLogger(__name__)
 
+STUCK_THRESHOLD_MINUTES = 60  # 1 hour
+
 
 @celery_app.task(
     bind=True,
@@ -22,19 +26,18 @@ logger = logging.getLogger(__name__)
 )
 def cleanup_stuck_activations_task(self):
     """
-    Clean up activation extraction jobs that have been stuck for more than 10 minutes.
+    Clean up activation extraction jobs that have been stuck for more than 1 hour.
 
     An activation extraction is considered stuck if:
-    - Status is QUEUED, LOADING, or EXTRACTING
-    - No update in the last 10 minutes
+    - Status is QUEUED, LOADING, EXTRACTING, or SAVING
+    - No update in the last hour
     - Either has no celery_task_id or task is not running
     """
     logger.info("Running stuck activation extraction cleanup task")
 
     with self.get_db() as db:
         try:
-            # Find potentially stuck activation extractions
-            stuck_threshold = datetime.now(timezone.utc) - timedelta(minutes=10)
+            stuck_threshold = datetime.now(timezone.utc) - timedelta(minutes=STUCK_THRESHOLD_MINUTES)
 
             stuck_extractions = db.query(ActivationExtraction).filter(
                 ActivationExtraction.status.in_([
@@ -63,16 +66,16 @@ def cleanup_stuck_activations_task(self):
                         )
 
                 if not task_is_running:
-                    # Mark as failed
+                    age_minutes = (datetime.now(timezone.utc) - extraction.updated_at).total_seconds() / 60
                     logger.warning(
                         f"Marking stuck activation extraction {extraction.id} as FAILED "
-                        f"(status: {extraction.status}, last update: {extraction.updated_at}, "
+                        f"(status: {extraction.status}, age: {age_minutes:.0f}min, "
                         f"task_id: {extraction.celery_task_id or 'None'})"
                     )
 
                     extraction.status = ExtractionStatus.FAILED
                     extraction.error_message = (
-                        "Extraction job stuck - no progress for more than 10 minutes. "
+                        f"Extraction job stuck - no progress for more than {int(age_minutes)} minutes. "
                         "This may indicate a crashed worker or system issue."
                     )
                     extraction.error_type = "TIMEOUT"
