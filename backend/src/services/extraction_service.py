@@ -1602,6 +1602,9 @@ class ExtractionService:
             dead_neurons_filtered = 0
 
             extraction_timestamp = extraction_job.id[5:20]
+            # Include SAE short ID in feature IDs to avoid collisions across batch jobs
+            # sae_id format: "sae_5ed106db5bd5" → sae_short: "5ed1"
+            sae_short = sae_id.split("_")[1][:4] if "_" in sae_id else sae_id[:4]
 
             # Idempotency: delete features from a previous failed run of this same job
             existing_count = self.db.query(Feature).filter(
@@ -1645,7 +1648,7 @@ class ExtractionService:
 
                 # Create feature with external_sae_id (no training_id)
                 feature = Feature(
-                    id=f"feat_sae_{extraction_timestamp}_{neuron_idx:05d}",
+                    id=f"feat_sae_{extraction_timestamp}_{sae_short}_{neuron_idx:05d}",
                     external_sae_id=sae_id,
                     training_id=None,  # External SAE - no training
                     extraction_job_id=extraction_job.id,
