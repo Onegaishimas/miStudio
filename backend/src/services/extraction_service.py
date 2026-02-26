@@ -571,22 +571,16 @@ class ExtractionService:
         )
         external_sae = sae_result.scalar_one_or_none()
 
-        features_extracted = None
-        total_features = None
+        # Use stored feature counts instead of COUNT(*) query
+        features_extracted = extraction_job.features_extracted
+        total_features = extraction_job.total_features
 
+        # Fallback for completed jobs: use statistics.total_features
         if extraction_job.status == ExtractionStatus.COMPLETED.value:
-            from sqlalchemy import func
-            result = await self.db.execute(
-                select(func.count()).select_from(Feature).where(
-                    Feature.extraction_job_id == extraction_job.id
-                )
-            )
-            features_extracted = result.scalar_one()
-            total_features = features_extracted
-        elif extraction_job.status == ExtractionStatus.EXTRACTING.value:
-            if external_sae and extraction_job.progress:
-                total_features = external_sae.n_features or 16384
-                features_extracted = int(total_features * extraction_job.progress)
+            if features_extracted is None and extraction_job.statistics:
+                features_extracted = extraction_job.statistics.get("total_features")
+            if total_features is None:
+                total_features = features_extracted
 
         return {
             "id": extraction_job.id,
@@ -624,6 +618,9 @@ class ExtractionService:
         """
         List all extraction jobs with optional filtering.
 
+        Optimized to batch-load related entities (Training, ExternalSAE, Model, Dataset)
+        and use stored feature counts instead of per-row COUNT(*) queries.
+
         Args:
             status_filter: Optional list of statuses to filter by
             limit: Maximum number of results to return
@@ -653,83 +650,94 @@ class ExtractionService:
         result = await self.db.execute(query)
         extraction_jobs = result.scalars().all()
 
-        # Build response list
+        # Batch-load related entities to avoid N+1 queries
+        training_ids = {ej.training_id for ej in extraction_jobs if ej.training_id}
+        sae_ids = {ej.external_sae_id for ej in extraction_jobs if ej.external_sae_id}
+
+        # Load all trainings in one query
+        trainings_map: Dict[str, Any] = {}
+        model_ids = set()
+        dataset_ids = set()
+        if training_ids:
+            result = await self.db.execute(
+                select(Training).where(Training.id.in_(training_ids))
+            )
+            for t in result.scalars().all():
+                trainings_map[t.id] = t
+                if t.model_id:
+                    model_ids.add(t.model_id)
+                if t.dataset_id:
+                    dataset_ids.add(t.dataset_id)
+
+        # Load all external SAEs in one query
+        saes_map: Dict[str, Any] = {}
+        if sae_ids:
+            result = await self.db.execute(
+                select(ExternalSAE).where(ExternalSAE.id.in_(sae_ids))
+            )
+            for s in result.scalars().all():
+                saes_map[s.id] = s
+
+        # Collect dataset_ids from SAE-based extraction configs
+        for ej in extraction_jobs:
+            if ej.external_sae_id and ej.config:
+                ds_id = ej.config.get("dataset_id")
+                if ds_id:
+                    dataset_ids.add(ds_id)
+
+        # Load all models in one query
+        models_map: Dict[str, str] = {}
+        if model_ids:
+            result = await self.db.execute(
+                select(ModelRecord.id, ModelRecord.name).where(ModelRecord.id.in_(model_ids))
+            )
+            for row in result.all():
+                models_map[row[0]] = row[1]
+
+        # Load all datasets in one query
+        datasets_map: Dict[str, str] = {}
+        if dataset_ids:
+            result = await self.db.execute(
+                select(Dataset.id, Dataset.name).where(Dataset.id.in_(dataset_ids))
+            )
+            for row in result.all():
+                datasets_map[row[0]] = row[1]
+
+        # Build response list using lookup maps
         extractions_list = []
         for extraction_job in extraction_jobs:
-            # Determine source type
             source_type = "external_sae" if extraction_job.external_sae_id else "training"
             model_name = None
             dataset_name = None
             sae_name = None
 
             if extraction_job.training_id:
-                # Training-based extraction
-                result = await self.db.execute(
-                    select(Training).where(Training.id == extraction_job.training_id)
-                )
-                training = result.scalar_one_or_none()
-
-                if training and training.model_id:
-                    model_result = await self.db.execute(
-                        select(ModelRecord).where(ModelRecord.id == training.model_id)
-                    )
-                    model = model_result.scalar_one_or_none()
-                    if model:
-                        model_name = model.name
-
-                if training and training.dataset_id:
-                    dataset_result = await self.db.execute(
-                        select(Dataset).where(Dataset.id == training.dataset_id)
-                    )
-                    dataset = dataset_result.scalar_one_or_none()
-                    if dataset:
-                        dataset_name = dataset.name
+                training = trainings_map.get(extraction_job.training_id)
+                if training:
+                    if training.model_id:
+                        model_name = models_map.get(training.model_id)
+                    if training.dataset_id:
+                        dataset_name = datasets_map.get(training.dataset_id)
 
             elif extraction_job.external_sae_id:
-                # External SAE-based extraction
-                sae_result = await self.db.execute(
-                    select(ExternalSAE).where(ExternalSAE.id == extraction_job.external_sae_id)
-                )
-                external_sae = sae_result.scalar_one_or_none()
-
+                external_sae = saes_map.get(extraction_job.external_sae_id)
                 if external_sae:
                     sae_name = external_sae.name
                     model_name = external_sae.model_name
+                    ds_id = extraction_job.config.get("dataset_id") if extraction_job.config else None
+                    if ds_id:
+                        dataset_name = datasets_map.get(ds_id)
 
-                    # Try to get dataset name from config
-                    dataset_id = extraction_job.config.get("dataset_id")
-                    if dataset_id:
-                        dataset_result = await self.db.execute(
-                            select(Dataset).where(Dataset.id == dataset_id)
-                        )
-                        dataset = dataset_result.scalar_one_or_none()
-                        if dataset:
-                            dataset_name = dataset.name
+            # Use stored feature counts instead of COUNT(*) per row
+            features_extracted = extraction_job.features_extracted
+            total_features = extraction_job.total_features
 
-            # Calculate features_extracted and total_features
-            features_extracted = None
-            total_features = None
-
+            # For completed jobs, use statistics.total_features as fallback
             if extraction_job.status == ExtractionStatus.COMPLETED.value:
-                result = await self.db.execute(
-                    select(func.count()).select_from(Feature).where(
-                        Feature.extraction_job_id == extraction_job.id
-                    )
-                )
-                features_extracted = result.scalar_one()
-                total_features = features_extracted
-            elif extraction_job.status == ExtractionStatus.EXTRACTING.value:
-                # Estimate based on progress
-                if extraction_job.training_id:
-                    training = training if 'training' in dir() else None
-                    if training and extraction_job.progress:
-                        total_features = training.hyperparameters.get("latent_dim", 16384)
-                        features_extracted = int(total_features * extraction_job.progress)
-                elif extraction_job.external_sae_id:
-                    external_sae = external_sae if 'external_sae' in dir() else None
-                    if external_sae and extraction_job.progress:
-                        total_features = external_sae.n_features or 16384
-                        features_extracted = int(total_features * extraction_job.progress)
+                if features_extracted is None and extraction_job.statistics:
+                    features_extracted = extraction_job.statistics.get("total_features")
+                if total_features is None:
+                    total_features = features_extracted
 
             extractions_list.append({
                 "id": extraction_job.id,
@@ -739,8 +747,8 @@ class ExtractionService:
                 "model_name": model_name,
                 "dataset_name": dataset_name,
                 "sae_name": sae_name,
-                "layer_index": extraction_job.layer_index,  # Layer index for multi-layer trainings
-                "hook_type": extraction_job.hook_type,  # Hook type for multi-hook trainings
+                "layer_index": extraction_job.layer_index,
+                "hook_type": extraction_job.hook_type,
                 "status": extraction_job.status,
                 "progress": extraction_job.progress,
                 "features_extracted": features_extracted,
@@ -913,12 +921,18 @@ class ExtractionService:
 
         if statistics is not None:
             extraction_job.statistics = statistics
+            # Also store total_features from statistics for fast lookups
+            if "total_features" in statistics:
+                extraction_job.total_features = statistics["total_features"]
 
         if error_message is not None:
             extraction_job.error_message = error_message
 
         if status == ExtractionStatus.COMPLETED.value:
             extraction_job.completed_at = datetime.now(timezone.utc)
+            # Ensure total_features is set for completed jobs
+            if extraction_job.total_features is None and features_extracted is not None:
+                extraction_job.total_features = features_extracted
 
         self.db.commit()
 

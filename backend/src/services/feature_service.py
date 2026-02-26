@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from sqlalchemy import desc, asc, func, or_, select, String, exists, literal_column
 from sqlalchemy.sql import text
 
@@ -64,8 +64,12 @@ class FeatureService:
         Returns:
             FeatureListResponse with features, pagination info, and statistics
         """
-        # Task 9.3: Build base query with training_id filter
-        query = select(Feature).where(Feature.training_id == training_id)
+        # Task 9.3: Build base query with training_id filter — defer heavy JSONB columns
+        query = (
+            select(Feature)
+            .options(defer(Feature.nlp_analysis))
+            .where(Feature.training_id == training_id)
+        )
 
         # Task 9.4: Apply search filter if specified
         if search_params.search:
@@ -171,53 +175,54 @@ class FeatureService:
         result = await self.db.execute(query)
         features = result.scalars().all()
 
-        # Task 9.8: For each feature, include one example_context
+        # Task 9.8: Batch-load one max-activating example per feature (instead of N+1 queries)
+        feature_ids = [f.id for f in features]
+        examples_map: Dict[str, Any] = {}
+        if feature_ids:
+            examples_query = (
+                text(
+                    "SELECT DISTINCT ON (feature_id) * FROM feature_activations "
+                    "WHERE feature_id = ANY(:feature_ids) "
+                    "ORDER BY feature_id, max_activation DESC"
+                )
+            )
+            examples_result = await self.db.execute(
+                examples_query, {"feature_ids": feature_ids}
+            )
+            for row in examples_result.mappings().all():
+                examples_map[row["feature_id"]] = row
+
         feature_responses = []
         for feature in features:
             example_context = None
-
-            # Get max-activating example from FeatureActivation table
-            # Note: example_tokens_summary is a simple comma-separated string for display only,
-            # not suitable for structured context. Always use FeatureActivation for examples.
-            example_query = (
-                select(FeatureActivation)
-                .where(FeatureActivation.feature_id == feature.id)
-                .order_by(desc(FeatureActivation.max_activation))
-                .limit(1)
-            )
-            example_result = await self.db.execute(example_query)
-            example = example_result.scalar_one_or_none()
+            example = examples_map.get(feature.id)
 
             if example:
-                    # Handle both legacy and new data formats
-                    # Legacy: tokens is a dict with all_tokens key (from old extraction code)
-                    # New: tokens is a simple list, context window in dedicated columns
-                    if isinstance(example.tokens, dict):
-                        # Old extraction format: tokens field is a dict
-                        tokens_list = example.tokens.get("all_tokens", example.tokens.get("tokens", []))
-                        example_context = FeatureActivationExample(
-                            tokens=tokens_list,
-                            activations=example.activations,
-                            max_activation=example.max_activation,
-                            sample_index=example.sample_index,
-                            prefix_tokens=example.tokens.get("prefix_tokens"),
-                            prime_token=example.tokens.get("prime_token"),
-                            suffix_tokens=example.tokens.get("suffix_tokens"),
-                            prime_activation_index=example.tokens.get("prime_activation_index"),
-                            token_positions=example.tokens.get("token_positions")
-                        )
-                    else:
-                        # New extraction format or legacy: tokens is a list, check dedicated columns
-                        example_context = FeatureActivationExample(
-                            tokens=example.tokens,
-                            activations=example.activations,
-                            max_activation=example.max_activation,
-                            sample_index=example.sample_index,
-                            prefix_tokens=example.prefix_tokens,
-                            prime_token=example.prime_token,
-                            suffix_tokens=example.suffix_tokens,
-                            prime_activation_index=example.prime_activation_index
-                        )
+                tokens = example["tokens"]
+                if isinstance(tokens, dict):
+                    tokens_list = tokens.get("all_tokens", tokens.get("tokens", []))
+                    example_context = FeatureActivationExample(
+                        tokens=tokens_list,
+                        activations=example["activations"],
+                        max_activation=example["max_activation"],
+                        sample_index=example["sample_index"],
+                        prefix_tokens=tokens.get("prefix_tokens"),
+                        prime_token=tokens.get("prime_token"),
+                        suffix_tokens=tokens.get("suffix_tokens"),
+                        prime_activation_index=tokens.get("prime_activation_index"),
+                        token_positions=tokens.get("token_positions")
+                    )
+                else:
+                    example_context = FeatureActivationExample(
+                        tokens=tokens,
+                        activations=example["activations"],
+                        max_activation=example["max_activation"],
+                        sample_index=example["sample_index"],
+                        prefix_tokens=example.get("prefix_tokens"),
+                        prime_token=example.get("prime_token"),
+                        suffix_tokens=example.get("suffix_tokens"),
+                        prime_activation_index=example.get("prime_activation_index")
+                    )
 
             feature_response = FeatureResponse(
                 id=feature.id,
@@ -240,29 +245,22 @@ class FeatureService:
             )
             feature_responses.append(feature_response)
 
-        # Task 9.9: Calculate statistics
-        # Total features
-        total_features_query = select(func.count()).select_from(Feature).where(Feature.training_id == training_id)
-        total_features_result = await self.db.execute(total_features_query)
-        total_features = total_features_result.scalar_one()
-
-        # Interpretable percentage (interpretability_score > 0.5)
-        interpretable_count_query = (
-            select(func.count())
-            .select_from(Feature)
-            .where(Feature.training_id == training_id, Feature.interpretability_score > 0.5)
-        )
-        interpretable_count_result = await self.db.execute(interpretable_count_query)
-        interpretable_count = interpretable_count_result.scalar_one()
-        interpretable_percentage = (interpretable_count / total_features * 100) if total_features > 0 else 0.0
-
-        # Average activation frequency
-        avg_activation_freq_query = (
-            select(func.avg(Feature.activation_frequency))
+        # Task 9.9: Calculate statistics — single combined query instead of 3 separate ones
+        stats_query = (
+            select(
+                func.count().label("total_features"),
+                func.count().filter(Feature.interpretability_score > 0.5).label("interpretable_count"),
+                func.avg(Feature.activation_frequency).label("avg_activation_freq")
+            )
             .where(Feature.training_id == training_id)
         )
-        avg_activation_freq_result = await self.db.execute(avg_activation_freq_query)
-        avg_activation_freq_value = avg_activation_freq_result.scalar_one_or_none()
+        stats_result = await self.db.execute(stats_query)
+        stats_row = stats_result.one()
+
+        total_features = stats_row.total_features
+        interpretable_count = stats_row.interpretable_count
+        avg_activation_freq_value = stats_row.avg_activation_freq
+        interpretable_percentage = (interpretable_count / total_features * 100) if total_features > 0 else 0.0
         avg_activation_frequency = float(avg_activation_freq_value) if avg_activation_freq_value else 0.0
 
         statistics = FeatureStatistics(
@@ -287,6 +285,9 @@ class FeatureService:
         """
         List features for a specific extraction job with search, filtering, sorting, and pagination.
 
+        Optimized: defers nlp_analysis JSONB column (avg 3.5KB/row) from list queries,
+        and batch-loads examples instead of N+1 individual queries.
+
         Args:
             extraction_job_id: ID of the extraction job to list features for
             search_params: Search parameters (search query, filters, sort, pagination)
@@ -294,15 +295,17 @@ class FeatureService:
         Returns:
             FeatureListResponse with features, pagination info, and statistics
         """
-        # Build base query with extraction_job_id filter
-        query = select(Feature).where(Feature.extraction_job_id == extraction_job_id)
+        # Build base query — defer heavy JSONB columns not needed for list view
+        query = (
+            select(Feature)
+            .options(defer(Feature.nlp_analysis))
+            .where(Feature.extraction_job_id == extraction_job_id)
+        )
 
         # Apply search filter if specified
         if search_params.search:
             search_pattern = f'%{search_params.search}%'
 
-            # Subquery to check if any activation tokens match
-            # Join FeatureActivation with Feature to filter by extraction_job_id
             token_subquery = (
                 select(FeatureActivation.feature_id)
                 .join(Feature, FeatureActivation.feature_id == Feature.id)
@@ -340,7 +343,6 @@ class FeatureService:
         if search_params.search:
             search_pattern = f'%{search_params.search}%'
 
-            # Same token search subquery for count
             token_subquery = (
                 select(FeatureActivation.feature_id)
                 .join(Feature, FeatureActivation.feature_id == Feature.id)
@@ -359,7 +361,6 @@ class FeatureService:
             count_query = count_query.where(Feature.is_favorite == search_params.is_favorite)
 
         # Apply activation frequency range filter to count query
-        # Note: UI uses percentages (0-100) but DB stores decimals (0-1), so divide by 100
         if search_params.min_activation_freq is not None:
             count_query = count_query.where(Feature.activation_frequency >= search_params.min_activation_freq / 100)
         if search_params.max_activation_freq is not None:
@@ -398,53 +399,57 @@ class FeatureService:
         result = await self.db.execute(query)
         features = result.scalars().all()
 
-        # For each feature, include one example_context
+        # Batch-load one max-activating example per feature (instead of N+1 queries)
+        feature_ids = [f.id for f in features]
+        examples_map: Dict[str, FeatureActivation] = {}
+        if feature_ids:
+            # Use a lateral join / window function to get top-1 per feature
+            # DISTINCT ON (feature_id) with ORDER BY feature_id, max_activation DESC
+            examples_query = (
+                text(
+                    "SELECT DISTINCT ON (feature_id) * FROM feature_activations "
+                    "WHERE feature_id = ANY(:feature_ids) "
+                    "ORDER BY feature_id, max_activation DESC"
+                )
+            )
+            examples_result = await self.db.execute(
+                examples_query, {"feature_ids": feature_ids}
+            )
+            for row in examples_result.mappings().all():
+                examples_map[row["feature_id"]] = row
+
+        # Build response list
         feature_responses = []
         for feature in features:
             example_context = None
-
-            # Get max-activating example from FeatureActivation table
-            # Note: example_tokens_summary is a simple comma-separated string for display only,
-            # not suitable for structured context. Always use FeatureActivation for examples.
-            example_query = (
-                select(FeatureActivation)
-                .where(FeatureActivation.feature_id == feature.id)
-                .order_by(desc(FeatureActivation.max_activation))
-                .limit(1)
-            )
-            example_result = await self.db.execute(example_query)
-            example = example_result.scalar_one_or_none()
+            example = examples_map.get(feature.id)
 
             if example:
-                    # Handle both legacy and new data formats
-                    # Legacy: tokens is a dict with all_tokens key (from old extraction code)
-                    # New: tokens is a simple list, context window in dedicated columns
-                    if isinstance(example.tokens, dict):
-                        # Old extraction format: tokens field is a dict
-                        tokens_list = example.tokens.get("all_tokens", example.tokens.get("tokens", []))
-                        example_context = FeatureActivationExample(
-                            tokens=tokens_list,
-                            activations=example.activations,
-                            max_activation=example.max_activation,
-                            sample_index=example.sample_index,
-                            prefix_tokens=example.tokens.get("prefix_tokens"),
-                            prime_token=example.tokens.get("prime_token"),
-                            suffix_tokens=example.tokens.get("suffix_tokens"),
-                            prime_activation_index=example.tokens.get("prime_activation_index"),
-                            token_positions=example.tokens.get("token_positions")
-                        )
-                    else:
-                        # New extraction format or legacy: tokens is a list, check dedicated columns
-                        example_context = FeatureActivationExample(
-                            tokens=example.tokens,
-                            activations=example.activations,
-                            max_activation=example.max_activation,
-                            sample_index=example.sample_index,
-                            prefix_tokens=example.prefix_tokens,
-                            prime_token=example.prime_token,
-                            suffix_tokens=example.suffix_tokens,
-                            prime_activation_index=example.prime_activation_index
-                        )
+                tokens = example["tokens"]
+                if isinstance(tokens, dict):
+                    tokens_list = tokens.get("all_tokens", tokens.get("tokens", []))
+                    example_context = FeatureActivationExample(
+                        tokens=tokens_list,
+                        activations=example["activations"],
+                        max_activation=example["max_activation"],
+                        sample_index=example["sample_index"],
+                        prefix_tokens=tokens.get("prefix_tokens"),
+                        prime_token=tokens.get("prime_token"),
+                        suffix_tokens=tokens.get("suffix_tokens"),
+                        prime_activation_index=tokens.get("prime_activation_index"),
+                        token_positions=tokens.get("token_positions")
+                    )
+                else:
+                    example_context = FeatureActivationExample(
+                        tokens=tokens,
+                        activations=example["activations"],
+                        max_activation=example["max_activation"],
+                        sample_index=example["sample_index"],
+                        prefix_tokens=example.get("prefix_tokens"),
+                        prime_token=example.get("prime_token"),
+                        suffix_tokens=example.get("suffix_tokens"),
+                        prime_activation_index=example.get("prime_activation_index")
+                    )
 
             feature_response = FeatureResponse(
                 id=feature.id,
@@ -467,29 +472,22 @@ class FeatureService:
             )
             feature_responses.append(feature_response)
 
-        # Calculate statistics
-        # Total features
-        total_features_query = select(func.count()).select_from(Feature).where(Feature.extraction_job_id == extraction_job_id)
-        total_features_result = await self.db.execute(total_features_query)
-        total_features = total_features_result.scalar_one()
-
-        # Interpretable percentage (interpretability_score > 0.5)
-        interpretable_count_query = (
-            select(func.count())
-            .select_from(Feature)
-            .where(Feature.extraction_job_id == extraction_job_id, Feature.interpretability_score > 0.5)
-        )
-        interpretable_count_result = await self.db.execute(interpretable_count_query)
-        interpretable_count = interpretable_count_result.scalar_one()
-        interpretable_percentage = (interpretable_count / total_features * 100) if total_features > 0 else 0.0
-
-        # Average activation frequency
-        avg_activation_freq_query = (
-            select(func.avg(Feature.activation_frequency))
+        # Calculate statistics — combine into a single query
+        stats_query = (
+            select(
+                func.count().label("total_features"),
+                func.count().filter(Feature.interpretability_score > 0.5).label("interpretable_count"),
+                func.avg(Feature.activation_frequency).label("avg_activation_freq")
+            )
             .where(Feature.extraction_job_id == extraction_job_id)
         )
-        avg_activation_freq_result = await self.db.execute(avg_activation_freq_query)
-        avg_activation_freq_value = avg_activation_freq_result.scalar_one_or_none()
+        stats_result = await self.db.execute(stats_query)
+        stats_row = stats_result.one()
+
+        total_features = stats_row.total_features
+        interpretable_count = stats_row.interpretable_count
+        avg_activation_freq_value = stats_row.avg_activation_freq
+        interpretable_percentage = (interpretable_count / total_features * 100) if total_features > 0 else 0.0
         avg_activation_frequency = float(avg_activation_freq_value) if avg_activation_freq_value else 0.0
 
         statistics = FeatureStatistics(
