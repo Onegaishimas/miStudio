@@ -967,92 +967,98 @@ class LabelingService:
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
-                    for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
-                        batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
-                        batch_features = features[batch_start:batch_end]
-                        batch_examples = features_examples[batch_start:batch_end]
-                        batch_all_examples = all_features_examples[batch_start:batch_end]
+                    # Use a single event loop for all batches to keep the httpx
+                    # connection pool alive. asyncio.run() per batch would destroy
+                    # the loop (and the pool) after each batch, causing
+                    # APIConnectionError on subsequent batches.
+                    loop = asyncio.new_event_loop()
+                    try:
+                        for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
+                            batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
+                            batch_features = features[batch_start:batch_end]
+                            batch_examples = features_examples[batch_start:batch_end]
+                            batch_all_examples = all_features_examples[batch_start:batch_end]
 
-                        # Generate labels for this batch using context-based examples
-                        # Create concurrent tasks for all features in batch
-                        # Pass all examples for NLP analysis to improve labeling
-                        label_tasks = []
-                        for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
-                            task = labeling_service.generate_label_from_examples(
-                                examples=examples,
-                                template_config=template_config,
-                                user_prompt_template=user_prompt_template,
-                                system_message=system_message,
-                                feature_id=feature.id,
-                                neuron_index=feature.neuron_index,
-                                logit_effects=None,  # TODO: Implement in Sprint 4
-                                all_examples=all_ex,  # Pass full 100 examples for NLP analysis
-                                nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
-                            )
-                            label_tasks.append(task)
+                            # Generate labels for this batch using context-based examples
+                            # Create concurrent tasks for all features in batch
+                            # Pass all examples for NLP analysis to improve labeling
+                            label_tasks = []
+                            for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
+                                task = labeling_service.generate_label_from_examples(
+                                    examples=examples,
+                                    template_config=template_config,
+                                    user_prompt_template=user_prompt_template,
+                                    system_message=system_message,
+                                    feature_id=feature.id,
+                                    neuron_index=feature.neuron_index,
+                                    logit_effects=None,  # TODO: Implement in Sprint 4
+                                    all_examples=all_ex,  # Pass full 100 examples for NLP analysis
+                                    nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
+                                )
+                                label_tasks.append(task)
 
-                        # Execute all labeling tasks concurrently
-                        # Wrap gather in an async function for asyncio.run()
-                        async def run_batch():
-                            return await asyncio.gather(*label_tasks, return_exceptions=True)
-
-                        batch_labels = asyncio.run(run_batch())
-
-                        # Persist this batch immediately
-                        for feature, label, examples in zip(batch_features, batch_labels, batch_examples):
-                            # Handle any exceptions
-                            if isinstance(label, Exception):
-                                logger.error(f"Error generating label for feature {feature.id}: {label}")
-                                label = {"category": "error_feature", "specific": f"feature_{feature.neuron_index}", "description": ""}
-
-                            feature.category = label["category"]
-                            feature.name = label["specific"]
-                            feature.description = label.get("description", "")
-                            feature.label_source = label_source_value
-                            feature.labeling_job_id = labeling_job.id
-                            feature.labeled_at = labeled_at
-                            feature.updated_at = labeled_at
-
-                            # Create example tokens summary from context examples (first 7 prime tokens)
-                            prime_tokens = [ex.get('prime_token', '') for ex in examples[:7] if ex.get('prime_token')]
-                            example_summary = ', '.join(prime_tokens) if prime_tokens else ''
-                            feature.example_tokens_summary = example_summary
-
-                            # Emit individual result for real-time display
-                            # Send first 10 full examples with prefix/prime/suffix context
-                            example_data = []
-                            for ex in examples[:10]:
-                                example_data.append({
-                                    "prefix_tokens": ex.get('prefix_tokens', []),
-                                    "prime_token": ex.get('prime_token', ''),
-                                    "suffix_tokens": ex.get('suffix_tokens', []),
-                                    "max_activation": ex.get('max_activation', 0.0)
-                                })
-
-                            emit_labeling_result(
-                                labeling_job_id=labeling_job.id,
-                                feature_data={
-                                    "feature_id": feature.neuron_index,
-                                    "label": feature.name,
-                                    "category": feature.category,
-                                    "description": feature.description or "",
-                                    "examples": example_data
-                                }
+                            # Execute all labeling tasks concurrently within the shared loop
+                            batch_labels = loop.run_until_complete(
+                                asyncio.gather(*label_tasks, return_exceptions=True)
                             )
 
-                        # Commit this batch
-                        self.db.commit()
+                            # Persist this batch immediately
+                            for feature, label, examples in zip(batch_features, batch_labels, batch_examples):
+                                # Handle any exceptions
+                                if isinstance(label, Exception):
+                                    logger.error(f"Error generating label for feature {feature.id}: {label}")
+                                    label = {"category": "error_feature", "specific": f"feature_{feature.neuron_index}", "description": ""}
 
-                        # Update progress
-                        current_labeled = batch_end
-                        labeling_progress_callback(current_labeled, total_features)
+                                feature.category = label["category"]
+                                feature.name = label["specific"]
+                                feature.description = label.get("description", "")
+                                feature.label_source = label_source_value
+                                feature.labeling_job_id = labeling_job.id
+                                feature.labeled_at = labeled_at
+                                feature.updated_at = labeled_at
 
-                        logger.info(f"Batch {batch_start//LABEL_BATCH_SIZE + 1}/{(total_features + LABEL_BATCH_SIZE - 1)//LABEL_BATCH_SIZE}: Labeled and persisted features {batch_start+1}-{batch_end}/{total_features}")
+                                # Create example tokens summary from context examples (first 7 prime tokens)
+                                prime_tokens = [ex.get('prime_token', '') for ex in examples[:7] if ex.get('prime_token')]
+                                example_summary = ', '.join(prime_tokens) if prime_tokens else ''
+                                feature.example_tokens_summary = example_summary
+
+                                # Emit individual result for real-time display
+                                # Send first 10 full examples with prefix/prime/suffix context
+                                example_data = []
+                                for ex in examples[:10]:
+                                    example_data.append({
+                                        "prefix_tokens": ex.get('prefix_tokens', []),
+                                        "prime_token": ex.get('prime_token', ''),
+                                        "suffix_tokens": ex.get('suffix_tokens', []),
+                                        "max_activation": ex.get('max_activation', 0.0)
+                                    })
+
+                                emit_labeling_result(
+                                    labeling_job_id=labeling_job.id,
+                                    feature_data={
+                                        "feature_id": feature.neuron_index,
+                                        "label": feature.name,
+                                        "category": feature.category,
+                                        "description": feature.description or "",
+                                        "examples": example_data
+                                    }
+                                )
+
+                            # Commit this batch
+                            self.db.commit()
+
+                            # Update progress
+                            current_labeled = batch_end
+                            labeling_progress_callback(current_labeled, total_features)
+
+                            logger.info(f"Batch {batch_start//LABEL_BATCH_SIZE + 1}/{(total_features + LABEL_BATCH_SIZE - 1)//LABEL_BATCH_SIZE}: Labeled and persisted features {batch_start+1}-{batch_end}/{total_features}")
+                    finally:
+                        # Clean up: close httpx client, then shut down the loop
+                        loop.run_until_complete(labeling_service._http_client.aclose())
+                        loop.run_until_complete(loop.shutdown_asyncgens())
+                        loop.close()
 
                     logger.info(f"All {total_features} features labeled and persisted successfully")
-
-                    # Close HTTP client to release file descriptors
-                    labeling_service.close()
 
                     # Create labels list for statistics calculation (now we need to query back from DB)
                     labels = [{"category": f.category, "specific": f.name} for f in features]
@@ -1124,92 +1130,95 @@ class LabelingService:
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
-                    for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
-                        batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
-                        batch_features = features[batch_start:batch_end]
-                        batch_examples = features_examples[batch_start:batch_end]
-                        batch_all_examples = all_features_examples[batch_start:batch_end]
+                    # Use a single event loop for all batches (same fix as OpenAI path)
+                    loop = asyncio.new_event_loop()
+                    try:
+                        for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
+                            batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
+                            batch_features = features[batch_start:batch_end]
+                            batch_examples = features_examples[batch_start:batch_end]
+                            batch_all_examples = all_features_examples[batch_start:batch_end]
 
-                        # Generate labels for this batch using context-based examples
-                        # Create concurrent tasks for all features in batch
-                        # Pass all examples for NLP analysis to improve labeling
-                        label_tasks = []
-                        for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
-                            task = labeling_service.generate_label_from_examples(
-                                examples=examples,
-                                template_config=template_config,
-                                user_prompt_template=user_prompt_template,
-                                system_message=system_message,
-                                feature_id=feature.id,
-                                neuron_index=feature.neuron_index,
-                                logit_effects=None,  # TODO: Implement in Sprint 4
-                                all_examples=all_ex,  # Pass full 100 examples for NLP analysis
-                                nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
-                            )
-                            label_tasks.append(task)
+                            # Generate labels for this batch using context-based examples
+                            # Create concurrent tasks for all features in batch
+                            # Pass all examples for NLP analysis to improve labeling
+                            label_tasks = []
+                            for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
+                                task = labeling_service.generate_label_from_examples(
+                                    examples=examples,
+                                    template_config=template_config,
+                                    user_prompt_template=user_prompt_template,
+                                    system_message=system_message,
+                                    feature_id=feature.id,
+                                    neuron_index=feature.neuron_index,
+                                    logit_effects=None,  # TODO: Implement in Sprint 4
+                                    all_examples=all_ex,  # Pass full 100 examples for NLP analysis
+                                    nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
+                                )
+                                label_tasks.append(task)
 
-                        # Execute all labeling tasks concurrently
-                        # Wrap gather in an async function for asyncio.run()
-                        async def run_batch():
-                            return await asyncio.gather(*label_tasks, return_exceptions=True)
-
-                        batch_labels = asyncio.run(run_batch())
-
-                        # Persist this batch immediately
-                        for feature, label, examples in zip(batch_features, batch_labels, batch_examples):
-                            # Handle any exceptions
-                            if isinstance(label, Exception):
-                                logger.error(f"Error generating label for feature {feature.id}: {label}")
-                                label = {"category": "error_feature", "specific": f"feature_{feature.neuron_index}", "description": ""}
-
-                            feature.category = label["category"]
-                            feature.name = label["specific"]
-                            feature.description = label.get("description", "")
-                            feature.label_source = label_source_value
-                            feature.labeling_job_id = labeling_job.id
-                            feature.labeled_at = labeled_at
-                            feature.updated_at = labeled_at
-
-                            # Create example tokens summary from context examples (first 7 prime tokens)
-                            prime_tokens = [ex.get('prime_token', '') for ex in examples[:7] if ex.get('prime_token')]
-                            example_summary = ', '.join(prime_tokens) if prime_tokens else ''
-                            feature.example_tokens_summary = example_summary
-
-                            # Emit individual result for real-time display
-                            # Send first 10 full examples with prefix/prime/suffix context
-                            example_data = []
-                            for ex in examples[:10]:
-                                example_data.append({
-                                    "prefix_tokens": ex.get('prefix_tokens', []),
-                                    "prime_token": ex.get('prime_token', ''),
-                                    "suffix_tokens": ex.get('suffix_tokens', []),
-                                    "max_activation": ex.get('max_activation', 0.0)
-                                })
-
-                            emit_labeling_result(
-                                labeling_job_id=labeling_job.id,
-                                feature_data={
-                                    "feature_id": feature.neuron_index,
-                                    "label": feature.name,
-                                    "category": feature.category,
-                                    "description": feature.description or "",
-                                    "examples": example_data
-                                }
+                            # Execute all labeling tasks concurrently within the shared loop
+                            batch_labels = loop.run_until_complete(
+                                asyncio.gather(*label_tasks, return_exceptions=True)
                             )
 
-                        # Commit this batch
-                        self.db.commit()
+                            # Persist this batch immediately
+                            for feature, label, examples in zip(batch_features, batch_labels, batch_examples):
+                                # Handle any exceptions
+                                if isinstance(label, Exception):
+                                    logger.error(f"Error generating label for feature {feature.id}: {label}")
+                                    label = {"category": "error_feature", "specific": f"feature_{feature.neuron_index}", "description": ""}
 
-                        # Update progress
-                        current_labeled = batch_end
-                        labeling_progress_callback(current_labeled, total_features)
+                                feature.category = label["category"]
+                                feature.name = label["specific"]
+                                feature.description = label.get("description", "")
+                                feature.label_source = label_source_value
+                                feature.labeling_job_id = labeling_job.id
+                                feature.labeled_at = labeled_at
+                                feature.updated_at = labeled_at
 
-                        logger.info(f"Batch {batch_start//LABEL_BATCH_SIZE + 1}/{(total_features + LABEL_BATCH_SIZE - 1)//LABEL_BATCH_SIZE}: Labeled and persisted features {batch_start+1}-{batch_end}/{total_features}")
+                                # Create example tokens summary from context examples (first 7 prime tokens)
+                                prime_tokens = [ex.get('prime_token', '') for ex in examples[:7] if ex.get('prime_token')]
+                                example_summary = ', '.join(prime_tokens) if prime_tokens else ''
+                                feature.example_tokens_summary = example_summary
+
+                                # Emit individual result for real-time display
+                                # Send first 10 full examples with prefix/prime/suffix context
+                                example_data = []
+                                for ex in examples[:10]:
+                                    example_data.append({
+                                        "prefix_tokens": ex.get('prefix_tokens', []),
+                                        "prime_token": ex.get('prime_token', ''),
+                                        "suffix_tokens": ex.get('suffix_tokens', []),
+                                        "max_activation": ex.get('max_activation', 0.0)
+                                    })
+
+                                emit_labeling_result(
+                                    labeling_job_id=labeling_job.id,
+                                    feature_data={
+                                        "feature_id": feature.neuron_index,
+                                        "label": feature.name,
+                                        "category": feature.category,
+                                        "description": feature.description or "",
+                                        "examples": example_data
+                                    }
+                                )
+
+                            # Commit this batch
+                            self.db.commit()
+
+                            # Update progress
+                            current_labeled = batch_end
+                            labeling_progress_callback(current_labeled, total_features)
+
+                            logger.info(f"Batch {batch_start//LABEL_BATCH_SIZE + 1}/{(total_features + LABEL_BATCH_SIZE - 1)//LABEL_BATCH_SIZE}: Labeled and persisted features {batch_start+1}-{batch_end}/{total_features}")
+                    finally:
+                        # Clean up: close httpx client, then shut down the loop
+                        loop.run_until_complete(labeling_service._http_client.aclose())
+                        loop.run_until_complete(loop.shutdown_asyncgens())
+                        loop.close()
 
                     logger.info(f"All {total_features} features labeled and persisted successfully")
-
-                    # Close HTTP client to release file descriptors
-                    labeling_service.close()
 
                     # Create labels list for statistics calculation (now we need to query back from DB)
                     labels = [{"category": f.category, "specific": f.name} for f in features]

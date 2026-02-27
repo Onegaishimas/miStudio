@@ -171,13 +171,15 @@ class OpenAILabelingService:
 
     async def _call_openai(self, messages: list, **kwargs) -> Any:
         """
-        Call OpenAI API with automatic fallback for unsupported parameters.
+        Call OpenAI API with automatic fallback for unsupported parameters
+        and retry logic for transient connection errors.
 
         Some models (o-series reasoning models) reject temperature, top_p, etc.
         On BadRequestError mentioning 'unsupported', retry without those params.
         Uses a semaphore to limit concurrent connections and avoid fd exhaustion.
+        Retries up to 3 times on APIConnectionError with exponential backoff.
         """
-        from openai import BadRequestError
+        from openai import BadRequestError, APIConnectionError
 
         call_kwargs = {
             "model": self.model,
@@ -188,21 +190,34 @@ class OpenAILabelingService:
             **kwargs,
         }
 
+        max_retries = 3
         async with self._api_semaphore:
-            try:
-                return await self.client.chat.completions.create(**call_kwargs)
-            except BadRequestError as e:
-                error_msg = str(e).lower()
-                if "unsupported" not in error_msg:
-                    raise
+            for attempt in range(max_retries + 1):
+                try:
+                    return await self.client.chat.completions.create(**call_kwargs)
+                except APIConnectionError as e:
+                    if attempt < max_retries:
+                        wait_time = 2 ** attempt  # 1s, 2s, 4s
+                        logger.warning(
+                            f"Connection error (attempt {attempt + 1}/{max_retries + 1}), "
+                            f"retrying in {wait_time}s: {e}"
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Connection error after {max_retries + 1} attempts: {e}")
+                        raise
+                except BadRequestError as e:
+                    error_msg = str(e).lower()
+                    if "unsupported" not in error_msg:
+                        raise
 
-                # Retry without temperature and top_p for reasoning models
-                logger.warning(
-                    f"Model {self.model} rejected sampling params, retrying without temperature/top_p"
-                )
-                call_kwargs.pop("temperature", None)
-                call_kwargs.pop("top_p", None)
-                return await self.client.chat.completions.create(**call_kwargs)
+                    # Retry without temperature and top_p for reasoning models
+                    logger.warning(
+                        f"Model {self.model} rejected sampling params, retrying without temperature/top_p"
+                    )
+                    call_kwargs.pop("temperature", None)
+                    call_kwargs.pop("top_p", None)
+                    return await self.client.chat.completions.create(**call_kwargs)
 
     def _save_request_for_testing(
         self,
@@ -227,11 +242,9 @@ class OpenAILabelingService:
         from datetime import datetime
 
         try:
-            # Get application root (parent of backend/)
-            app_root = Path(__file__).parent.parent.parent.parent
-
-            # Create base tmp_api directory
-            tmp_api_dir = app_root / "tmp_api"
+            # Use settings.data_dir for writable volume (works in Docker/k8s)
+            from src.core.config import settings
+            tmp_api_dir = settings.data_dir / "tmp_api"
             tmp_api_dir.mkdir(exist_ok=True)
 
             # Create subfolder ONCE per labeling job (reuse for all neurons)
@@ -246,7 +259,7 @@ class OpenAILabelingService:
                 self._request_dir = request_dir
                 self._request_timestamp = timestamp
                 self._request_folder_name = folder_name
-                logger.info(f"📁 Created API request folder for labeling job: tmp_api/{folder_name}/")
+                logger.info(f"📁 Created API request folder for labeling job: {request_dir}/")
             else:
                 # Reuse cached values
                 request_dir = self._request_dir
@@ -352,7 +365,7 @@ curl -X POST '{endpoint_url}' \\
 
             # Log files created based on export format
             logger.info(f"💾 Saved API request for testing (format: {self.export_format}):")
-            logger.info(f"   Folder: tmp_api/{folder_name}/")
+            logger.info(f"   Folder: {request_dir}/")
             for file_info in files_created:
                 logger.info(f"   {file_info}")
 
@@ -516,13 +529,10 @@ curl -X POST '{endpoint_url}' \\
                 logger.debug(f"Skipping poor quality save for neuron {neuron_index} (sample rate: {self.poor_quality_sample_rate})")
                 return
 
-            # Create directory if it doesn't exist (use absolute path like _save_request_for_testing)
+            # Create directory if it doesn't exist (use settings.data_dir for writable volume)
             if self._request_dir is None:
-                # Get application root (parent of backend/)
-                app_root = Path(__file__).parent.parent.parent.parent
-
-                # Create base tmp_api directory
-                tmp_api_dir = app_root / "tmp_api"
+                from src.core.config import settings
+                tmp_api_dir = settings.data_dir / "tmp_api"
                 tmp_api_dir.mkdir(exist_ok=True)
 
                 # Create subfolder with timestamp and job ID
