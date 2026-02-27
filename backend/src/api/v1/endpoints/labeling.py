@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
 from src.core.config import settings
 from src.core.deps import get_db
 from src.services.labeling_service import LabelingService
@@ -20,10 +21,82 @@ from src.schemas.labeling import (
     LabelingStatusResponse,
     LabelingListResponse
 )
+from src.models.extraction_job import ExtractionJob
+from src.models.training import Training
+from src.models.external_sae import ExternalSAE
+from src.models.model import Model
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _enrich_labeling_responses(
+    db: AsyncSession,
+    responses: list[LabelingStatusResponse]
+) -> list[LabelingStatusResponse]:
+    """Enrich labeling responses with extraction context (model, layer, hook, SAE name)."""
+    if not responses:
+        return responses
+
+    # Batch-load extraction jobs
+    ext_ids = {r.extraction_job_id for r in responses}
+    result = await db.execute(
+        select(ExtractionJob).where(ExtractionJob.id.in_(ext_ids))
+    )
+    ext_map = {ej.id: ej for ej in result.scalars().all()}
+
+    # Collect training/SAE IDs for batch loading
+    training_ids = {ej.training_id for ej in ext_map.values() if ej.training_id}
+    sae_ids = {ej.external_sae_id for ej in ext_map.values() if ej.external_sae_id}
+
+    # Batch-load trainings
+    trainings_map = {}
+    model_ids = set()
+    if training_ids:
+        result = await db.execute(select(Training).where(Training.id.in_(training_ids)))
+        for t in result.scalars().all():
+            trainings_map[t.id] = t
+            if t.model_id:
+                model_ids.add(t.model_id)
+
+    # Batch-load external SAEs
+    saes_map = {}
+    if sae_ids:
+        result = await db.execute(select(ExternalSAE).where(ExternalSAE.id.in_(sae_ids)))
+        for s in result.scalars().all():
+            saes_map[s.id] = s
+            if hasattr(s, 'model_id') and s.model_id:
+                model_ids.add(s.model_id)
+
+    # Batch-load models
+    models_map = {}
+    if model_ids:
+        result = await db.execute(
+            select(Model.id, Model.name).where(Model.id.in_(model_ids))
+        )
+        for row in result.all():
+            models_map[row[0]] = row[1]
+
+    # Enrich each response
+    for resp in responses:
+        ej = ext_map.get(resp.extraction_job_id)
+        if not ej:
+            continue
+
+        resp.layer_index = ej.layer_index
+        resp.hook_type = ej.hook_type
+
+        if ej.training_id and ej.training_id in trainings_map:
+            training = trainings_map[ej.training_id]
+            resp.model_name = models_map.get(training.model_id, training.model_id)
+        elif ej.external_sae_id and ej.external_sae_id in saes_map:
+            sae = saes_map[ej.external_sae_id]
+            resp.sae_name = getattr(sae, 'name', None) or sae.id
+            if hasattr(sae, 'model_id') and sae.model_id:
+                resp.model_name = models_map.get(sae.model_id, sae.model_id)
+
+    return responses
 
 
 @router.post(
@@ -131,7 +204,9 @@ async def get_labeling_status(
             detail=f"Labeling job {labeling_job_id} not found"
         )
 
-    return LabelingStatusResponse.model_validate(labeling_job)
+    response = LabelingStatusResponse.model_validate(labeling_job)
+    enriched = await _enrich_labeling_responses(db, [response])
+    return enriched[0]
 
 
 @router.get(
@@ -165,8 +240,11 @@ async def list_labeling_jobs(
         offset=offset
     )
 
+    responses = [LabelingStatusResponse.model_validate(job) for job in jobs_list]
+    responses = await _enrich_labeling_responses(db, responses)
+
     return LabelingListResponse(
-        data=[LabelingStatusResponse.model_validate(job) for job in jobs_list],
+        data=responses,
         meta={
             "total": total,
             "limit": limit,

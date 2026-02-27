@@ -163,6 +163,7 @@ class LabelingStatusResponse(BaseModel):
     extraction_job_id: str
     labeling_method: str
     openai_model: Optional[str] = None
+    openai_compatible_model: Optional[str] = None
     local_model: Optional[str] = None
     prompt_template_id: Optional[str] = None
     filter_special: bool = True
@@ -185,6 +186,12 @@ class LabelingStatusResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
+
+    # Extraction context (populated by the list/get endpoints)
+    model_name: Optional[str] = None
+    layer_index: Optional[int] = None
+    hook_type: Optional[str] = None
+    sae_name: Optional[str] = None
 
 
 class LabelingListResponse(BaseModel):

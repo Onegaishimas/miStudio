@@ -186,20 +186,32 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
           </div>
           <div className="flex items-center gap-4 flex-1">
             <span className={`text-sm font-semibold ${COMPONENTS.text.primary}`}>
-              Labeling Job
+              {job.model_name || 'Unknown Model'}
             </span>
+            {job.layer_index != null && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                L{job.layer_index}
+              </span>
+            )}
+            {job.hook_type && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                {job.hook_type}
+              </span>
+            )}
+            {job.sae_name && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                {job.sae_name}
+              </span>
+            )}
             <span className={`text-xs px-2 py-0.5 rounded ${statusDisplay.bg} ${statusDisplay.color}`}>
               {statusDisplay.label}
             </span>
             <span className={`text-xs ${COMPONENTS.text.secondary}`}>
-              {job.extraction_job_id}
-            </span>
-            <span className={`text-xs ${COMPONENTS.text.secondary}`}>
               {job.labeling_method === 'openai'
-                ? 'OpenAI'
+                ? `OpenAI (${job.openai_model || 'gpt-4o-mini'})`
                 : job.labeling_method === 'openai_compatible'
                 ? job.openai_compatible_model || 'Ollama'
-                : 'Local LLM'}
+                : `Local (${job.local_model || 'meta-llama/Llama-3.2-1B'})`}
             </span>
             <span className={`text-xs ${COMPONENTS.text.secondary}`}>
               Started: {format(new Date(job.created_at), 'MMM d, h:mm a')}
@@ -286,12 +298,15 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
       {!isActive && (
         <div className={`text-sm ${COMPONENTS.text.secondary} space-y-1`}>
           <p>
-            <span className="font-medium">Extraction:</span> {job.extraction_job_id}
+            <span className="font-medium">Model:</span> {job.model_name || 'Unknown'}
+            {job.layer_index != null && <> · <span className="font-medium">Layer:</span> {job.layer_index}</>}
+            {job.hook_type && <> · <span className="font-medium">Hook:</span> {job.hook_type}</>}
+            {job.sae_name && <> · <span className="font-medium">SAE:</span> {job.sae_name}</>}
           </p>
           <p>
             <span className="font-medium">Method:</span>{' '}
             {job.labeling_method === 'openai'
-              ? 'OpenAI'
+              ? `OpenAI (${job.openai_model || 'gpt-4o-mini'})`
               : job.labeling_method === 'openai_compatible'
               ? `Local LLM (${job.openai_compatible_model || 'Ollama'})`
               : `Local LLM (${job.local_model || 'meta-llama/Llama-3.2-1B'})`}
@@ -302,7 +317,13 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
           <p>
             <span className="font-medium">Features:</span>{' '}
             {job.features_labeled.toLocaleString()} / {totalFeatures.toLocaleString()}
-            {isCompleted && ' ✓'}
+            {isCompleted && job.statistics && (
+              <> ({job.statistics.successfully_labeled.toLocaleString()} labeled, {job.statistics.failed_labels.toLocaleString()} failed)</>
+            )}
+          </p>
+          <p>
+            <span className="font-medium">Extraction:</span>{' '}
+            <span className="text-xs font-mono">{job.extraction_job_id}</span>
           </p>
           <p>Started: {format(new Date(job.created_at), 'MMM d, yyyy • h:mm:ss a')}</p>
           {job.completed_at && (

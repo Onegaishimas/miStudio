@@ -55,6 +55,11 @@ def mock_labeling_job():
     job.completed_at = None
     job.created_at = datetime.now(timezone.utc)
     job.updated_at = datetime.now(timezone.utc)
+    # Extraction context fields (populated by _enrich_labeling_responses)
+    job.model_name = None
+    job.layer_index = None
+    job.hook_type = None
+    job.sae_name = None
     return job
 
 
@@ -153,6 +158,7 @@ class TestStartLabeling:
 class TestGetLabelingStatus:
     """Tests for GET /api/v1/labeling/{labeling_job_id} endpoint."""
 
+    @patch("src.api.v1.endpoints.labeling._enrich_labeling_responses", new=AsyncMock(side_effect=lambda db, responses: responses))
     @patch("src.api.v1.endpoints.labeling.LabelingService")
     def test_get_labeling_status_success(
         self, mock_service_class, client, mock_labeling_job
@@ -184,6 +190,7 @@ class TestGetLabelingStatus:
 class TestListLabelingJobs:
     """Tests for GET /api/v1/labeling endpoint."""
 
+    @patch("src.api.v1.endpoints.labeling._enrich_labeling_responses", new=AsyncMock(side_effect=lambda db, responses: responses))
     @patch("src.api.v1.endpoints.labeling.LabelingService")
     def test_list_labeling_jobs_success(
         self, mock_service_class, client, mock_labeling_job
@@ -201,6 +208,7 @@ class TestListLabelingJobs:
         assert len(data["data"]) == 3
         assert data["meta"]["total"] == 3
 
+    @patch("src.api.v1.endpoints.labeling._enrich_labeling_responses", new=AsyncMock(side_effect=lambda db, responses: responses))
     @patch("src.api.v1.endpoints.labeling.LabelingService")
     def test_list_labeling_jobs_filtered(
         self, mock_service_class, client, mock_labeling_job

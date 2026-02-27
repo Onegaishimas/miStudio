@@ -208,6 +208,19 @@ export interface LabelingJob {
 
   /** Labeling completion timestamp */
   completed_at?: string | null;
+
+  // Extraction context (populated by API enrichment)
+  /** Model name (from training or external SAE) */
+  model_name?: string | null;
+
+  /** Layer index from extraction job */
+  layer_index?: number | null;
+
+  /** Hook type from extraction job (e.g., 'residual', 'mlp', 'attention') */
+  hook_type?: string | null;
+
+  /** External SAE name (if applicable) */
+  sae_name?: string | null;
 }
 
 /**
