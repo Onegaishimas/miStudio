@@ -935,30 +935,6 @@ class LabelingService:
                     # TODO: Add api_timeout column to labeling_jobs table for configurable timeout
                     api_timeout = 120.0
 
-                    logger.info(f"Initializing OpenAI labeling service with model: {openai_model}")
-                    labeling_service = OpenAILabelingService(
-                        api_key=openai_api_key,
-                        model=openai_model,
-                        system_message=system_message,
-                        user_prompt_template=user_prompt_template,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        top_p=top_p,
-                        timeout=api_timeout,
-                        filter_special=labeling_job.filter_special,
-                        filter_single_char=labeling_job.filter_single_char,
-                        filter_punctuation=labeling_job.filter_punctuation,
-                        filter_numbers=labeling_job.filter_numbers,
-                        filter_fragments=labeling_job.filter_fragments,
-                        filter_stop_words=labeling_job.filter_stop_words,
-                        save_requests_for_testing=labeling_job.save_requests_for_testing,
-                        export_format=labeling_job.export_format,
-                        save_poor_quality_labels=labeling_job.save_poor_quality_labels,
-                        poor_quality_sample_rate=labeling_job.poor_quality_sample_rate,
-                        save_requests_sample_rate=labeling_job.save_requests_sample_rate,
-                        labeling_job_id=labeling_job.id
-                    )
-
                     # Generate and persist labels in batches of 10
                     # This ensures progress is saved incrementally if the job fails
                     label_source_value = LabelSource.OPENAI.value
@@ -967,12 +943,34 @@ class LabelingService:
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
-                    # Use a single event loop for all batches to keep the httpx
-                    # connection pool alive. asyncio.run() per batch would destroy
-                    # the loop (and the pool) after each batch, causing
-                    # APIConnectionError on subsequent batches.
+                    # Create event loop BEFORE the OpenAI service so that httpx
+                    # AsyncClient and asyncio.Semaphore bind to this loop.
                     loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
                     try:
+                        logger.info(f"Initializing OpenAI labeling service with model: {openai_model}")
+                        labeling_service = OpenAILabelingService(
+                            api_key=openai_api_key,
+                            model=openai_model,
+                            system_message=system_message,
+                            user_prompt_template=user_prompt_template,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            top_p=top_p,
+                            timeout=api_timeout,
+                            filter_special=labeling_job.filter_special,
+                            filter_single_char=labeling_job.filter_single_char,
+                            filter_punctuation=labeling_job.filter_punctuation,
+                            filter_numbers=labeling_job.filter_numbers,
+                            filter_fragments=labeling_job.filter_fragments,
+                            filter_stop_words=labeling_job.filter_stop_words,
+                            save_requests_for_testing=labeling_job.save_requests_for_testing,
+                            export_format=labeling_job.export_format,
+                            save_poor_quality_labels=labeling_job.save_poor_quality_labels,
+                            poor_quality_sample_rate=labeling_job.poor_quality_sample_rate,
+                            save_requests_sample_rate=labeling_job.save_requests_sample_rate,
+                            labeling_job_id=labeling_job.id
+                        )
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
@@ -1097,31 +1095,6 @@ class LabelingService:
                     # TODO: Add api_timeout column to labeling_jobs table for configurable timeout
                     api_timeout = 120.0
 
-                    logger.info(f"Initializing OpenAI-compatible labeling service with endpoint: {endpoint}, model: {model_name}")
-                    labeling_service = OpenAILabelingService(
-                        api_key="dummy-key-not-required",  # Most local endpoints don't require auth
-                        model=model_name,
-                        base_url=endpoint,
-                        system_message=system_message,
-                        user_prompt_template=user_prompt_template,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        top_p=top_p,
-                        timeout=api_timeout,
-                        filter_special=labeling_job.filter_special,
-                        filter_single_char=labeling_job.filter_single_char,
-                        filter_punctuation=labeling_job.filter_punctuation,
-                        filter_numbers=labeling_job.filter_numbers,
-                        filter_fragments=labeling_job.filter_fragments,
-                        filter_stop_words=labeling_job.filter_stop_words,
-                        save_requests_for_testing=labeling_job.save_requests_for_testing,
-                        export_format=labeling_job.export_format,
-                        save_poor_quality_labels=labeling_job.save_poor_quality_labels,
-                        poor_quality_sample_rate=labeling_job.poor_quality_sample_rate,
-                        save_requests_sample_rate=labeling_job.save_requests_sample_rate,
-                        labeling_job_id=labeling_job.id
-                    )
-
                     # Generate and persist labels in batches of 10
                     # This ensures progress is saved incrementally if the job fails
                     label_source_value = LabelSource.OPENAI.value  # Use OPENAI source for compatible endpoints
@@ -1130,9 +1103,35 @@ class LabelingService:
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
-                    # Use a single event loop for all batches (same fix as OpenAI path)
+                    # Create event loop BEFORE the OpenAI service so that httpx
+                    # AsyncClient and asyncio.Semaphore bind to this loop.
                     loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
                     try:
+                        logger.info(f"Initializing OpenAI-compatible labeling service with endpoint: {endpoint}, model: {model_name}")
+                        labeling_service = OpenAILabelingService(
+                            api_key="dummy-key-not-required",  # Most local endpoints don't require auth
+                            model=model_name,
+                            base_url=endpoint,
+                            system_message=system_message,
+                            user_prompt_template=user_prompt_template,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            top_p=top_p,
+                            timeout=api_timeout,
+                            filter_special=labeling_job.filter_special,
+                            filter_single_char=labeling_job.filter_single_char,
+                            filter_punctuation=labeling_job.filter_punctuation,
+                            filter_numbers=labeling_job.filter_numbers,
+                            filter_fragments=labeling_job.filter_fragments,
+                            filter_stop_words=labeling_job.filter_stop_words,
+                            save_requests_for_testing=labeling_job.save_requests_for_testing,
+                            export_format=labeling_job.export_format,
+                            save_poor_quality_labels=labeling_job.save_poor_quality_labels,
+                            poor_quality_sample_rate=labeling_job.poor_quality_sample_rate,
+                            save_requests_sample_rate=labeling_job.save_requests_sample_rate,
+                            labeling_job_id=labeling_job.id
+                        )
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
