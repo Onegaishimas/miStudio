@@ -677,6 +677,8 @@ class ExtractionService:
             )
             for s in result.scalars().all():
                 saes_map[s.id] = s
+                if s.model_id:
+                    model_ids.add(s.model_id)
 
         # Collect dataset_ids from SAE-based extraction configs
         for ej in extraction_jobs:
@@ -724,6 +726,8 @@ class ExtractionService:
                 if external_sae:
                     sae_name = external_sae.name
                     model_name = external_sae.model_name
+                    if not model_name and external_sae.model_id:
+                        model_name = models_map.get(external_sae.model_id)
                     ds_id = extraction_job.config.get("dataset_id") if extraction_job.config else None
                     if ds_id:
                         dataset_name = datasets_map.get(ds_id)
