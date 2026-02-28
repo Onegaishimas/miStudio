@@ -101,6 +101,9 @@ export interface LabelingConfigRequest {
   /** Export format for saved API requests: 'postman' (Postman collection), 'curl' (cURL command), or 'both' (default: both) */
   export_format?: 'postman' | 'curl' | 'both';
 
+  /** Maximum tokens in LLM response (50-8000, default: 300) */
+  max_tokens?: number;
+
   /** Batch size for labeling (1-100, default: 10) */
   batch_size?: number;
 
@@ -168,6 +171,9 @@ export interface LabelingJob {
 
   /** Export format for saved API requests */
   export_format: string;
+
+  /** Maximum tokens in LLM response */
+  max_tokens: number;
 
   /** Save poor quality labels for debugging */
   save_poor_quality_labels: boolean;

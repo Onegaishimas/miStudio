@@ -44,6 +44,7 @@ def mock_labeling_job():
     job.export_format = "both"
     job.save_poor_quality_labels = False
     job.poor_quality_sample_rate = 1.0
+    job.max_tokens = 300
     job.status = LabelingStatus.QUEUED.value
     job.progress = 0.0
     job.features_labeled = 0

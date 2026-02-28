@@ -45,7 +45,7 @@ class OpenAILabelingService:
         system_message: Optional[str] = None,
         user_prompt_template: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 50,
+        max_tokens: int = 300,
         top_p: float = 0.9,
         timeout: float = 120.0,
         filter_special: bool = True,

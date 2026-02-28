@@ -43,6 +43,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
   const [openaiModelsError, setOpenaiModelsError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [maxExamples, setMaxExamples] = useState<number>(25);  // Number of examples per feature (10-50)
+  const [maxTokens, setMaxTokens] = useState<number>(300);  // Max tokens in LLM response (50-8000)
   const [apiTimeout, setApiTimeout] = useState<number>(120);  // API timeout in seconds (30-600)
 
   // Token filtering configuration
@@ -192,6 +193,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
         prompt_template_id: selectedTemplateId || undefined,
         batch_size: 10,
         max_examples: maxExamples,  // Number of examples per feature
+        max_tokens: maxTokens,  // Max tokens in LLM response
         api_timeout: apiTimeout,  // API request timeout in seconds
         // Token filtering configuration
         filter_special: filterSpecial,
@@ -536,6 +538,24 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                     />
                     <p className="mt-1 text-xs text-slate-400">
                       Number of high-activation examples to show the LLM (10-50, default: 25)
+                    </p>
+                  </div>
+
+                  {/* Max Tokens */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Max Response Tokens
+                    </label>
+                    <input
+                      type="number"
+                      min={50}
+                      max={8000}
+                      value={maxTokens}
+                      onChange={(e) => setMaxTokens(parseInt(e.target.value) || 300)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <p className="mt-1 text-xs text-slate-400">
+                      Maximum tokens in the LLM response (50-8000, default: 300). Increase for longer descriptions.
                     </p>
                   </div>
 

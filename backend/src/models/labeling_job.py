@@ -83,6 +83,9 @@ class LabelingJob(Base):
     filter_fragments = Column(Boolean, nullable=False, default=True)  # Filter word fragments (BPE subwords)
     filter_stop_words = Column(Boolean, nullable=False, default=False)  # Filter common stop words
 
+    # LLM response configuration
+    max_tokens = Column(Integer, nullable=False, default=300)  # Max tokens in LLM response (50-2000)
+
     # Debugging configuration
     save_requests_for_testing = Column(Boolean, nullable=False, default=False)  # Save API requests to /tmp/ for testing
     save_requests_sample_rate = Column(Float, nullable=False, default=1.0)  # Sample rate for saving all requests (0.0-1.0)

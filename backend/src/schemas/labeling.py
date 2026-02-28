@@ -126,6 +126,14 @@ class LabelingConfigRequest(BaseModel):
         description="Number of activation examples per feature (10-50). If not specified, uses template's default."
     )
 
+    # LLM response configuration
+    max_tokens: Optional[int] = Field(
+        default=300,
+        ge=50,
+        le=8000,
+        description="Maximum tokens in LLM response (50-8000). Default: 300. Increase for longer descriptions."
+    )
+
     # API timeout configuration
     api_timeout: Optional[float] = Field(
         default=120.0,
@@ -175,6 +183,7 @@ class LabelingStatusResponse(BaseModel):
     save_requests_for_testing: bool = False
     save_requests_sample_rate: float = 1.0
     export_format: str = "both"
+    max_tokens: int = 300
     save_poor_quality_labels: bool = False
     poor_quality_sample_rate: float = 1.0
     status: str

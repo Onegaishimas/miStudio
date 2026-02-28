@@ -200,6 +200,7 @@ class LabelingService:
             export_format=config.get("export_format", "both"),
             save_poor_quality_labels=config.get("save_poor_quality_labels", False),
             poor_quality_sample_rate=config.get("poor_quality_sample_rate", 1.0),
+            max_tokens=config.get("max_tokens", 300),
             status=LabelingStatus.QUEUED.value,
             progress=0.0,
             features_labeled=0,
@@ -915,7 +916,7 @@ class LabelingService:
                     system_message = None
                     user_prompt_template = None
                     temperature = 0.3
-                    max_tokens = 50
+                    max_tokens = labeling_job.max_tokens or 300
                     top_p = 0.9
 
                     if labeling_job.prompt_template_id:
@@ -1075,7 +1076,7 @@ class LabelingService:
                     system_message = None
                     user_prompt_template = None
                     temperature = 0.3
-                    max_tokens = 50
+                    max_tokens = labeling_job.max_tokens or 300
                     top_p = 0.9
 
                     if labeling_job.prompt_template_id:
