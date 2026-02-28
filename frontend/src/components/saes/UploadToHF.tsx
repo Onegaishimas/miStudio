@@ -42,6 +42,17 @@ function getLayerPadWidth(totalLayers: number | undefined): number {
   return Math.max(2, totalLayers.toString().length);
 }
 
+/** Format latent width as compact string: 8192 → "8k", 16384 → "16k", 65536 → "65k" */
+function formatWidth(nFeatures: number): string {
+  if (nFeatures >= 1000 && nFeatures % 1000 === 0) {
+    return `${nFeatures / 1000}k`;
+  }
+  if (nFeatures >= 1024 && nFeatures % 1024 === 0) {
+    return `${nFeatures / 1024}k`;
+  }
+  return nFeatures.toString();
+}
+
 interface UploadToHFProps {
   sae: SAE;
   isOpen: boolean;
@@ -75,8 +86,10 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
         const paddedLayer = sae.layer.toString().padStart(padWidth, '0');
         const hookAbbrev = getHookAbbrev(sae.hook_type);
 
-        setFilepath(`layer_${paddedLayer}/${hookAbbrev}`);
-        setCommitMessage(`info: push l${paddedLayer} ${hookAbbrev} sae trained by miStudio`);
+        const widthSegment = sae.n_features ? `width_${formatWidth(sae.n_features)}/` : '';
+        setFilepath(`layer_${paddedLayer}/${widthSegment}${hookAbbrev}`);
+        const widthLabel = sae.n_features ? ` ${formatWidth(sae.n_features)}` : '';
+        setCommitMessage(`info: push l${paddedLayer}${widthLabel} ${hookAbbrev} sae trained by miStudio`);
       } else {
         // Fallback: sanitize full SAE name
         const safeName = sae.name.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/-$/, '');
