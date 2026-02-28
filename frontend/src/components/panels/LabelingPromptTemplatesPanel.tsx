@@ -64,6 +64,7 @@ export function LabelingPromptTemplatesPanel() {
     temperature: 0.3,
     max_tokens: 50,
     top_p: 0.9,
+    include_nlp_analysis: false,
     is_default: false,
   });
   const [notification, setNotification] = useState<{
@@ -147,6 +148,7 @@ export function LabelingPromptTemplatesPanel() {
       temperature: 0.3,
       max_tokens: 50,
       top_p: 0.9,
+      include_nlp_analysis: false,
       is_default: false,
     });
     setEditingTemplate(null);
@@ -230,6 +232,7 @@ export function LabelingPromptTemplatesPanel() {
       temperature: template.temperature,
       max_tokens: template.max_tokens,
       top_p: template.top_p,
+      include_nlp_analysis: template.include_nlp_analysis ?? false,
     });
     setShowEditModal(true);
   };
@@ -734,17 +737,32 @@ export function LabelingPromptTemplatesPanel() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="is_default"
-                checked={formData.is_default}
-                onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
-                className="rounded bg-slate-800 border-slate-700"
-              />
-              <label htmlFor="is_default" className="text-sm text-slate-300">
-                Set as default template
-              </label>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="include_nlp_analysis"
+                  checked={formData.include_nlp_analysis ?? false}
+                  onChange={(e) => setFormData({ ...formData, include_nlp_analysis: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-700"
+                />
+                <label htmlFor="include_nlp_analysis" className="text-sm text-slate-300">
+                  Include NLP statistical analysis in prompt
+                </label>
+                <span className="text-xs text-slate-500">(POS tagging, NER, n-grams from all examples)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="is_default"
+                  checked={formData.is_default}
+                  onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-700"
+                />
+                <label htmlFor="is_default" className="text-sm text-slate-300">
+                  Set as default template
+                </label>
+              </div>
             </div>
 
             <div className="flex gap-3 pt-4">

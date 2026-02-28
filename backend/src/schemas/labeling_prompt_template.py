@@ -121,6 +121,12 @@ class LabelingPromptTemplateCreate(BaseModel):
         description="Whether this template is for detection/scoring (binary classification)"
     )
 
+    # NLP analysis configuration
+    include_nlp_analysis: bool = Field(
+        default=False,
+        description="Whether to include NLP statistical analysis (POS tagging, NER, n-grams) in the prompt"
+    )
+
     # Metadata
     is_default: bool = Field(
         default=False,
@@ -253,6 +259,12 @@ class LabelingPromptTemplateUpdate(BaseModel):
         description="Updated detection template flag"
     )
 
+    # NLP analysis configuration
+    include_nlp_analysis: Optional[bool] = Field(
+        default=None,
+        description="Updated NLP analysis inclusion setting"
+    )
+
     # Metadata
     is_default: Optional[bool] = Field(
         default=None,
@@ -313,6 +325,9 @@ class LabelingPromptTemplateResponse(BaseModel):
 
     # Detection/scoring template flag
     is_detection_template: bool
+
+    # NLP analysis configuration
+    include_nlp_analysis: bool
 
     # Metadata
     is_default: bool
@@ -397,6 +412,7 @@ class LabelingPromptTemplateExportItem(BaseModel):
     include_negative_examples: bool
     num_negative_examples: Optional[int] = None
     is_detection_template: bool
+    include_nlp_analysis: bool
     is_default: bool
 
 

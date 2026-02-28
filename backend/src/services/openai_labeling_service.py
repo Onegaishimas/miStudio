@@ -1372,18 +1372,20 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             logger.warning(f"Empty examples for feature {feature_id}, using fallback label")
             return {"category": "empty_features", "specific": fallback_label, "description": ""}
 
-        # Compute NLP analysis if not provided and we have all examples
+        # Compute NLP analysis only if enabled in template config
+        include_nlp = template_config.get('include_nlp_analysis', False)
         analysis_summary = None
-        if nlp_analysis:
-            analysis_summary = nlp_analysis.get("summary_for_prompt", "")
-        elif all_examples and len(all_examples) > len(examples):
-            try:
-                nlp_service = NLPAnalysisService()
-                analysis_result = nlp_service.analyze_feature(all_examples, feature_id or "unknown")
-                analysis_summary = analysis_result.get("summary_for_prompt", "")
-                logger.debug(f"Computed NLP analysis for feature {feature_id} with {len(all_examples)} examples")
-            except Exception as e:
-                logger.warning(f"Failed to compute NLP analysis for feature {feature_id}: {e}")
+        if include_nlp:
+            if nlp_analysis:
+                analysis_summary = nlp_analysis.get("summary_for_prompt", "")
+            elif all_examples and len(all_examples) > len(examples):
+                try:
+                    nlp_service = NLPAnalysisService()
+                    analysis_result = nlp_service.analyze_feature(all_examples, feature_id or "unknown")
+                    analysis_summary = analysis_result.get("summary_for_prompt", "")
+                    logger.debug(f"Computed NLP analysis for feature {feature_id} with {len(all_examples)} examples")
+                except Exception as e:
+                    logger.warning(f"Failed to compute NLP analysis for feature {feature_id}: {e}")
 
         # Fall back to defaults when no template is selected
         effective_system_message = system_message or (

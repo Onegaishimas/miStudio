@@ -59,6 +59,9 @@ class LabelingPromptTemplate(Base):
     # Detection/scoring template flag (for EleutherAI-style template)
     is_detection_template = Column(Boolean, nullable=False, default=False)  # For binary classification/scoring
 
+    # NLP analysis configuration
+    include_nlp_analysis = Column(Boolean, nullable=False, default=False)  # Include NLP statistical analysis in prompt
+
     # Metadata
     is_default = Column(Boolean, nullable=False, default=False)
     is_system = Column(Boolean, nullable=False, default=False)  # System templates can't be deleted

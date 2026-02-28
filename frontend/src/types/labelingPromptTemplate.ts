@@ -25,6 +25,8 @@ export interface LabelingPromptTemplate {
   max_tokens: number;
   /** Top-p sampling parameter (0.0-1.0) */
   top_p: number;
+  /** Whether to include NLP statistical analysis in the prompt */
+  include_nlp_analysis: boolean;
   /** Whether this template is the default */
   is_default: boolean;
   /** Whether this is a system template (cannot be deleted/modified) */
@@ -58,6 +60,8 @@ export interface LabelingPromptTemplateCreate {
   max_tokens?: number;
   /** Top-p sampling parameter (0.0-1.0, default: 0.9) */
   top_p?: number;
+  /** Whether to include NLP statistical analysis in the prompt (default: false) */
+  include_nlp_analysis?: boolean;
   /** Whether this template should be the default (default: false) */
   is_default?: boolean;
 }
@@ -81,6 +85,8 @@ export interface LabelingPromptTemplateUpdate {
   max_tokens?: number;
   /** Top-p */
   top_p?: number;
+  /** Whether to include NLP statistical analysis in the prompt */
+  include_nlp_analysis?: boolean;
   /** Whether this template should be the default */
   is_default?: boolean;
 }
@@ -97,6 +103,7 @@ export interface LabelingPromptTemplateResponse {
   temperature: number;
   max_tokens: number;
   top_p: number;
+  include_nlp_analysis: boolean;
   is_default: boolean;
   is_system: boolean;
   created_by?: string | null;

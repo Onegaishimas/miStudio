@@ -675,7 +675,8 @@ class LabelingService:
                         'include_logit_effects': template.include_logit_effects,
                         'top_promoted_tokens_count': template.top_promoted_tokens_count,
                         'top_suppressed_tokens_count': template.top_suppressed_tokens_count,
-                        'is_detection_template': template.is_detection_template
+                        'is_detection_template': template.is_detection_template,
+                        'include_nlp_analysis': getattr(template, 'include_nlp_analysis', False),
                     }
 
                     override_msg = f" (job override)" if job_max_examples is not None else ""
@@ -692,7 +693,8 @@ class LabelingService:
                     'include_logit_effects': False,
                     'top_promoted_tokens_count': 10,
                     'top_suppressed_tokens_count': 10,
-                    'is_detection_template': False
+                    'is_detection_template': False,
+                    'include_nlp_analysis': False,
                 }
                 logger.info(f"No template specified - using default mistudio_context (K={max_examples})")
 
@@ -701,12 +703,14 @@ class LabelingService:
             # For display in LLM prompt, we only show top max_examples (default 10)
             BATCH_SIZE = 1000
             NLP_ANALYSIS_EXAMPLES = 100  # Retrieve all examples for comprehensive NLP analysis
+            include_nlp = template_config.get('include_nlp_analysis', False)
+            retrieval_count = NLP_ANALYSIS_EXAMPLES if include_nlp else max_examples
             features_examples = []  # Top max_examples for LLM display
-            all_features_examples = []  # All examples for NLP analysis
+            all_features_examples = []  # All examples for NLP analysis (empty when NLP disabled)
             neuron_indices = []
 
             # Phase 1: Examples Retrieval with progress tracking
-            logger.info(f"Starting examples retrieval phase for {total_features} features (display K={max_examples}, NLP K={NLP_ANALYSIS_EXAMPLES}) in batches of {BATCH_SIZE}")
+            logger.info(f"Starting examples retrieval phase for {total_features} features (display K={max_examples}, NLP={'enabled (K='+str(retrieval_count)+')' if include_nlp else 'disabled'}) in batches of {BATCH_SIZE}")
 
             for batch_start in range(0, total_features, BATCH_SIZE):
                 batch_end = min(batch_start + BATCH_SIZE, total_features)
@@ -718,21 +722,26 @@ class LabelingService:
                 # Get feature IDs for this batch
                 batch_feature_ids = [f.id for f in batch_features]
 
-                # Retrieve ALL examples (up to 100) for NLP analysis
+                # Retrieve examples: all 100 for NLP analysis, or just max_examples if NLP disabled
                 # Use sync version since Celery worker uses sync session
                 all_examples_map = self._retrieve_top_examples_batch_sync(
                     session=self.db,
                     feature_ids=batch_feature_ids,
-                    max_examples=NLP_ANALYSIS_EXAMPLES
+                    max_examples=retrieval_count
                 )
 
                 # Build ordered lists for labeling (maintain feature order)
                 for feature in batch_features:
                     all_examples = all_examples_map.get(feature.id, [])
-                    # Store all examples for NLP analysis
-                    all_features_examples.append(all_examples)
-                    # Store only top max_examples for LLM display
-                    features_examples.append(all_examples[:max_examples])
+                    if include_nlp:
+                        # Store all examples for NLP analysis
+                        all_features_examples.append(all_examples)
+                        # Store only top max_examples for LLM display
+                        features_examples.append(all_examples[:max_examples])
+                    else:
+                        # NLP disabled: no extra examples needed
+                        all_features_examples.append([])
+                        features_examples.append(all_examples)
                     neuron_indices.append(feature.neuron_index)
 
                 # Update progress in database

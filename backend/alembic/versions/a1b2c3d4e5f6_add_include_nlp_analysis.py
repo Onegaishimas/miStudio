@@ -1,0 +1,32 @@
+"""add include_nlp_analysis to labeling_prompt_templates
+
+Add configurable toggle for NLP statistical analysis in labeling prompts.
+When False (default), NLP analysis is not computed or injected into prompts.
+
+Revision ID: a1b2c3d4e5f6
+Revises: d0549a22d4c6
+Create Date: 2026-02-28 16:00:00.000000
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'a1b2c3d4e5f6'
+down_revision: Union[str, None] = 'd0549a22d4c6'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.add_column(
+        'labeling_prompt_templates',
+        sa.Column('include_nlp_analysis', sa.Boolean(), nullable=False, server_default=sa.text('false'))
+    )
+
+
+def downgrade() -> None:
+    op.drop_column('labeling_prompt_templates', 'include_nlp_analysis')
