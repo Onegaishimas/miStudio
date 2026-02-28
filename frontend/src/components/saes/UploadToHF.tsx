@@ -16,7 +16,31 @@ import { useState, useEffect } from 'react';
 import { Upload, X, Cloud, Eye, EyeOff, ExternalLink, Loader, CheckCircle, FileCode } from 'lucide-react';
 import { SAE, SAESource, SAEUploadRequest, SAEUploadResponse } from '../../types/sae';
 import { useSAEsStore } from '../../stores/saesStore';
+import { useModelsStore } from '../../stores/modelsStore';
 import { COMPONENTS } from '../../config/brand';
+
+/** Abbreviate hook type names for compact filepaths */
+const HOOK_ABBREVIATIONS: Record<string, string> = {
+  'residual': 'res',
+  'hook_resid_pre': 'res',
+  'hook_resid_post': 'res',
+  'mlp': 'mlp',
+  'hook_mlp_out': 'mlp',
+  'attention': 'attn',
+  'hook_attn_out': 'attn',
+};
+
+/** Get abbreviated hook type, falling back to first 4 chars */
+function getHookAbbrev(hookType: string): string {
+  const lower = hookType.toLowerCase();
+  return HOOK_ABBREVIATIONS[lower] ?? lower.slice(0, 4);
+}
+
+/** Determine zero-padding width from total layer count */
+function getLayerPadWidth(totalLayers: number | undefined): number {
+  if (!totalLayers || totalLayers <= 0) return 2; // default 2 digits
+  return Math.max(2, totalLayers.toString().length);
+}
 
 interface UploadToHFProps {
   sae: SAE;
@@ -38,15 +62,37 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
   const [uploadResult, setUploadResult] = useState<SAEUploadResponse | null>(null);
 
   const { uploadSAE } = useSAEsStore();
+  const { models } = useModelsStore();
 
-  // Set default filepath based on SAE name when modal opens
+  // Set default filepath and commit message based on SAE fields when modal opens
   useEffect(() => {
     if (isOpen && sae) {
-      // Create a default filepath from SAE name
-      const safeName = sae.name.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-');
-      setFilepath(`saes/${safeName}`);
+      if (sae.layer !== null && sae.layer !== undefined && sae.hook_type) {
+        // Structured path: use SAE fields for clean, sortable filepath
+        const model = sae.model_id ? models.find(m => m.id === sae.model_id) : undefined;
+        const totalLayers = model?.architecture_config?.num_hidden_layers;
+        const padWidth = getLayerPadWidth(totalLayers);
+        const paddedLayer = sae.layer.toString().padStart(padWidth, '0');
+        const hookAbbrev = getHookAbbrev(sae.hook_type);
+
+        // Build model name portion from sae.name, stripping the layer/hook suffix
+        const safeName = sae.name
+          .toLowerCase()
+          .replace(/\s+l\d+\s+\w+$/i, '') // strip trailing " L0 Residual" etc.
+          .replace(/[^a-z0-9-_]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/-$/, '');
+
+        setFilepath(`saes/${safeName}-l${paddedLayer}-${hookAbbrev}`);
+        setCommitMessage(`info: push l${paddedLayer} ${hookAbbrev} sae trained by miStudio`);
+      } else {
+        // Fallback: sanitize full SAE name
+        const safeName = sae.name.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/-$/, '');
+        setFilepath(`saes/${safeName}`);
+        setCommitMessage('Upload SAE via miStudio');
+      }
     }
-  }, [isOpen, sae]);
+  }, [isOpen, sae, models]);
 
   // Reset form when modal closes
   useEffect(() => {
