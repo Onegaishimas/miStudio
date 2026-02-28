@@ -3,7 +3,7 @@
 Add configurable toggle for NLP statistical analysis in labeling prompts.
 When False (default), NLP analysis is not computed or injected into prompts.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 9e045d0a94ef
 Revises: d0549a22d4c6
 Create Date: 2026-02-28 16:00:00.000000
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
+revision: str = '9e045d0a94ef'
 down_revision: Union[str, None] = 'd0549a22d4c6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
