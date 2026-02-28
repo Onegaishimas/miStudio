@@ -9,12 +9,43 @@
  * - Support for custom SAE names
  */
 
-import { useState, useEffect } from 'react';
-import { Download, Search, CheckCircle, Cloud, FileCode, Loader, Box, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Download, Search, CheckCircle, Cloud, FolderOpen, Loader, Box, Eye, EyeOff } from 'lucide-react';
 import { HFFileInfo } from '../../types/sae';
 import { useSAEsStore } from '../../stores/saesStore';
 import { useModelsStore } from '../../stores/modelsStore';
 import { COMPONENTS } from '../../config/brand';
+
+/** An SAE directory group containing all files for one SAE */
+interface SAEGroup {
+  dirPath: string;
+  files: HFFileInfo[];
+  totalSizeBytes: number;
+  layer: number | undefined;
+  nFeatures: number | undefined;
+}
+
+/** Group individual SAE files into directory-level SAE groups */
+function groupFilesIntoSAEs(saeFiles: HFFileInfo[]): SAEGroup[] {
+  const groups = new Map<string, SAEGroup>();
+  for (const file of saeFiles) {
+    const lastSlash = file.filepath.lastIndexOf('/');
+    const dirPath = lastSlash > 0 ? file.filepath.substring(0, lastSlash) : '.';
+    if (!groups.has(dirPath)) {
+      groups.set(dirPath, {
+        dirPath, files: [], totalSizeBytes: 0,
+        layer: file.layer ?? undefined,
+        nFeatures: file.n_features ?? undefined,
+      });
+    }
+    const group = groups.get(dirPath)!;
+    group.files.push(file);
+    group.totalSizeBytes += file.size_bytes || 0;
+    if (group.layer === undefined && file.layer != null) group.layer = file.layer;
+    if (!group.nFeatures && file.n_features) group.nFeatures = file.n_features;
+  }
+  return Array.from(groups.values());
+}
 
 interface DownloadFromHFProps {
   onDownloadComplete?: () => void;
@@ -24,7 +55,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
   const [repoId, setRepoId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [customName, setCustomName] = useState('');
-  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [selectedDirs, setSelectedDirs] = useState<Set<string>>(new Set());
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -72,7 +103,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
       return;
     }
 
-    setSelectedFiles(new Set());
+    setSelectedDirs(new Set());
     try {
       await previewHFRepository({
         repo_id: repoId.trim(),
@@ -83,41 +114,47 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
     }
   };
 
-  const toggleFileSelection = (filepath: string) => {
-    setSelectedFiles(prev => {
+  // Compute SAE groups from preview files
+  const saeGroups = useMemo(() => {
+    if (!hfPreview) return [];
+    return groupFilesIntoSAEs(hfPreview.sae_files);
+  }, [hfPreview]);
+
+  const toggleDirSelection = (dirPath: string) => {
+    setSelectedDirs(prev => {
       const next = new Set(prev);
-      if (next.has(filepath)) {
-        next.delete(filepath);
+      if (next.has(dirPath)) {
+        next.delete(dirPath);
       } else {
-        next.add(filepath);
+        next.add(dirPath);
       }
       return next;
     });
   };
 
-  const selectAllInLayer = (files: HFFileInfo[]) => {
-    setSelectedFiles(prev => {
+  const selectAllInLayer = (groups: SAEGroup[]) => {
+    setSelectedDirs(prev => {
       const next = new Set(prev);
-      files.forEach(f => next.add(f.filepath));
+      groups.forEach(g => next.add(g.dirPath));
       return next;
     });
   };
 
-  const deselectAllInLayer = (files: HFFileInfo[]) => {
-    setSelectedFiles(prev => {
+  const deselectAllInLayer = (groups: SAEGroup[]) => {
+    setSelectedDirs(prev => {
       const next = new Set(prev);
-      files.forEach(f => next.delete(f.filepath));
+      groups.forEach(g => next.delete(g.dirPath));
       return next;
     });
   };
 
-  const isLayerFullySelected = (files: HFFileInfo[]) => {
-    return files.every(f => selectedFiles.has(f.filepath));
+  const isLayerFullySelected = (groups: SAEGroup[]) => {
+    return groups.every(g => selectedDirs.has(g.dirPath));
   };
 
   const handleDownload = async () => {
-    if (selectedFiles.size === 0 || !hfPreview) {
-      setValidationError('Please select at least one SAE file to download');
+    if (selectedDirs.size === 0 || !hfPreview) {
+      setValidationError('Please select at least one SAE to download');
       return;
     }
 
@@ -126,20 +163,19 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
       return;
     }
 
-    const filesToDownload = hfPreview.sae_files.filter(f => selectedFiles.has(f.filepath));
+    const dirsToDownload = Array.from(selectedDirs);
 
     setIsDownloading(true);
-    setDownloadProgress({ current: 0, total: filesToDownload.length });
+    setDownloadProgress({ current: 0, total: dirsToDownload.length });
 
     try {
-      // Download each selected file sequentially
-      for (let i = 0; i < filesToDownload.length; i++) {
-        const file = filesToDownload[i];
-        setDownloadProgress({ current: i + 1, total: filesToDownload.length });
+      // Download each selected SAE directory sequentially
+      for (let i = 0; i < dirsToDownload.length; i++) {
+        setDownloadProgress({ current: i + 1, total: dirsToDownload.length });
 
         await downloadSAE({
           repo_id: hfPreview.repo_id,
-          filepath: file.filepath,
+          filepath: dirsToDownload[i],
           name: customName.trim() || undefined,
           access_token: accessToken.trim() || undefined,
           model_id: selectedModelId,
@@ -150,7 +186,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
       setRepoId('');
       setAccessToken('');
       setCustomName('');
-      setSelectedFiles(new Set());
+      setSelectedDirs(new Set());
       setSelectedModelId('');
       clearHFPreview();
       onDownloadComplete?.();
@@ -329,7 +365,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium text-slate-300">
-              Found {hfPreview.sae_files.length} SAE file{hfPreview.sae_files.length !== 1 ? 's' : ''}
+              Found {saeGroups.length} SAE{saeGroups.length !== 1 ? 's' : ''}
             </h4>
             {hfPreview.model_name && (
               <span className="text-xs text-slate-500">
@@ -338,35 +374,35 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
             )}
           </div>
 
-          {hfPreview.sae_files.length === 0 ? (
+          {saeGroups.length === 0 ? (
             <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-400 text-sm">
               No SAELens format files found in this repository. Make sure the repository contains
               cfg.json and/or sae_weights.safetensors files.
             </div>
           ) : (
             <div className="max-h-60 overflow-y-auto">
-              {/* Group files by layer and render with sticky headers */}
+              {/* Group SAEs by layer and render with sticky headers */}
               {(() => {
-                // Group files by layer
-                const filesByLayer = new Map<number | 'unknown', HFFileInfo[]>();
-                hfPreview.sae_files.forEach((file) => {
-                  const layerKey = file.layer ?? 'unknown';
-                  if (!filesByLayer.has(layerKey)) {
-                    filesByLayer.set(layerKey, []);
+                // Group SAE directories by layer
+                const groupsByLayer = new Map<number | 'unknown', SAEGroup[]>();
+                saeGroups.forEach((group) => {
+                  const layerKey = group.layer ?? 'unknown';
+                  if (!groupsByLayer.has(layerKey)) {
+                    groupsByLayer.set(layerKey, []);
                   }
-                  filesByLayer.get(layerKey)!.push(file);
+                  groupsByLayer.get(layerKey)!.push(group);
                 });
 
                 // Sort layers numerically (unknown last)
-                const sortedLayers = Array.from(filesByLayer.keys()).sort((a, b) => {
+                const sortedLayers = Array.from(groupsByLayer.keys()).sort((a, b) => {
                   if (a === 'unknown') return 1;
                   if (b === 'unknown') return -1;
                   return (a as number) - (b as number);
                 });
 
                 return sortedLayers.map((layerKey) => {
-                  const layerFiles = filesByLayer.get(layerKey)!;
-                  const allSelected = isLayerFullySelected(layerFiles);
+                  const layerGroups = groupsByLayer.get(layerKey)!;
+                  const allSelected = isLayerFullySelected(layerGroups);
 
                   return (
                     <div key={layerKey} className="relative">
@@ -377,20 +413,20 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
                         </span>
                         <button
                           type="button"
-                          onClick={() => allSelected ? deselectAllInLayer(layerFiles) : selectAllInLayer(layerFiles)}
+                          onClick={() => allSelected ? deselectAllInLayer(layerGroups) : selectAllInLayer(layerGroups)}
                           className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
                         >
                           {allSelected ? 'Deselect All' : 'Select All'}
                         </button>
                       </div>
-                      {/* Files in this layer */}
+                      {/* SAE directories in this layer */}
                       <div className="space-y-2 p-2">
-                        {layerFiles.map((file) => {
-                          const isSelected = selectedFiles.has(file.filepath);
+                        {layerGroups.map((group) => {
+                          const isSelected = selectedDirs.has(group.dirPath);
                           return (
                             <div
-                              key={file.filepath}
-                              onClick={() => toggleFileSelection(file.filepath)}
+                              key={group.dirPath}
+                              onClick={() => toggleDirSelection(group.dirPath)}
                               className={`p-3 rounded-lg cursor-pointer transition-colors ${
                                 isSelected
                                   ? 'bg-emerald-500/20 border border-emerald-500/50'
@@ -402,21 +438,22 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
                                   {isSelected ? (
                                     <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                                   ) : (
-                                    <FileCode className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <FolderOpen className="w-4 h-4 text-slate-400 flex-shrink-0" />
                                   )}
                                   <span className="text-sm text-slate-200 truncate font-mono">
-                                    {file.filepath}
+                                    {group.dirPath}
                                   </span>
                                 </div>
                                 <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
-                                  {formatFileSize(file.size_bytes)}
+                                  {group.totalSizeBytes > 0 ? formatFileSize(group.totalSizeBytes) : `${group.files.length} files`}
                                 </span>
                               </div>
-                              {file.n_features && (
-                                <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
-                                  <span>{file.n_features.toLocaleString()} features</span>
-                                </div>
-                              )}
+                              <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
+                                <span>{group.files.length} file{group.files.length !== 1 ? 's' : ''}</span>
+                                {group.nFeatures && (
+                                  <><span>•</span><span>{group.nFeatures.toLocaleString()} features</span></>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -442,7 +479,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
         <button
           type="button"
           onClick={handleDownload}
-          disabled={selectedFiles.size === 0 || !selectedModelId || isDownloading}
+          disabled={selectedDirs.size === 0 || !selectedModelId || isDownloading}
           className={`w-full py-3 flex items-center justify-center gap-2 ${COMPONENTS.button.primary}`}
         >
           {isDownloading ? (
@@ -453,9 +490,9 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
           ) : (
             <>
               <Download className="w-5 h-5" />
-              {selectedFiles.size === 0
+              {selectedDirs.size === 0
                 ? 'Select SAEs to Download'
-                : `Download ${selectedFiles.size} Selected SAE${selectedFiles.size !== 1 ? 's' : ''}`}
+                : `Download ${selectedDirs.size} Selected SAE${selectedDirs.size !== 1 ? 's' : ''}`}
             </>
           )}
         </button>
