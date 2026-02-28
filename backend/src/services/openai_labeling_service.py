@@ -1089,8 +1089,12 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
                     lines = lines[:-1]
                 cleaned_response = '\n'.join(lines).strip()
 
-            # Try to parse JSON
-            data = json.loads(cleaned_response)
+            # Try to parse JSON (use raw_decode to handle extra text after JSON)
+            try:
+                data = json.loads(cleaned_response)
+            except json.JSONDecodeError:
+                decoder = json.JSONDecoder()
+                data, _ = decoder.raw_decode(cleaned_response)
 
             # Extract category
             category = self._clean_label(data.get("category", "uncategorized"))
