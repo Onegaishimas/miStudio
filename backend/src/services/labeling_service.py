@@ -649,40 +649,50 @@ class LabelingService:
             total_features = len(features)
             logger.info(f"Labeling {total_features} features for extraction {labeling_job.extraction_job_id}")
 
-            # Fetch template configuration if specified
+            # Fetch template configuration - use specified template or fall back to DB default
             template_config = None
             max_examples = 10  # Default for miStudio Internal
+            from src.models.labeling_prompt_template import LabelingPromptTemplate
+
+            template = None
             if labeling_job.prompt_template_id:
-                from src.models.labeling_prompt_template import LabelingPromptTemplate
                 template = self.db.query(LabelingPromptTemplate).filter(
                     LabelingPromptTemplate.id == labeling_job.prompt_template_id
                 ).first()
+            else:
+                # No template specified - look up the default template from DB
+                template = self.db.query(LabelingPromptTemplate).filter(
+                    LabelingPromptTemplate.is_default == True  # noqa: E712
+                ).first()
                 if template:
-                    # Check for job-level max_examples override in statistics
-                    job_max_examples = None
-                    if labeling_job.statistics and isinstance(labeling_job.statistics, dict):
-                        job_max_examples = labeling_job.statistics.get('max_examples')
+                    logger.info(f"No template specified in job - using DB default: {template.name}")
 
-                    # Use job override if provided, otherwise use template default
-                    max_examples = job_max_examples if job_max_examples is not None else template.max_examples
+            if template:
+                # Check for job-level max_examples override in statistics
+                job_max_examples = None
+                if labeling_job.statistics and isinstance(labeling_job.statistics, dict):
+                    job_max_examples = labeling_job.statistics.get('max_examples')
 
-                    template_config = {
-                        'template_type': template.template_type,
-                        'max_examples': max_examples,  # Use resolved value (job override or template default)
-                        'include_prefix': template.include_prefix,
-                        'include_suffix': template.include_suffix,
-                        'prime_token_marker': template.prime_token_marker,
-                        'include_logit_effects': template.include_logit_effects,
-                        'top_promoted_tokens_count': template.top_promoted_tokens_count,
-                        'top_suppressed_tokens_count': template.top_suppressed_tokens_count,
-                        'is_detection_template': template.is_detection_template,
-                        'include_nlp_analysis': getattr(template, 'include_nlp_analysis', False),
-                    }
+                # Use job override if provided, otherwise use template default
+                max_examples = job_max_examples if job_max_examples is not None else template.max_examples
 
-                    override_msg = f" (job override)" if job_max_examples is not None else ""
-                    logger.info(f"Using template: {template.name} (type: {template.template_type}, K={max_examples}{override_msg})")
+                template_config = {
+                    'template_type': template.template_type,
+                    'max_examples': max_examples,  # Use resolved value (job override or template default)
+                    'include_prefix': template.include_prefix,
+                    'include_suffix': template.include_suffix,
+                    'prime_token_marker': template.prime_token_marker,
+                    'include_logit_effects': template.include_logit_effects,
+                    'top_promoted_tokens_count': template.top_promoted_tokens_count,
+                    'top_suppressed_tokens_count': template.top_suppressed_tokens_count,
+                    'is_detection_template': template.is_detection_template,
+                    'include_nlp_analysis': getattr(template, 'include_nlp_analysis', False),
+                }
 
-            # Provide default template_config if no template was specified or found
+                override_msg = f" (job override)" if job_max_examples is not None else ""
+                logger.info(f"Using template: {template.name} (type: {template.template_type}, K={max_examples}{override_msg})")
+
+            # Provide hardcoded fallback if no template found in DB at all
             if template_config is None:
                 template_config = {
                     'template_type': 'mistudio_context',
@@ -696,7 +706,7 @@ class LabelingService:
                     'is_detection_template': False,
                     'include_nlp_analysis': False,
                 }
-                logger.info(f"No template specified - using default mistudio_context (K={max_examples})")
+                logger.warning(f"No template found (specified or default) - using hardcoded fallback (K={max_examples})")
 
             # Retrieve activation examples using efficient SQL batching
             # For NLP analysis, we need ALL examples (up to 100)
@@ -921,25 +931,33 @@ class LabelingService:
 
                     openai_model = labeling_job.openai_model or "gpt-4o-mini"
 
-                    # Fetch prompt template if specified
+                    # Fetch prompt template - use specified or fall back to DB default
                     system_message = None
                     user_prompt_template = None
                     temperature = 0.3
                     max_tokens = labeling_job.max_tokens or 300
                     top_p = 0.9
 
+                    from src.models.labeling_prompt_template import LabelingPromptTemplate
+                    template = None
                     if labeling_job.prompt_template_id:
-                        from src.models.labeling_prompt_template import LabelingPromptTemplate
                         template = self.db.query(LabelingPromptTemplate).filter(
                             LabelingPromptTemplate.id == labeling_job.prompt_template_id
                         ).first()
+                    else:
+                        template = self.db.query(LabelingPromptTemplate).filter(
+                            LabelingPromptTemplate.is_default == True  # noqa: E712
+                        ).first()
                         if template:
-                            system_message = template.system_message
-                            user_prompt_template = template.user_prompt_template
-                            temperature = template.temperature
-                            max_tokens = template.max_tokens
-                            top_p = template.top_p
-                            logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
+                            logger.info(f"No template in job - using DB default: {template.name}")
+
+                    if template:
+                        system_message = template.system_message
+                        user_prompt_template = template.user_prompt_template
+                        temperature = template.temperature
+                        max_tokens = template.max_tokens
+                        top_p = template.top_p
+                        logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
 
                     # Use default API timeout (120s)
                     # TODO: Add api_timeout column to labeling_jobs table for configurable timeout
@@ -1081,25 +1099,33 @@ class LabelingService:
                     if not model_name:
                         raise ValueError("OpenAI-compatible model name not provided")
 
-                    # Fetch prompt template if specified
+                    # Fetch prompt template - use specified or fall back to DB default
                     system_message = None
                     user_prompt_template = None
                     temperature = 0.3
                     max_tokens = labeling_job.max_tokens or 300
                     top_p = 0.9
 
+                    from src.models.labeling_prompt_template import LabelingPromptTemplate
+                    template = None
                     if labeling_job.prompt_template_id:
-                        from src.models.labeling_prompt_template import LabelingPromptTemplate
                         template = self.db.query(LabelingPromptTemplate).filter(
                             LabelingPromptTemplate.id == labeling_job.prompt_template_id
                         ).first()
+                    else:
+                        template = self.db.query(LabelingPromptTemplate).filter(
+                            LabelingPromptTemplate.is_default == True  # noqa: E712
+                        ).first()
                         if template:
-                            system_message = template.system_message
-                            user_prompt_template = template.user_prompt_template
-                            temperature = template.temperature
-                            max_tokens = template.max_tokens
-                            top_p = template.top_p
-                            logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
+                            logger.info(f"No template in job - using DB default: {template.name}")
+
+                    if template:
+                        system_message = template.system_message
+                        user_prompt_template = template.user_prompt_template
+                        temperature = template.temperature
+                        max_tokens = template.max_tokens
+                        top_p = template.top_p
+                        logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
 
                     # Use default API timeout (120s)
                     # TODO: Add api_timeout column to labeling_jobs table for configurable timeout

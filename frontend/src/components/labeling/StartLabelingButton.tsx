@@ -72,6 +72,16 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
     }
   }, [isOpen]);
 
+  // Auto-select default template when templates are loaded
+  useEffect(() => {
+    if (templates.length > 0 && selectedTemplateId === null) {
+      const defaultTemplate = templates.find(t => t.is_default);
+      if (defaultTemplate) {
+        setSelectedTemplateId(defaultTemplate.id);
+      }
+    }
+  }, [templates]);
+
   // Fetch locally cached models when modal opens
   useEffect(() => {
     if (isOpen && labelingMethod === LabelingMethod.LOCAL && availableModels.length === 0) {
