@@ -1,7 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Copy } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Copy, GripHorizontal } from 'lucide-react';
 import { LabelingResult, useLabelingResultsWebSocket } from '../../hooks/useLabelingResultsWebSocket';
 import { joinTokensWithProperSpacing } from '../../utils/tokenDisplay';
+
+const MIN_HEIGHT = 128;  // 8rem
+const DEFAULT_HEIGHT = 256; // 16rem (h-64)
+const MAX_HEIGHT = 800;
 
 interface LabelingResultsWindowProps {
   labelingJobId: string | null;
@@ -11,9 +15,41 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
   labelingJobId
 }) => {
   const [results, setResults] = useState<LabelingResult[]>([]);
+  const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isResizing = useRef(false);
+  const startY = useRef(0);
+  const startHeight = useRef(0);
 
   console.log('[LabelingResultsWindow] Rendered with labelingJobId:', labelingJobId, 'results count:', results.length);
+
+  // Drag-to-resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizing.current = true;
+    startY.current = e.clientY;
+    startHeight.current = height;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleResizeMove = (moveEvent: MouseEvent) => {
+      if (!isResizing.current) return;
+      const delta = moveEvent.clientY - startY.current;
+      const newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight.current + delta));
+      setHeight(newHeight);
+    };
+
+    const handleResizeEnd = () => {
+      isResizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+    };
+
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+  }, [height]);
 
   // Subscribe to real-time results
   useLabelingResultsWebSocket(labelingJobId, (result) => {
@@ -95,7 +131,7 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
 
   if (!labelingJobId || results.length === 0) {
     return (
-      <div className="bg-slate-900 border border-slate-700 rounded p-3 h-64">
+      <div className="bg-slate-900 border border-slate-700 rounded p-3" style={{ height }}>
         <h3 className="text-xs font-medium text-slate-300 mb-2">Recent Labeling Results</h3>
         <div className="flex items-center justify-center h-full text-slate-500 text-xs">
           {labelingJobId ? 'Waiting for results...' : 'Start a labeling job to see live results'}
@@ -120,7 +156,7 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
         </button>
       </div>
 
-      <div ref={scrollContainerRef} className="h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900">
+      <div ref={scrollContainerRef} className="overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900" style={{ height }}>
         {results.map((result, index) => {
           const examples = result.examples || [];
 
@@ -177,6 +213,14 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Resize handle */}
+      <div
+        onMouseDown={handleResizeStart}
+        className="flex items-center justify-center h-3 cursor-row-resize border-t border-slate-700 hover:bg-slate-700/50 transition-colors group"
+      >
+        <GripHorizontal className="w-4 h-3 text-slate-600 group-hover:text-slate-400" />
       </div>
     </div>
   );
