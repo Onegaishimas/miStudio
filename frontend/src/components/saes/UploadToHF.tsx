@@ -78,7 +78,8 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
         // Build model name portion from sae.name, stripping the layer/hook suffix
         const safeName = sae.name
           .toLowerCase()
-          .replace(/\s+l\d+\s+\w+$/i, '') // strip trailing " L0 Residual" etc.
+          .replace(/\s*\(l\d+[-\s]\w+\)\s*$/i, '') // strip trailing "(L11-residual)" etc.
+          .replace(/\s+l\d+[-\s]\w+\s*$/i, '') // strip trailing " L0 Residual" etc.
           .replace(/[^a-z0-9-_]/g, '-')
           .replace(/-+/g, '-')
           .replace(/-$/, '');
