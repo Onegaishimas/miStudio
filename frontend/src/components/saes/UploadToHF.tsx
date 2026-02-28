@@ -75,16 +75,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
         const paddedLayer = sae.layer.toString().padStart(padWidth, '0');
         const hookAbbrev = getHookAbbrev(sae.hook_type);
 
-        // Build model name portion from sae.name, stripping the layer/hook suffix
-        const safeName = sae.name
-          .toLowerCase()
-          .replace(/\s*\(l\d+[-\s]\w+\)\s*$/i, '') // strip trailing "(L11-residual)" etc.
-          .replace(/\s+l\d+[-\s]\w+\s*$/i, '') // strip trailing " L0 Residual" etc.
-          .replace(/[^a-z0-9-_]/g, '-')
-          .replace(/-+/g, '-')
-          .replace(/-$/, '');
-
-        setFilepath(`saes/${safeName}-l${paddedLayer}-${hookAbbrev}`);
+        setFilepath(`layer_${paddedLayer}/${hookAbbrev}`);
         setCommitMessage(`info: push l${paddedLayer} ${hookAbbrev} sae trained by miStudio`);
       } else {
         // Fallback: sanitize full SAE name
