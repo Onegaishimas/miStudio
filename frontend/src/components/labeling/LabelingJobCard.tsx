@@ -81,6 +81,7 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
     const duration = intervalToDuration({ start, end });
 
     const parts = [];
+    if (duration.days) parts.push(`${duration.days}d`);
     if (duration.hours) parts.push(`${duration.hours}h`);
     if (duration.minutes) parts.push(`${duration.minutes}m`);
     if (duration.seconds) parts.push(`${duration.seconds}s`);
