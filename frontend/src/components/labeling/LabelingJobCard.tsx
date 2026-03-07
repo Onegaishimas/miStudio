@@ -183,9 +183,9 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
   const statusDisplay = getStatusDisplay();
 
   return (
-    <div className={`${COMPONENTS.card.base} p-4 border ${statusDisplay.border}`}>
+    <div className={`${COMPONENTS.card.base} px-4 py-3 border ${statusDisplay.border}`}>
       {/* Compact Header: Status, Title, Info, and Actions - Single Row */}
-      <div className="flex items-center justify-between mb-3">
+      <div className={`flex items-center justify-between ${isActive ? 'mb-2' : 'mb-1'}`}>
         {/* Left: Status Icon + Title + Key Info */}
         <div className="flex items-center gap-3 flex-1">
           <div className={`p-1.5 rounded-lg ${statusDisplay.bg} ${statusDisplay.color}`}>
@@ -301,44 +301,25 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
         </div>
       )}
 
-      {/* Single Column Layout for Completed/Failed/Cancelled Jobs */}
+      {/* Compact details for completed/failed/cancelled jobs */}
       {!isActive && (
-        <div className={`text-sm ${COMPONENTS.text.secondary} space-y-1`}>
+        <div className={`text-xs ${COMPONENTS.text.secondary} space-y-0.5`}>
           <p>
-            <span className="font-medium">Model:</span> {job.model_name || 'Unknown'}
-            {job.layer_index != null && <> · <span className="font-medium">Layer:</span> {job.layer_index}</>}
-            {job.hook_type && <> · <span className="font-medium">Hook:</span> {job.hook_type}</>}
-            {job.sae_name && <> · <span className="font-medium">SAE:</span> {job.sae_name}</>}
-          </p>
-          <p>
-            <span className="font-medium">Method:</span>{' '}
-            {job.labeling_method === 'openai'
-              ? `OpenAI (${job.openai_model || 'gpt-4o-mini'})`
-              : job.labeling_method === 'openai_compatible'
-              ? `Local LLM (${job.openai_compatible_model || 'Ollama'})`
-              : `Local LLM (${job.local_model || 'meta-llama/Llama-3.2-1B'})`}
-          </p>
-          <p>
-            <span className="font-medium">Template:</span> {templateName}
-          </p>
-          <p>
-            <span className="font-medium">Features:</span>{' '}
-            {job.features_labeled.toLocaleString()} / {totalFeatures.toLocaleString()}
+            {templateName}
+            {' · '}
+            {job.features_labeled.toLocaleString()}/{totalFeatures.toLocaleString()} features
             {isCompleted && job.statistics && (
-              <> ({job.statistics.successfully_labeled.toLocaleString()} labeled, {job.statistics.failed_labels.toLocaleString()} failed)</>
+              <> ({job.statistics.failed_labels.toLocaleString()} failed)</>
+            )}
+            {' · '}
+            {format(new Date(job.created_at), 'MMM d h:mm a')}
+            {job.completed_at && (
+              <> → {format(new Date(job.completed_at), 'MMM d h:mm a')}</>
+            )}
+            {job.completed_at && (
+              <span className="text-emerald-400 font-medium"> ({getElapsedTime()})</span>
             )}
           </p>
-          <p>
-            <span className="font-medium">Extraction:</span>{' '}
-            <span className="text-xs font-mono">{job.extraction_job_id}</span>
-          </p>
-          <p>Started: {format(new Date(job.created_at), 'MMM d, yyyy • h:mm:ss a')}</p>
-          {job.completed_at && (
-            <>
-              <p>Completed: {format(new Date(job.completed_at), 'MMM d, yyyy • h:mm:ss a')}</p>
-              <p className="text-emerald-400 font-medium">Elapsed: {getElapsedTime()}</p>
-            </>
-          )}
         </div>
       )}
 
