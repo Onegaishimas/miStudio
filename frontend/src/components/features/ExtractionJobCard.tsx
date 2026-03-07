@@ -17,7 +17,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Zap, Loader, CheckCircle, XCircle, Trash2, Clock, ChevronDown, ChevronUp, Search, ArrowUpDown, Star, ArrowUp, ArrowDown, RefreshCw, List, Layers, Activity, Copy, Check, Brain, StopCircle, Play, RotateCcw } from 'lucide-react';
 import type { ExtractionStatusResponse, FeatureSearchRequest } from '../../types/features';
 import { triggerNlpAnalysis, cancelNlpAnalysis, resetNlpAnalysis } from '../../api/models';
-import { format, intervalToDuration } from 'date-fns';
+import { format } from 'date-fns';
 import { useFeaturesStore } from '../../stores/featuresStore';
 import { useTrainingsStore } from '../../stores/trainingsStore';
 import { TokenHighlightCompact } from './TokenHighlight';
@@ -747,14 +747,21 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
     const startTime = new Date(extraction.created_at);
     const endTime = extraction.completed_at ? new Date(extraction.completed_at) : new Date();
 
-    const duration = intervalToDuration({ start: startTime, end: endTime });
+    let totalSeconds = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+    if (totalSeconds < 0) totalSeconds = 0;
+
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
 
     const parts = [];
-    if (duration.hours) parts.push(`${duration.hours} ${duration.hours === 1 ? 'hour' : 'hours'}`);
-    if (duration.minutes) parts.push(`${duration.minutes} ${duration.minutes === 1 ? 'minute' : 'minutes'}`);
-    if (duration.seconds !== undefined) parts.push(`${duration.seconds} ${duration.seconds === 1 ? 'second' : 'seconds'}`);
+    if (days) parts.push(`${days}d`);
+    if (hours) parts.push(`${hours}h`);
+    if (minutes) parts.push(`${minutes}m`);
+    if (seconds) parts.push(`${seconds}s`);
 
-    return parts.length > 0 ? parts.join(', ') : 'Less than a second';
+    return parts.length > 0 ? parts.join(' ') : '<1s';
   };
 
   const getStatusBadge = () => {
@@ -852,16 +859,31 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 </button>
               )}
             </div>
-            <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
-              <p>Started: {format(new Date(extraction.created_at), 'MMM d, yyyy • h:mm:ss a')}</p>
+            <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
+              {isCompleted && extraction.statistics && (
+                <>
+                  <span className="text-emerald-400 font-medium">{extraction.statistics.total_features?.toLocaleString()} features</span>
+                  <span>·</span>
+                  <span>{extraction.statistics.interpretable_count !== undefined && extraction.statistics.total_features
+                    ? `${((extraction.statistics.interpretable_count / extraction.statistics.total_features) * 100).toFixed(1)}% interpretable`
+                    : ''}</span>
+                  <span>·</span>
+                  <span>{extraction.statistics.avg_activation_frequency !== undefined
+                    ? `${(extraction.statistics.avg_activation_frequency * 100).toFixed(2)}% activation`
+                    : ''}</span>
+                  <span>·</span>
+                </>
+              )}
+              <span>{format(new Date(extraction.created_at), 'MMM d h:mm a')}</span>
               {extraction.completed_at && (
                 <>
-                  <p>Completed: {format(new Date(extraction.completed_at), 'MMM d, yyyy • h:mm:ss a')}</p>
-                  <p className="text-emerald-400 font-medium">Elapsed: {getElapsedTime()}</p>
+                  <span>→</span>
+                  <span>{format(new Date(extraction.completed_at), 'MMM d h:mm a')}</span>
+                  <span className="text-emerald-400 font-medium">({getElapsedTime()})</span>
                 </>
               )}
               {isActive && (
-                <p className="text-blue-400 font-medium">Elapsed: {getElapsedTime()}</p>
+                <span className="text-blue-400 font-medium">Elapsed: {getElapsedTime()}</span>
               )}
             </div>
           </div>
@@ -1396,8 +1418,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
         </div>
       )}
 
-      {/* Statistics for Completed */}
-      {isCompleted && extraction.statistics && (
+      {/* Statistics boxes shown when expanded */}
+      {isCompleted && isExpanded && extraction.statistics && (
         <div className="grid grid-cols-3 gap-3 mb-4">
           <div className={COMPONENTS.stat.container}>
             <div className={COMPONENTS.stat.label}>Features Found</div>
