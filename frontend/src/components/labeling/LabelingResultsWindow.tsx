@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Copy, GripHorizontal } from 'lucide-react';
+import { Copy, GripHorizontal, Maximize2, Minimize2 } from 'lucide-react';
 import { LabelingResult, useLabelingResultsWebSocket } from '../../hooks/useLabelingResultsWebSocket';
 import { joinTokensWithProperSpacing } from '../../utils/tokenDisplay';
 
@@ -16,12 +16,26 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
 }) => {
   const [results, setResults] = useState<LabelingResult[]>([]);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [isMaximized, setIsMaximized] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
+  const previousHeight = useRef(DEFAULT_HEIGHT);
 
   console.log('[LabelingResultsWindow] Rendered with labelingJobId:', labelingJobId, 'results count:', results.length);
+
+  // Toggle maximize/restore
+  const toggleMaximize = useCallback(() => {
+    if (isMaximized) {
+      setHeight(previousHeight.current);
+      setIsMaximized(false);
+    } else {
+      previousHeight.current = height;
+      setHeight(MAX_HEIGHT);
+      setIsMaximized(true);
+    }
+  }, [isMaximized, height]);
 
   // Drag-to-resize handlers
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -37,6 +51,7 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
       const delta = moveEvent.clientY - startY.current;
       const newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight.current + delta));
       setHeight(newHeight);
+      setIsMaximized(false);
     };
 
     const handleResizeEnd = () => {
@@ -147,13 +162,22 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
           <h3 className="text-xs font-medium text-slate-300">Recent Labeling Results</h3>
           <p className="text-xs text-slate-500 mt-0.5">Last {results.length} features</p>
         </div>
-        <button
-          onClick={handleCopyResults}
-          className="p-1.5 rounded hover:bg-slate-800 transition-colors text-slate-400 hover:text-slate-200"
-          title="Copy results to clipboard"
-        >
-          <Copy className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggleMaximize}
+            className="p-1.5 rounded hover:bg-slate-800 transition-colors text-slate-400 hover:text-slate-200"
+            title={isMaximized ? 'Restore default height' : 'Maximize height'}
+          >
+            {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={handleCopyResults}
+            className="p-1.5 rounded hover:bg-slate-800 transition-colors text-slate-400 hover:text-slate-200"
+            title="Copy results to clipboard"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div ref={scrollContainerRef} className="overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900" style={{ height }}>
