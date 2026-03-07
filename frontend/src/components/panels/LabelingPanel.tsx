@@ -67,7 +67,7 @@ export const LabelingPanel: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[80%] mx-auto px-6 py-8">
+    <div className="px-6 py-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className={`text-2xl font-semibold ${COMPONENTS.text.primary} mb-2`}>Semantic Labeling</h1>

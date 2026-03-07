@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Sun, Moon } from 'lucide-react';
-import logoSvg from './assets/logo.svg';
 import { DatasetsPanel } from './components/panels/DatasetsPanel';
 import { ModelsPanel } from './components/panels/ModelsPanel';
 import { TemplatesPanel } from './components/panels/TemplatesPanel';
@@ -10,16 +8,19 @@ import { LabelingPanel } from './components/panels/LabelingPanel';
 import { SAEsPanel } from './components/panels/SAEsPanel';
 import { SteeringPanel } from './components/panels/SteeringPanel';
 import { SystemMonitor } from './components/SystemMonitor/SystemMonitor';
-import { CompactGPUStatus } from './components/SystemMonitor/CompactGPUStatus';
+import { Sidebar } from './components/layout/Sidebar';
+import { Header } from './components/layout/Header';
 import { WebSocketProvider, useWebSocketContext } from './contexts/WebSocketContext';
 import { useGlobalDatasetProgress } from './hooks/useDatasetProgress';
 import { setDatasetSubscriptionCallback } from './stores/datasetsStore';
-import { COMPONENTS } from './config/brand';
+import { useUIStore } from './stores/uiStore';
 
-type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'templates' | 'saes' | 'steering' | 'system';
+type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'saes' | 'steering' | 'templates' | 'system';
 
 function AppContent() {
   const ws = useWebSocketContext();
+  const { sidebar } = useUIStore();
+
   // Restore active panel from localStorage, default to 'datasets'
   const [activePanel, setActivePanel] = useState<ActivePanel>(() => {
     const saved = localStorage.getItem('activePanel');
@@ -61,164 +62,20 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* Sticky Header + Navigation Container */}
-      <div className="sticky top-0 z-50">
-        <header className="border-b border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-950">
-          <div className="max-w-[80%] mx-auto px-6 py-4">
-            <div className="flex items-center gap-3">
-              <img
-                src={logoSvg}
-                alt="MechInterp Studio"
-                className="w-8 h-8"
-              />
-              <div className="flex-1">
-                <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">MechInterp Studio</h1>
-                <p className="text-sm text-slate-600 dark:text-slate-400">Edge AI Feature Discovery Platform</p>
-              </div>
-              <button
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className={COMPONENTS.button.icon}
-                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </button>
-            </div>
-          </div>
-        </header>
+      <Sidebar activePanel={activePanel} onPanelChange={setActivePanel} />
 
-        {/* Navigation Tabs */}
-        <nav className="border-b border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-950">
-        <div className="max-w-[80%] mx-auto px-6">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex gap-1">
-            <button
-              onClick={() => setActivePanel('datasets')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'datasets'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Datasets
-              {activePanel === 'datasets' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('models')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'models'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Models
-              {activePanel === 'models' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('training')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'training'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Training
-              {activePanel === 'training' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('extractions')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'extractions'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Extractions
-              {activePanel === 'extractions' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('labeling')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'labeling'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Labeling
-              {activePanel === 'labeling' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('saes')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'saes'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              SAEs
-              {activePanel === 'saes' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('steering')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'steering'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Steering
-              {activePanel === 'steering' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('templates')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'templates'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Templates
-              {activePanel === 'templates' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            <button
-              onClick={() => setActivePanel('system')}
-              className={`px-6 py-3 font-medium transition-colors relative ${
-                activePanel === 'system'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              Monitor
-              {activePanel === 'system' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600 dark:bg-emerald-400"></div>
-              )}
-            </button>
-            </div>
+      <Header
+        theme={theme}
+        onThemeToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        onNavigateToMonitor={() => setActivePanel('system')}
+      />
 
-            {/* Compact GPU Status - Right aligned */}
-            <CompactGPUStatus onClickMonitor={() => setActivePanel('system')} />
-          </div>
-        </div>
-        </nav>
-      </div>
-
-      <main>
+      <main
+        className={`
+          transition-all duration-300 ease-in-out
+          ${sidebar.collapsed ? 'ml-16' : 'ml-56'}
+        `}
+      >
         {activePanel === 'datasets' && <DatasetsPanel />}
         {activePanel === 'models' && <ModelsPanel />}
         {activePanel === 'training' && <TrainingPanel />}

@@ -87,7 +87,7 @@ export const ExtractionsPanel: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[80%] mx-auto px-6 py-8">
+    <div className="px-6 py-8">
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
