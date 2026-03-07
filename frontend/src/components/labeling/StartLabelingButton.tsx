@@ -5,10 +5,11 @@
  * Opens a modal to configure labeling options.
  */
 
-import React, { useState, useEffect } from 'react';
-import { Tag, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Tag, AlertCircle, Save, Trash2, ChevronDown } from 'lucide-react';
 import { useLabelingStore } from '../../stores/labelingStore';
 import { useLabelingPromptTemplatesStore } from '../../stores/labelingPromptTemplatesStore';
+import { useSavedConfigStore } from '../../stores/savedConfigStore';
 import { LabelingMethod } from '../../types/labeling';
 import { getLocalModels } from '../../api/models';
 import { fetchAPI } from '../../api/client';
@@ -62,8 +63,24 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
   const [savePoorQualityLabels, setSavePoorQualityLabels] = useState(false);
   const [poorQualitySampleRate, setPoorQualitySampleRate] = useState(100);  // Store as percentage 0-100
 
+  const [showSavedEndpoints, setShowSavedEndpoints] = useState(false);
+  const savedEndpointsRef = useRef<HTMLDivElement>(null);
+
   const { startLabeling, isLoading, error, clearError } = useLabelingStore();
   const { templates, fetchTemplates } = useLabelingPromptTemplatesStore();
+  const { endpoints: savedEndpoints, addEndpoint, removeEndpoint, touchEndpoint } = useSavedConfigStore();
+
+  // Close saved endpoints dropdown on outside click
+  useEffect(() => {
+    if (!showSavedEndpoints) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (savedEndpointsRef.current && !savedEndpointsRef.current.contains(e.target as Node)) {
+        setShowSavedEndpoints(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showSavedEndpoints]);
 
   // Fetch templates when modal opens
   useEffect(() => {
@@ -187,6 +204,11 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
     try {
       clearError();
 
+      // Auto-save endpoint URL when starting a job
+      if (labelingMethod === LabelingMethod.OPENAI_COMPATIBLE && openaiCompatibleEndpoint.trim()) {
+        addEndpoint(openaiCompatibleEndpoint.trim());
+      }
+
       await startLabeling({
         extraction_job_id: extractionId,
         labeling_method: labelingMethod,
@@ -290,7 +312,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value={LabelingMethod.OPENAI}>OpenAI (requires api-key)</option>
-                      <option value={LabelingMethod.OPENAI_COMPATIBLE}>OpenAI-Compatible (Ollama, vLLM, etc.)</option>
+                      <option value={LabelingMethod.OPENAI_COMPATIBLE}>OpenAI-Compatible (miLLM, Ollama, vLLM, etc.)</option>
                       <option value={LabelingMethod.LOCAL}>Local Model</option>
                     </select>
                   </div>
@@ -353,17 +375,91 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           Endpoint URL
                         </label>
                         <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={openaiCompatibleEndpoint}
-                            onChange={(e) => {
-                              setOpenaiCompatibleEndpoint(e.target.value);
-                              setCompatibleModels([]);
-                              setCompatibleModelsError(null);
+                          <div className="flex-1 relative" ref={savedEndpointsRef}>
+                            <div className="flex">
+                              <input
+                                type="text"
+                                value={openaiCompatibleEndpoint}
+                                onChange={(e) => {
+                                  setOpenaiCompatibleEndpoint(e.target.value);
+                                  setCompatibleModels([]);
+                                  setCompatibleModelsError(null);
+                                }}
+                                placeholder="/ollama/v1"
+                                className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-l-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowSavedEndpoints(!showSavedEndpoints)}
+                                className="px-2 py-2 bg-slate-900 border border-l-0 border-slate-700 rounded-r-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                title="Saved endpoints"
+                              >
+                                <ChevronDown className="w-4 h-4" />
+                              </button>
+                            </div>
+                            {showSavedEndpoints && (
+                              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                                {savedEndpoints.length === 0 ? (
+                                  <div className="px-3 py-2 text-xs text-slate-500">No saved endpoints</div>
+                                ) : (
+                                  savedEndpoints
+                                    .sort((a, b) => b.lastUsed - a.lastUsed)
+                                    .map((ep) => (
+                                      <div
+                                        key={ep.url}
+                                        className="flex items-center gap-1 px-3 py-1.5 hover:bg-slate-700 group"
+                                      >
+                                        <button
+                                          type="button"
+                                          className="flex-1 text-left text-sm text-slate-200 truncate"
+                                          onClick={() => {
+                                            setOpenaiCompatibleEndpoint(ep.url);
+                                            setCompatibleModels([]);
+                                            setCompatibleModelsError(null);
+                                            touchEndpoint(ep.url);
+                                            setShowSavedEndpoints(false);
+                                          }}
+                                          title={ep.url}
+                                        >
+                                          {ep.label ? (
+                                            <>
+                                              <span className="text-slate-300">{ep.label}</span>
+                                              <span className="text-slate-500 ml-1 text-xs">({ep.url})</span>
+                                            </>
+                                          ) : (
+                                            ep.url
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            removeEndpoint(ep.url);
+                                          }}
+                                          className="p-0.5 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                          title="Delete saved endpoint"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (openaiCompatibleEndpoint.trim()) {
+                                addEndpoint(openaiCompatibleEndpoint.trim());
+                              }
                             }}
-                            placeholder="/ollama/v1"
-                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                          />
+                            disabled={!openaiCompatibleEndpoint.trim()}
+                            className="px-2 py-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 hover:text-white disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors"
+                            title="Save endpoint URL"
+                          >
+                            <Save className="w-4 h-4" />
+                          </button>
                           <button
                             type="button"
                             onClick={fetchCompatibleModels}
@@ -374,7 +470,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           </button>
                         </div>
                         <p className="mt-1 text-xs text-slate-400">
-                          OpenAI-compatible API endpoint (Ollama, vLLM, etc.)
+                          OpenAI-compatible API endpoint (miLLM, Ollama, vLLM, etc.)
                         </p>
                       </div>
 
