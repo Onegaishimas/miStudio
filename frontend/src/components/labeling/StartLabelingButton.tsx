@@ -43,6 +43,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
   const [loadingOpenaiModels, setLoadingOpenaiModels] = useState(false);
   const [openaiModelsError, setOpenaiModelsError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [batchSize, setBatchSize] = useState<number>(10);  // Features per batch (1-100)
   const [maxExamples, setMaxExamples] = useState<number>(25);  // Number of examples per feature (10-50)
   const [maxTokens, setMaxTokens] = useState<number>(300);  // Max tokens in LLM response (50-8000)
   const [apiTimeout, setApiTimeout] = useState<number>(120);  // API timeout in seconds (30-600)
@@ -123,6 +124,19 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
       fetchSettings();
     }
   }, [isOpen]);
+
+  // Initialize batch size from DB settings default
+  useEffect(() => {
+    if (isOpen) {
+      const defaultBatchSizeSetting = settings.find(s => s.key === 'labeling_default_batch_size');
+      if (defaultBatchSizeSetting) {
+        const parsed = parseInt(defaultBatchSizeSetting.value);
+        if (!isNaN(parsed) && parsed >= 1 && parsed <= 100) {
+          setBatchSize(parsed);
+        }
+      }
+    }
+  }, [isOpen, settings]);
 
   // Auto-select default template when templates are loaded
   useEffect(() => {
@@ -258,7 +272,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
           labelingMethod === LabelingMethod.OPENAI_COMPATIBLE ? openaiCompatibleModel : undefined,
         local_model: labelingMethod === LabelingMethod.LOCAL ? localModel : undefined,
         prompt_template_id: selectedTemplateId || undefined,
-        batch_size: 10,
+        batch_size: batchSize,
         max_examples: maxExamples,  // Number of examples per feature
         max_tokens: maxTokens,  // Max tokens in LLM response
         api_timeout: apiTimeout,  // API request timeout in seconds
@@ -664,6 +678,24 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
               {/* RIGHT COLUMN */}
               <div className="flex flex-col">
                 <div className="space-y-4">
+                  {/* Batch Size */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Batch Size
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={batchSize}
+                      onChange={(e) => setBatchSize(Math.max(1, Math.min(100, parseInt(e.target.value) || 10)))}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <p className="mt-1 text-xs text-slate-400">
+                      Features to label per batch (1-100, default from Settings)
+                    </p>
+                  </div>
+
                   {/* Examples Per Feature */}
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">
