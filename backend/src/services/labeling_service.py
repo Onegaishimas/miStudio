@@ -206,7 +206,8 @@ class LabelingService:
             features_labeled=0,
             total_features=total_features,
             statistics={
-                "max_examples": config.get("max_examples")  # Store example count override (None = use template default)
+                "max_examples": config.get("max_examples"),  # Store example count override (None = use template default)
+                "batch_size": config.get("batch_size", 10),  # Features per batch (default 10)
             }
         )
 
@@ -668,10 +669,12 @@ class LabelingService:
                     logger.info(f"No template specified in job - using DB default: {template.name}")
 
             if template:
-                # Check for job-level max_examples override in statistics
+                # Check for job-level overrides in statistics
                 job_max_examples = None
+                job_batch_size = 10
                 if labeling_job.statistics and isinstance(labeling_job.statistics, dict):
                     job_max_examples = labeling_job.statistics.get('max_examples')
+                    job_batch_size = labeling_job.statistics.get('batch_size', 10)
 
                 # Use job override if provided, otherwise use template default
                 max_examples = job_max_examples if job_max_examples is not None else template.max_examples
@@ -837,7 +840,7 @@ class LabelingService:
                         # This ensures progress is saved incrementally if the job fails
                         label_source_value = LabelSource.LOCAL_LLM.value
                         labeled_at = datetime.now(timezone.utc)
-                        LABEL_BATCH_SIZE = 10
+                        LABEL_BATCH_SIZE = job_batch_size
 
                         logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
@@ -979,7 +982,7 @@ class LabelingService:
                     # This ensures progress is saved incrementally if the job fails
                     label_source_value = LabelSource.OPENAI.value
                     labeled_at = datetime.now(timezone.utc)
-                    LABEL_BATCH_SIZE = 10
+                    LABEL_BATCH_SIZE = job_batch_size
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
@@ -1147,7 +1150,7 @@ class LabelingService:
                     # This ensures progress is saved incrementally if the job fails
                     label_source_value = LabelSource.OPENAI.value  # Use OPENAI source for compatible endpoints
                     labeled_at = datetime.now(timezone.utc)
-                    LABEL_BATCH_SIZE = 10
+                    LABEL_BATCH_SIZE = job_batch_size
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
