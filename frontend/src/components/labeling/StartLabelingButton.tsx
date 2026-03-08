@@ -9,7 +9,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Tag, AlertCircle, Save, Trash2, ChevronDown } from 'lucide-react';
 import { useLabelingStore } from '../../stores/labelingStore';
 import { useLabelingPromptTemplatesStore } from '../../stores/labelingPromptTemplatesStore';
-import { useSavedConfigStore } from '../../stores/savedConfigStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { LabelingMethod } from '../../types/labeling';
 import { getLocalModels } from '../../api/models';
 import { fetchAPI } from '../../api/client';
@@ -68,7 +68,41 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
 
   const { startLabeling, isLoading, error, clearError } = useLabelingStore();
   const { templates, fetchTemplates } = useLabelingPromptTemplatesStore();
-  const { endpoints: savedEndpoints, addEndpoint, removeEndpoint, touchEndpoint } = useSavedConfigStore();
+  const { settings, upsert: upsertSetting, remove: removeSetting, fetchAll: fetchSettings } = useSettingsStore();
+
+  // Derive saved endpoints from DB-backed settings store
+  const savedEndpoints = settings
+    .filter((s) => s.category === 'endpoints')
+    .map((s) => {
+      try {
+        const parsed = JSON.parse(s.value) as { url: string; label?: string; lastUsed?: number };
+        return { ...parsed, _key: s.key };
+      } catch {
+        return { url: s.value, _key: s.key };
+      }
+    });
+
+  const addEndpoint = (url: string, label?: string) => {
+    const key = `endpoint:${url}`;
+    upsertSetting({
+      key,
+      value: JSON.stringify({ url, label: label || undefined, lastUsed: Date.now() }),
+      is_sensitive: false,
+      category: 'endpoints',
+    });
+  };
+
+  const removeEndpoint = (url: string) => {
+    const key = `endpoint:${url}`;
+    removeSetting(key);
+  };
+
+  const touchEndpoint = (url: string) => {
+    const ep = savedEndpoints.find((e) => e.url === url);
+    if (ep) {
+      addEndpoint(url, ep.label);
+    }
+  };
 
   // Close saved endpoints dropdown on outside click
   useEffect(() => {
@@ -82,10 +116,11 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showSavedEndpoints]);
 
-  // Fetch templates when modal opens
+  // Fetch templates and settings when modal opens
   useEffect(() => {
-    if (isOpen && templates.length === 0) {
-      fetchTemplates();
+    if (isOpen) {
+      if (templates.length === 0) fetchTemplates();
+      fetchSettings();
     }
   }, [isOpen]);
 
@@ -403,7 +438,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                                   <div className="px-3 py-2 text-xs text-slate-500">No saved endpoints</div>
                                 ) : (
                                   savedEndpoints
-                                    .sort((a, b) => b.lastUsed - a.lastUsed)
+                                    .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))
                                     .map((ep) => (
                                       <div
                                         key={ep.url}

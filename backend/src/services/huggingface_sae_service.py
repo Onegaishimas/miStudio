@@ -64,8 +64,19 @@ class HuggingFaceSAEService:
         Returns:
             Repository preview with file list and detected SAE paths
         """
-        # Use provided token, or settings token, but treat empty/whitespace/"None" as None
+        # Use provided token, or DB settings token, or env settings token
         token = access_token or settings.hf_token
+        if not token or not token.strip() or token.strip().lower() == "none":
+            try:
+                from ..models.app_setting import AppSetting
+                from ..core.encryption import decrypt_value
+                from ..core.database import SyncSessionLocal
+                with SyncSessionLocal() as db_session:
+                    db_setting = db_session.query(AppSetting).filter(AppSetting.key == "hf_token").first()
+                    if db_setting:
+                        token = decrypt_value(db_setting.value) if db_setting.is_sensitive else db_setting.value
+            except Exception:
+                pass
         if not token or not token.strip() or token.strip().lower() == "none":
             token = None
 
@@ -242,8 +253,19 @@ class HuggingFaceSAEService:
         Returns:
             Dict with download info including local_path, file_size, metadata
         """
-        # Use provided token, or settings token, but treat empty/whitespace/"None" as None
+        # Use provided token, or DB settings token, or env settings token
         token = access_token or settings.hf_token
+        if not token or not token.strip() or token.strip().lower() == "none":
+            try:
+                from ..models.app_setting import AppSetting
+                from ..core.encryption import decrypt_value
+                from ..core.database import SyncSessionLocal
+                with SyncSessionLocal() as db_session:
+                    db_setting = db_session.query(AppSetting).filter(AppSetting.key == "hf_token").first()
+                    if db_setting:
+                        token = decrypt_value(db_setting.value) if db_setting.is_sensitive else db_setting.value
+            except Exception:
+                pass
         if not token or not token.strip() or token.strip().lower() == "none":
             token = None
         local_dir.mkdir(parents=True, exist_ok=True)

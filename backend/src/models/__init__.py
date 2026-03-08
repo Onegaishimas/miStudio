@@ -24,6 +24,7 @@ from .external_sae import ExternalSAE, SAESource, SAEStatus, SAEFormat
 from .neuronpedia_export import NeuronpediaExportJob, ExportStatus
 from .feature_dashboard import FeatureDashboardData
 from .steering_experiment import SteeringExperiment
+from .app_setting import AppSetting
 
 __all__ = [
     "Dataset",
@@ -61,4 +62,5 @@ __all__ = [
     "ExportStatus",
     "FeatureDashboardData",
     "SteeringExperiment",
+    "AppSetting",
 ]

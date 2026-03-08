@@ -8,13 +8,14 @@ import {
   Sliders,
   FileText,
   Activity,
+  Settings,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import logoSvg from '../../assets/logo.svg';
 import { useUIStore } from '../../stores/uiStore';
 
-type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'saes' | 'steering' | 'templates' | 'system';
+type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
 
 const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'datasets', label: 'Datasets', icon: Database },
@@ -26,6 +27,10 @@ const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'steering', label: 'Steering', icon: Sliders },
   { id: 'templates', label: 'Templates', icon: FileText },
   { id: 'system', label: 'Monitor', icon: Activity },
+];
+
+const bottomNavItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 interface SidebarProps {
@@ -66,30 +71,57 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="p-2 space-y-0.5">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onPanelChange(item.id)}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
-              transition-all duration-200
-              ${activePanel === item.id
-                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
-              }
-              ${collapsed ? 'justify-center' : ''}
-            `}
-            title={collapsed ? item.label : undefined}
-          >
-            <item.icon className="w-5 h-5 flex-shrink-0" />
-            {!collapsed && (
-              <span className="text-sm font-medium">{item.label}</span>
-            )}
-          </button>
-        ))}
-      </nav>
+      {/* Navigation - flex column to push settings to bottom */}
+      <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+        <nav className="p-2 space-y-0.5 flex-1">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onPanelChange(item.id)}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
+                transition-all duration-200
+                ${activePanel === item.id
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
+                }
+                ${collapsed ? 'justify-center' : ''}
+              `}
+              title={collapsed ? item.label : undefined}
+            >
+              <item.icon className="w-5 h-5 flex-shrink-0" />
+              {!collapsed && (
+                <span className="text-sm font-medium">{item.label}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* Bottom nav (Settings) */}
+        <div className="p-2 border-t border-slate-200 dark:border-slate-700/50">
+          {bottomNavItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onPanelChange(item.id)}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
+                transition-all duration-200
+                ${activePanel === item.id
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
+                }
+                ${collapsed ? 'justify-center' : ''}
+              `}
+              title={collapsed ? item.label : undefined}
+            >
+              <item.icon className="w-5 h-5 flex-shrink-0" />
+              {!collapsed && (
+                <span className="text-sm font-medium">{item.label}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Collapse Toggle */}
       <button
