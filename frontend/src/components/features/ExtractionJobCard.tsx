@@ -764,133 +764,83 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
     return parts.length > 0 ? parts.join(' ') : '<1s';
   };
 
-  const getStatusBadge = () => {
-    const baseClasses = 'px-3 py-1 rounded-full text-sm font-medium';
-
-    switch (extraction.status) {
-      case 'completed':
-        return (
-          <span className={`${baseClasses} bg-emerald-900/30 text-emerald-400 flex items-center gap-1`}>
-            <CheckCircle className="w-4 h-4" />
-            Completed
-          </span>
-        );
-      case 'extracting':
-        return (
-          <span className={`${baseClasses} bg-blue-900/30 text-blue-400 flex items-center gap-1`}>
-            <Loader className="w-4 h-4 animate-spin" />
-            Extracting
-          </span>
-        );
-      case 'finalizing':
-        return (
-          <span className={`${baseClasses} bg-amber-900/30 text-amber-400 flex items-center gap-1`}>
-            <Loader className="w-4 h-4 animate-spin" />
-            Saving
-          </span>
-        );
-      case 'queued':
-        return (
-          <span className={`${baseClasses} bg-yellow-900/30 text-yellow-400 flex items-center gap-1`}>
-            <Clock className="w-4 h-4" />
-            Queued
-          </span>
-        );
-      case 'failed':
-        return (
-          <span className={`${baseClasses} bg-red-900/30 text-red-400 flex items-center gap-1`}>
-            <XCircle className="w-4 h-4" />
-            Failed
-          </span>
-        );
-      case 'deleting':
-        return (
-          <span className={`${baseClasses} bg-orange-900/30 text-orange-400 flex items-center gap-1`}>
-            <Loader className="w-4 h-4 animate-spin" />
-            Deleting
-          </span>
-        );
-      default:
-        return (
-          <span className={`${baseClasses} bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300`}>
-            Unknown
-          </span>
-        );
-    }
-  };
-
   const progress = (extraction.progress || 0) * 100;
   const deletionProgress = (extraction.deletion_progress || 0) * 100;
 
   return (
-    <div className={`${COMPONENTS.card.base} p-6 ${COMPONENTS.border.hover} transition-colors`}>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-start gap-3 flex-1">
-          <Zap className="w-6 h-6 text-emerald-400 flex-shrink-0 mt-1" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-lg text-slate-900 dark:text-slate-100 truncate">
-                {extraction.source_type === 'external_sae' && extraction.sae_name
-                  ? `${extraction.sae_name} (${getModelDisplayName()})`
-                  : `${getModelDisplayName()} - ${extraction.dataset_name || 'Unknown Dataset'}`}
-              </h3>
-              {extraction.source_type === 'external_sae' && (
-                <span className="px-2 py-0.5 text-xs font-medium bg-purple-900/30 text-purple-400 rounded">SAE</span>
-              )}
-              {extraction.batch_id && (
-                <span
-                  className="px-2 py-0.5 text-xs font-medium bg-blue-900/30 text-blue-400 rounded"
-                  title={`Batch: ${extraction.batch_id}`}
-                >
-                  {extraction.batch_position}/{extraction.batch_total}
+    <div className={`${COMPONENTS.card.base} px-4 py-3 ${COMPONENTS.border.hover} transition-colors`}>
+      {/* Compact Header: Status, Title, Info, and Actions - Single Row */}
+      <div className={`flex items-center justify-between ${isActive ? 'mb-2' : 'mb-1'}`}>
+        {/* Left: Status Icon + Title + Key Info */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className={`p-1.5 rounded-lg flex-shrink-0 ${
+            isCompleted ? 'bg-emerald-500/10 text-emerald-400' :
+            isFailed ? 'bg-red-500/10 text-red-400' :
+            isDeleting ? 'bg-orange-500/10 text-orange-400' :
+            isActive ? 'bg-blue-500/10 text-blue-400' :
+            'bg-slate-500/10 text-slate-400'
+          }`}>
+            {isCompleted ? <CheckCircle className="w-5 h-5" /> :
+             isFailed ? <XCircle className="w-5 h-5" /> :
+             isDeleting ? <Loader className="w-5 h-5 animate-spin" /> :
+             isActive ? <Loader className="w-5 h-5 animate-spin" /> :
+             <Clock className="w-5 h-5" />}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap flex-1 min-w-0">
+            <span className={`text-sm font-semibold ${COMPONENTS.text.primary} truncate`}>
+              {extraction.source_type === 'external_sae' && extraction.sae_name
+                ? `${extraction.sae_name} (${getModelDisplayName()})`
+                : `${getModelDisplayName()} - ${extraction.dataset_name || 'Unknown Dataset'}`}
+            </span>
+            {extraction.source_type === 'external_sae' && (
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-900/30 text-purple-400 rounded">SAE</span>
+            )}
+            {extraction.batch_id && (
+              <span
+                className="px-1.5 py-0.5 text-xs font-medium bg-blue-900/30 text-blue-400 rounded"
+                title={`Batch: ${extraction.batch_id}`}
+              >
+                {extraction.batch_position}/{extraction.batch_total}
+              </span>
+            )}
+            <span className={`text-xs px-2 py-0.5 rounded ${
+              isCompleted ? 'bg-emerald-500/10 text-emerald-400' :
+              isFailed ? 'bg-red-500/10 text-red-400' :
+              isDeleting ? 'bg-orange-500/10 text-orange-400' :
+              isActive ? 'bg-blue-500/10 text-blue-400' :
+              'bg-yellow-500/10 text-yellow-400'
+            }`}>
+              {extraction.status === 'completed' ? 'Completed' :
+               extraction.status === 'failed' ? 'Failed' :
+               extraction.status === 'deleting' ? 'Deleting' :
+               extraction.status === 'extracting' ? 'Extracting' :
+               extraction.status === 'finalizing' ? 'Saving' :
+               extraction.status === 'queued' ? 'Queued' : 'Unknown'}
+            </span>
+            {isCompleted && getNlpStatusBadge()}
+            <span className={`text-xs ${COMPONENTS.text.secondary}`}>
+              Started: {format(new Date(extraction.created_at), 'MMM d, h:mm a')}
+            </span>
+            {isCompleted && extraction.completed_at && (
+              <span className="text-xs text-emerald-400 font-medium">
+                Completed in {getElapsedTime()}
+              </span>
+            )}
+            {isActive && (
+              <>
+                <span className="text-xs text-blue-400 font-medium">
+                  Elapsed: {getElapsedTime()}
                 </span>
-              )}
-              {getStatusBadge()}
-              {isCompleted && getNlpStatusBadge()}
-              {/* Expand/Collapse button for completed extractions */}
-              {isCompleted && (
-                <button
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className={`p-1 rounded ml-auto ${COMPONENTS.button.ghost}`}
-                  title={isExpanded ? 'Collapse features' : 'Expand features'}
-                >
-                  {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                </button>
-              )}
-            </div>
-            <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
-              {isCompleted && extraction.statistics && (
-                <>
-                  <span className="text-emerald-400 font-medium">{extraction.statistics.total_features?.toLocaleString()} features</span>
-                  <span>·</span>
-                  <span>{extraction.statistics.interpretable_count !== undefined && extraction.statistics.total_features
-                    ? `${((extraction.statistics.interpretable_count / extraction.statistics.total_features) * 100).toFixed(1)}% interpretable`
-                    : ''}</span>
-                  <span>·</span>
-                  <span>{extraction.statistics.avg_activation_frequency !== undefined
-                    ? `${(extraction.statistics.avg_activation_frequency * 100).toFixed(2)}% activation`
-                    : ''}</span>
-                  <span>·</span>
-                </>
-              )}
-              <span>{format(new Date(extraction.created_at), 'MMM d h:mm a')}</span>
-              {extraction.completed_at && (
-                <>
-                  <span>→</span>
-                  <span>{format(new Date(extraction.completed_at), 'MMM d h:mm a')}</span>
-                  <span className="text-emerald-400 font-medium">({getElapsedTime()})</span>
-                </>
-              )}
-              {isActive && (
-                <span className="text-blue-400 font-medium">Elapsed: {getElapsedTime()}</span>
-              )}
-            </div>
+                <span className="text-xs text-emerald-400 font-medium">
+                  {progress.toFixed(1)}%
+                </span>
+              </>
+            )}
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
           {isActive && onCancel && (
             <button
               type="button"
@@ -1058,31 +1008,65 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               }}
             />
           )}
+          {/* Expand/Collapse button for completed extractions */}
+          {isCompleted && (
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className={`p-1.5 rounded-lg ${COMPONENTS.button.ghost}`}
+              title={isExpanded ? 'Collapse features' : 'Expand features'}
+            >
+              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          )}
           {(isCompleted || isFailed) && !isDeleting && onDelete && (
             <button
               type="button"
               onClick={() => {
-                console.log(`[ExtractionJobCard] Delete button clicked for extraction ${extraction.id}`);
-                console.log(`[ExtractionJobCard] Extraction status: ${extraction.status}, NLP status: ${extraction.nlp_status}`);
                 if (window.confirm('Are you sure you want to delete this extraction?')) {
-                  console.log(`[ExtractionJobCard] User confirmed deletion`);
                   onDelete();
-                } else {
-                  console.log(`[ExtractionJobCard] User cancelled deletion`);
                 }
               }}
-              className={`p-2 rounded-lg ${COMPONENTS.button.ghost}`}
+              className={`p-1.5 rounded-lg ${COMPONENTS.button.ghost}`}
               title="Delete extraction"
             >
-              <Trash2 className="w-5 h-5" />
+              <Trash2 className="w-4 h-4" />
             </button>
           )}
         </div>
       </div>
 
+      {/* Compact details for completed/failed jobs */}
+      {!isActive && !isDeleting && (
+        <div className={`text-xs ${COMPONENTS.text.secondary} space-y-0.5`}>
+          <p>
+            {isCompleted && extraction.statistics && (
+              <>
+                <span className="text-emerald-400 font-medium">{extraction.statistics.total_features?.toLocaleString()} features</span>
+                {' · '}
+                {extraction.statistics.interpretable_count !== undefined && extraction.statistics.total_features
+                  ? `${((extraction.statistics.interpretable_count / extraction.statistics.total_features) * 100).toFixed(1)}% interpretable`
+                  : ''}
+                {' · '}
+                {extraction.statistics.avg_activation_frequency !== undefined
+                  ? `${(extraction.statistics.avg_activation_frequency * 100).toFixed(2)}% activation`
+                  : ''}
+                {' · '}
+              </>
+            )}
+            {format(new Date(extraction.created_at), 'MMM d h:mm a')}
+            {extraction.completed_at && (
+              <> → {format(new Date(extraction.completed_at), 'MMM d h:mm a')}</>
+            )}
+            {extraction.completed_at && (
+              <span className="text-emerald-400 font-medium"> ({getElapsedTime()})</span>
+            )}
+          </p>
+        </div>
+      )}
+
       {/* Progress Bar for Active Extractions */}
       {isActive && extraction.progress !== null && extraction.progress !== undefined && (
-        <div className="mb-4 space-y-3">
+        <div className="mb-2 space-y-2">
           {/* Progress info row */}
           <div className="flex items-center justify-between text-sm mb-2">
             <span className="text-slate-600 dark:text-slate-400">
@@ -1958,7 +1942,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       )}
 
       {/* Job Details */}
-      <div className={`mt-4 pt-4 border-t ${COMPONENTS.border.default}`}>
+      <div className={`mt-2 pt-2 border-t ${COMPONENTS.border.default}`}>
         <details className="text-sm">
           <summary className={`cursor-pointer ${COMPONENTS.text.secondary} hover:text-slate-300 dark:hover:text-slate-200 transition-colors`}>
             Job Details
