@@ -83,10 +83,16 @@ export async function fetchAPI<T>(
     const error = await response.json().catch(() => ({
       detail: `HTTP error! status: ${response.status}`,
     }));
-    throw new APIError(
-      response.status,
-      error.detail || error.message || 'API request failed'
-    );
+    // FastAPI validation errors return detail as an array of objects
+    let detail: string;
+    if (Array.isArray(error.detail)) {
+      detail = error.detail
+        .map((d: any) => `${d.loc?.join('.')}: ${d.msg}`)
+        .join('; ');
+    } else {
+      detail = error.detail || error.message || 'API request failed';
+    }
+    throw new APIError(response.status, detail);
   }
 
   // Handle 204 No Content responses (e.g., DELETE)
