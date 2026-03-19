@@ -1077,8 +1077,12 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
         import re
 
         try:
-            # Clean markdown code blocks if present (common with Ollama/local models)
+            # Strip thinking tags from reasoning models (e.g. <think>...</think>)
             cleaned_response = response.strip()
+            think_pattern = re.compile(r'<think>.*?</think>\s*', re.DOTALL)
+            cleaned_response = think_pattern.sub('', cleaned_response).strip()
+
+            # Clean markdown code blocks if present (common with Ollama/local models)
             if cleaned_response.startswith("```"):
                 # Remove markdown code fence
                 lines = cleaned_response.split('\n')
