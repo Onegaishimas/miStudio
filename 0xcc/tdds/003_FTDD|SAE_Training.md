@@ -1,8 +1,8 @@
 # Technical Design Document: SAE Training
 
 **Document ID:** 003_FTDD|SAE_Training
-**Version:** 1.1
-**Last Updated:** 2025-12-16
+**Version:** 1.2
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Related PRD:** [003_FPRD|SAE_Training](../prds/003_FPRD|SAE_Training.md)
 
@@ -57,7 +57,7 @@
 │  │  ┌────────────────────────────────────────────────┐     ││
 │  │  │              train_sae_task                    │     ││
 │  │  │  ┌────────────────┐  ┌────────────────────┐   │     ││
-│  │  │  │SparseAutoencoder│  │   JumpReLUSAE     │   │     ││
+│  │  │  │SparseAutoencoder│  │JumpReLUSAE│TopKSAE│   │     ││
 │  │  │  └────────────────┘  └────────────────────┘   │     ││
 │  │  └────────────────────────────────────────────────┘     ││
 │  └─────────────────────────────────────────────────────────┘│
@@ -86,6 +86,14 @@
 │  (Standard)    │  │               │   │               │
 │  L1 penalty    │  │  L0 penalty   │   │  Skip connect │
 └───────────────┘   └───────────────┘   └───────────────┘
+        │                                       │
+        ▼                                       │
+┌───────────────┐   ┌───────────────┐           │
+│   TopKSAE     │   │ TranscoderSAE │           │
+│               │   │               │           │
+│  Structural   │   │  Layer-to-    │           │
+│  sparsity     │   │  layer map    │           │
+└───────────────┘   └───────────────┘           │
 ```
 
 ### 2.2 Standard SAE Implementation
@@ -145,6 +153,229 @@ class JumpReLUSAE(nn.Module):
         }
 ```
 
+### 2.4 TopK SAE (Structural Sparsity)
+```python
+class TopKSAE(nn.Module):
+    """
+    TopK SAE enforces exact sparsity by keeping only top-k activations.
+    Unlike L1/L0 penalty approaches, sparsity is structural (guaranteed).
+    """
+    def __init__(self, d_in: int, d_sae: int, k: int = 50, ...):
+        super().__init__()
+        self.k = k  # Exact number of active features per sample
+        # ... standard encoder/decoder params
+
+    def encode(self, x: Tensor) -> Tensor:
+        pre_act = x @ self.W_enc + self.b_enc
+        # Keep only top-k activations, zero out the rest
+        topk_values, topk_indices = pre_act.topk(self.k, dim=-1)
+        z = torch.zeros_like(pre_act)
+        z.scatter_(-1, topk_indices, F.relu(topk_values))
+        return z
+
+    def loss(self, x, x_hat, z, aux):
+        recon_loss = F.mse_loss(x_hat, aux["x_norm"])
+        # Auxiliary loss for dead feature prevention
+        aux_loss = self._compute_aux_loss(aux["pre_act"], z)
+        return {
+            "loss": recon_loss + self.aux_coeff * aux_loss,
+            "recon_loss": recon_loss,
+            "aux_loss": aux_loss,
+            "l0": self.k,  # Always exactly k by construction
+        }
+
+    def _compute_aux_loss(self, pre_act: Tensor, z: Tensor) -> Tensor:
+        """
+        Auxiliary loss to prevent dead features.
+        Encourages features not in top-k to have non-zero pre-activations.
+        Uses the top-k of the complement (features NOT selected) to create
+        a secondary reconstruction that pulls dead features toward utility.
+        """
+        # Get dead feature mask (not in top-k)
+        dead_mask = (z == 0)
+        dead_pre_act = pre_act * dead_mask.float()
+        # Top-k of the dead features
+        dead_topk_values, dead_topk_indices = dead_pre_act.topk(self.k, dim=-1)
+        z_aux = torch.zeros_like(pre_act)
+        z_aux.scatter_(-1, dead_topk_indices, F.relu(dead_topk_values))
+        x_hat_aux = z_aux @ self.W_dec + self.b_dec
+        return F.mse_loss(x_hat_aux, aux["x_norm"])
+```
+
+**Key Design Decisions (TopK):**
+- **Structural sparsity**: Exactly `k` features active per sample -- no tuning of sparsity penalty
+- **No sparsity coefficient needed**: L0 is fixed at `k` by construction
+- **Aux loss for dead features**: Secondary reconstruction using complement features prevents dead neurons
+- **Straight-through estimation**: Gradients flow through the top-k selection via STE
+
+### 2.5 Activation Normalization Pipeline
+
+Three normalization modes are supported, applied to activations before SAE encoding:
+
+| Mode | Description | When to Use |
+|------|-------------|-------------|
+| `constant_norm_rescale` | Normalize to constant L2 norm, rescale reconstruction | Gemma Scope default; stabilizes training across layers |
+| `anthropic_rescale` | Anthropic-style: subtract mean, divide by sqrt(d) | Matches Anthropic's published SAE methodology |
+| `none` | No normalization applied | When activations are already well-conditioned |
+
+```python
+def normalize_activations(x: Tensor, mode: str) -> Tuple[Tensor, dict]:
+    if mode == "constant_norm_rescale":
+        norm = x.norm(dim=-1, keepdim=True)
+        x_normed = x * (x.shape[-1] ** 0.5) / (norm + 1e-8)
+        return x_normed, {"scaling_factor": norm / (x.shape[-1] ** 0.5)}
+    elif mode == "anthropic_rescale":
+        mean = x.mean(dim=-1, keepdim=True)
+        x_centered = x - mean
+        scale = (x.shape[-1] ** 0.5)
+        return x_centered / scale, {"mean": mean, "scale": scale}
+    else:  # "none"
+        return x, {}
+```
+
+### 2.6 JumpReLU STE-Based L0 with Sigmoid Approximation
+
+The JumpReLU L0 penalty requires special handling because the indicator function
+`(z > 0)` is non-differentiable. The implementation uses a Straight-Through Estimator (STE)
+with sigmoid approximation to make the threshold parameters learnable:
+
+```python
+# Non-differentiable (WRONG for loss -- thresholds get no gradient):
+l0 = (z > 0).float().sum(dim=-1).mean()
+
+# STE sigmoid approximation (CORRECT):
+# sigma((pre_act - theta) / epsilon) approximates the step function smoothly
+epsilon = 1e-3  # Temperature for sigmoid sharpness
+l0_differentiable = torch.sigmoid((pre_act - threshold) / epsilon)
+```
+
+**Count-based L0 formulation** (Gemma Scope paper):
+```python
+# WRONG -- fraction-based (.mean() over both batch and d_sae):
+l0_loss = l0_differentiable.mean()  # Value ~0.01, gradients too weak per-threshold
+
+# CORRECT -- count-based (sum over d_sae, mean over batch):
+# Paper: L = E_batch[ ||x - x_hat||^2 + lambda * sum_i H(z_i - theta_i) ]
+l0_loss = l0_differentiable.sum(dim=-1).mean()  # Value ~50 (active feature count)
+```
+
+This distinction is critical: with `d_sae=16384`, fraction-based L0 makes each threshold's
+gradient `d_sae` times too weak. The count-based formulation matches the paper and ensures
+each threshold receives appropriately scaled gradients.
+
+### 2.7 SAELens-Style Initialization
+
+All SAE architectures follow SAELens initialization patterns for community compatibility:
+
+```python
+def _init_weights_saelens(self):
+    """SAELens-compatible weight initialization."""
+    # Decoder: random directions, normalized to unit norm per feature
+    nn.init.kaiming_uniform_(self.W_dec)
+    with torch.no_grad():
+        self.W_dec.data = F.normalize(self.W_dec.data, dim=-1)
+
+    # Encoder: initialized as transpose of decoder (W_enc = W_dec.T)
+    with torch.no_grad():
+        self.W_enc.data = self.W_dec.data.T.clone()
+
+    # Biases: zero initialized
+    nn.init.zeros_(self.b_enc)
+    nn.init.zeros_(self.b_dec)
+
+    # JumpReLU thresholds: initialized to 0.1 (log space: log(0.1))
+    if hasattr(self, 'log_threshold'):
+        nn.init.constant_(self.log_threshold, math.log(0.1))
+```
+
+### 2.8 Decoder Bias Centering
+
+The decoder bias (`b_dec`) is periodically re-centered to the mean of the training data.
+This prevents the bias from absorbing reconstruction error that should be handled by features:
+
+```python
+def update_decoder_bias(sae, activation_mean: Tensor):
+    """
+    Set b_dec to the geometric mean of training activations.
+    Called periodically (e.g., every 1000 steps) during training.
+    """
+    with torch.no_grad():
+        sae.b_dec.data = activation_mean.clone()
+```
+
+### 2.9 Sparsity Warmup Mechanism
+
+JumpReLU and TopK SAEs use a sparsity warmup schedule to prevent early training collapse.
+The sparsity penalty ramps linearly from 0 to its target value over a warmup period:
+
+```python
+def get_sparsity_coeff(step: int, warmup_steps: int, target_coeff: float) -> float:
+    """
+    Linear warmup for sparsity coefficient.
+    Default warmup: 10,000 steps for JumpReLU.
+    """
+    if step >= warmup_steps:
+        return target_coeff
+    return target_coeff * (step / warmup_steps)
+```
+
+**Rationale:** Without warmup, the sparsity penalty dominates early training when
+reconstruction hasn't converged yet, leading to dead features. The warmup allows the
+encoder/decoder to learn basic reconstruction before sparsity pressure is applied.
+
+### 2.10 Framework Config Registry (Frontend)
+
+The frontend uses a centralized config registry (`frameworkConfigs.ts`) that provides
+paper-grounded default hyperparameters for each SAE architecture:
+
+```typescript
+// frontend/src/config/frameworkConfigs.ts
+export const frameworkConfigs: Record<Architecture, FrameworkConfig> = {
+  standard: {
+    displayName: "Standard (ReLU + L1)",
+    paper: "Cunningham et al. 2023",
+    defaults: {
+      latent_dim_multiplier: 8,
+      sparsity_coeff: 5e-3,     // L1 scale
+      learning_rate: 1e-4,
+      batch_size: 4096,
+      normalize_activations: "none",
+    },
+    hiddenFields: ["l0_target"],  // Not applicable to L1-based
+  },
+  jumprelu: {
+    displayName: "JumpReLU (Gemma Scope)",
+    paper: "Rajamanoharan et al. 2024",
+    defaults: {
+      latent_dim_multiplier: 16,
+      sparsity_coeff: 1e-3,     // L0 scale (NOT l1_alpha!)
+      learning_rate: 5e-5,
+      batch_size: 4096,
+      normalize_activations: "constant_norm_rescale",
+      sparsity_warmup_steps: 10000,
+    },
+    hiddenFields: [],
+  },
+  topk: {
+    displayName: "TopK (Structural Sparsity)",
+    paper: "Gao et al. 2024",
+    defaults: {
+      latent_dim_multiplier: 16,
+      k: 50,
+      aux_coeff: 1/32,
+      learning_rate: 5e-5,
+      batch_size: 4096,
+    },
+    hiddenFields: ["sparsity_coeff"],  // Not applicable -- k controls sparsity
+  },
+  // ... skip, transcoder
+};
+```
+
+The registry ensures that when users switch architectures in the training form, the
+defaults change to paper-recommended values. This prevents common mistakes like using
+L1-scale `sparsity_coeff` (0.005) with JumpReLU which expects L0-scale (0.001).
+
 ---
 
 ## 3. Database Schema
@@ -158,7 +389,7 @@ CREATE TABLE trainings (
     dataset_id UUID REFERENCES datasets(id),
     tokenization_id UUID REFERENCES dataset_tokenizations(id),
     layer INTEGER NOT NULL,
-    architecture VARCHAR(50) NOT NULL,  -- standard, jumprelu, skip, transcoder
+    architecture VARCHAR(50) NOT NULL,  -- standard, jumprelu, topk, skip, transcoder
     hyperparameters JSONB NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     current_step INTEGER DEFAULT 0,
@@ -171,7 +402,7 @@ CREATE TABLE trainings (
     completed_at TIMESTAMP,
 
     CONSTRAINT trainings_arch_check CHECK (
-        architecture IN ('standard', 'jumprelu', 'skip', 'transcoder')
+        architecture IN ('standard', 'jumprelu', 'topk', 'skip', 'transcoder')
     )
 );
 ```

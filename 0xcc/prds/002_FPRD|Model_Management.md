@@ -1,8 +1,8 @@
 # Feature PRD: Model Management
 
 **Document ID:** 002_FPRD|Model_Management
-**Version:** 1.0 (MVP Complete)
-**Last Updated:** 2025-12-05
+**Version:** 1.1 (Dynamic Discovery & LFM2 Support)
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
 
@@ -201,6 +201,9 @@ CREATE TABLE models (
 - [x] View architecture modal
 - [x] Delete model
 - [x] Memory estimation accuracy
+- [x] LFM2 (Liquid Foundation Model) architecture support (Jan 2026)
+- [x] Dynamic layer discovery — any transformer works without code changes (Feb 2026)
+- [x] trust_remote_code checkbox for custom model architectures (Jan 2026)
 
 ---
 

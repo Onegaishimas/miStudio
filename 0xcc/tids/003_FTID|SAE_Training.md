@@ -1,8 +1,8 @@
 # Technical Implementation Document: SAE Training
 
 **Document ID:** 003_FTID|SAE_Training
-**Version:** 1.0
-**Last Updated:** 2025-12-05
+**Version:** 1.1
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Related TDD:** [003_FTDD|SAE_Training](../tdds/003_FTDD|SAE_Training.md)
 
@@ -16,6 +16,7 @@
 3. JumpReLU SAE (L0 penalty)
 4. Skip SAE (residual connections)
 5. Transcoder SAE (layer-to-layer)
+6. TopK SAE (structural sparsity)
 
 ### Phase 2: Training Infrastructure
 1. Database migration (trainings, training_metrics, checkpoints)
@@ -39,7 +40,22 @@
 
 ## 2. File-by-File Implementation
 
-### 2.1 SAE Architectures
+### 2.1 SAE Architecture Files
+
+The 6 framework implementations live in `backend/src/ml/architectures/`:
+
+| File | Architecture | Sparsity Mechanism | Key Param |
+|------|-------------|-------------------|-----------|
+| `standard_sae.py` | Standard (ReLU + L1) | L1 penalty on activations | `sparsity_coeff` (L1 scale, ~5e-3) |
+| `jumprelu_sae.py` | JumpReLU (Gemma Scope) | Learnable thresholds + L0 | `sparsity_coeff` (L0 scale, ~1e-3) |
+| `topk_sae.py` | TopK | Structural (keep top-k) | `k` (exact active count) |
+| `skip_sae.py` | Skip (residual) | L1 penalty + skip connection | `sparsity_coeff` + `skip_coeff` |
+| `transcoder_sae.py` | Transcoder | L1 penalty, different d_in/d_out | `sparsity_coeff` |
+| `base_sae.py` | Abstract base class | N/A | N/A |
+
+All architectures inherit from `BaseSAE` and implement `encode()`, `decode()`, `forward()`, and `loss()`.
+
+### 2.2 SAE Architectures (Core Code)
 
 #### `backend/src/ml/sparse_autoencoder.py`
 ```python
@@ -291,6 +307,66 @@ class TranscoderSAE(BaseSAE):
 - JumpReLU uses log-space for threshold stability
 - Transcoder has different input/output dimensions
 
+### 2.3 Framework Config Registry (Frontend)
+
+#### `frontend/src/config/frameworkConfigs.ts`
+
+This file provides paper-grounded default hyperparameters for each architecture.
+When the user selects an architecture in the training form, defaults are populated
+from this registry.
+
+**Critical implementation detail -- sparsity_coeff scaling:**
+- L1-based SAEs (Standard, Skip, Transcoder): `sparsity_coeff` is at **L1 scale** (~5e-3).
+  The loss term is `sparsity_coeff * z.abs().sum(dim=-1).mean()`.
+- L0-based SAEs (JumpReLU): `sparsity_coeff` is at **L0 scale** (~1e-3).
+  The loss term is `sparsity_coeff * sigmoid_l0.sum(dim=-1).mean()` where sigmoid_l0
+  counts ~50 active features per sample.
+- TopK SAEs: `sparsity_coeff` is **not applicable** -- sparsity is structural via `k`.
+
+**Do NOT fall back `sparsity_coeff` to `l1_alpha` when switching architectures.**
+These are completely different scales. At L0=50 active features:
+- L0-scale: `1e-3 * 50 = 0.05` (correct)
+- L1-scale: `5e-3 * 50 = 0.25` (way too strong for L0, collapses training)
+
+The `frameworkConfigs.ts` registry enforces this separation by providing architecture-specific
+defaults and hiding irrelevant fields (e.g., `sparsity_coeff` hidden for TopK).
+
+### 2.4 Multi-Extraction Training via Cached Activations
+
+Training can use pre-extracted and cached activations instead of extracting on-the-fly.
+This enables training multiple SAEs on the same activations without re-running the model:
+
+```
+Flow: Extract once -> Cache to disk -> Train many SAEs
+
+1. Extraction phase (one-time):
+   - Run model forward pass on full dataset
+   - Save activations per layer to .safetensors files
+   - Store metadata (model, layer, hook_point, dataset, shape)
+
+2. Training phase (repeated):
+   - Load cached activations from disk
+   - Create DataLoader over cached tensors
+   - Train SAE without needing the source model loaded
+   - Multiple SAEs can train on same cached activations
+```
+
+```python
+# In training task: check for cached activations
+cached_path = Path(settings.data_dir) / "activations" / f"{model_id}_{layer}_{hook_point}"
+if cached_path.exists():
+    # Load from cache -- no model needed on GPU
+    activations = load_cached_activations(cached_path)
+else:
+    # Extract fresh -- requires model on GPU
+    activations = extract_and_cache(model, dataset, layer, hook_point, cached_path)
+```
+
+This pattern is especially important for:
+- Training multiple architectures on the same activations for comparison
+- Iterating on hyperparameters without re-extracting
+- Running on machines with limited GPU memory (model not needed during SAE training)
+
 #### `backend/src/ml/activation_extraction.py`
 ```python
 import torch
@@ -362,7 +438,7 @@ class ActivationExtractor:
 - Clear hooks after extraction to avoid memory leaks
 - Support multiple hook points (residual stream, MLP, attention)
 
-### 2.2 Training Service
+### 2.5 Training Service
 
 #### `backend/src/services/training_service.py`
 ```python
@@ -438,7 +514,7 @@ class TrainingService:
         ).order_by(TrainingMetric.step).all()
 ```
 
-### 2.3 Training Task
+### 2.6 Training Task
 
 #### `backend/src/workers/training_tasks.py`
 ```python
@@ -634,7 +710,7 @@ def save_final_model(sae, training_id: str, config: dict) -> str:
 - Regular checkpoint saving for recovery
 - WebSocket emission at configurable intervals
 
-### 2.4 Frontend Components
+### 2.7 Frontend Components
 
 #### `frontend/src/components/training/TrainingCard.tsx`
 ```typescript
@@ -894,6 +970,29 @@ recon_loss = (x - x_hat).pow(2).sum()
 
 # RIGHT - Mean reduction
 recon_loss = (x - x_hat).pow(2).mean()
+```
+
+### Pitfall 4: Sparsity Coefficient Scale Mismatch
+```python
+# WRONG - Using L1 scale for JumpReLU
+# When switching from Standard to JumpReLU, do NOT keep sparsity_coeff=5e-3
+# JumpReLU L0 counts ~50 features: 5e-3 * 50 = 0.25 (too strong, kills training)
+
+# RIGHT - Use architecture-appropriate scale
+# Standard (L1): sparsity_coeff = 5e-3 (penalty on z.abs().sum(dim=-1).mean())
+# JumpReLU (L0): sparsity_coeff = 1e-3 (penalty on sigmoid_l0.sum(dim=-1).mean())
+# TopK: no sparsity_coeff needed (structural sparsity via k)
+```
+
+### Pitfall 5: Fraction vs Count L0
+```python
+# WRONG - Fraction-based L0 for loss (gradients too weak)
+l0_loss = sparsity_coeff * l0_differentiable.mean()
+
+# RIGHT - Count-based L0 for loss (paper formulation)
+l0_loss = sparsity_coeff * l0_differentiable.sum(dim=-1).mean()
+
+# Note: fraction-based L0 is fine for LOGGING/DISPLAY, just not for the loss term
 ```
 
 ---

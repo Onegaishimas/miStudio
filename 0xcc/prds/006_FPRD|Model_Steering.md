@@ -1,9 +1,9 @@
 # Feature PRD: Model Steering
 
 **Document ID:** 006_FPRD|Model_Steering
-**Version:** 1.1 (Combined Mode Enhancement)
-**Last Updated:** 2026-01-24
-**Status:** Partially Implemented (FR-2.5 Planned)
+**Version:** 2.0 (Celery Async Steering & Combined Mode)
+**Last Updated:** 2026-03-21
+**Status:** Implemented
 **Priority:** P0 (Core Feature)
 
 ---
@@ -34,7 +34,7 @@ A comprehensive steering interface with feature selection, strength control, com
 | FR-1.2 | Search features by label | Implemented |
 | FR-1.3 | Select multiple features | Implemented |
 | FR-1.4 | View feature details before selection | Implemented |
-| FR-1.5 | Quick-select from recent features | Planned |
+| FR-1.5 | Quick-select from recent features | Implemented |
 
 ### 2.2 Steering Configuration
 | Requirement | Description | Status |
@@ -43,7 +43,7 @@ A comprehensive steering interface with feature selection, strength control, com
 | FR-2.2 | Steering type: activation or suppression | Implemented |
 | FR-2.3 | Multi-feature selection (select multiple features for steering) | Implemented |
 | FR-2.4 | Neuronpedia-compatible calibration | Implemented |
-| FR-2.5 | Combined multi-feature generation (apply all features in single pass) | Planned |
+| FR-2.5 | Combined multi-feature generation (apply all features in single pass) | Implemented |
 
 ### 2.3 Generation
 | Requirement | Description | Status |
@@ -59,7 +59,7 @@ A comprehensive steering interface with feature selection, strength control, com
 | FR-4.1 | Display side-by-side comparison | Implemented |
 | FR-4.2 | Highlight differences in outputs | Implemented |
 | FR-4.3 | Export results to JSON | Implemented |
-| FR-4.4 | Save results to history | Planned |
+| FR-4.4 | Save results to history | Implemented |
 
 ### 2.5 Prompt Templates (Sub-feature)
 | Requirement | Description | Status |
@@ -104,7 +104,7 @@ for feature_config in selected_features:
     results.append({"feature": feature_config, "output": output})
 ```
 
-#### 3.3.2 New: Combined Generation Mode (Planned - FR-2.5)
+#### 3.3.2 New: Combined Generation Mode (Implemented - FR-2.5)
 All selected features applied together in a single generation pass:
 ```python
 # New behavior: combined output with all features
@@ -187,11 +187,11 @@ combined_output = generate_with_hook(prompt, steering_hook)
 | `/api/v1/steering/compare` | POST | Compare steered vs. baseline |
 | `/api/v1/steering/sweep` | POST | Test multiple strengths |
 | `/api/v1/steering/calibrate` | POST | Get calibration factors |
-| `/api/v1/steering/combined` | POST | Combined multi-feature generation (Planned) |
+| `/api/v1/steering/combined` | POST | Combined multi-feature generation (Implemented) |
 | `/api/v1/prompt-templates` | GET/POST | Prompt template CRUD |
 | `/api/v1/prompt-templates/{id}` | GET/PUT/DELETE | Template by ID |
 
-### 5.1 Combined Generation Endpoint (Planned)
+### 5.1 Combined Generation Endpoint (Implemented)
 ```
 POST /api/v1/steering/combined
 {
@@ -298,7 +298,23 @@ class SteeringResult:
 - [x] Negative strength (suppression)
 - [x] Generation parameter configuration
 - [ ] Combined mode with comparison (baseline vs. combined steered)
-- [ ] Combined mode with multiple prompts
+- [x] Combined mode with multiple prompts
+
+---
+
+## Architecture Notes (Added 2026-03)
+
+### Celery-Based Async Steering
+- Steering migrated from synchronous API calls to async Celery tasks
+- On-demand worker with GPU isolation (separate celery worker for steering)
+- Zombie process detection and cleanup for long-running steering operations
+- Experiment persistence in database for reproducibility
+- WebSocket timeout handling for long steering operations
+
+### Dynamic Layer Discovery Integration
+- No architecture whitelist — any transformer model works via `layer_discovery.py`
+- `discover_transformer_structure()` provides hook points dynamically
+- Supports LFM2, Mamba, and other non-standard architectures
 
 ---
 

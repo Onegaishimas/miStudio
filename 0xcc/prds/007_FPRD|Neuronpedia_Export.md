@@ -1,8 +1,8 @@
-# Feature PRD: Neuronpedia Export
+# Feature PRD: Neuronpedia Export & Push
 
 **Document ID:** 007_FPRD|Neuronpedia_Export
-**Version:** 1.0 (MVP Complete)
-**Last Updated:** 2025-12-05
+**Version:** 2.0 (Export + Local Push)
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Priority:** P1 (Important Feature)
 
@@ -11,7 +11,7 @@
 ## 1. Overview
 
 ### 1.1 Purpose
-Enable users to export SAE findings in Neuronpedia-compatible format for community sharing and collaboration.
+Enable users to export SAE findings in Neuronpedia-compatible format and push them directly to a local Neuronpedia instance for community sharing and collaboration.
 
 ### 1.2 User Problem
 Researchers need to share SAE findings but face challenges with:
@@ -19,9 +19,23 @@ Researchers need to share SAE findings but face challenges with:
 - Computing logit lens data for features
 - Generating activation histograms
 - Packaging weights in SAELens format
+- Manually uploading exported packages to Neuronpedia (tedious multi-step process)
 
 ### 1.3 Solution
-A comprehensive export system that creates complete Neuronpedia-compatible packages with configurable data inclusion.
+A comprehensive export and push system with two modes:
+1. **Export to ZIP** — Creates complete Neuronpedia-compatible packages for manual upload
+2. **Direct Push to Local Neuronpedia** — Pushes features, weights, and dashboard data directly to a local Neuronpedia instance via its API, with async processing and WebSocket progress updates
+
+### 1.4 Direct Push Architecture (Added 2026-01)
+
+The push feature uses:
+- **`neuronpedia_local_service.py`** — Handles API communication with local Neuronpedia instance
+- **`neuronpedia_push_tasks.py`** — Async Celery task with progress tracking via WebSocket
+- **`neuronpedia.py`** — API endpoint for initiating and managing push jobs
+- **WebSocket channel:** `neuronpedia-push/{job_id}` for real-time progress updates
+- **Model naming:** Proper model/SAE naming for discoverability in Neuronpedia UI
+- **Dashboard data:** Computes logits, feature statistics, and activation histograms during push
+- **K8s manifest:** `k8s/neuronpedia-deployment.yaml` for deploying local Neuronpedia instance
 
 ---
 

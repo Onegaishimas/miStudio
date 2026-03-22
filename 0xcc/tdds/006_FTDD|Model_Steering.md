@@ -1,8 +1,8 @@
 # Technical Design Document: Model Steering
 
 **Document ID:** 006_FTDD|Model_Steering
-**Version:** 1.1 (Combined Mode Enhancement)
-**Last Updated:** 2026-01-24
+**Version:** 1.2 (Async Steering Architecture)
+**Last Updated:** 2026-03-21
 **Status:** Partially Implemented (Combined Mode Planned)
 **Related PRD:** [006_FPRD|Model_Steering](../prds/006_FPRD|Model_Steering.md)
 
@@ -67,6 +67,137 @@
 │  │  └──────────────────────────────────────────────────────┘  ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
+```
+
+### 1.3 Celery-Based Async Steering Architecture
+
+Steering operations run as Celery tasks on a dedicated GPU worker, separate from the
+SAE training worker, to provide GPU isolation and prevent resource contention:
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐
+│  Frontend    │────→│  FastAPI     │────→│  Redis Broker        │
+│  (WebSocket) │     │  Endpoint    │     │  (steering queue)    │
+└──────┬───────┘     └──────────────┘     └──────────┬───────────┘
+       │                                              │
+       │  WebSocket: steering/{experiment_id}         ▼
+       │                                    ┌──────────────────────┐
+       │                                    │  Celery Worker       │
+       │                                    │  (steering queue)    │
+       │                                    │  - GPU isolated      │
+       │                                    │  - On-demand start   │
+       │◄───────────────────────────────────│  - Model caching     │
+       │         Progress/Results           │  - Zombie detection  │
+       │                                    └──────────────────────┘
+```
+
+**Key architectural properties:**
+- **Separate Celery queue**: `steering` queue distinct from `sae` training queue
+- **On-demand worker**: The steering worker starts only when needed (not always running)
+  to conserve GPU memory when not actively steering
+- **GPU isolation**: Steering worker has its own CUDA context, preventing OOM conflicts
+  with concurrent training jobs
+- **Model caching**: Model and SAE are loaded once per worker lifecycle, not per request
+
+### 1.4 Zombie Process Detection and Cleanup
+
+Long-running steering tasks can leave zombie processes if the worker crashes:
+
+```python
+class SteeringTaskManager:
+    """Detect and clean up zombie steering processes."""
+
+    STALE_THRESHOLD = timedelta(minutes=30)
+
+    def detect_zombies(self, db: Session) -> List[SteeringExperiment]:
+        """Find experiments stuck in 'running' state beyond threshold."""
+        cutoff = datetime.utcnow() - self.STALE_THRESHOLD
+        return db.query(SteeringExperiment).filter(
+            SteeringExperiment.status == 'running',
+            SteeringExperiment.started_at < cutoff
+        ).all()
+
+    def cleanup_zombie(self, experiment: SteeringExperiment, db: Session):
+        """Mark zombie experiment as failed, revoke Celery task."""
+        from src.core.celery_app import celery_app
+        if experiment.celery_task_id:
+            celery_app.control.revoke(experiment.celery_task_id, terminate=True)
+        experiment.status = 'failed'
+        experiment.error_message = 'Task timed out (zombie cleanup)'
+        db.commit()
+```
+
+### 1.5 Experiment Persistence
+
+Steering experiments are persisted in the database for history, reproducibility,
+and result caching:
+
+```sql
+CREATE TABLE steering_experiments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sae_id UUID REFERENCES external_saes(id),
+    model_id UUID REFERENCES models(id),
+    prompt TEXT NOT NULL,
+    features JSONB NOT NULL,           -- [{feature_index, strength}]
+    generation_config JSONB NOT NULL,
+    mode VARCHAR(50) NOT NULL,         -- 'compare', 'sweep', 'combined'
+    status VARCHAR(50) DEFAULT 'pending',
+    celery_task_id VARCHAR(255),
+    results JSONB,                     -- Stored generation results
+    error_message TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### 1.6 WebSocket Timeout Handling
+
+Steering operations (especially sweeps with multiple strengths) can take 30+ seconds.
+The system uses WebSocket channels with heartbeat and timeout handling:
+
+```python
+# Backend: emit heartbeat during long operations
+async def emit_steering_heartbeat(experiment_id: str, step: str):
+    """Emit heartbeat to prevent WebSocket timeout during long operations."""
+    emit_ws_event(
+        channel=f"steering/{experiment_id}",
+        event="heartbeat",
+        data={"step": step, "timestamp": datetime.utcnow().isoformat()}
+    )
+
+# Sweep task emits progress per strength value
+@celery_app.task(bind=True, queue='steering', soft_time_limit=300)
+def steering_sweep_task(self, experiment_id: str, config: dict):
+    strengths = config['strengths']
+    for i, strength in enumerate(strengths):
+        emit_steering_heartbeat(experiment_id, f"strength_{i+1}/{len(strengths)}")
+        result = generate_with_strength(strength, config)
+        emit_ws_event(
+            channel=f"steering/{experiment_id}",
+            event="sweep_progress",
+            data={"strength": strength, "output": result, "progress": (i+1)/len(strengths)}
+        )
+```
+
+```typescript
+// Frontend: handle WebSocket timeout with reconnection
+const STEERING_TIMEOUT_MS = 120_000;  // 2 minutes without heartbeat
+
+useEffect(() => {
+  const timeoutId = setTimeout(() => {
+    if (isGenerating) {
+      setError('Steering operation timed out');
+      setIsGenerating(false);
+    }
+  }, STEERING_TIMEOUT_MS);
+
+  // Reset timeout on each heartbeat/progress event
+  socket.on('heartbeat', () => clearTimeout(timeoutId));
+  socket.on('sweep_progress', () => clearTimeout(timeoutId));
+
+  return () => clearTimeout(timeoutId);
+}, [isGenerating]);
 ```
 
 ---
@@ -220,7 +351,7 @@ class CombinedSteeringHook:
 |--------|---------------|---------------|
 | Outputs | N outputs for N features | 1 output with all features |
 | Purpose | Analyze individual impact | Test feature interactions |
-| Speed | N × generation time | 1 × generation time |
+| Speed | N x generation time | 1 x generation time |
 | Use Case | Feature hypothesis testing | Behavioral composition |
 
 ---
@@ -562,7 +693,7 @@ interface StrengthSliderProps {
 }
 
 // Visual representation:
-// Suppression ←───────────[●]───────────→ Activation
+// Suppression <-----------[*]-----------> Activation
 //     -10                  0                  +10
 ```
 
@@ -575,12 +706,12 @@ interface ComparisonResultsProps {
 }
 
 // Side-by-side display:
-// ┌──────────────────┬───────────────────┐
-// │    Baseline      │     Steered       │
-// ├──────────────────┼───────────────────┤
-// │ Normal text      │ Modified text     │
-// │ here...          │ [highlighted]...  │
-// └──────────────────┴───────────────────┘
+// +------------------+-------------------+
+// |    Baseline      |     Steered       |
+// +------------------+-------------------+
+// | Normal text      | Modified text     |
+// | here...          | [highlighted]...  |
+// +------------------+-------------------+
 ```
 
 ---
@@ -664,6 +795,9 @@ interface CombinedSteeringResult {
 | SAE mismatch | SAE doesn't match model | Validate compatibility |
 | OOM during generation | Large model/batch | Reduce max_tokens |
 | Invalid strength | Out of range | Clamp to [-10, 10] |
+| WebSocket timeout | Long steering operation | Heartbeat + reconnect |
+| Zombie task | Worker crash during steering | Periodic cleanup scan |
+| Celery task revoked | Manual cancellation | Update experiment status |
 
 ---
 

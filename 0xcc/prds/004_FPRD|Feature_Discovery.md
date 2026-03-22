@@ -1,8 +1,8 @@
 # Feature PRD: Feature Discovery
 
 **Document ID:** 004_FPRD|Feature_Discovery
-**Version:** 1.2 (Batch Extraction & Live Metrics)
-**Last Updated:** 2026-01-21
+**Version:** 1.3 (Labeling Enhancements & Reasoning Model Support)
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
 
@@ -334,6 +334,16 @@ CREATE TABLE extraction_jobs (
 - [x] Live progress metrics display (Jan 2026)
 - [x] Save as Template from extraction modal (Jan 2026)
 - [x] Sequential batch processing with NLP continuation (Jan 2026)
+- [x] Labeling: drag-to-resize results window (Feb 2026)
+- [x] Labeling: maximize/restore toggle (Feb 2026)
+- [x] Labeling: configurable NLP analysis per template (Feb 2026)
+- [x] Labeling: configurable batch_size 1-100 (Feb 2026)
+- [x] Labeling: configurable max_tokens 50-8000 (Mar 2026)
+- [x] Labeling: configurable api_timeout 30-600s (Mar 2026)
+- [x] Labeling: Fetch Models button for OpenAI endpoint (Mar 2026)
+- [x] Labeling: reasoning model support with think tag stripping (Mar 2026)
+- [x] Labeling: OpenAI-compatible endpoint support (e.g., miLLM, Ollama) (Mar 2026)
+- [x] Labeling: model/layer/hook display on job cards (Mar 2026)
 
 ---
 

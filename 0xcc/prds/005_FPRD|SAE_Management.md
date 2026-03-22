@@ -1,8 +1,8 @@
 # Feature PRD: SAE Management
 
 **Document ID:** 005_FPRD|SAE_Management
-**Version:** 1.1 (External SAE Import Enhancements)
-**Last Updated:** 2026-01-21
+**Version:** 1.2 (Multi-Select Downloads & HF Upload Improvements)
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
 
@@ -237,6 +237,12 @@ google/gemma-scope-2b-pt-res/
 - [x] Delete SAE
 - [x] Filter by source/model
 - [x] Link to training record
+- [x] Multi-select SAE downloads from HuggingFace (Feb 2026)
+- [x] Grouped download preview by directory (Feb 2026)
+- [x] Latent width in HF upload filepath (Feb 2026)
+- [x] layer_XX directory structure for uploads (Feb 2026)
+- [x] Training info display on SAE tiles (Feb 2026)
+- [x] Dynamic layer discovery — no architecture whitelist (Feb 2026)
 
 ---
 

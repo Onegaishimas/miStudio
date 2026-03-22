@@ -1,8 +1,8 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 2.2 (CI/CD Pipeline & Idempotent Migrations)
+**Version:** 2.3 (Architecture Updates, GCP Deployment & Dynamic Discovery)
 **Created:** 2025-10-05
-**Updated:** 2026-01-21
+**Updated:** 2026-03-21
 **Status:** Active
 **Document Type:** Project-Level Architecture Decision Record
 
@@ -50,7 +50,7 @@ This ADR establishes the foundational technology choices, architectural patterns
 
 ### Decision 1: Backend Framework
 
-**Decision:** Use **FastAPI (Python 3.10+)** for backend API
+**Decision:** Use **FastAPI (Python 3.11+)** for backend API
 
 **Rationale:**
 - **ML Integration**: Native Python integration with PyTorch, HuggingFace, NumPy
@@ -2038,7 +2038,7 @@ WantedBy=multi-user.target
 **For users who prefer native installation:**
 1. Install PostgreSQL 14+
 2. Install Redis 7+
-3. Install Python 3.10+ with pip
+3. Install Python 3.11+ with pip
 4. Install Node.js 18+ with npm
 5. Install backend: `pip install -r requirements.txt`
 6. Install frontend: `npm install`
@@ -2196,7 +2196,7 @@ GET /api/v1/health/live   # Process is alive
 ### Technology Stack
 
 **Backend:**
-- Framework: FastAPI (Python 3.10+)
+- Framework: FastAPI (Python 3.11+)
 - Database: PostgreSQL 14+
 - Cache: Redis 7+
 - Queue: Celery with Redis backend
@@ -2324,7 +2324,7 @@ Closes #123
 ### Technology Stack
 
 **Backend:**
-- Python 3.10+, FastAPI, PostgreSQL 14+, Redis 7+, Celery
+- Python 3.11+, FastAPI, PostgreSQL 14+, Redis 7+, Celery
 - PyTorch 2.0+, HuggingFace (transformers, datasets), bitsandbytes
 - TensorRT for Jetson optimization
 
@@ -2489,17 +2489,19 @@ sae_directory/
 **Date:** 2025-10-30
 **Context:** Research community uses different SAE architectures for different purposes.
 
-**Decision:** Support four SAE architectures in a unified training system.
+**Decision:** Support six SAE architectures in a unified, framework-aware training system.
 
 **Architectures:**
 | Type | Class | Key Feature |
 |------|-------|-------------|
-| Standard | `SparseAutoencoder` | L1 sparsity, general purpose |
-| JumpReLU | `JumpReLUSAE` | L0 penalty, Gemma Scope-style |
+| Standard (SAELens) | `SparseAutoencoder` | L1 sparsity, general purpose |
+| Standard (Anthropic) | `StandardAnthropicSAE` | Anthropic-style with pre-encoder bias, decoder bias centering |
+| JumpReLU (Gemma Scope) | `JumpReLUSAE` | Learnable threshold, sigmoid STE L0, count-based loss |
+| TopK (OpenAI) | `TopKSAE` | Fixed sparsity via top-k selection, aux dead feature loss |
 | Skip | `SkipSAE` | Residual connections |
-| Transcoder | `TranscoderSAE` | Layer-to-layer mapping |
+| Transcoder | `TranscoderSAE` | MLP replacement, layer-to-layer mapping |
 
-**Implementation:** Single training pipeline with architecture-specific forward/loss methods.
+**Implementation:** Single training pipeline with architecture-specific forward/loss methods. Framework-aware configuration (`frameworkConfigs.ts`) provides paper-grounded defaults and conditional UI field visibility per architecture.
 
 ---
 
@@ -2702,12 +2704,96 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-13: Dynamic Layer Discovery
+
+**Date:** 2026-01-31
+**Context:** Hardcoded architecture if/elif chains in steering and extraction code limited model support to a fixed set of known architectures.
+
+**Decision:** Implement architecture-agnostic model introspection via `layer_discovery.py`.
+
+**Implementation:**
+- `discover_transformer_structure()` introspects any HuggingFace transformer model
+- Returns layer count, attention module paths, MLP module paths, residual stream paths
+- Used by `steering_service.py`, `forward_hooks.py`, and `model_loader.py`
+- Frontend removed `SUPPORTED_ARCHITECTURES` whitelist; any transformer works without code changes
+
+**Rationale:** Any new transformer architecture (including LFM2, Mamba, etc.) works automatically without code changes.
+
+---
+
+### IDL-14: Application Settings Subsystem
+
+**Date:** 2026-03-08
+**Context:** Need persistent, user-configurable settings with secure storage for API keys.
+
+**Decision:** Implement DB-backed application settings with AES-256-GCM encryption for sensitive values.
+
+**Implementation:**
+- Backend model: `app_setting.py` (key-value store with encrypted flag)
+- Frontend: `SettingsPanel.tsx` with tabbed interface (Endpoints, API Keys, Labeling, Display)
+- Encryption: AES-256-GCM using `SETTINGS_ENCRYPTION_KEY` environment variable
+- Categories: General, LLM Provider, API Keys, System
+
+**Rationale:** Secure storage for API keys (OpenAI, HuggingFace) without environment variables or plain-text files.
+
+---
+
+### IDL-15: Sidebar Navigation
+
+**Date:** 2026-03-07
+**Context:** Horizontal tab navigation couldn't scale to growing number of panels.
+
+**Decision:** Replace horizontal tab bar with collapsible sidebar navigation (`Sidebar.tsx`).
+
+**Implementation:**
+- Full sidebar with labels and icon-only collapsed mode
+- Persistent collapse state via localStorage
+- Grouped navigation sections (Data, Training, Analysis, System)
+- Keyboard shortcut support for navigation
+
+**Rationale:** Better scalability, more screen real estate for content panels.
+
+---
+
+### IDL-16: Schema Validation Tooling
+
+**Date:** 2026-02-15
+**Context:** Schema drift between SQLAlchemy models and Alembic migrations caused deployment issues.
+
+**Decision:** Implement startup schema validation and migration gap analysis.
+
+**Implementation:**
+- Startup validator compares live DB schema against SQLAlchemy model metadata
+- Migration gap analyzer detects missing columns, type mismatches, missing indexes
+- Warnings logged at startup; optionally blocks startup on critical mismatches
+
+**Rationale:** Catch schema drift early, prevent silent data issues in production.
+
+---
+
+### IDL-17: Neuronpedia Local Push Integration
+
+**Date:** 2026-01-24
+**Context:** Users want to publish SAE features directly to a local Neuronpedia instance.
+
+**Decision:** Add direct push-to-Neuronpedia integration alongside existing ZIP export.
+
+**Implementation:**
+- `neuronpedia_local_service.py` handles API communication with local Neuronpedia
+- Async Celery task (`neuronpedia_push_tasks.py`) with WebSocket progress updates
+- Proper model naming and dashboard data computation (logits, feature stats)
+- K8s deployment manifest for local Neuronpedia instance
+
+**Rationale:** Streamlines the workflow from local SAE training to feature browsing in Neuronpedia.
+
+---
+
 ## Document Control
 
-**Version:** 2.1
+**Version:** 2.3
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2025-12-16
+**Last Updated:** 2026-03-21
 **Status:** Active - Post-MVP Enhancements
 
 **Review and Approval:**

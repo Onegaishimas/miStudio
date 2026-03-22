@@ -2,15 +2,15 @@ yes
 # Project: MechInterp Studio (miStudio)
 
 ## Current Status
-- **Phase:** Maintenance & Bug Fixes
-- **Last Session:** 2025-12-16 - Integration Test Fixes & Dataset Samples Endpoint Fix
-- **Current Task:** General maintenance and bug fixes
+- **Phase:** Active Development & Maintenance
+- **Last Session:** 2026-03-21
+- **Current Task:** Documentation alignment and bug fixes
 - **Active Work:** Test suite maintenance and API stability improvements
 - **Completed:**
   - HP-1 System Monitoring WebSocket Migration (10/10 sub-tasks) ✅
   - Integration test fixes (15 tests fixed) ✅
   - Dataset samples endpoint bytes handling fix ✅
-- **Test Status:** 887 passed, 3 skipped (conditional on external dependencies)
+- **Test Status:** 961 passed, 4 skipped (conditional on external dependencies)
 - **Services Status:** Backend (port 8000) ✅, Frontend (port 3000) ✅, PostgreSQL ✅, Redis ✅, Celery Worker ✅, Celery Beat ✅, Nginx ✅
 
 ## PRIMARY UI/UX REFERENCE
@@ -182,7 +182,7 @@ pgrep -f celery  # Celery worker should be running
 ### Technology Stack
 
 **Backend:**
-- Python 3.10+, FastAPI, PostgreSQL 14+, Redis 7+, Celery
+- Python 3.11+, FastAPI, PostgreSQL 14+, Redis 7+, Celery
 - PyTorch 2.0+, HuggingFace (transformers, datasets), bitsandbytes
 - TensorRT for Jetson optimization
 
@@ -350,7 +350,7 @@ git commit -m "feat: [brief description]" -m "- [key change 1]" -m "- [key chang
 ### Test Commands
 *[Will be defined in ADR, examples:]*
 - **Frontend:** `npm test` or `npm run test:unit`
-- **Backend:** `pytest` or `python -m pytest` 
+- **Backend:** `pytest` or `python -m pytest`
 - **Full Suite:** `[project-specific command]`
 
 ## Code Quality Checklist
@@ -507,15 +507,15 @@ The application uses a consistent WebSocket-first approach for all real-time upd
 *From Project PRD - Core Features (P0):*
 
 **MVP Features (Must Have):**
-1. Dataset Management Panel (P0) - HuggingFace integration, local ingestion
-2. Model Management Panel (P0) - Model downloads, quantization, architecture viewer
-3. SAE Training System (P0) - Sparse autoencoder training with real-time monitoring
-4. Feature Discovery & Browser (P0) - Extract and analyze features from trained SAEs
-5. Model Steering Interface (P0) - Feature-based interventions and comparative generation
+1. Dataset Management Panel (P0) - HuggingFace integration, local ingestion ✅
+2. Model Management Panel (P0) - Model downloads, quantization, architecture viewer ✅
+3. SAE Training System (P0) - Sparse autoencoder training with real-time monitoring ✅
+4. Feature Discovery & Browser (P0) - Extract and analyze features from trained SAEs ✅
+5. Model Steering Interface (P0) - Feature-based interventions and comparative generation ✅
 
 **Secondary Features (P1):**
-6. Training Templates & Presets - Save/load training configurations
-7. Extraction Templates - Preset activation extraction configs
+6. Training Templates & Presets - Save/load training configurations ✅
+7. Extraction Templates - Preset activation extraction configs ✅
 8. Steering Presets - Save/load steering configurations
 9. Advanced Visualizations - UMAP, correlation heatmaps
 10. Feature Analysis Tools - Logit lens, ablation studies
@@ -706,6 +706,68 @@ The application uses a consistent WebSocket-first approach for all real-time upd
 - **Duration:** ~2 hours
 - **Key Achievement:** Restored test suite health with 887 passing tests, fixed critical API bug affecting dataset sample viewing
 
+### Session 7: 2026-01-02 to 2026-01-21 - Steering Migration & January Documentation Update
+- **Accomplished:**
+  - Migrated steering from synchronous API to async Celery tasks with GPU isolation
+  - Added zombie process detection for steering workers
+  - Fixed WebSocket timeout issues for long steering operations
+  - Comprehensive January documentation update across PRDs, TDDs, TIDs
+  - Added multi-extraction cached activations training support
+  - Enhanced labeling with configurable batch size and NLP analysis per template
+- **Files Modified:** Multiple across backend/src/workers/, frontend/src/components/steering/, 0xcc/ docs
+- **Duration:** ~20 sessions
+
+### Session 8: 2026-01-22 to 2026-01-26 - Neuronpedia Push & LFM2 Support
+- **Accomplished:**
+  - Implemented direct push to local Neuronpedia instance (async Celery, WebSocket progress)
+  - Added LFM2 (Liquid Foundation Model) architecture support
+  - Added layer discovery, extraction hooks for LFM2
+  - GCP deployment configuration (Docker Compose, Neuronpedia domain, Ollama)
+  - Combined multi-feature steering mode implemented
+  - Upgraded transformers to 4.57.6
+- **Files Created:** backend/src/services/neuronpedia_local_service.py, backend/src/workers/neuronpedia_push_tasks.py
+- **Duration:** ~5 sessions
+
+### Session 9: 2026-01-31 to 2026-02-07 - Dynamic Layer Discovery & Architecture Agnosticism
+- **Accomplished:**
+  - Replaced hardcoded architecture whitelists with dynamic discover_transformer_structure()
+  - Frontend SUPPORTED_ARCHITECTURES whitelist removed
+  - Steering service refactored to use dynamic discovery
+  - Multi-select SAE downloads from HuggingFace
+  - Test suite expanded to 961 tests
+- **Key Decision:** Any transformer model can now be used without code changes
+- **Duration:** ~4 sessions
+
+### Session 10: 2026-02-13 to 2026-02-18 - JumpReLU L0 Fixes & SAE Framework Expansion
+- **Accomplished:**
+  - Fixed JumpReLU L0 loss: non-differentiable → sigmoid STE, fraction-based → count-based
+  - Expanded SAE architectures from 4 to 6 paper-grounded frameworks
+  - Added TopK (OpenAI) and Standard (Anthropic) architectures
+  - Framework-aware configuration with paper-grounded defaults
+  - Added activation normalization modes (constant_norm_rescale, anthropic_rescale, none)
+- **Key Achievement:** SAE training now matches paper implementations exactly
+- **Duration:** ~5 sessions
+
+### Session 11: 2026-02-20 to 2026-03-08 - Labeling Enhancements & Settings Panel
+- **Accomplished:**
+  - Labeling: drag-to-resize results, maximize/restore, configurable max_tokens, Fetch Models button
+  - Reasoning model support (think tag stripping for labeling)
+  - DB-backed application settings with AES-256-GCM encryption
+  - Settings Panel with tabbed interface (Endpoints, API Keys, Labeling, Display)
+  - Sidebar navigation replacing horizontal tabs
+  - HF upload path improvements (latent width, layer_XX structure)
+- **Duration:** ~8 sessions
+
+### Session 12: 2026-03-08 to 2026-03-21 - Bug Fixes, Monitoring & Model Loader
+- **Accomplished:**
+  - Fixed probe monitoring activations (tensor dimension, service initialization, WebSocket emission)
+  - Fixed FastAPI validation error display in UI
+  - Handle unclosed think tags from reasoning models
+  - Compact extraction card tiles
+  - Batch size wiring through labeling service
+  - Integration with miLLM for labeling via OpenAI-compatible endpoint
+- **Duration:** ~6 sessions
+
 *[Add new sessions as they occur]*
 
 ## Research Integration
@@ -767,7 +829,7 @@ project-root/
 ---
 
 **Framework Version:** 1.1
-**Last Updated:** 2025-12-16
+**Last Updated:** 2026-03-21
 **Project Started:** 2025-10-05
 **Project:** MechInterp Studio (miStudio)
 **Structure:** 0xcc framework with MCP research integration

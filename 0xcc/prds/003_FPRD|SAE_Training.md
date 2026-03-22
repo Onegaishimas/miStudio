@@ -1,8 +1,8 @@
 # Feature PRD: SAE Training
 
 **Document ID:** 003_FPRD|SAE_Training
-**Version:** 1.1 (Multi-Dataset & Multi-Hook Training)
-**Last Updated:** 2026-01-21
+**Version:** 2.0 (6 Paper-Grounded Training Frameworks)
+**Last Updated:** 2026-03-21
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
 
@@ -33,7 +33,7 @@ A comprehensive training system with multiple architectures, real-time metrics s
 | FR-1.1 | Select dataset and tokenization | Implemented |
 | FR-1.2 | Select model and layer for activation extraction | Implemented |
 | FR-1.3 | Configure all hyperparameters (see §4) | Implemented |
-| FR-1.4 | Select SAE architecture (Standard, JumpReLU, Skip, Transcoder) | Implemented |
+| FR-1.4 | Select SAE training framework (6 types: Standard SAELens, Standard Anthropic, JumpReLU Gemma Scope, TopK OpenAI, Skip, Transcoder) | Implemented |
 | FR-1.5 | Set checkpoint interval | Implemented |
 | FR-1.6 | Select multiple datasets for training (Jan 2026) | Implemented |
 | FR-1.7 | Select multiple hook types per layer (Jan 2026) | Implemented |
@@ -94,39 +94,76 @@ A comprehensive training system with multiple architectures, real-time metrics s
 
 ---
 
-## 3. SAE Architectures
+## 3. SAE Training Frameworks (6 Paper-Grounded Architectures)
 
-### 3.1 Standard SAE
+Each framework has paper-grounded defaults configured in `frameworkConfigs.ts` with conditional UI field visibility.
+
+### 3.1 Standard SAE (SAELens)
 ```python
 # Forward pass
 z = ReLU(W_enc @ x_norm + b_enc)
 x_hat = W_dec @ z + b_dec
-# Loss
-L = MSE(x_hat, x_norm) + l1_alpha * L1(z)
+# Loss: L1 sparsity on activations (sum over d_sae, mean over batch)
+L = MSE(x_hat, x_norm) + l1_alpha * z.abs().sum(dim=-1).mean()
 ```
 
-### 3.2 JumpReLU SAE (Gemma Scope Style)
+### 3.2 Standard SAE (Anthropic)
+```python
+# Forward pass with pre-encoder bias and decoder bias centering
+x_centered = x_norm - b_dec  # Pre-encoder bias subtraction
+z = ReLU(W_enc @ x_centered + b_enc)
+x_hat = W_dec @ z + b_dec
+# Loss: L1 sparsity, anthropic_rescale normalization
+L = MSE(x_hat, x_norm) + l1_alpha * z.abs().sum(dim=-1).mean()
+# Decoder bias centering: b_dec tracks mean of training data
+```
+
+### 3.3 JumpReLU SAE (Gemma Scope)
 ```python
 # Forward pass with learnable threshold
-z = JumpReLU(W_enc @ x_norm + b_enc, threshold)
+pre_acts = W_enc @ x_norm + b_enc
+z = pre_acts * (pre_acts > threshold)  # Hard threshold in forward
 x_hat = W_dec @ z + b_dec
-# Loss with L0 penalty
-L = MSE(x_hat, x_norm) + l0_alpha * L0(z)
+# Loss: Count-based L0 via sigmoid STE (per Gemma Scope paper)
+# L0_diff = σ((pre_acts - threshold) / ε).sum(dim=-1).mean()  # Count per sample
+L = MSE(x_hat, x_norm) + sparsity_coeff * L0_diff
+# sparsity_coeff ~1e-3 (NOT same scale as l1_alpha)
+# Sparsity warmup: 10K steps
 ```
 
-### 3.3 Skip SAE
+### 3.4 TopK SAE (OpenAI)
 ```python
-# Forward with residual
+# Forward pass with structural sparsity
+pre_acts = W_enc @ x_norm + b_enc
+topk_values, topk_indices = pre_acts.topk(k)
+z = zeros_like(pre_acts).scatter(-1, topk_indices, topk_values)
+x_hat = W_dec @ z + b_dec
+# Loss: No sparsity penalty needed (structural), auxiliary dead feature loss
+L = MSE(x_hat, x_norm) + aux_loss_coeff * dead_feature_aux_loss
+```
+
+### 3.5 Skip SAE
+```python
+# Forward with residual connection from input to decoder
 z = ReLU(W_enc @ x_norm + b_enc)
 x_hat = W_dec @ z + b_dec + x_norm  # Skip connection
 ```
 
-### 3.4 Transcoder SAE
+### 3.6 Transcoder SAE
 ```python
-# Layer-to-layer transcoding
-z = ReLU(W_enc @ layer_n + b_enc)
-layer_n_plus_1_hat = W_dec @ z + b_dec
+# MLP replacement: layer-to-layer transcoding
+z = ReLU(W_enc @ mlp_input + b_enc)
+mlp_output_hat = W_dec @ z + b_dec
+# Trained on MLP input→output pairs, not residual stream
 ```
+
+### 3.7 Framework-Aware Configuration
+- Each framework has paper-grounded defaults in `frontend/src/config/frameworkConfigs.ts`
+- Conditional UI field visibility (e.g., TopK shows `k` but hides `l1_alpha`)
+- Activation normalization modes: `constant_norm_rescale`, `anthropic_rescale`, `none`
+- Multi-extraction training: can use cached activations from multiple extraction jobs
+- EMA dead neuron detection for resampling
+- Decoder weight normalization (unit norm columns)
 
 ---
 
