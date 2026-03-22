@@ -1,8 +1,8 @@
 # Technical Implementation Document: Model Steering
 
 **Document ID:** 006_FTID|Model_Steering
-**Version:** 1.1 (Combined Mode Enhancement)
-**Last Updated:** 2026-01-24
+**Version:** 1.2 (Async Steering Architecture)
+**Last Updated:** 2026-03-21
 **Status:** Partially Implemented (Combined Mode Planned)
 **Related TDD:** [006_FTDD|Model_Steering](../tdds/006_FTDD|Model_Steering.md)
 
@@ -39,6 +39,13 @@
 3. Combined mode UI toggle
 4. Combined results display component
 5. Combined mode store integration
+
+### Phase 6: Celery-Based Async Steering
+1. Celery worker setup for steering queue
+2. GPU memory management and isolation
+3. Dynamic layer discovery integration
+4. Experiment persistence and result caching
+5. Zombie process detection and cleanup
 
 ---
 
@@ -458,7 +465,175 @@ async def sweep_strengths(
     )
 ```
 
-### 2.2 Frontend Components
+### 2.2 Backend - Celery Worker for Steering Tasks
+
+#### `backend/src/workers/steering_tasks.py`
+
+The steering Celery worker runs on a **separate queue** (`steering`) from the SAE training
+worker (`sae`) to provide GPU isolation:
+
+```python
+from celery import shared_task
+from src.core.celery_app import celery_app
+from src.db.session import SessionLocal
+from src.ml.model_loader import ModelLoader
+from src.ml.sae_loader import load_sae
+from src.ml.layer_discovery import discover_transformer_structure
+from src.services.steering_service import SteeringService
+from src.workers.websocket_emitter import emit_ws_event
+
+@celery_app.task(
+    bind=True,
+    queue='steering',
+    soft_time_limit=300,     # 5 min soft limit
+    time_limit=600,          # 10 min hard limit
+    acks_late=True,
+)
+def steering_generate_task(self, experiment_id: str, config: dict):
+    """
+    Async steering generation task.
+    Runs on dedicated steering worker with GPU isolation.
+    """
+    db = SessionLocal()
+    try:
+        # Update experiment status
+        experiment = db.query(SteeringExperiment).get(experiment_id)
+        experiment.status = 'running'
+        experiment.celery_task_id = self.request.id
+        experiment.started_at = datetime.utcnow()
+        db.commit()
+
+        # Load model (cached per worker lifecycle)
+        model_loader = ModelLoader.get_instance()
+        model = model_loader.load_model(config['model_name'])
+        tokenizer = model_loader.load_tokenizer(config['model_name'])
+
+        # Load SAE
+        sae = load_sae(config['sae_path'])
+
+        # Dynamic layer discovery -- no hardcoded architecture lookups
+        structure = discover_transformer_structure(model)
+        layer = config['layer']
+
+        # Create service and generate
+        service = SteeringService(model, tokenizer, sae, layer)
+        result = service.generate_comparison(
+            prompt=config['prompt'],
+            feature_configs=config['features'],
+            max_new_tokens=config.get('max_new_tokens', 100),
+            temperature=config.get('temperature', 0.7),
+        )
+
+        # Persist results
+        experiment.status = 'completed'
+        experiment.results = {
+            'baseline_output': result.baseline_output,
+            'steered_output': result.steered_output,
+        }
+        experiment.completed_at = datetime.utcnow()
+        db.commit()
+
+        # Emit completion via WebSocket
+        emit_ws_event(
+            channel=f"steering/{experiment_id}",
+            event="completed",
+            data=experiment.results
+        )
+
+    except Exception as e:
+        experiment.status = 'failed'
+        experiment.error_message = str(e)
+        db.commit()
+        emit_ws_event(
+            channel=f"steering/{experiment_id}",
+            event="failed",
+            data={"error": str(e)}
+        )
+        raise
+    finally:
+        db.close()
+```
+
+**Worker startup configuration:**
+```bash
+# Steering worker -- separate from training worker
+celery -A src.core.celery_app worker \
+    --queues=steering \
+    --concurrency=1 \
+    --pool=solo \
+    --hostname=steering@%h \
+    --loglevel=info
+```
+
+Key details:
+- `--concurrency=1`: Only one steering task at a time (GPU exclusivity)
+- `--pool=solo`: No forking -- avoids CUDA context issues with multiprocessing
+- `--queues=steering`: Only consumes from the steering queue
+
+### 2.3 GPU Memory Management During Steering
+
+```python
+class SteeringGPUManager:
+    """Manage GPU memory for steering operations."""
+
+    def __init__(self):
+        self._model_loaded = False
+        self._sae_loaded = False
+
+    def ensure_memory_available(self, required_gb: float = 4.0):
+        """Check GPU has enough free memory for steering."""
+        if torch.cuda.is_available():
+            free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
+            if free_mem < required_gb:
+                # Force garbage collection and cache clearing
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+                free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
+                if free_mem < required_gb:
+                    raise RuntimeError(
+                        f"Insufficient GPU memory: {free_mem:.1f}GB free, "
+                        f"{required_gb:.1f}GB required"
+                    )
+
+    def cleanup_after_steering(self):
+        """Release GPU memory after steering completes."""
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+```
+
+### 2.4 Dynamic Layer Discovery Integration
+
+The steering service uses `layer_discovery.py` for architecture-agnostic layer resolution,
+eliminating hardcoded if/elif chains for different model architectures:
+
+```python
+from src.ml.layer_discovery import discover_transformer_structure
+
+# Instead of:
+#   if "gemma" in model_name: layers = model.model.layers
+#   elif "llama" in model_name: layers = model.model.layers
+#   elif "gpt2" in model_name: layers = model.transformer.h
+#   ...
+
+# Use dynamic discovery:
+structure = discover_transformer_structure(model)
+# structure.layers -> list of layer modules
+# structure.num_layers -> int
+# structure.hidden_size -> int
+# structure.layer_type -> str (e.g., "GemmaDecoderLayer")
+
+# Register hook on dynamically discovered layer
+target_layer = structure.layers[layer_idx]
+handle = target_layer.register_forward_hook(steering_hook)
+```
+
+This ensures steering works with any transformer architecture supported by
+`discover_transformer_structure()` without code changes.
+
+### 2.5 Frontend Components
 
 #### `frontend/src/components/steering/StrengthSlider.tsx`
 ```typescript
@@ -917,7 +1092,7 @@ class CombinedSteeringHook:
 
         Mathematical basis:
         - Each feature's steering direction is W_dec[feature_idx, :]
-        - Combined steering = Σ (strength_i × calibration_i × direction_i)
+        - Combined steering = sum (strength_i x calibration_i x direction_i)
         """
         W_dec = self.sae.W_dec
         device = W_dec.device
@@ -978,7 +1153,7 @@ async def generate_combined(self, request):
 3. **Direct Modification**: No SAE encode/decode during inference - faster
 4. **Calibration**: Each feature scaled by its calibration factor
 
-### 3.2 Streaming Generation
+### 3.3 Streaming Generation
 ```python
 # For long outputs, stream tokens
 from transformers import TextIteratorStreamer
@@ -1100,6 +1275,18 @@ def check_feature_conflicts(features):
     if has_opposing_categories(categories):
         return "Warning: Selected features may have opposing effects"
     return None
+```
+
+### Pitfall 5: CUDA Context in Celery Workers
+```python
+# WRONG - Fork-based pool with CUDA
+# celery worker --pool=prefork  # CUDA contexts don't survive fork!
+
+# RIGHT - Solo pool for GPU workers
+# celery worker --pool=solo --concurrency=1
+
+# Also: never share CUDA tensors between processes
+# Each worker must load its own model copy
 ```
 
 ---
