@@ -18,8 +18,8 @@ import { useUIStore } from '../../stores/uiStore';
 type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
 
 const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
-  { id: 'datasets', label: 'Datasets', icon: Database },
   { id: 'models', label: 'Models', icon: Server },
+  { id: 'datasets', label: 'Datasets', icon: Database },
   { id: 'training', label: 'Training', icon: GraduationCap },
   { id: 'extractions', label: 'Extractions', icon: Layers },
   { id: 'labeling', label: 'Labeling', icon: Tags },
