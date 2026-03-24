@@ -1128,7 +1128,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                     </div>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Training Layers</div>
+                    <div className="text-xs text-slate-400 mb-1">Training Layer(s)</div>
                     <div className="text-sm text-slate-100 font-medium font-mono">
                       {training.hyperparameters.training_layers && training.hyperparameters.training_layers.length > 0
                         ? training.hyperparameters.training_layers.map(l => `L${l}`).join(', ')
