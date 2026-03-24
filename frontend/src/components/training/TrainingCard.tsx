@@ -35,7 +35,6 @@ import {
   Brain,
   Copy,
   Check,
-  Clock,
 } from 'lucide-react';
 import { useTrainingsStore } from '../../stores/trainingsStore';
 import { TrainingStatus } from '../../types/training';
@@ -512,288 +511,149 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
   };
 
   return (
-    <div className={`${COMPONENTS.card.base} p-4 space-y-3`}>
-      {/* Header Section */}
+    <div className={`${COMPONENTS.card.base} p-3 space-y-2`}>
+      {/* Header Row: checkbox + title + model/dataset + framework info + status */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 min-w-0">
           <input
             type="checkbox"
             checked={isSelected}
             onChange={() => onToggleSelect(training.id)}
-            className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+            className="w-4 h-4 shrink-0 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
           />
-          <div>
-            <div className="flex items-center gap-3">
-              <h4 className="font-semibold text-base text-slate-100">
-                Training {training.id.slice(0, 8)}
-              </h4>
-              <span className="text-sm text-slate-400">•</span>
-              <span className="text-sm text-slate-300">
-                {modelName}
+          <h4 className="font-semibold text-sm text-slate-100 shrink-0">
+            Training {training.id.slice(0, 8)}
+          </h4>
+          <span className="text-xs text-slate-500">•</span>
+          <span className="text-xs text-slate-300 truncate">{modelName}</span>
+          <span className="text-xs text-slate-500">+</span>
+          <span className="text-xs text-slate-300 truncate">{datasetName}</span>
+          <span className="text-xs text-slate-500">•</span>
+          <span className="text-xs text-slate-400">
+            {training.hyperparameters?.architecture_type ? getFrameworkDisplayName(training.hyperparameters.architecture_type) : 'N/A'}
+          </span>
+          {training.hyperparameters?.training_layers && training.hyperparameters.training_layers.length > 0 && (
+            <span className="text-xs text-slate-500">
+              L{training.hyperparameters.training_layers.join(',')}
+            </span>
+          )}
+          <span className="text-xs text-slate-500">
+            {training.hyperparameters?.hook_types && training.hyperparameters.hook_types.length > 0
+              ? training.hyperparameters.hook_types.join(',')
+              : 'residual'}
+          </span>
+          {training.started_at && (
+            <>
+              <span className="text-xs text-slate-500">•</span>
+              <span className="text-xs text-slate-500">
+                {formatTime(training.started_at)}
               </span>
-              <span className="text-sm text-slate-400">+</span>
-              <span className="text-sm text-slate-300">
-                {datasetName}
-              </span>
-            </div>
-            <p className="text-sm text-slate-400">
-              Framework: {training.hyperparameters?.architecture_type ? getFrameworkDisplayName(training.hyperparameters.architecture_type) : 'N/A'}
-              {training.hyperparameters?.training_layers && training.hyperparameters.training_layers.length > 0 && (
-                <>
-                  {' • '}
-                  Layer(s): {training.hyperparameters.training_layers.map(l => `L${l}`).join(', ')}
-                </>
-              )}
-              {' • '}
-              Hook(s): {training.hyperparameters?.hook_types && training.hyperparameters.hook_types.length > 0
-                ? training.hyperparameters.hook_types.join(', ')
-                : 'residual'}
-              {' • '}
-              Started: {training.started_at ? formatTime(training.started_at) : 'Not started'}
-              {training.completed_at && training.started_at && (
-                <>
-                  {' • '}
-                  Completed: {formatTime(training.completed_at)}
-                  {' • '}
-                  Duration: {calculateDuration(training.started_at, training.completed_at)}
-                </>
-              )}
-            </p>
-          </div>
+            </>
+          )}
+          {training.completed_at && training.started_at && (
+            <span className="text-xs text-slate-500">
+              • {calculateDuration(training.started_at, training.completed_at)}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowHyperparameters(!showHyperparameters)}
+            className="text-slate-500 hover:text-emerald-400 transition-colors"
+            title="View all hyperparameters"
+          >
+            <Sliders size={14} />
+          </button>
           <StatusIcon />
-          <span className="capitalize px-3 py-1 bg-slate-800 rounded-full text-sm text-slate-100">
+          <span className="capitalize px-2 py-0.5 bg-slate-800 rounded-full text-xs text-slate-100">
             {training.status}
           </span>
         </div>
       </div>
 
-      {/* Key Hyperparameters Section */}
-      <div className="bg-slate-800/50 rounded-lg p-2">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-slate-300">Key Parameters</span>
-          <button
-            onClick={() => setShowHyperparameters(!showHyperparameters)}
-            className="text-slate-400 hover:text-emerald-400 transition-colors"
-            title="View all hyperparameters"
-          >
-            <Sliders size={16} />
-          </button>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-xs">
-          <div>
-            <span className="text-slate-400">Latent Dim: </span>
-            <span className="text-slate-100 font-medium">
-              {training.hyperparameters?.latent_dim?.toLocaleString() || 'N/A'}
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-400">Learning Rate: </span>
-            <span className="text-slate-100 font-medium">
-              {training.hyperparameters?.learning_rate ?? 'N/A'}
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-400">Batch Size: </span>
-            <span className="text-slate-100 font-medium">
-              {training.hyperparameters?.batch_size ?? 'N/A'}
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-400">Total Steps: </span>
-            <span className="text-slate-100 font-medium">
-              {training.hyperparameters?.total_steps?.toLocaleString() || 'N/A'}
-            </span>
-          </div>
-          <div>
-            {(() => {
-              const archType = training.hyperparameters?.architecture_type || 'standard_saelens';
-              const fw = getFrameworkConfig(archType);
-              if (fw.sparsityType === 'l0') {
-                return (
-                  <>
-                    <span className="text-slate-400">Sparsity Coeff: </span>
-                    <span className="text-slate-100 font-medium">
-                      {training.hyperparameters?.sparsity_coeff ?? 'N/A'}
-                    </span>
-                  </>
-                );
-              } else if (fw.sparsityType === 'topk') {
-                return (
-                  <>
-                    <span className="text-slate-400">Top-K: </span>
-                    <span className="text-emerald-400 font-medium">
-                      K={training.hyperparameters?.top_k ?? 64}
-                    </span>
-                  </>
-                );
-              } else {
-                return (
-                  <>
-                    <span className="text-slate-400">L1 Alpha: </span>
-                    <span className="text-slate-100 font-medium">
-                      {training.hyperparameters?.l1_alpha ?? 'N/A'}
-                    </span>
-                  </>
-                );
-              }
-            })()}
-          </div>
-          <div>
-            <span className="text-slate-400">Hidden Dim: </span>
-            <span className="text-slate-100 font-medium">
-              {training.hyperparameters?.hidden_dim?.toLocaleString() || 'N/A'}
-            </span>
-          </div>
-        </div>
+      {/* Compact Parameters Row */}
+      <div className="flex items-center gap-4 text-xs text-slate-400 px-6">
+        <span>Latent <span className="text-slate-200">{training.hyperparameters?.latent_dim?.toLocaleString() || '?'}</span></span>
+        <span>Hidden <span className="text-slate-200">{training.hyperparameters?.hidden_dim?.toLocaleString() || '?'}</span></span>
+        <span>LR <span className="text-slate-200">{training.hyperparameters?.learning_rate ?? '?'}</span></span>
+        <span>Batch <span className="text-slate-200">{training.hyperparameters?.batch_size ?? '?'}</span></span>
+        <span>Steps <span className="text-slate-200">{training.hyperparameters?.total_steps?.toLocaleString() || '?'}</span></span>
+        <span>
+          {(() => {
+            const archType = training.hyperparameters?.architecture_type || 'standard_saelens';
+            const fw = getFrameworkConfig(archType);
+            if (fw.sparsityType === 'l0') return <>λ <span className="text-slate-200">{training.hyperparameters?.sparsity_coeff ?? '?'}</span></>;
+            if (fw.sparsityType === 'topk') return <>K <span className="text-emerald-400">{training.hyperparameters?.top_k ?? 64}</span></>;
+            return <>L1 <span className="text-slate-200">{training.hyperparameters?.l1_alpha ?? '?'}</span></>;
+          })()}
+        </span>
       </div>
 
-      {/* Progress Section */}
+      {/* Progress + Metrics Section (compact) */}
       {(training.status === TrainingStatus.RUNNING ||
         training.status === TrainingStatus.COMPLETED ||
         training.status === TrainingStatus.PAUSED) && (
-        <div className="space-y-3">
-          {/* Progress Label with Phase Indicator */}
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400">Training Progress</span>
-              {trainingPhase && (
-                <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${trainingPhase.bgColor} ${trainingPhase.borderColor}`}>
-                  <Zap className={`w-3 h-3 ${trainingPhase.color}`} />
-                  <span className={`text-xs font-medium ${trainingPhase.color}`}>
-                    {trainingPhase.name}
-                  </span>
-                  <span className="text-xs text-slate-500">·</span>
-                  <span className="text-xs text-slate-400">
-                    {trainingPhase.description}
-                  </span>
-                </div>
-              )}
+        <div className="space-y-1.5">
+          {/* Progress Bar with percentage */}
+          <div className="flex items-center gap-2">
+            {trainingPhase && (
+              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs ${trainingPhase.bgColor} ${trainingPhase.borderColor}`}>
+                <Zap className={`w-3 h-3 ${trainingPhase.color}`} />
+                <span className={`font-medium ${trainingPhase.color}`}>{trainingPhase.name}</span>
+              </div>
+            )}
+            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
+                style={{ width: `${training.progress}%` }}
+              />
             </div>
-            <div className="flex items-center gap-3">
-              {training.status === TrainingStatus.RUNNING && elapsedTime && (
-                <div className="flex items-center gap-1.5 text-slate-400">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span className="text-sm">{elapsedTime}</span>
-                </div>
-              )}
-              <span className="text-emerald-400 font-medium">
-                {training.progress.toFixed(1)}%
-              </span>
-            </div>
+            {training.status === TrainingStatus.RUNNING && elapsedTime && (
+              <span className="text-xs text-slate-500 shrink-0">{elapsedTime}</span>
+            )}
+            <span className="text-xs text-emerald-400 font-medium shrink-0 w-12 text-right">
+              {training.progress.toFixed(1)}%
+            </span>
           </div>
 
-          {/* Progress Bar */}
-          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
-              style={{ width: `${training.progress}%` }}
-            />
+          {/* Inline Metrics Row */}
+          <div className="flex items-center gap-4 text-xs px-6">
+            <span className="text-slate-400">Loss <span className="text-emerald-400 font-semibold">{hasMetrics ? currentLoss.toFixed(6) : '—'}</span></span>
+            <span className="text-slate-400">L0 <span className={`font-semibold ${
+              !hasMetrics ? 'text-slate-400'
+                : l0Sparsity > 0.15 ? 'text-red-400'
+                : l0Sparsity > 0.08 ? 'text-yellow-400'
+                : 'text-emerald-400'
+            }`}>{hasMetrics
+              ? training.hyperparameters?.latent_dim
+                ? formatL0Absolute(l0Sparsity, training.hyperparameters.latent_dim)
+                : (l0Sparsity * 100).toFixed(2) + '%'
+              : '—'}</span></span>
+            <span className="text-slate-400">Dead <span className="text-red-400 font-semibold">{hasMetrics ? Math.floor(deadNeurons) : '—'}</span></span>
+            <span className="text-slate-400">LR <span className="text-purple-400 font-semibold">{hasMetrics ? learningRate.toExponential(2) : '—'}</span></span>
           </div>
 
-          {/* Metrics Grid */}
-          <div className="grid grid-cols-4 gap-2 pt-2">
-            {/* Loss */}
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <div className="text-xs text-slate-400 mb-1">Loss</div>
-              <div className="text-lg font-semibold text-emerald-400">
-                {hasMetrics ? currentLoss.toFixed(6) : '—'}
-              </div>
-              {hasMetrics && (training.current_reconstruction_loss != null || training.current_l1_loss != null) && (
-                <div className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                  {training.current_reconstruction_loss != null && (
-                    <span>recon={training.current_reconstruction_loss.toFixed(6)}</span>
-                  )}
-                  {training.current_l1_loss != null && (
-                    <span> L1={training.current_l1_loss.toFixed(6)}</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* L0 Sparsity - Neuronpedia-aligned display */}
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <div className="text-xs text-slate-400 mb-1">L0 Sparsity</div>
-              <div className="flex flex-col">
-                <div
-                  className={`text-lg font-semibold ${
-                    !hasMetrics
-                      ? 'text-slate-400'
-                      : l0Sparsity > 0.15
-                      ? 'text-red-400'
-                      : l0Sparsity > 0.08
-                      ? 'text-yellow-400'
-                      : 'text-emerald-400'
-                  }`}
-                  title={hasMetrics && training.hyperparameters?.latent_dim
-                    ? `~${Math.round(l0Sparsity * training.hyperparameters.latent_dim)} of ${training.hyperparameters.latent_dim} features active per token`
-                    : undefined
-                  }
-                >
-                  {hasMetrics
-                    ? training.hyperparameters?.latent_dim
-                      ? formatL0Absolute(l0Sparsity, training.hyperparameters.latent_dim)
-                      : (l0Sparsity * 100).toFixed(2) + '%'
-                    : '—'}
-                </div>
-                {hasMetrics && training.hyperparameters?.latent_dim && (
-                  <div className="text-xs text-slate-500">
-                    {(l0Sparsity * 100).toFixed(1)}% of {training.hyperparameters.latent_dim}
-                  </div>
-                )}
-                {hasMetrics && training.hyperparameters?.target_l0 && (
-                  <div className="text-xs text-slate-500">
-                    Target: {training.hyperparameters.latent_dim
-                      ? formatL0Absolute(training.hyperparameters.target_l0, training.hyperparameters.latent_dim)
-                      : (training.hyperparameters.target_l0 * 100).toFixed(1) + '%'}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Dead Neurons */}
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <div className="text-xs text-slate-400 mb-1">Dead Neurons</div>
-              <div className="text-lg font-semibold text-red-400">
-                {hasMetrics ? Math.floor(deadNeurons) : '—'}
-              </div>
-            </div>
-
-            {/* Learning Rate */}
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <div className="text-xs text-slate-400 mb-1">Learning Rate</div>
-              <div className="text-lg font-semibold text-purple-400">
-                {hasMetrics ? learningRate.toExponential(2) : '—'}
-              </div>
-            </div>
-          </div>
-
-          {/* Toggle Buttons - different layouts per status */}
+          {/* Action Buttons */}
           {training.status === TrainingStatus.COMPLETED && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex items-center gap-2 px-6">
               <button
                 type="button"
                 onClick={() => setShowCheckpoints(!showCheckpoints)}
-                className={`flex items-center justify-center gap-2 rounded-lg ${COMPONENTS.button.secondary}`}
+                className={`flex items-center gap-1.5 text-xs rounded-lg px-3 py-1 ${COMPONENTS.button.secondary}`}
               >
-                <Download className="w-4 h-4" />
-                <span>Checkpoints ({checkpoints.length})</span>
+                <Download className="w-3.5 h-3.5" />
+                Checkpoints ({checkpoints.length})
               </button>
               <button
                 type="button"
                 onClick={handleOpenImportModal}
                 disabled={importedSAECount > 0}
-                className={`flex items-center justify-center gap-2 rounded-lg ${COMPONENTS.button.secondary} ${
+                className={`flex items-center gap-1.5 text-xs rounded-lg px-3 py-1 ${COMPONENTS.button.secondary} ${
                   importedSAECount > 0 ? 'bg-emerald-500/20 border-emerald-500/50' : ''
                 }`}
               >
-                <Brain className="w-4 h-4" />
-                <span>
-                  {importedSAECount > 0
-                    ? `Imported (${importedSAECount})`
-                    : 'Import to SAEs'}
-                </span>
+                <Brain className="w-3.5 h-3.5" />
+                {importedSAECount > 0 ? `Imported (${importedSAECount})` : 'Import to SAEs'}
               </button>
             </div>
           )}
