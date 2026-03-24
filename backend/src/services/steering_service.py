@@ -926,12 +926,22 @@ class SteeringService:
         """
         def steering_hook(module, input, output):
             try:
-                # Output must be a tuple for transformer layers
-                if not isinstance(output, tuple):
-                    logger.warning("[Steering Hook] Expected tuple output, got single tensor")
-                    return output
+                # Handle both tuple and single tensor outputs
+                # Standard transformers return tuples (hidden_states, ...) but some
+                # architectures (e.g., LFM2/Liquid, custom models) return single tensors
+                is_tuple = isinstance(output, tuple)
+                if is_tuple:
+                    hidden_states = output[0]
+                else:
+                    hidden_states = output
 
-                hidden_states = output[0]
+                logger.info(
+                    f"[Steering Hook] FIRED on {type(module).__name__}, "
+                    f"output_type={'tuple' if is_tuple else 'tensor'}, "
+                    f"shape={hidden_states.shape}, dtype={hidden_states.dtype}, "
+                    f"features={[c.feature_idx for c in feature_configs]}, "
+                    f"strengths={[c.strength for c in feature_configs]}"
+                )
 
                 # Validate shape - ensure we have 3D tensor [batch, seq, hidden]
                 if len(hidden_states.shape) != 3:
