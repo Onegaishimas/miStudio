@@ -55,7 +55,7 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
     >
       {/* Logo */}
       <div className="h-14 flex items-center px-4 border-b border-slate-200 dark:border-slate-700/50">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 min-w-0">
           <img
             src={logoSvg}
             alt="MechInterp Studio"
@@ -63,9 +63,9 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
           />
           {!collapsed && (
             <>
-              <div className="overflow-hidden">
-                <div className="text-base font-semibold text-slate-900 dark:text-slate-100">MechInterp Studio</div>
-                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+              <div className="overflow-hidden min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">MechInterp Studio</div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
                   Edge AI Feature Discovery
                 </div>
               </div>
@@ -74,9 +74,9 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
                 target="_blank"
                 rel="noopener noreferrer"
                 title="User Manual"
-                className="ml-auto p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                className="flex-shrink-0 p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               >
-                <BookOpen className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
+                <BookOpen className="w-3.5 h-3.5 text-slate-400 hover:text-emerald-400" />
               </a>
             </>
           )}
