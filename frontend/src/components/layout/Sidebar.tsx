@@ -62,23 +62,12 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
             className="w-8 h-8 flex-shrink-0"
           />
           {!collapsed && (
-            <>
-              <div className="overflow-hidden min-w-0 flex-1">
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">MechInterp Studio</div>
-                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
-                  Edge AI Feature Discovery
-                </div>
+            <div className="overflow-hidden min-w-0 flex-1">
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">MechInterp Studio</div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+                Edge AI Feature Discovery
               </div>
-              <a
-                href="https://hitsainet.github.io/miStudio/"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="User Manual"
-                className="flex-shrink-0 p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-slate-400 hover:text-emerald-400" />
-              </a>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -109,28 +98,40 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
           ))}
         </nav>
 
-        {/* Bottom nav (Settings) */}
+        {/* Bottom nav (Settings + Manual link) */}
         <div className="p-2 border-t border-slate-200 dark:border-slate-700/50">
           {bottomNavItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onPanelChange(item.id)}
-              className={`
-                w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
-                transition-all duration-200
-                ${activePanel === item.id
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
-                }
-                ${collapsed ? 'justify-center' : ''}
-              `}
-              title={collapsed ? item.label : undefined}
-            >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
+            <div key={item.id} className="flex items-center">
+              <button
+                onClick={() => onPanelChange(item.id)}
+                className={`
+                  flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg
+                  transition-all duration-200
+                  ${activePanel === item.id
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
+                  }
+                  ${collapsed ? 'justify-center' : ''}
+                `}
+                title={collapsed ? item.label : undefined}
+              >
+                <item.icon className="w-5 h-5 flex-shrink-0" />
+                {!collapsed && (
+                  <span className="text-sm font-medium">{item.label}</span>
+                )}
+              </button>
               {!collapsed && (
-                <span className="text-sm font-medium">{item.label}</span>
+                <a
+                  href="https://hitsainet.github.io/miStudio/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="User Manual"
+                  className="flex-shrink-0 p-2 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <BookOpen className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
+                </a>
               )}
-            </button>
+            </div>
           ))}
         </div>
       </div>
