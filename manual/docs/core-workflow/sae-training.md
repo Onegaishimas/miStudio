@@ -8,6 +8,18 @@ description: "Building the Prism — SAE frameworks, hyperparameters, and traini
 
 The **Training** panel is where you build the Sparse Autoencoder that decomposes polysemantic neurons into monosemantic features.
 
+![Training Panel — Completed training jobs](/img/miStudio_Training_Panel-Browse.jpg)
+
+## Configuring a Training Job
+
+The training configuration walks you through three steps: select a model, choose your SAE architecture, and set hyperparameters.
+
+![Step 1 — Select a model](/img/miStudio_Training_Panel-Config-ModelChoice.jpg)
+
+![Step 2 — Choose SAE framework and architecture](/img/miStudio_Training_Panel-Config-SAEChoice.jpg)
+
+![Step 3 — Set hyperparameters](/img/miStudio_Training_Panel-Config-HyperParameters.jpg)
+
 ## The Six SAE Frameworks
 
 miStudio supports six paper-grounded SAE architectures, each with different sparsity mechanisms and trade-offs:

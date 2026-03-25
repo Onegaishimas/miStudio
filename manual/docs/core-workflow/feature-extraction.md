@@ -8,7 +8,13 @@ description: "Recording the evidence — extraction configuration, token filteri
 
 After training (or downloading an external SAE), run an **Extraction Job** to scan your dataset and record which features activate on which tokens.
 
+![Extraction Panel — Completed extraction jobs](/img/miStudio_Extraction_Panel-JobBrowser.jpg)
+
 ## Extraction Configuration
+
+![Extraction Job Configuration — Step 1](/img/miStudio_Extraction_Panel-ExtractionJobConfig_01.jpg)
+
+![Extraction Job Configuration — Step 2](/img/miStudio_Extraction_Panel-ExtractionJobConfig_02.jpg)
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
@@ -51,3 +57,13 @@ Features that activate too rarely are filtered:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Min Activation Frequency** | 0.001 (0.1%) | Features firing less than this rate are excluded as "dead" |
+
+## Browsing Extracted Features
+
+Once extraction completes, browse the discovered features in the feature browser:
+
+![Feature Browser — Browsing extracted features with labels and statistics](/img/miStudio_Extraction_Panel-FeatureBrowser.jpg)
+
+Click any feature to view its activation examples, token context, and detailed statistics:
+
+![Feature Details — Activation examples and token-level analysis](/img/miStudio_Extraction_Panel-FeatureDetails.jpg)

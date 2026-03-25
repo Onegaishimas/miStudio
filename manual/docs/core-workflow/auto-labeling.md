@@ -8,6 +8,8 @@ description: "Interpreting features at scale with LLM-powered labeling"
 
 With 8,000–131,000 features, manual labeling is impractical. miStudio's auto-labeling system uses LLMs to interpret each feature from its activation examples.
 
+![Labeling Configuration Panel — Method selection and options](/img/miStudio_Extraction_Panel-FeatureLabelConfigPanel.jpg)
+
 ## Four Labeling Methods
 
 | Method | Cost | Speed | Privacy | Best For |
