@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'miStudio Manual',
   tagline: 'MechInterp Studio — End-to-End Mechanistic Interpretability Platform',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/favicon.svg',
 
   // GitHub Pages deployment
   url: 'https://onegaishimas.github.io',

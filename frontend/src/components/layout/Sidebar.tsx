@@ -11,6 +11,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  BookOpen,
 } from 'lucide-react';
 import logoSvg from '../../assets/logo.svg';
 import { useUIStore } from '../../stores/uiStore';
@@ -61,12 +62,23 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
             className="w-8 h-8 flex-shrink-0"
           />
           {!collapsed && (
-            <div className="overflow-hidden">
-              <div className="text-base font-semibold text-slate-900 dark:text-slate-100">MechInterp Studio</div>
-              <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                Edge AI Feature Discovery
+            <>
+              <div className="overflow-hidden">
+                <div className="text-base font-semibold text-slate-900 dark:text-slate-100">MechInterp Studio</div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                  Edge AI Feature Discovery
+                </div>
               </div>
-            </div>
+              <a
+                href="https://hitsainet.github.io/miStudio/"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="User Manual"
+                className="ml-auto p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                <BookOpen className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
+              </a>
+            </>
           )}
         </div>
       </div>
