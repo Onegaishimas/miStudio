@@ -49,6 +49,16 @@ Every feature receives two labels:
 
 Labels track their **provenance** — whether they came from OpenAI, a local model, or manual editing — enabling quality comparison across methods.
 
+## Labeling Progress & Results
+
+Once a labeling job is running, track progress in real-time:
+
+![Labeling Job Progress — Real-time progress and labeled results](/img/miStudio_Labeling_Panel-LabelingJobProgressResults.jpg)
+
+Browse completed labeling results across all jobs:
+
+![Labeling Results Browser — View and compare labels across jobs](/img/miStudio_Labeling_Panel-LabelingJobResultsPanelBrowser.jpg)
+
 ## Prompt Templates
 
 Customize how the LLM analyzes features by editing **Labeling Prompt Templates**:

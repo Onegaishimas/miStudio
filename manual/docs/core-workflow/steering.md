@@ -8,6 +8,8 @@ description: "Proving causation through feature intervention"
 
 Steering is the definitive proof of your research. By manipulating specific features during generation, you demonstrate that a feature causally influences model behavior — not just correlates with it.
 
+![Steering Panel — Feature configuration with prompts and strength settings](/img/miStudio_Steering_Panel-Config.jpg)
+
 ## Steering Modes
 
 miStudio provides three distinct steering modes:
@@ -64,3 +66,9 @@ Unlike tools with a single slider, miStudio uses a **grid approach**:
 :::info Combined Mode Synergies
 Steering multiple features simultaneously is NOT the same as running them separately. "Scientific Tone" + "Excitement" combined may produce different text than either alone. Combined mode reveals **circuit behavior** where features interact.
 :::
+
+## Viewing Results
+
+After execution, results are presented in a structured comparison view showing baseline and steered outputs side-by-side with perplexity metrics:
+
+![Steering Session Results — Baseline vs steered outputs with perplexity comparison](/img/miStudio_Steering_Panel-SessionResults.jpg)
