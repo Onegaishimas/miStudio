@@ -28,6 +28,8 @@ The interface uses a **collapsible sidebar** with grouped navigation sections. T
 
 ## Real-Time System Monitoring
 
+![System Monitor — Real-time GPU, CPU, memory, and disk metrics](/img/miStudio_Monitor_Panel.jpg)
+
 The **Monitor** panel provides live WebSocket-driven metrics:
 
 - **GPU Utilization & Temperature:** Watch for thermal throttling (usually ~85°C). If hit, clock speeds drop and training times multiply.
