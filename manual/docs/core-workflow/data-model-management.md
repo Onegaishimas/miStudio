@@ -8,11 +8,17 @@ description: "Model ingestion, quantization, hook points, and tokenization"
 
 ## Model Ingestion
 
+![Models Panel — Browse downloaded models](/img/miStudio_Model_Panel-Browse.jpg)
+
 When you enter a HuggingFace ID (e.g., `google/gemma-2-2b`), miStudio:
 
 1. Downloads the model weights to local cache
 2. Runs **Dynamic Layer Discovery** to map every layer and hook point
 3. Displays the architecture in the model detail view
+
+Use the **Preview** button to inspect a model's metadata before downloading:
+
+![Model Preview — Architecture, parameters, and layer structure](/img/miStudio_Model_Panel-PreviewModal.jpg)
 
 **Quantization** reduces VRAM usage at the cost of precision:
 

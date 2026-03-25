@@ -12,9 +12,17 @@ After training (or downloading an external SAE), run an **Extraction Job** to sc
 
 ## Extraction Configuration
 
-![Extraction Job Configuration — Step 1](/img/miStudio_Extraction_Panel-ExtractionJobConfig_01.jpg)
+miStudio supports two extraction types: **Feature Extraction** (from a trained SAE) and **Activation Extraction** (raw activations for training).
 
-![Extraction Job Configuration — Step 2](/img/miStudio_Extraction_Panel-ExtractionJobConfig_02.jpg)
+### Feature Extraction Configuration
+
+![Feature Extraction Job Configuration — SAE selection and parameters](/img/miStudio_Extraction_Panel-FeatureExtractionJobConfig_01.jpg)
+
+![Feature Extraction Job Configuration — Token filtering and context](/img/miStudio_Extraction_Panel-FeatureExtractionJobConfig_02.jpg)
+
+### Activation Extraction Configuration
+
+![Activation Extraction Job Configuration](/img/miStudio_Extraction_Panel-ActivationExtractionJobConfig_01.jpg)
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
