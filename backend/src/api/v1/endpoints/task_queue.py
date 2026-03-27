@@ -112,11 +112,16 @@ async def list_failed_tasks(db: AsyncSession = Depends(get_db)):
 @router.get("/active", response_model=TaskQueueListResponse)
 async def list_active_tasks(db: AsyncSession = Depends(get_db)):
     """
-    List all active (queued or running) task queue entries.
+    List all active (queued or running) operations across all job types.
+
+    Queries task_queue table plus labeling_jobs and neuronpedia push jobs
+    to provide a unified view of all background operations.
 
     Returns:
         List of active tasks with entity information
     """
+    from sqlalchemy import select, or_, text
+
     tasks = await TaskQueueService.get_active_tasks(db)
 
     enriched_tasks = []
@@ -143,6 +148,84 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
             "entity_info": entity_info,
         }
         enriched_tasks.append(task_dict)
+
+    # Also include active labeling jobs
+    try:
+        labeling_result = await db.execute(
+            text("""
+                SELECT lj.id, lj.extraction_job_id, lj.labeling_method,
+                       lj.openai_compatible_model, lj.openai_model, lj.local_model,
+                       lj.status, lj.progress, lj.features_labeled, lj.total_features,
+                       lj.created_at, lj.updated_at
+                FROM labeling_jobs lj
+                WHERE lj.status IN ('queued', 'labeling')
+                ORDER BY lj.created_at DESC
+            """)
+        )
+        for row in labeling_result:
+            model_name = row.openai_compatible_model or row.openai_model or row.local_model or 'unknown'
+            progress_pct = (row.features_labeled / row.total_features * 100) if row.total_features > 0 else 0
+            enriched_tasks.append({
+                "id": row.id,
+                "task_id": row.id,
+                "task_type": "labeling",
+                "entity_id": row.extraction_job_id,
+                "entity_type": "labeling",
+                "status": "running" if row.status == "labeling" else "queued",
+                "progress": progress_pct,
+                "error_message": None,
+                "retry_params": None,
+                "retry_count": 0,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "started_at": row.created_at.isoformat() if row.created_at else None,
+                "completed_at": None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "entity_info": {
+                    "name": f"Labeling ({model_name})",
+                    "details": f"{row.features_labeled}/{row.total_features} features",
+                },
+            })
+    except Exception as e:
+        logger.warning(f"Failed to query labeling jobs: {e}")
+
+    # Also include active Neuronpedia push jobs
+    try:
+        push_result = await db.execute(
+            text("""
+                SELECT np.id, np.sae_id, np.status, np.progress,
+                       np.features_pushed, np.total_features,
+                       np.created_at, np.updated_at,
+                       es.name as sae_name
+                FROM neuronpedia_pushes np
+                LEFT JOIN external_saes es ON es.id = np.sae_id
+                WHERE np.status IN ('queued', 'pushing', 'preparing')
+                ORDER BY np.created_at DESC
+            """)
+        )
+        for row in push_result:
+            progress_pct = float(row.progress) if row.progress else 0
+            enriched_tasks.append({
+                "id": row.id,
+                "task_id": row.id,
+                "task_type": "neuronpedia_push",
+                "entity_id": row.sae_id,
+                "entity_type": "neuronpedia",
+                "status": "running" if row.status in ("pushing", "preparing") else "queued",
+                "progress": progress_pct,
+                "error_message": None,
+                "retry_params": None,
+                "retry_count": 0,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "started_at": row.created_at.isoformat() if row.created_at else None,
+                "completed_at": None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "entity_info": {
+                    "name": f"Push to Neuronpedia",
+                    "details": row.sae_name or row.sae_id,
+                },
+            })
+    except Exception as e:
+        logger.warning(f"Failed to query neuronpedia pushes: {e}")
 
     return {"data": enriched_tasks}
 

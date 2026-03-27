@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, Hash, Plus, Layers, ChevronLeft, ChevronRight, Zap, Eye, ArrowUp, ArrowDown } from 'lucide-react';
+import { fetchAPI } from '../../api/client';
 import { useSAEsStore } from '../../stores/saesStore';
 import { useSteeringStore } from '../../stores/steeringStore';
 import { SAEFeatureSummary } from '../../types/sae';
@@ -152,22 +153,22 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
 
   // Handle view feature details from context menu
   const handleViewFeatureDetails = async () => {
-    if (!contextMenu.feature || !selectedSAE?.training_id) {
-      console.log('[FeatureBrowser] Cannot view details - no feature or training_id', {
+    const trainingId = selectedSAE?.training_id || selectedSAE?.external_sae_id;
+    if (!contextMenu.feature || !trainingId) {
+      console.log('[FeatureBrowser] Cannot view details - no feature or training/SAE id', {
         hasFeature: !!contextMenu.feature,
         trainingId: selectedSAE?.training_id,
+        externalSaeId: selectedSAE?.external_sae_id,
       });
       setContextMenu((prev) => ({ ...prev, visible: false }));
       return;
     }
 
-    const trainingId = selectedSAE.training_id;
     const feature = contextMenu.feature;
     setContextMenu((prev) => ({ ...prev, visible: false }));
 
-    // If feature_id is directly available from the SAE browse endpoint, use it
+    // If feature_id is directly available, use it
     if (feature.feature_id) {
-      console.log('[FeatureBrowser] Using feature_id directly:', feature.feature_id);
       setSelectedFeatureForModal({
         featureId: feature.feature_id,
         trainingId: trainingId,
@@ -175,9 +176,24 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
       return;
     }
 
-    // Fallback: feature wasn't extracted, show helpful message
-    console.log('[FeatureBrowser] Feature not extracted - feature_id is null for feature_idx:', feature.feature_idx);
-    alert(`Feature #${feature.feature_idx} has not been extracted yet.\n\nOnly features that activated during an extraction job have detailed data available.\n\nTo view details for this feature, run a new extraction job on the Extractions tab that includes this feature.`);
+    // Fallback: look up feature_id by index via API
+    try {
+      const response = await fetchAPI<{ feature_id: string | null }>(
+        `/trainings/${trainingId}/features/by-index/${feature.feature_idx}`
+      );
+      if (response.feature_id) {
+        setSelectedFeatureForModal({
+          featureId: response.feature_id,
+          trainingId: trainingId,
+        });
+        return;
+      }
+    } catch (err) {
+      console.log('[FeatureBrowser] Feature lookup failed:', err);
+    }
+
+    // Feature genuinely not extracted
+    alert(`Feature #${feature.feature_idx} has not been extracted yet.\n\nRun an extraction job on the Extractions tab to view details for this feature.`);
   };
 
   // Close feature detail modal

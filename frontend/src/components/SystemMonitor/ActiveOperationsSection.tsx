@@ -25,6 +25,8 @@ export function ActiveOperationsSection() {
       training: 'Training',
       extraction: 'Extraction',
       tokenization: 'Tokenization',
+      labeling: 'Labeling',
+      neuronpedia_push: 'Neuronpedia Push',
     };
     return labels[type] || type;
   };
@@ -35,6 +37,8 @@ export function ActiveOperationsSection() {
       dataset: 'Dataset',
       training: 'Training',
       extraction: 'Extraction',
+      labeling: 'Labeling',
+      neuronpedia: 'Neuronpedia',
     };
     return labels[type] || type;
   };
