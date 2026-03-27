@@ -18,6 +18,7 @@
 
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
+import { fetchAPI } from '../api/client';
 
 export interface NeuronpediaPushProgress {
   push_job_id: string;
@@ -141,6 +142,61 @@ export const useNeuronpediaPushWebSocket = (
       unsubscribe(channel);
     };
   }, [pushJobId, isConnected, subscribe, unsubscribe]);
+
+  // Polling fallback: if no WebSocket events arrive, poll the API
+  const lastWsUpdateRef = useRef<number>(0);
+  useEffect(() => {
+    if (!pushJobId || isComplete) return;
+
+    // Track when we last got a WS event
+    lastWsUpdateRef.current = Date.now();
+
+    const pollInterval = setInterval(async () => {
+      const timeSinceLastWs = Date.now() - lastWsUpdateRef.current;
+      // Only poll if no WS event in last 10 seconds
+      if (timeSinceLastWs < 10000) return;
+
+      try {
+        const data = await fetchAPI<{
+          status: string;
+          progress: number;
+          features_pushed: number;
+          total_features: number;
+          error_message: string | null;
+        }>(`/neuronpedia/push-local/${pushJobId}`);
+
+        if (data.status === 'not_found') return;
+
+        const progressData = {
+          push_job_id: pushJobId,
+          progress: data.progress,
+          status: data.status,
+          features_pushed: data.features_pushed || 0,
+          total_features: data.total_features || 0,
+          message: `Processing feature ${data.features_pushed}/${data.total_features}`,
+        } as any;
+
+        if (data.status === 'completed') {
+          handleCompleted(progressData);
+        } else if (data.status === 'failed') {
+          handleFailed({ ...progressData, error: data.error_message });
+        } else {
+          handleProgress(progressData);
+        }
+      } catch {
+        // Polling failure is non-critical
+      }
+    }, 5000);
+
+    return () => clearInterval(pollInterval);
+  }, [pushJobId, isComplete, handleProgress, handleCompleted, handleFailed]);
+
+  // Update lastWsUpdate whenever we get a WS event
+  useEffect(() => {
+    if (progress) {
+      lastWsUpdateRef.current = Date.now();
+    }
+  }, [progress]);
 
   return { progress, isComplete, error, reset };
 };

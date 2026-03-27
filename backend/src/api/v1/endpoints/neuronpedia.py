@@ -436,20 +436,48 @@ async def push_to_local_neuronpedia(
 @router.get("/push-local/{push_job_id}")
 async def get_push_status(
     push_job_id: str,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get status of a push job by polling (alternative to WebSocket).
 
-    Note: For real-time updates, use WebSocket subscription to
-    channel neuronpedia/push/{push_job_id}
+    Returns current progress from the database, useful as a fallback
+    when WebSocket subscription misses events.
     """
-    from ....core.celery_app import celery_app
+    from sqlalchemy import text
 
-    # Extract task_id from result backend if we stored it
-    # For now, return basic info
+    result = await db.execute(
+        text("""
+            SELECT np.id, np.sae_id, np.status, np.progress,
+                   np.features_pushed, np.total_features,
+                   np.error_message, np.created_at, np.updated_at,
+                   es.name as sae_name
+            FROM neuronpedia_pushes np
+            LEFT JOIN external_saes es ON es.id = np.sae_id
+            WHERE np.id = :push_job_id
+        """),
+        {"push_job_id": push_job_id},
+    )
+    row = result.first()
+
+    if not row:
+        return {
+            "push_job_id": push_job_id,
+            "status": "not_found",
+            "progress": 0,
+        }
+
     return {
-        "push_job_id": push_job_id,
-        "message": "Use WebSocket subscription for real-time progress updates",
+        "push_job_id": row.id,
+        "sae_id": row.sae_id,
+        "sae_name": row.sae_name,
+        "status": row.status,
+        "progress": float(row.progress) if row.progress else 0,
+        "features_pushed": row.features_pushed,
+        "total_features": row.total_features,
+        "error_message": row.error_message,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "websocket_channel": f"neuronpedia/push/{push_job_id}",
     }
 
