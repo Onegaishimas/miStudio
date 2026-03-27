@@ -332,6 +332,34 @@ async def get_feature_id_by_index(
     return {"feature_id": feature_id}
 
 
+@router.get(
+    "/saes/{sae_id}/features/by-index/{feature_idx}",
+    response_model=dict,
+    summary="Lookup feature ID by SAE ID and index"
+)
+async def get_feature_id_by_sae_and_index(
+    sae_id: str,
+    feature_idx: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Look up feature ID by external_sae_id and feature index.
+
+    Used for features from external/downloaded SAEs where training_id is null.
+    """
+    from sqlalchemy import select
+    from ....models.feature import Feature
+
+    result = await db.execute(
+        select(Feature.id).where(
+            Feature.external_sae_id == sae_id,
+            Feature.neuron_index == feature_idx
+        )
+    )
+    feature_id = result.scalar_one_or_none()
+    return {"feature_id": feature_id}
+
+
 @router.patch(
     "/features/{feature_id}",
     response_model=FeatureResponse,

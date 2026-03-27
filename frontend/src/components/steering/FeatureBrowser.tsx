@@ -153,38 +153,49 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
 
   // Handle view feature details from context menu
   const handleViewFeatureDetails = async () => {
-    const trainingId = selectedSAE?.training_id || selectedSAE?.external_sae_id;
-    if (!contextMenu.feature || !trainingId) {
-      console.log('[FeatureBrowser] Cannot view details - no feature or training/SAE id', {
-        hasFeature: !!contextMenu.feature,
-        trainingId: selectedSAE?.training_id,
-        externalSaeId: selectedSAE?.external_sae_id,
-      });
+    if (!contextMenu.feature || !selectedSAE) {
       setContextMenu((prev) => ({ ...prev, visible: false }));
       return;
     }
 
     const feature = contextMenu.feature;
+    const saeId = selectedSAE.id;
+    const trainingId = selectedSAE.training_id;
     setContextMenu((prev) => ({ ...prev, visible: false }));
 
     // If feature_id is directly available, use it
     if (feature.feature_id) {
       setSelectedFeatureForModal({
         featureId: feature.feature_id,
-        trainingId: trainingId,
+        trainingId: trainingId || saeId,
       });
       return;
     }
 
-    // Fallback: look up feature_id by index via API
+    // Fallback: look up feature_id by training_id or sae_id
     try {
+      // Try training_id lookup first (for trained SAEs)
+      if (trainingId) {
+        const response = await fetchAPI<{ feature_id: string | null }>(
+          `/trainings/${trainingId}/features/by-index/${feature.feature_idx}`
+        );
+        if (response.feature_id) {
+          setSelectedFeatureForModal({
+            featureId: response.feature_id,
+            trainingId: trainingId,
+          });
+          return;
+        }
+      }
+
+      // Try sae_id lookup (for external/downloaded SAEs)
       const response = await fetchAPI<{ feature_id: string | null }>(
-        `/trainings/${trainingId}/features/by-index/${feature.feature_idx}`
+        `/saes/${saeId}/features/by-index/${feature.feature_idx}`
       );
       if (response.feature_id) {
         setSelectedFeatureForModal({
           featureId: response.feature_id,
-          trainingId: trainingId,
+          trainingId: trainingId || saeId,
         });
         return;
       }
@@ -582,7 +593,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
         >
           <button
             onClick={handleViewFeatureDetails}
-            disabled={!selectedSAE?.training_id}
+            disabled={!selectedSAE}
             className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Eye className="w-4 h-4" />
