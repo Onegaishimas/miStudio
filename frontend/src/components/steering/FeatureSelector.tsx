@@ -117,69 +117,63 @@ export function FeatureSelector() {
 
   // Handle view feature details from context menu
   const handleViewFeatureDetails = async () => {
-    if (contextMenu.featureIdx === null || !selectedSAE?.training_id) {
-      console.log('[FeatureSelector] Cannot view details - no featureIdx or training_id', {
-        featureIdx: contextMenu.featureIdx,
-        trainingId: selectedSAE?.training_id,
-      });
+    if (contextMenu.featureIdx === null || !selectedSAE) {
       setContextMenu((prev) => ({ ...prev, visible: false }));
       return;
     }
 
+    const saeId = selectedSAE.id;
     const trainingId = selectedSAE.training_id;
     const featureIdx = contextMenu.featureIdx;
     const layer = contextMenu.layer;
     setContextMenu((prev) => ({ ...prev, visible: false }));
 
+    const openModal = (featureId: string) => {
+      setSelectedFeatureForModal({
+        featureId,
+        trainingId: trainingId || saeId,
+      });
+    };
+
     // If feature_id is directly available in the selected feature, use it
     if (contextMenu.featureId) {
-      console.log('[FeatureSelector] Using feature_id directly:', contextMenu.featureId);
-      setSelectedFeatureForModal({
-        featureId: contextMenu.featureId,
-        trainingId: trainingId,
-      });
+      openModal(contextMenu.featureId);
       return;
     }
 
     // Fallback: Try to find feature_id from the Feature Browser data
-    // This handles cases where feature_id wasn't preserved when adding to selected features
     const { featureBrowser } = useSAEsStore.getState();
     if (featureBrowser.data?.features) {
       const matchingFeature = featureBrowser.data.features.find(
         (f) => f.feature_idx === featureIdx && f.layer === layer
       );
       if (matchingFeature?.feature_id) {
-        console.log('[FeatureSelector] Found feature_id from Feature Browser:', matchingFeature.feature_id);
-        setSelectedFeatureForModal({
-          featureId: matchingFeature.feature_id,
-          trainingId: trainingId,
-        });
+        openModal(matchingFeature.feature_id);
         return;
       }
     }
 
-    // API fallback: Look up feature_id by training_id + feature_idx
-    // This handles manual index entry where feature_id wasn't available at add time
+    // API fallback: try training_id lookup, then SAE ID lookup
     try {
-      console.log('[FeatureSelector] Looking up feature_id via API for feature_idx:', featureIdx);
-      const response = await axios.get(`/api/v1/trainings/${trainingId}/features/by-index/${featureIdx}`);
-      const { feature_id } = response.data;
+      if (trainingId) {
+        const response = await axios.get(`/api/v1/trainings/${trainingId}/features/by-index/${featureIdx}`);
+        if (response.data.feature_id) {
+          openModal(response.data.feature_id);
+          return;
+        }
+      }
 
-      if (feature_id) {
-        console.log('[FeatureSelector] Found feature_id via API:', feature_id);
-        setSelectedFeatureForModal({
-          featureId: feature_id,
-          trainingId: trainingId,
-        });
+      // Try SAE ID lookup (for external/downloaded SAEs)
+      const response = await axios.get(`/api/v1/saes/${saeId}/features/by-index/${featureIdx}`);
+      if (response.data.feature_id) {
+        openModal(response.data.feature_id);
         return;
       }
     } catch (error) {
-      console.log('[FeatureSelector] API lookup failed:', error);
+      console.log('[FeatureSelector] Feature lookup failed:', error);
     }
 
-    // Final fallback: feature wasn't extracted, show helpful message
-    console.log('[FeatureSelector] Feature not extracted - feature_id is null for feature_idx:', featureIdx);
-    alert(`Feature #${featureIdx} has not been extracted yet.\n\nOnly features that activated during an extraction job have detailed data available.\n\nTo view details for this feature, run a new extraction job on the Extractions tab that includes this feature.`);
+    alert(`Feature #${featureIdx} has not been extracted yet.\n\nRun an extraction job on the Extractions tab to view details for this feature.`);
   };
 
   // Handle duplicate feature from context menu
