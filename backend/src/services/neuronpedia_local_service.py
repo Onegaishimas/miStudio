@@ -150,22 +150,45 @@ class NeuronpediaLocalClient:
         layers: int,
         creator_id: str,
         visibility: str = "PUBLIC",
+        neurons_per_layer: int = 0,
+        source_set_name: Optional[str] = None,
+        default_source_id: Optional[str] = None,
     ) -> bool:
-        """Create a Model record if it doesn't exist."""
+        """Create or update a Model record."""
         async with self._pool.acquire() as conn:
-            # Check if model exists
             existing = await conn.fetchrow(
-                'SELECT id FROM "Model" WHERE id = $1',
+                'SELECT id, layers FROM "Model" WHERE id = $1',
                 model_id
             )
 
             if existing:
-                # Update visibility if model exists
+                # Update layers if this push adds more, plus keep other fields current
+                new_layers = max(existing['layers'] or 0, layers)
+                update_parts = [
+                    '"visibility" = $1',
+                    '"updatedAt" = $2',
+                    '"layers" = $3',
+                ]
+                params = [visibility, datetime.utcnow(), new_layers]
+                idx = 4
+                if neurons_per_layer:
+                    update_parts.append(f'"neuronsPerLayer" = ${idx}')
+                    params.append(neurons_per_layer)
+                    idx += 1
+                if source_set_name:
+                    update_parts.append(f'"defaultSourceSetName" = ${idx}')
+                    params.append(source_set_name)
+                    idx += 1
+                if default_source_id:
+                    update_parts.append(f'"defaultSourceId" = ${idx}')
+                    params.append(default_source_id)
+                    idx += 1
+                params.append(model_id)
                 await conn.execute(
-                    'UPDATE "Model" SET visibility = $1, "updatedAt" = $2 WHERE id = $3',
-                    visibility, datetime.utcnow(), model_id
+                    f'UPDATE "Model" SET {", ".join(update_parts)} WHERE id = ${idx}',
+                    *params,
                 )
-                logger.info(f"Model {model_id} already exists, updated visibility to {visibility}")
+                logger.info(f"Model {model_id} updated: layers={new_layers}")
                 return False
 
             # Create model
@@ -173,12 +196,14 @@ class NeuronpediaLocalClient:
                 '''
                 INSERT INTO "Model" (
                     id, "displayName", "displayNameShort", "creatorId",
-                    layers, "neuronsPerLayer", owner, visibility,
-                    "inferenceEnabled", instruct, "createdAt", "updatedAt"
+                    layers, "neuronsPerLayer", "defaultSourceSetName", "defaultSourceId",
+                    owner, visibility, "inferenceEnabled", instruct, "createdAt", "updatedAt"
                 )
-                VALUES ($1, $2, $2, $3, $4, 0, 'miStudio', $5, false, false, $6, $6)
+                VALUES ($1, $2, $2, $3, $4, $5, $6, $7, 'miStudio', $8, false, false, $9, $9)
                 ''',
-                model_id, display_name, creator_id, layers, visibility, datetime.utcnow()
+                model_id, display_name, creator_id, layers,
+                neurons_per_layer, source_set_name or '', default_source_id or '',
+                visibility, datetime.utcnow()
             )
             logger.info(f"Created Neuronpedia model: {model_id} with visibility={visibility}")
             return True
@@ -245,22 +270,21 @@ class NeuronpediaLocalClient:
             )
 
             if existing:
-                # Update visibility if exists (neuronCount may not exist in schema)
                 await conn.execute(
-                    'UPDATE "SourceSet" SET visibility = $1 WHERE "modelId" = $2 AND name = $3',
-                    visibility, model_id, name
+                    'UPDATE "SourceSet" SET visibility = $1, "defaultOfModelId" = $2 WHERE "modelId" = $3 AND name = $4',
+                    visibility, model_id, model_id, name
                 )
-                logger.info(f"SourceSet {name} already exists, updated visibility to {visibility}")
+                logger.info(f"SourceSet {name} already exists, updated visibility and defaultOfModelId")
                 return False
 
-            # Create source set (neuronCount not in Neuronpedia schema)
+            # Create source set
             await conn.execute(
                 '''
                 INSERT INTO "SourceSet" (
                     "modelId", name, description, type, "creatorName", "creatorId",
-                    visibility, "hasDashboards", "allowInferenceSearch", urls, "createdAt"
+                    visibility, "hasDashboards", "allowInferenceSearch", "defaultOfModelId", urls, "createdAt"
                 )
-                VALUES ($1, $2, $3, 'sae', 'miStudio', $4, $5, true, false, ARRAY[]::text[], $6)
+                VALUES ($1, $2, $3, 'sae', 'miStudio', $4, $5, true, false, $1, ARRAY[]::text[], $6)
                 ''',
                 model_id, name, description, creator_id, visibility, datetime.utcnow()
             )
@@ -274,22 +298,22 @@ class NeuronpediaLocalClient:
         set_name: str,
         creator_id: str,
         visibility: str = "PUBLIC",
+        release_name: Optional[str] = None,
     ) -> bool:
         """Create a Source record if it doesn't exist."""
+        sae_release = release_name or f"{model_id}-{set_name}"
         async with self._pool.acquire() as conn:
-            # Check if source exists
             existing = await conn.fetchrow(
                 'SELECT id FROM "Source" WHERE id = $1 AND "modelId" = $2',
                 source_id, model_id
             )
 
             if existing:
-                # Update visibility if exists
                 await conn.execute(
-                    'UPDATE "Source" SET visibility = $1 WHERE id = $2 AND "modelId" = $3',
-                    visibility, source_id, model_id
+                    'UPDATE "Source" SET visibility = $1, "saelensRelease" = $2 WHERE id = $3 AND "modelId" = $4',
+                    visibility, sae_release, source_id, model_id
                 )
-                logger.info(f"Source {source_id} already exists, updated visibility to {visibility}")
+                logger.info(f"Source {source_id} already exists, updated visibility and saelensRelease")
                 return False
 
             # Create source
@@ -297,11 +321,11 @@ class NeuronpediaLocalClient:
                 '''
                 INSERT INTO "Source" (
                     id, "modelId", "setName", "creatorId",
-                    visibility, "hasDashboards", "inferenceEnabled", "createdAt"
+                    visibility, "hasDashboards", "inferenceEnabled", "saelensRelease", "createdAt"
                 )
-                VALUES ($1, $2, $3, $4, $5, true, false, $6)
+                VALUES ($1, $2, $3, $4, $5, true, false, $6, $7)
                 ''',
-                source_id, model_id, set_name, creator_id, visibility, datetime.utcnow()
+                source_id, model_id, set_name, creator_id, visibility, sae_release, datetime.utcnow()
             )
             logger.info(f"Created Neuronpedia source: {source_id} with visibility={visibility}")
             return True
@@ -693,13 +717,16 @@ class NeuronpediaLocalPushService:
             # Ensure admin user exists
             creator_id = await client.ensure_admin_user()
 
-            # Create Model
+            # Create Model — pass full context so layers/defaults stay correct on every push
             await client.create_model(
                 model_id=np_model_id,
                 display_name=model_name,
-                layers=layer + 1,  # At least this many layers
+                layers=layer + 1,
                 creator_id=creator_id,
                 visibility=config.visibility,
+                neurons_per_layer=n_features,
+                source_set_name=np_source_set_name,
+                default_source_id=np_source_id,
             )
 
             if progress_callback:
@@ -726,13 +753,15 @@ class NeuronpediaLocalPushService:
                 default_source_id=np_source_id,
             )
 
-            # Create Source
+            # Create Source — saelensRelease drives the breadcrumb on feature pages
+            np_release_name = f"{np_model_id}-{np_source_set_name}"
             await client.create_source(
                 source_id=np_source_id,
                 model_id=np_model_id,
                 set_name=np_source_set_name,
                 creator_id=creator_id,
                 visibility=config.visibility,
+                release_name=np_release_name,
             )
 
             # Compute dashboard data (logit lens, histograms) if needed
