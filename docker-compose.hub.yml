@@ -55,7 +55,7 @@ services:
   # ============================================================================
 
   backend:
-    image: onegaionegai/mistudio-backend:latest
+    image: hitsai/mistudio-backend:latest
     container_name: mistudio-backend
     environment:
       SERVICE_TYPE: api
@@ -105,7 +105,7 @@ services:
       - mistudio-network
 
   celery-worker:
-    image: onegaionegai/mistudio-backend:latest
+    image: hitsai/mistudio-backend:latest
     container_name: mistudio-celery-worker
     environment:
       SERVICE_TYPE: celery-worker
@@ -147,7 +147,7 @@ services:
       - mistudio-network
 
   celery-beat:
-    image: onegaionegai/mistudio-backend:latest
+    image: hitsai/mistudio-backend:latest
     container_name: mistudio-celery-beat
     environment:
       SERVICE_TYPE: celery-beat
@@ -173,7 +173,7 @@ services:
   # ============================================================================
 
   frontend:
-    image: onegaionegai/mistudio-frontend:latest
+    image: hitsai/mistudio-frontend:latest
     container_name: mistudio-frontend
     environment:
       NODE_ENV: production
