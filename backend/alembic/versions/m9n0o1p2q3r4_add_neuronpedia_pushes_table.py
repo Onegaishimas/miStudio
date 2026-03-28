@@ -10,6 +10,11 @@ Tracks Neuronpedia local push jobs so they appear in Active Operations monitor.
 from alembic import op
 import sqlalchemy as sa
 
+revision = "m9n0o1p2q3r4"
+down_revision = "l8m9n0o1p2q3"
+branch_labels = None
+depends_on = None
+
 
 def upgrade() -> None:
     op.create_table(
