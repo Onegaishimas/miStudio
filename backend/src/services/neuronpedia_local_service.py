@@ -924,10 +924,18 @@ class NeuronpediaLocalPushService:
                             )
                             activations_created += 1
 
-                # Create explanation: prefer human-readable description, fall back to name
+                # Create explanation: "name: description" or just whichever is available
                 if config.include_explanations:
-                    explanation_text = (feature.description or "").strip() or (feature.name or "").strip()
-                    if explanation_text and not explanation_text.startswith("feature_"):
+                    name = (feature.name or "").strip()
+                    desc = (feature.description or "").strip()
+                    has_name = name and not name.startswith("feature_")
+                    if has_name and desc:
+                        explanation_text = f"{name}: {desc}"
+                    elif has_name:
+                        explanation_text = name
+                    else:
+                        explanation_text = desc
+                    if explanation_text:
                         await client.create_explanation(
                             model_id=np_model_id,
                             layer=np_source_id,
