@@ -22,9 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'labeling_prompt_templates',
-        sa.Column('include_nlp_analysis', sa.Boolean(), nullable=False, server_default=sa.text('false'))
+    op.execute(
+        "ALTER TABLE labeling_prompt_templates ADD COLUMN IF NOT EXISTS include_nlp_analysis BOOLEAN NOT NULL DEFAULT false"
     )
 
 
