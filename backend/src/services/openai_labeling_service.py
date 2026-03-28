@@ -1398,7 +1398,10 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
         # Fall back to defaults when no template is selected
         effective_system_message = system_message or (
             "You are an expert in mechanistic interpretability analyzing sparse autoencoder features. "
-            "Provide both category and specific labels in JSON format."
+            "You will be given multiple activation examples. You MUST synthesize across ALL of them — "
+            "do not describe or name specific tokens from individual examples. "
+            "Find the shared concept that explains why all examples activate the same feature. "
+            "Provide category, specific label, and description in JSON format."
         )
 
         try:

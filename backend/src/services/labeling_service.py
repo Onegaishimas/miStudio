@@ -7,6 +7,7 @@ Labeling is independent from extraction, allowing re-labeling without re-extract
 
 import logging
 import os
+import random
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -747,14 +748,18 @@ class LabelingService:
                 for feature in batch_features:
                     all_examples = all_examples_map.get(feature.id, [])
                     if include_nlp:
-                        # Store all examples for NLP analysis
+                        # Store all examples for NLP analysis (keep activation order)
                         all_features_examples.append(all_examples)
-                        # Store only top max_examples for LLM display
-                        features_examples.append(all_examples[:max_examples])
+                        # Shuffle top examples before LLM display to break primacy bias
+                        llm_examples = list(all_examples[:max_examples])
+                        random.shuffle(llm_examples)
+                        features_examples.append(llm_examples)
                     else:
-                        # NLP disabled: no extra examples needed
+                        # NLP disabled: shuffle all retrieved examples to break primacy bias
+                        llm_examples = list(all_examples)
+                        random.shuffle(llm_examples)
                         all_features_examples.append([])
-                        features_examples.append(all_examples)
+                        features_examples.append(llm_examples)
                     neuron_indices.append(feature.neuron_index)
 
                 # Update progress in database
