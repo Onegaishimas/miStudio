@@ -790,10 +790,11 @@ class NeuronpediaLocalPushService:
                     )
                 except Exception as e:
                     logger.warning(f"Dashboard data computation failed, continuing without it: {e}")
-                    # Rollback to clear the aborted transaction state
-                    await db.rollback()
-                    # Refresh the SAE object to re-attach it to the session after rollback
-                    await db.refresh(sae)
+                    try:
+                        await db.rollback()
+                        await db.refresh(sae)
+                    except Exception:
+                        pass
 
             if progress_callback:
                 progress_callback(50, "Loading features...")
