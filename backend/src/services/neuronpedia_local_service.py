@@ -183,6 +183,50 @@ class NeuronpediaLocalClient:
             logger.info(f"Created Neuronpedia model: {model_id} with visibility={visibility}")
             return True
 
+    async def create_source_release(
+        self,
+        model_id: str,
+        source_set_name: str,
+        creator_id: str,
+        description: str,
+        visibility: str = "PUBLIC",
+        default_source_id: Optional[str] = None,
+    ) -> bool:
+        """Create a SourceRelease record and link SourceSet to it.
+
+        The SourceRelease drives the layer dropdown in the Neuronpedia UI.
+        Without it, the dropdown just shows "Release" with no layers.
+        The release name is derived as '{model_id}-{source_set_name}'.
+        """
+        release_name = f"{model_id}-{source_set_name}"
+        async with self._pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                'SELECT name FROM "SourceRelease" WHERE name = $1',
+                release_name,
+            )
+            if not existing:
+                await conn.execute(
+                    '''
+                    INSERT INTO "SourceRelease" (
+                        name, visibility, "isNewUi", featured, description,
+                        "creatorName", "creatorId", "defaultSourceSetName", "defaultSourceId", "createdAt"
+                    )
+                    VALUES ($1, $2, true, false, $3, 'miStudio', $4, $5, $6, $7)
+                    ''',
+                    release_name, visibility, description,
+                    creator_id, source_set_name, default_source_id, datetime.utcnow(),
+                )
+                logger.info(f"Created SourceRelease: {release_name}")
+
+            # Always ensure SourceSet.releaseName is set (covers the case where
+            # SourceSet was created before SourceRelease existed)
+            await conn.execute(
+                'UPDATE "SourceSet" SET "releaseName" = $1 WHERE "modelId" = $2 AND name = $3',
+                release_name, model_id, source_set_name,
+            )
+            logger.info(f"Linked SourceSet {source_set_name} → SourceRelease {release_name}")
+            return True
+
     async def create_source_set(
         self,
         model_id: str,
@@ -669,6 +713,17 @@ class NeuronpediaLocalPushService:
                 creator_id=creator_id,
                 visibility=config.visibility,
                 neuron_count=n_features,
+            )
+
+            # Create SourceRelease and link SourceSet to it.
+            # Without this the layer dropdown in Neuronpedia shows only "Release".
+            await client.create_source_release(
+                model_id=np_model_id,
+                source_set_name=np_source_set_name,
+                creator_id=creator_id,
+                description=f"SAE from miStudio - {model_name}",
+                visibility=config.visibility,
+                default_source_id=np_source_id,
             )
 
             # Create Source
