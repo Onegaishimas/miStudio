@@ -119,7 +119,7 @@ run_migrations() {
     if [ "$should_run" = "true" ]; then
         log_info "Running database migrations..."
         # Run as mistudio user, with error handling
-        if su -s /bin/bash mistudio -c "cd /app && alembic upgrade head"; then
+        if su -s /bin/bash mistudio -c "cd /app && alembic upgrade heads"; then
             log_info "Database migrations completed successfully"
         else
             log_error "Database migrations failed!"
