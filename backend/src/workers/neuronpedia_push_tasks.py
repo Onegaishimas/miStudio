@@ -111,11 +111,30 @@ def push_to_neuronpedia_local_task(
             start_time=time.time(),
         )
 
+        async def _update_db(db_session, status: str, prog: float, features: int = 0, error: str = None):
+            """Update neuronpedia_pushes row with current status."""
+            from sqlalchemy import text as sa_text
+            try:
+                await db_session.execute(
+                    sa_text("""
+                        UPDATE neuronpedia_pushes
+                        SET status=:status, progress=:progress, features_pushed=:features, error_message=:error, updated_at=now()
+                        WHERE id=:id
+                    """),
+                    {"status": status, "progress": prog, "features": features, "error": error, "id": push_job_id},
+                )
+                await db_session.commit()
+            except Exception as db_err:
+                logger.warning(f"Failed to update neuronpedia_pushes: {db_err}")
+
         try:
             # Emit initial progress
             progress.emit("Initializing push...", "pushing")
 
             async with AsyncSessionLocal() as db:
+                # Mark as pushing in DB
+                await _update_db(db, "pushing", 0)
+
                 # Load SAE to get feature count
                 sae = await db.get(ExternalSAE, sae_id)
                 if not sae:
@@ -148,6 +167,8 @@ def push_to_neuronpedia_local_task(
                 )
 
                 # Create a progress callback that emits WebSocket events
+                _last_db_update_time = [0.0]
+
                 def progress_callback(pct: int, message: str):
                     """Convert service progress to WebSocket emissions."""
                     # Parse stage from message
@@ -179,6 +200,21 @@ def push_to_neuronpedia_local_task(
 
                     progress.emit(message)
 
+                    # Throttled DB progress update (every 15s) so Monitor shows live progress
+                    now = time.time()
+                    if now - _last_db_update_time[0] > 15 and progress.total_features > 0:
+                        _last_db_update_time[0] = now
+                        pct_done = (progress.features_pushed / progress.total_features) * 100
+                        import asyncio as _asyncio
+                        try:
+                            loop = _asyncio.get_event_loop()
+                            if loop.is_running():
+                                _asyncio.ensure_future(
+                                    _update_db(db, "pushing", pct_done, progress.features_pushed)
+                                )
+                        except Exception:
+                            pass
+
                 # Perform the push
                 result = await service.push_sae_to_local(
                     db=db,
@@ -196,6 +232,8 @@ def push_to_neuronpedia_local_task(
                     progress.activations_pushed = result.activations_created
                     progress.explanations_pushed = result.explanations_created
                     progress.current_stage = "completed"
+
+                    await _update_db(db, "completed", 100, result.neurons_created)
 
                     emit_neuronpedia_push_progress(
                         push_job_id=push_job_id,
@@ -221,6 +259,7 @@ def push_to_neuronpedia_local_task(
                         "neuronpedia_url": result.neuronpedia_url,
                     }
                 else:
+                    await _update_db(db, "failed", 0, error=result.error_message)
                     emit_neuronpedia_push_progress(
                         push_job_id=push_job_id,
                         sae_id=sae_id,
@@ -238,6 +277,8 @@ def push_to_neuronpedia_local_task(
 
         except Exception as e:
             logger.exception(f"Neuronpedia push task failed: {e}")
+            async with AsyncSessionLocal() as db:
+                await _update_db(db, "failed", 0, error=str(e))
             emit_neuronpedia_push_progress(
                 push_job_id=push_job_id,
                 sae_id=sae_id,
