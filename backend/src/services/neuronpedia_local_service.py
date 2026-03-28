@@ -202,7 +202,7 @@ class NeuronpediaLocalClient:
                 VALUES ($1, $2, $2, $3, $4, $5, $6, $7, 'miStudio', $8, false, false, $9, $9)
                 ''',
                 model_id, display_name, creator_id, layers,
-                neurons_per_layer, source_set_name or '', default_source_id or '',
+                neurons_per_layer, source_set_name or None, default_source_id or None,
                 visibility, datetime.utcnow()
             )
             logger.info(f"Created Neuronpedia model: {model_id} with visibility={visibility}")
@@ -717,7 +717,7 @@ class NeuronpediaLocalPushService:
             # Ensure admin user exists
             creator_id = await client.ensure_admin_user()
 
-            # Create Model — pass full context so layers/defaults stay correct on every push
+            # Create Model WITHOUT defaultSourceId — Source doesn't exist yet (FK constraint)
             await client.create_model(
                 model_id=np_model_id,
                 display_name=model_name,
@@ -726,7 +726,6 @@ class NeuronpediaLocalPushService:
                 visibility=config.visibility,
                 neurons_per_layer=n_features,
                 source_set_name=np_source_set_name,
-                default_source_id=np_source_id,
             )
 
             if progress_callback:
@@ -762,6 +761,18 @@ class NeuronpediaLocalPushService:
                 creator_id=creator_id,
                 visibility=config.visibility,
                 release_name=np_release_name,
+            )
+
+            # Now that Source exists, set defaultSourceId on the Model (FK safe)
+            await client.create_model(
+                model_id=np_model_id,
+                display_name=model_name,
+                layers=layer + 1,
+                creator_id=creator_id,
+                visibility=config.visibility,
+                neurons_per_layer=n_features,
+                source_set_name=np_source_set_name,
+                default_source_id=np_source_id,
             )
 
             # Compute dashboard data (logit lens, histograms) if needed
