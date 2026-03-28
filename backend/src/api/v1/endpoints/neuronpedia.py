@@ -493,6 +493,51 @@ async def get_push_status(
     }
 
 
+@router.get("/push-local")
+async def list_active_push_jobs(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all active (non-completed) push jobs.
+
+    Used by the frontend on page load to restore push job state after a browser refresh.
+    """
+    from sqlalchemy import text
+
+    result = await db.execute(
+        text("""
+            SELECT np.id, np.sae_id, np.status, np.progress,
+                   np.features_pushed, np.total_features,
+                   np.error_message, np.created_at, np.updated_at,
+                   es.name as sae_name
+            FROM neuronpedia_pushes np
+            LEFT JOIN external_saes es ON es.id = np.sae_id
+            WHERE np.status IN ('queued', 'pushing', 'preparing')
+            ORDER BY np.created_at DESC
+        """)
+    )
+    rows = result.fetchall()
+
+    return {
+        "jobs": [
+            {
+                "push_job_id": row.id,
+                "sae_id": row.sae_id,
+                "sae_name": row.sae_name,
+                "status": row.status,
+                "progress": float(row.progress) if row.progress else 0,
+                "features_pushed": row.features_pushed,
+                "total_features": row.total_features,
+                "error_message": row.error_message,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "websocket_channel": f"neuronpedia/push/{row.id}",
+            }
+            for row in rows
+        ]
+    }
+
+
 @router.get("/local-status")
 async def get_local_neuronpedia_status():
     """

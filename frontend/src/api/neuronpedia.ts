@@ -459,3 +459,44 @@ export async function pushToLocal(
     websocketChannel: response.websocket_channel,
   };
 }
+
+export interface ActivePushJobSummary {
+  pushJobId: string;
+  saeId: string;
+  saeName: string | null;
+  status: string;
+  progress: number;
+  featuresPushed: number;
+  totalFeatures: number;
+  createdAt: string | null;
+}
+
+/**
+ * List all active (non-completed) push jobs.
+ * Used on page load to restore push job state after a browser refresh.
+ */
+export async function listActivePushJobs(): Promise<ActivePushJobSummary[]> {
+  const response = await fetchAPI<{
+    jobs: Array<{
+      push_job_id: string;
+      sae_id: string;
+      sae_name: string | null;
+      status: string;
+      progress: number;
+      features_pushed: number;
+      total_features: number;
+      created_at: string | null;
+    }>;
+  }>('/neuronpedia/push-local');
+
+  return response.jobs.map((job) => ({
+    pushJobId: job.push_job_id,
+    saeId: job.sae_id,
+    saeName: job.sae_name,
+    status: job.status,
+    progress: job.progress,
+    featuresPushed: job.features_pushed,
+    totalFeatures: job.total_features,
+    createdAt: job.created_at,
+  }));
+}

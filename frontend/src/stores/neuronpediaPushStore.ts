@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { NeuronpediaPushProgress } from '../hooks/useNeuronpediaPushWebSocket';
+import { listActivePushJobs } from '../api/neuronpedia';
 
 /**
  * Active push job state.
@@ -34,6 +35,7 @@ interface NeuronpediaPushState {
   clearPush: (saeId: string) => void;
   getPushJob: (saeId: string) => ActivePushJob | null;
   hasPushInProgress: (saeId: string) => boolean;
+  fetchActivePushJobs: () => Promise<void>;
 }
 
 export const useNeuronpediaPushStore = create<NeuronpediaPushState>((set, get) => ({
@@ -153,6 +155,50 @@ export const useNeuronpediaPushStore = create<NeuronpediaPushState>((set, get) =
   hasPushInProgress: (saeId: string) => {
     const job = get().activePushJobs[saeId];
     return job !== undefined && !job.isComplete;
+  },
+
+  /**
+   * Fetch active push jobs from backend and restore store state.
+   * Called on page load to survive browser refreshes.
+   */
+  fetchActivePushJobs: async () => {
+    try {
+      const jobs = await listActivePushJobs();
+      const currentJobs = get().activePushJobs;
+      const updates: Record<string, ActivePushJob> = {};
+
+      for (const job of jobs) {
+        // Don't overwrite jobs we're already tracking (e.g. just started)
+        if (currentJobs[job.saeId]) continue;
+
+        updates[job.saeId] = {
+          pushJobId: job.pushJobId,
+          saeId: job.saeId,
+          saeName: job.saeName || job.saeId,
+          startTime: job.createdAt ? new Date(job.createdAt).getTime() : Date.now(),
+          progress: {
+            push_job_id: job.pushJobId,
+            sae_id: job.saeId,
+            stage: job.status,
+            progress: job.progress,
+            status: job.status as NeuronpediaPushProgress['status'],
+            features_pushed: job.featuresPushed,
+            total_features: job.totalFeatures,
+            message: `Processing feature ${job.featuresPushed}/${job.totalFeatures}`,
+          },
+          isComplete: false,
+          error: null,
+        };
+      }
+
+      if (Object.keys(updates).length > 0) {
+        set((state) => ({
+          activePushJobs: { ...updates, ...state.activePushJobs },
+        }));
+      }
+    } catch {
+      // Non-critical — store stays empty, user can still start new pushes
+    }
   },
 }));
 

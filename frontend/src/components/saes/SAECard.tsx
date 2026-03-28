@@ -28,10 +28,13 @@ import {
   Database,
   Hash,
 } from 'lucide-react';
+import { useEffect } from 'react';
 import { SAE, SAESource, SAEStatus } from '../../types/sae';
 import { COMPONENTS } from '../../config/brand';
 import { useModelsStore } from '../../stores/modelsStore';
 import { useNeuronpediaPushStore, selectActivePushJob } from '../../stores/neuronpediaPushStore';
+import { fetchAPI } from '../../api/client';
+import { NeuronpediaPushProgress } from '../../hooks/useNeuronpediaPushWebSocket';
 
 interface SAECardProps {
   sae: SAE;
@@ -69,6 +72,52 @@ export function SAECard({
 
   // Get active push job for this SAE (if any)
   const activePushJob = useNeuronpediaPushStore(selectActivePushJob(sae.id));
+  const { updateProgress, completePush, failPush } = useNeuronpediaPushStore();
+
+  // Poll for progress when an active push job exists but the modal isn't open (e.g. after page refresh)
+  useEffect(() => {
+    if (!activePushJob || activePushJob.isComplete) return;
+    const { pushJobId, saeId } = activePushJob;
+
+    const poll = async () => {
+      try {
+        const data = await fetchAPI<{
+          status: string;
+          progress: number;
+          features_pushed: number;
+          total_features: number;
+          error_message: string | null;
+        }>(`/neuronpedia/push-local/${pushJobId}`);
+
+        if (data.status === 'not_found') return;
+
+        const progress: NeuronpediaPushProgress = {
+          push_job_id: pushJobId,
+          sae_id: saeId,
+          stage: data.status,
+          progress: data.progress,
+          status: data.status as NeuronpediaPushProgress['status'],
+          features_pushed: data.features_pushed || 0,
+          total_features: data.total_features || 0,
+          message: `Processing feature ${data.features_pushed}/${data.total_features}`,
+        };
+
+        if (data.status === 'completed') {
+          completePush(saeId, progress);
+        } else if (data.status === 'failed') {
+          failPush(saeId, data.error_message || 'Push failed', progress);
+        } else {
+          updateProgress(saeId, progress);
+        }
+      } catch {
+        // Non-critical
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, [activePushJob?.pushJobId, activePushJob?.isComplete, updateProgress, completePush, failPush]);
 
   // Get model name with fallback to store lookup
   const getModelName = (): string | null => {

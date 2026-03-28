@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { useSAEsStore } from '../../stores/saesStore';
 import { useSteeringStore } from '../../stores/steeringStore';
 import { useNeuronpediaExportStore } from '../../stores/neuronpediaExportStore';
+import { useNeuronpediaPushStore } from '../../stores/neuronpediaPushStore';
 import { SAE, SAESource, SAEStatus } from '../../types/sae';
 import { SAECard } from '../saes/SAECard';
 import { DownloadFromHF } from '../saes/DownloadFromHF';
@@ -52,11 +53,17 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
   const [pushingSAE, setPushingSAE] = useState<SAE | null>(null);
 
   const { openExportDialog } = useNeuronpediaExportStore();
+  const { fetchActivePushJobs } = useNeuronpediaPushStore();
 
   // Fetch SAEs on mount
   useEffect(() => {
     fetchSAEs();
   }, [fetchSAEs]);
+
+  // Restore active push job state after page refresh
+  useEffect(() => {
+    fetchActivePushJobs();
+  }, [fetchActivePushJobs]);
 
   // Refetch when filters or pagination change
   useEffect(() => {
