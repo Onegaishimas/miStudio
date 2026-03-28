@@ -6,6 +6,7 @@ Create Date: 2026-03-28 22:00:00.000000
 
 """
 from alembic import op
+import sqlalchemy as sa
 
 revision = "n1o2p3q4r5s6"
 down_revision = "m9n0o1p2q3r4"
@@ -88,12 +89,11 @@ Return ONLY this exact JSON object:
 
 def upgrade() -> None:
     op.execute(
-        """
-        UPDATE labeling_prompt_templates
-        SET system_message = :sys, user_prompt_template = :usr
-        WHERE name = 'miStudio Internal - Full Context'
-        """,
-        {"sys": NEW_SYSTEM_MESSAGE, "usr": NEW_USER_PROMPT},
+        sa.text(
+            "UPDATE labeling_prompt_templates "
+            "SET system_message = :sys, user_prompt_template = :usr "
+            "WHERE name = 'miStudio Internal - Full Context'"
+        ).bindparams(sys=NEW_SYSTEM_MESSAGE, usr=NEW_USER_PROMPT)
     )
 
 
