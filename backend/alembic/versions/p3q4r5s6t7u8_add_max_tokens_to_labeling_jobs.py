@@ -15,14 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "labeling_jobs",
-        sa.Column(
-            "max_tokens",
-            sa.Integer(),
-            nullable=False,
-            server_default="300",
-        ),
+    op.execute(
+        sa.text(
+            "ALTER TABLE labeling_jobs ADD COLUMN IF NOT EXISTS max_tokens INTEGER NOT NULL DEFAULT 300"
+        )
     )
 
 
