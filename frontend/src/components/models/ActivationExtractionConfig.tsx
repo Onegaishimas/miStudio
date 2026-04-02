@@ -414,7 +414,7 @@ export function ActivationExtractionConfig({
               Select Dataset
             </label>
             {readyDatasets.length === 0 ? (
-              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-400 text-sm">
+              <div className="p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-400 text-sm">
                 No ready datasets available. Please download and prepare a dataset first.
               </div>
             ) : (
@@ -425,7 +425,7 @@ export function ActivationExtractionConfig({
                   onChange={(e) => setSelectedDataset(e.target.value)}
                   disabled={extracting}
                   className={`w-full px-4 py-2 bg-slate-900 border rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
-                    selectedDataset && !hasTokenization ? 'border-yellow-500/50' : 'border-slate-700'
+                    selectedDataset && !hasTokenization ? 'border-cyan-500/50' : 'border-slate-700'
                   }`}
                 >
                   {readyDatasets.map((ds) => (
@@ -436,9 +436,9 @@ export function ActivationExtractionConfig({
                 </select>
                 {/* Tokenization Warning */}
                 {selectedDataset && !hasTokenization && (
-                  <div className="mt-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                    <div className="text-sm text-yellow-400">
+                  <div className="mt-2 p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-cyan-400">
                       <span className="font-medium">Tokenization required:</span> This dataset has not been tokenized for {model.name}.
                       Go to the Datasets panel to tokenize it first.
                     </div>
@@ -684,10 +684,10 @@ export function ActivationExtractionConfig({
                     {resourceEstimates.warnings && resourceEstimates.warnings.length > 0 && (
                       <div className="pt-2 mt-2 border-t border-slate-700">
                         <div className="flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+                          <AlertCircle className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
                           <div className="space-y-1">
                             {resourceEstimates.warnings.map((warning: string, idx: number) => (
-                              <div key={idx} className="text-yellow-400 text-xs">
+                              <div key={idx} className="text-cyan-400 text-xs">
                                 {warning}
                               </div>
                             ))}

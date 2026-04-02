@@ -462,9 +462,9 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
             </div>
           )}
           {hasWarnings && (
-            <div className="bg-yellow-900/20 border border-yellow-800 rounded p-2 space-y-1">
+            <div className="bg-cyan-900/20 border border-cyan-800 rounded p-2 space-y-1">
               {resource_estimates.warnings.map((warning, idx) => (
-                <div key={idx} className="flex items-start space-x-2 text-yellow-400 text-sm">
+                <div key={idx} className="flex items-start space-x-2 text-cyan-400 text-sm">
                   <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
                   <span>{warning}</span>
                 </div>

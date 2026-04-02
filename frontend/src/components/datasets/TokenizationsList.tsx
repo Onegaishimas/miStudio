@@ -380,9 +380,9 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                 </div>
 
                 {/* Warning */}
-                <div className="flex items-start gap-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded">
-                  <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-yellow-300">
+                <div className="flex items-start gap-2 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded">
+                  <AlertCircle className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-cyan-300">
                     Filtering is permanent. Filtered samples will not be included in the tokenized dataset.
                   </p>
                 </div>

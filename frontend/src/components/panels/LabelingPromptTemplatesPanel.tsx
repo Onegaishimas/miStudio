@@ -574,7 +574,7 @@ export function LabelingPromptTemplatesPanel() {
                         Are you sure you want to delete this template?
                       </p>
                       {usageCounts[template.id] > 0 && (
-                        <p className="text-xs text-yellow-300 mb-2 flex items-start gap-1">
+                        <p className="text-xs text-cyan-300 mb-2 flex items-start gap-1">
                           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                           <span>
                             Warning: This template is currently used by {usageCounts[template.id]} labeling job{usageCounts[template.id] !== 1 ? 's' : ''}.
@@ -1132,7 +1132,7 @@ export function LabelingPromptTemplatesPanel() {
                     </div>
                     <div className="bg-slate-900/50 p-3 rounded">
                       <span className="text-slate-400">Skipped:</span>
-                      <span className="ml-2 text-yellow-400 font-medium">{importResults.skipped_count}</span>
+                      <span className="ml-2 text-cyan-400 font-medium">{importResults.skipped_count}</span>
                     </div>
                     <div className="bg-slate-900/50 p-3 rounded">
                       <span className="text-slate-400">Failed:</span>

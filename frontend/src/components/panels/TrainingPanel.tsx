@@ -1233,7 +1233,7 @@ export const TrainingPanel: React.FC = () => {
                       return warnings.length > 0 ? (
                         <div className="mt-2 space-y-1">
                           {warnings.map((warning, idx) => (
-                            <div key={idx} className="flex items-start gap-2 text-xs text-yellow-400">
+                            <div key={idx} className="flex items-start gap-2 text-xs text-cyan-400">
                               <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
                               <span>{warning}</span>
                             </div>
@@ -1308,7 +1308,7 @@ export const TrainingPanel: React.FC = () => {
                         )}
                       </div>
                       {config.top_k && config.top_k > config.latent_dim * 0.10 && (
-                        <p className="mt-1 text-xs text-yellow-400 flex items-center gap-1">
+                        <p className="mt-1 text-xs text-cyan-400 flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3 flex-shrink-0" />
                           K is &gt;10% of features — quite dense. Typical range: 32-256.
                         </p>

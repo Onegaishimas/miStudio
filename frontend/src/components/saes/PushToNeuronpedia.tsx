@@ -439,8 +439,8 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
 
               {/* Warning if not configured */}
               {!isReady && !isCheckingStatus && (
-                <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                  <h4 className="text-sm font-medium text-yellow-300 mb-2 flex items-center gap-2">
+                <div className="p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+                  <h4 className="text-sm font-medium text-cyan-300 mb-2 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4" />
                     Configuration Required
                   </h4>
