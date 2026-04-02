@@ -210,20 +210,20 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
       </div>
 
       {/* Trust Remote Code Checkbox */}
-      <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+      <div className="flex items-start gap-3 p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
         <input
           type="checkbox"
           id="trust-remote-code"
           checked={trustRemoteCode}
           onChange={(e) => setTrustRemoteCode(e.target.checked)}
           disabled={isSubmitting}
-          className="mt-1 w-4 h-4 rounded border-yellow-500/50 bg-slate-900 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-slate-950 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="mt-1 w-4 h-4 rounded border-cyan-500/50 bg-slate-900 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-950 disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <div className="flex-1">
-          <label htmlFor="trust-remote-code" className="block text-sm font-medium text-yellow-300 cursor-pointer">
+          <label htmlFor="trust-remote-code" className="block text-sm font-medium text-cyan-300 cursor-pointer">
             Trust Remote Code
           </label>
-          <p className="mt-1 text-xs text-yellow-200/80">
+          <p className="mt-1 text-xs text-cyan-200/80">
             Some models (like Phi-4, CodeLlama, etc.) require executing custom code from the repository.
             Only enable this if you trust the model source.
           </p>

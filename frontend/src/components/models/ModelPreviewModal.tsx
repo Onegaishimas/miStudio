@@ -145,12 +145,12 @@ export function ModelPreviewModal({
 
               {/* Trust Remote Code Warning */}
               {modelInfo.requiresTrustRemoteCode && !modelInfo.unsupportedArchitecture && (
-                <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <div className="p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
                   <div className="flex items-start gap-3">
-                    <Info className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <Info className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-medium text-yellow-300">Trust Remote Code Required</p>
-                      <p className="text-sm text-yellow-200/80 mt-1">
+                      <p className="font-medium text-cyan-300">Trust Remote Code Required</p>
+                      <p className="text-sm text-cyan-200/80 mt-1">
                         This model requires executing custom code from the repository. You'll need to
                         enable "Trust Remote Code" below. Only proceed if you trust the model source.
                       </p>
@@ -318,19 +318,19 @@ export function ModelPreviewModal({
           <div className="border-t border-slate-800 p-4 bg-slate-900/50 space-y-4">
             {/* Trust Remote Code Checkbox */}
             {modelInfo.requiresTrustRemoteCode && (
-              <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+              <div className="flex items-start gap-3 p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
                 <input
                   type="checkbox"
                   id="preview-trust-remote-code"
                   checked={trustRemoteCode}
                   onChange={(e) => handleTrustRemoteCodeChange(e.target.checked)}
-                  className="mt-1 w-4 h-4 rounded border-yellow-500/50 bg-slate-900 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-slate-950"
+                  className="mt-1 w-4 h-4 rounded border-cyan-500/50 bg-slate-900 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-950"
                 />
                 <div className="flex-1">
-                  <label htmlFor="preview-trust-remote-code" className="block text-sm font-medium text-yellow-300 cursor-pointer">
+                  <label htmlFor="preview-trust-remote-code" className="block text-sm font-medium text-cyan-300 cursor-pointer">
                     Trust Remote Code
                   </label>
-                  <p className="mt-1 text-xs text-yellow-200/80">
+                  <p className="mt-1 text-xs text-cyan-200/80">
                     I understand this model requires executing custom code and I trust the source.
                   </p>
                 </div>
