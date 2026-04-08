@@ -58,16 +58,16 @@ click-plugins==1.1.1.2
 click-repl==0.3.0
 coverage==7.13.0
 crashtest==0.4.1
-cryptography==46.0.5
+cryptography==46.0.6
 datasets==2.21.0
 decorator==5.2.1
 dill==0.3.8
 distlib==0.4.0
-dulwich==0.24.10
+dulwich==1.1.0
 executing==2.2.1
 fastapi>=0.115.0
 fastjsonschema==2.21.2
-filelock==3.20.1
+filelock==3.20.3
 findpython==0.7.1
 frozenlist==1.8.0
 fsspec==2024.6.1
@@ -109,7 +109,8 @@ numpy==2.3.5
 packaging==25.0
 pandas==2.3.3
 parso==0.8.5
-pathspec==0.12.1
+pathspec==1.0.4
+pytokens==0.4.1
 pexpect==4.9.0
 pkginfo==1.12.1.2
 platformdirs==4.5.1
@@ -129,7 +130,7 @@ pycparser==2.23
 pydantic==2.12.5
 pydantic-settings==2.12.0
 pydantic_core==2.41.5
-Pygments==2.19.2
+Pygments==2.20.0
 PyJWT==2.12.0
 pyproject_hooks==1.2.0
 pytest==7.4.4
@@ -147,7 +148,7 @@ PyYAML==6.0.3
 RapidFuzz==3.14.3
 redis==5.3.1
 regex==2025.11.3
-requests==2.32.5
+requests==2.33.0
 requests-toolbelt==1.0.0
 ruff==0.1.15
 safetensors==0.7.0
@@ -182,7 +183,7 @@ urllib3>=2.6.0
 uvicorn==0.24.0.post1
 uvloop==0.22.1
 vine==5.1.0
-virtualenv==20.35.4
+virtualenv==20.36.1
 watchfiles==1.1.1
 wcwidth==0.2.14
 websockets==15.0.1
