@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-12 to 2026-02-13
 **Commits:** `3a3d875`, `a2637f7`, `fa754b7`, `074ab46`
-**Deployed to:** k8s-mistudio.mcslab.io
+**Deployed to:** k8s-mistudio.hitsai.local
 
 ---
 

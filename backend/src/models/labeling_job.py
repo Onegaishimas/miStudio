@@ -65,7 +65,7 @@ class LabelingJob(Base):
     labeling_method = Column(String(50), nullable=False)  # openai, openai_compatible, local, manual
     openai_model = Column(String(100), nullable=True)  # e.g., "gpt-4o-mini"
     openai_api_key = Column(String(500), nullable=True)  # Encrypted API key
-    openai_compatible_endpoint = Column(String(500), nullable=True)  # e.g., "http://ollama.mcslab.io"
+    openai_compatible_endpoint = Column(String(500), nullable=True)  # e.g., "http://ollama.hitsai.local"
     openai_compatible_model = Column(String(100), nullable=True)  # e.g., "llama3.2"
     local_model = Column(String(100), nullable=True)  # e.g., "meta-llama/Llama-3.2-1B"
     prompt_template_id = Column(

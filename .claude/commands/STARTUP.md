@@ -8,7 +8,7 @@ Use this guide to start, stop, and troubleshoot MechInterp Studio services.
 
 1. **Add domain to /etc/hosts** (one-time setup):
 ```bash
-sudo bash -c 'echo "127.0.0.1  mistudio.mcslab.io" >> /etc/hosts'
+sudo bash -c 'echo "127.0.0.1  mistudio.hitsai.local" >> /etc/hosts'
 ```
 
 2. **Start all services**:
@@ -18,7 +18,7 @@ cd /home/x-sean/app/miStudio
 ```
 
 3. **Access the application**:
-- Main URL: http://mistudio.mcslab.io
+- Main URL: http://mistudio.hitsai.local
 
 ### Subsequent Starts
 
@@ -153,14 +153,14 @@ The startup script automatically starts all required services in the correct ord
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Main App** | http://mistudio.mcslab.io | Primary access point (via nginx) |
+| **Main App** | http://mistudio.hitsai.local | Primary access point (via nginx) |
 | Frontend Direct | http://localhost:3000 | Direct Vite dev server |
 | Backend Direct | http://localhost:8000 | Direct FastAPI server |
 | API Docs | http://localhost:8000/docs | Swagger/OpenAPI docs |
 | PostgreSQL | localhost:5432 | Database (user: postgres, db: mistudio) |
 | Redis | localhost:6379 | Message broker |
 | Ollama API | http://localhost:11434 | LLM inference (direct) |
-| Ollama via Nginx | http://mistudio.mcslab.io/ollama/v1 | LLM inference (proxied) |
+| Ollama via Nginx | http://mistudio.hitsai.local/ollama/v1 | LLM inference (proxied) |
 
 ## Checking Service Status
 
@@ -209,7 +209,7 @@ docker exec mistudio-nginx nginx -t
 ```bash
 docker exec mistudio-ollama ollama list
 curl http://localhost:11434/api/tags
-curl http://mistudio.mcslab.io/ollama/v1/models
+curl http://mistudio.hitsai.local/ollama/v1/models
 ```
 
 ## Viewing Logs
@@ -269,12 +269,12 @@ grep mistudio /etc/hosts
 
 Should show:
 ```
-127.0.0.1  mistudio.mcslab.io
+127.0.0.1  mistudio.hitsai.local
 ```
 
 If missing, add it:
 ```bash
-sudo bash -c 'echo "127.0.0.1  mistudio.mcslab.io" >> /etc/hosts'
+sudo bash -c 'echo "127.0.0.1  mistudio.hitsai.local" >> /etc/hosts'
 ```
 
 ### Services Won't Start
@@ -330,7 +330,7 @@ curl http://localhost:11434/api/tags
 docker exec mistudio-ollama ollama list
 
 # Check via Nginx proxy
-curl http://mistudio.mcslab.io/ollama/v1/models
+curl http://mistudio.hitsai.local/ollama/v1/models
 
 # Pull a model if none available
 docker exec mistudio-ollama ollama pull gemma2:2b
@@ -430,7 +430,7 @@ alembic upgrade head
 ### Normal Development Session
 
 1. Start services: `./start-mistudio.sh`
-2. Access app at http://mistudio.mcslab.io
+2. Access app at http://mistudio.hitsai.local
 3. Make code changes (backend/frontend auto-reload)
 4. View logs: `tail -f /tmp/backend.log` or `/tmp/frontend.log`
 5. Stop services when done: `./stop-mistudio.sh`
@@ -463,7 +463,7 @@ alembic upgrade head
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  http://mistudio.mcslab.io (Port 80)                    │
+│  http://mistudio.hitsai.local (Port 80)                    │
 │                    ↓                                     │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │  Nginx (Docker)                                  │   │
@@ -510,7 +510,7 @@ HF_TOKEN=your_token_here
 
 ## Next Steps
 
-- Access the app at http://mistudio.mcslab.io
+- Access the app at http://mistudio.hitsai.local
 - Check out API docs at http://localhost:8000/docs
 - View logs in `/tmp/` for debugging
 - Read CLAUDE.md for development workflow

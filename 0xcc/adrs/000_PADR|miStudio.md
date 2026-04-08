@@ -322,7 +322,7 @@ This ADR establishes the foundational technology choices, architectural patterns
 - **Single Entry Point**: All traffic through nginx on port 80 (HTTP) / 443 (HTTPS future)
 
 **Public Access:**
-- **Base URL**: `http://mistudio.mcslab.io` (port 80)
+- **Base URL**: `http://mistudio.hitsai.local` (port 80)
 - **Future**: HTTPS on port 443 with SSL certificate
 
 **Compose Services:**
@@ -355,13 +355,13 @@ services:
     expose: ["8000"]  # Internal only, proxied by nginx
     depends_on: [postgres, redis]
     environment:
-      - API_BASE_URL=http://mistudio.mcslab.io
+      - API_BASE_URL=http://mistudio.hitsai.local
 
   frontend:
     build: ./frontend
     expose: ["3000"]  # Internal only, proxied by nginx
     environment:
-      - VITE_API_URL=http://mistudio.mcslab.io/api
+      - VITE_API_URL=http://mistudio.hitsai.local/api
 
   celery-worker:
     build: ./backend
@@ -398,7 +398,7 @@ http {
 
     server {
         listen 80;
-        server_name mistudio.mcslab.io;
+        server_name mistudio.hitsai.local;
 
         # Future HTTPS redirect
         # return 301 https://$server_name$request_uri;
@@ -453,10 +453,10 @@ http {
     # Future HTTPS configuration
     # server {
     #     listen 443 ssl http2;
-    #     server_name mistudio.mcslab.io;
+    #     server_name mistudio.hitsai.local;
     #
-    #     ssl_certificate /etc/nginx/ssl/mistudio.mcslab.io.crt;
-    #     ssl_certificate_key /etc/nginx/ssl/mistudio.mcslab.io.key;
+    #     ssl_certificate /etc/nginx/ssl/mistudio.hitsai.local.crt;
+    #     ssl_certificate_key /etc/nginx/ssl/mistudio.hitsai.local.key;
     #     ssl_protocols TLSv1.2 TLSv1.3;
     #     ssl_ciphers HIGH:!aNULL:!MD5;
     #
@@ -477,8 +477,8 @@ http {
 │                                                                      │
 │  ┌────────────────────────────────────────────────────────┐         │
 │  │                    Nginx Reverse Proxy                 │         │
-│  │            http://mistudio.mcslab.io (Port 80)         │         │
-│  │         Future: https://mistudio.mcslab.io (Port 443)  │         │
+│  │            http://mistudio.hitsai.local (Port 80)         │         │
+│  │         Future: https://mistudio.hitsai.local (Port 443)  │         │
 │  └────────┬──────────────────────────────────┬────────────┘         │
 │           │                                  │                      │
 │           │ /api/* + /ws/*                   │ /*                   │
@@ -796,7 +796,7 @@ CREATE TABLE steering_presets (
 
 ### REST API Structure
 
-**Base URL (Public):** `http://mistudio.mcslab.io/api/v1`
+**Base URL (Public):** `http://mistudio.hitsai.local/api/v1`
 **Base URL (Development):** `http://localhost/api/v1` or `http://localhost:8000/api/v1` (direct backend)
 
 **Note:** All production traffic goes through nginx reverse proxy on port 80. Backend runs on internal port 8000.
@@ -1962,8 +1962,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:devpassword@postgres:5432/mistudio
       REDIS_URL: redis://redis:6379
-      API_BASE_URL: http://mistudio.mcslab.io
-      ALLOWED_ORIGINS: http://mistudio.mcslab.io,http://localhost
+      API_BASE_URL: http://mistudio.hitsai.local
+      ALLOWED_ORIGINS: http://mistudio.hitsai.local,http://localhost
     depends_on:
       - postgres
       - redis
@@ -2000,7 +2000,7 @@ services:
     volumes:
       - ./frontend:/app
     environment:
-      VITE_API_URL: http://mistudio.mcslab.io/api
+      VITE_API_URL: http://mistudio.hitsai.local/api
     restart: unless-stopped
 
 volumes:
@@ -2420,7 +2420,7 @@ Closes #123
 
 **Development:** Docker Compose (nginx, postgres, redis, backend, frontend, celery)
 **Production:** systemd service on Jetson with Docker Compose + nginx reverse proxy
-**Base URL:** http://mistudio.mcslab.io (port 80)
+**Base URL:** http://mistudio.hitsai.local (port 80)
 **Future HTTPS:** Port 443 with SSL certificate
 **Alternative:** Native installation (Nginx + PostgreSQL + Redis + Python + Node.js)
 ```

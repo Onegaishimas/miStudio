@@ -15,7 +15,7 @@ export default defineConfig({
     host: '0.0.0.0',
     // Allow all hosts for development - required for nginx proxy and open-source portability
     // Production builds serve static files so this only affects the dev server
-    allowedHosts: ['mistudio.mcslab.io', 'dev-mistudio.mcslab.io', 'k8s-mistudio.mcslab.io', 'k8s-mistudio.hitsai.net', 'localhost', 'host.docker.internal'],
+    allowedHosts: ['mistudio.hitsai.local', 'dev-mistudio.hitsai.local', 'k8s-mistudio.hitsai.local', 'k8s-mistudio.hitsai.net', 'localhost', 'host.docker.internal'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

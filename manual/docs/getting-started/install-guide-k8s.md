@@ -180,9 +180,9 @@ Confirm `GPU_NODE` is recorded from the Pre-Flight section above.
 ### Domain Name
 
 Ask the user:
-> "What hostname should miStudio be accessible at? Press Enter to use the default: `k8s-mistudio.mcslab.io`"
+> "What hostname should miStudio be accessible at? Press Enter to use the default: `k8s-mistudio.hitsai.local`"
 
-Record as `DOMAIN`. Default: `k8s-mistudio.mcslab.io`.
+Record as `DOMAIN`. Default: `k8s-mistudio.hitsai.local`.
 
 Ask the user:
 > "What is the IP address of the GPU node ($GPU_NODE)? This is used for the hostAlias and DNS/hosts configuration."

@@ -98,8 +98,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       API_HOST: 0.0.0.0
       API_PORT: 8000
-      API_BASE_URL: http://dev-mistudio.mcslab.io
-      ALLOWED_ORIGINS: '["http://dev-mistudio.mcslab.io","http://localhost:3000","http://localhost"]'
+      API_BASE_URL: http://dev-mistudio.hitsai.local
+      ALLOWED_ORIGINS: '["http://dev-mistudio.hitsai.local","http://localhost:3000","http://localhost"]'
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-use-a-long-random-string-here}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -160,8 +160,8 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-use-a-long-random-string-here}
-      ALLOWED_ORIGINS: '["http://dev-mistudio.mcslab.io","http://localhost:3000","http://localhost"]'
-      API_BASE_URL: http://dev-mistudio.mcslab.io
+      ALLOWED_ORIGINS: '["http://dev-mistudio.hitsai.local","http://localhost:3000","http://localhost"]'
+      API_BASE_URL: http://dev-mistudio.hitsai.local
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Cross-deployment URLs (use Docker service names)
       INTERNAL_API_URL: http://backend:8000
@@ -202,8 +202,8 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-use-a-long-random-string-here}
-      ALLOWED_ORIGINS: '["http://dev-mistudio.mcslab.io","http://localhost:3000","http://localhost"]'
-      API_BASE_URL: http://dev-mistudio.mcslab.io
+      ALLOWED_ORIGINS: '["http://dev-mistudio.hitsai.local","http://localhost:3000","http://localhost"]'
+      API_BASE_URL: http://dev-mistudio.hitsai.local
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATA_DIR: /data
       BACKEND_DIR: /app

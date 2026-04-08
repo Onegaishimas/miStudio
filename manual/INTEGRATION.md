@@ -103,12 +103,12 @@ Key settings in `docusaurus.config.ts`:
 
 | Setting | Current Value | Purpose |
 |---------|--------------|---------|
-| `url` | `https://mistudio.mcslab.io` | Production URL of the miStudio instance |
+| `url` | `https://mistudio.hitsai.local` | Production URL of the miStudio instance |
 | `baseUrl` | `/manual/` | URL path prefix — all manual pages live under `/manual/` |
 | `docs.routeBasePath` | `/` | Docs are the root content (no `/docs/` prefix within `/manual/`) |
 | `blog` | `false` | Blog feature disabled |
 
-**URL structure in production:** `https://mistudio.mcslab.io/manual/` → manual homepage.
+**URL structure in production:** `https://mistudio.hitsai.local/manual/` → manual homepage.
 
 If the production URL or path changes, update `url` and `baseUrl` in `docusaurus.config.ts` and rebuild.
 

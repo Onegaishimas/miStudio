@@ -6,8 +6,8 @@
 set -e
 
 PROJECT_ROOT="/home/x-sean/app/miStudio"
-DOMAIN="dev-mistudio.mcslab.io"
-NEURONPEDIA_DOMAIN="dev-neuron.mcslab.io"
+DOMAIN="dev-mistudio.hitsai.local"
+NEURONPEDIA_DOMAIN="dev-neuron.hitsai.local"
 
 echo "=================================="
 echo "Starting MechInterp Studio"
@@ -262,7 +262,7 @@ else
     docker run -d --name mistudio-ollama --gpus all \
         -p 11434:11434 \
         -v ollama_data:/root/.ollama \
-        -e OLLAMA_ORIGINS="http://dev-mistudio.mcslab.io,http://localhost:3000,http://localhost" \
+        -e OLLAMA_ORIGINS="http://dev-mistudio.hitsai.local,http://localhost:3000,http://localhost" \
         --network mistudio_default \
         --restart unless-stopped \
         ollama/ollama:latest > /dev/null

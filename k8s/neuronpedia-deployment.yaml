@@ -40,7 +40,7 @@ metadata:
   name: neuronpedia-config
   namespace: neuronpedia
 data:
-  NEXTAUTH_URL: "http://k8s-neuron.mcslab.io"
+  NEXTAUTH_URL: "http://k8s-neuron.hitsai.local"
 
 ---
 # PostgreSQL StatefulSet
@@ -264,7 +264,7 @@ metadata:
 spec:
   ingressClassName: public
   rules:
-    - host: k8s-neuron.mcslab.io
+    - host: k8s-neuron.hitsai.local
       http:
         paths:
           - path: /

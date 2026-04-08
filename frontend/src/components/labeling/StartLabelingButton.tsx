@@ -183,7 +183,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
       const endpoint = openaiCompatibleEndpoint.trim();
 
       // Resolve relative URLs to absolute using current origin
-      // e.g. "/ollama/v1" → "http://mistudio.mcslab.io/ollama/v1"
+      // e.g. "/ollama/v1" → "http://mistudio.hitsai.local/ollama/v1"
       let resolvedUrl = endpoint;
       if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
         resolvedUrl = `${window.location.origin}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;

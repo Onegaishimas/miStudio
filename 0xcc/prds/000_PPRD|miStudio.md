@@ -473,12 +473,12 @@ Community Standard format ensures interoperability:
 ### 8.1 Development Setup
 ```bash
 # Add domain to hosts
-sudo bash -c 'echo "127.0.0.1 mistudio.mcslab.io" >> /etc/hosts'
+sudo bash -c 'echo "127.0.0.1 mistudio.hitsai.local" >> /etc/hosts'
 
 # Start all services
 ./start-mistudio.sh
 
-# Access at http://mistudio.mcslab.io
+# Access at http://mistudio.hitsai.local
 ```
 
 ### 8.2 Service Components

@@ -37,12 +37,12 @@ All implementation MUST match the Mock UI specification exactly.
 # 3. Backend (FastAPI on port 8000)
 # 4. Frontend (Vite on port 3000)
 #
-# Access at: http://mistudio.mcslab.io
+# Access at: http://mistudio.hitsai.local
 ```
 
 **IMPORTANT**: Before first run, add domain to /etc/hosts:
 ```bash
-sudo bash -c 'echo "127.0.0.1  mistudio.mcslab.io" >> /etc/hosts'
+sudo bash -c 'echo "127.0.0.1  mistudio.hitsai.local" >> /etc/hosts'
 ```
 
 ### Stop All Services
@@ -75,7 +75,7 @@ sudo bash -c 'echo "127.0.0.1  mistudio.mcslab.io" >> /etc/hosts'
 │     - k8s_deploy                                                        │
 │                                                                          │
 │  5. VERIFY                                                               │
-│     - Test at http://k8s-mistudio.mcslab.io                             │
+│     - Test at http://k8s-mistudio.hitsai.local                             │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -111,7 +111,7 @@ k8s_deploy                      # Pull + restart + verify
 |---------|-------|
 | Host | 192.168.244.61 (mcs-lnxgpu01) |
 | Namespace | mistudio |
-| Domain | k8s-mistudio.mcslab.io |
+| Domain | k8s-mistudio.hitsai.local |
 | GPU | NVIDIA RTX 3090 (24GB) |
 | Manifest | k8s/mistudio-deployment.yaml |
 
@@ -124,7 +124,7 @@ lsof -i :3000  # Frontend should be running
 pgrep -f celery  # Celery worker should be running
 
 # Access points:
-# - Main app: http://mistudio.mcslab.ioplease
+# - Main app: http://mistudio.hitsai.localplease
 # - Frontend direct: http://localhost:3000
 # - Backend direct: http://localhost:8000
 # - API docs: http://localhost:8000/docs
@@ -195,7 +195,7 @@ pgrep -f celery  # Celery worker should be running
 **Infrastructure:**
 - Docker Compose for development (nginx, postgres, redis, backend, frontend, celery)
 - Nginx reverse proxy (port 80, future HTTPS on 443)
-- Base URL: http://mistudio.mcslab.io
+- Base URL: http://mistudio.hitsai.local
 - systemd for production (Jetson)
 - Local filesystem storage (/data/)
 
@@ -277,7 +277,7 @@ pgrep -f celery  # Celery worker should be running
 
 **Development:** Docker Compose (nginx, postgres, redis, backend, frontend, celery)
 **Production:** systemd service on Jetson with Docker Compose + nginx reverse proxy
-**Base URL:** http://mistudio.mcslab.io (port 80)
+**Base URL:** http://mistudio.hitsai.local (port 80)
 **Future HTTPS:** Port 443 with SSL certificate
 **Alternative:** Native installation (Nginx + PostgreSQL + Redis + Python + Node.js)
 

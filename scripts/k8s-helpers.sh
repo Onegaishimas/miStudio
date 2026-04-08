@@ -40,7 +40,7 @@ k8s_migrate() {
 }
 
 # Manifest location on k8s host
-K8S_MANIFEST="/home/sean/app/k8s-mistudio.mcslab.io/mistudio-deployment.yaml"
+K8S_MANIFEST="/home/sean/app/k8s-mistudio.hitsai.local/mistudio-deployment.yaml"
 
 # Apply the deployment manifest
 k8s_apply() {
@@ -188,7 +188,7 @@ np_deploy() {
 # MILLM HELPERS
 # ===========================
 MILLM_NS="millm"
-MILLM_MANIFEST="/home/sean/app/k8s-millm.mcslab.io/millm-deployment.yaml"
+MILLM_MANIFEST="/home/sean/app/k8s-millm.hitsai.local/millm-deployment.yaml"
 
 # Check DockerHub for miLLM image timestamps
 millm_check() {

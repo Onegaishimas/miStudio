@@ -97,7 +97,7 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     environment:
-      - OLLAMA_ORIGINS=http://dev-mistudio.mcslab.io,http://localhost:3000,http://localhost
+      - OLLAMA_ORIGINS=http://dev-mistudio.hitsai.local,http://localhost:3000,http://localhost
     restart: unless-stopped
     deploy:
       resources:
@@ -123,7 +123,7 @@ services:
       DATABASE_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
       # Required environment variables
       NEXTAUTH_SECRET: neuronpedia-dev-secret-change-in-production
-      NEXTAUTH_URL: http://dev-neuron.mcslab.io
+      NEXTAUTH_URL: http://dev-neuron.hitsai.local
       # Local mode settings
       NEXT_PUBLIC_DEMO_MODE: "false"
       NEXT_PUBLIC_CONTACT_EMAIL_ADDRESS: admin@localhost

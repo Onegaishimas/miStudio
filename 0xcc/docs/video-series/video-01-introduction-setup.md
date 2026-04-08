@@ -10,7 +10,7 @@
 ## Pre-Recording Checklist
 
 ### Environment Setup
-- [ ] miStudio running and accessible at http://mistudio.mcslab.io
+- [ ] miStudio running and accessible at http://mistudio.hitsai.local
 - [ ] All panels visible and responsive
 - [ ] No active training jobs (clean slate for demo)
 - [ ] System Monitor showing GPU available

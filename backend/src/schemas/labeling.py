@@ -39,7 +39,7 @@ class LabelingConfigRequest(BaseModel):
     # OpenAI-compatible configuration
     openai_compatible_endpoint: Optional[str] = Field(
         default=None,
-        description="OpenAI-compatible endpoint URL for labeling when labeling_method='openai_compatible'. Must include /v1 suffix. Example: 'http://ollama.mcslab.io/v1'"
+        description="OpenAI-compatible endpoint URL for labeling when labeling_method='openai_compatible'. Must include /v1 suffix. Example: 'http://ollama.hitsai.local/v1'"
     )
     openai_compatible_model: Optional[str] = Field(
         default=None,

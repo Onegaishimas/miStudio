@@ -112,7 +112,7 @@ A complete tutorial series demonstrating end-to-end SAE development with miStudi
 - [ ] Microphone tested
 
 ### Environment
-- [ ] miStudio running at http://mistudio.mcslab.io
+- [ ] miStudio running at http://mistudio.hitsai.local
 - [ ] Close unnecessary applications
 - [ ] Disable notifications
 - [ ] GPU available (check System Monitor)

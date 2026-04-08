@@ -181,9 +181,9 @@ curl -sf --max-time 10 https://hub.docker.com > /dev/null && echo "OK" || echo "
 ### Domain Name
 
 Ask the user:
-> "What hostname should miStudio be accessible at? Press Enter to use the default: `mistudio.mcslab.io`"
+> "What hostname should miStudio be accessible at? Press Enter to use the default: `mistudio.hitsai.local`"
 
-Record as `DOMAIN`. Default: `mistudio.mcslab.io`.
+Record as `DOMAIN`. Default: `mistudio.hitsai.local`.
 
 Add to `/etc/hosts` if not already present:
 ```bash
@@ -252,7 +252,7 @@ EOF
 
 ### Step 3 — Update domain references
 
-If `DOMAIN` differs from `mistudio.mcslab.io`, update nginx config and compose env vars:
+If `DOMAIN` differs from `mistudio.hitsai.local`, update nginx config and compose env vars:
 ```bash
 # Update nginx config
 sed -i "s/dev-mistudio\.mcslab\.io/$DOMAIN/g" nginx/nginx.docker.conf

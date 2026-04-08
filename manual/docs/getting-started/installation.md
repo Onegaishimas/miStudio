@@ -25,7 +25,7 @@ miStudio is packaged as a Docker Compose project:
 1. **Prerequisites:** Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 2. **Network Setup:** Add the domain to your hosts file:
    ```bash
-   sudo bash -c 'echo "127.0.0.1  mistudio.mcslab.io" >> /etc/hosts'
+   sudo bash -c 'echo "127.0.0.1  mistudio.hitsai.local" >> /etc/hosts'
    ```
 3. **Start all services:**
    ```bash
@@ -41,7 +41,7 @@ This launches six services:
 | **Celery Worker** | Performs GPU-intensive training, extraction, and labeling tasks |
 | **Celery Beat** | Schedules periodic tasks (system monitoring, cleanup) |
 | **FastAPI Backend** | API orchestrator with WebSocket support for real-time updates |
-| **React Frontend** | Interactive dashboard at `http://mistudio.mcslab.io` |
+| **React Frontend** | Interactive dashboard at `http://mistudio.hitsai.local` |
 
 :::info Why Docker?
 A MechInterp environment requires exact versions of PyTorch, Transformers, spaCy, and CUDA kernels. Docker freezes these into a reproducible image — miStudio runs identically on a Jetson Orin and a datacenter server.

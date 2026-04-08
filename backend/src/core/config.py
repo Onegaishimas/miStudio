@@ -55,13 +55,13 @@ class Settings(BaseSettings):
     api_workers: int = Field(default=1, ge=1, le=8, description="Number of API workers")
     api_reload: bool = Field(default=True, description="Enable auto-reload in development")
     api_base_url: str = Field(
-        default="http://dev-mistudio.mcslab.io", description="Public API base URL"
+        default="http://dev-mistudio.hitsai.local", description="Public API base URL"
     )
 
     # CORS Configuration
     allowed_origins: list[str] = Field(
         default=[
-            "http://dev-mistudio.mcslab.io",
+            "http://dev-mistudio.hitsai.local",
             "http://localhost:3000",
             "http://localhost",
             "http://192.168.224.222:3000",
@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     )
     neuronpedia_local_url: str | None = Field(
         default=None,
-        description="Public URL for local Neuronpedia instance (e.g., http://neuron.mcslab.io)"
+        description="Public URL for local Neuronpedia instance (e.g., http://neuron.hitsai.local)"
     )
     neuronpedia_local_admin_user_id: str = Field(
         default="cljj57d3c000076ei38vwnv35",
