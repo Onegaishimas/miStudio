@@ -14,6 +14,8 @@ Resilience features:
 
 import asyncio
 import logging
+import os
+import subprocess
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -332,28 +334,32 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
     backend_dir = settings.backend_dir
 
     try:
-        # Check if running in container (no venv) or development (with venv)
-        venv_path = backend_dir / "venv" / "bin" / "activate"
-        venv_activate = f"source {venv_path} && " if venv_path.exists() else ""
+        # Use venv celery binary if present (dev), otherwise system celery (container)
+        venv_celery = backend_dir / "venv" / "bin" / "celery"
+        celery_bin = str(venv_celery) if venv_celery.exists() else "celery"
 
-        # CUDA_VISIBLE_DEVICES=0 restricts to first GPU only
-        start_cmd = (
-            f"cd {backend_dir} && {venv_activate}"
-            f"CUDA_VISIBLE_DEVICES=0 celery -A src.core.celery_app worker "
-            f"-Q steering -c 1 --pool=solo --loglevel=info "
-            f'--hostname="steering@%h" --max-tasks-per-child=1 '
-            f'--pidfile="{PID_FILE}" > "{STEERING_LOG}" 2>&1'
-        )
+        # Pass CUDA restriction via env, not shell interpolation
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = "0"
 
-        # Start process in background
-        subprocess.Popen(
-            start_cmd,
-            shell=True,
-            executable="/bin/bash",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        # Redirect output to log file; child inherits fd after fork
+        log_file = open(STEERING_LOG, "a")
+        try:
+            subprocess.Popen(
+                [
+                    celery_bin, "-A", "src.core.celery_app", "worker",
+                    "-Q", "steering", "-c", "1", "--pool=solo", "--loglevel=info",
+                    "--hostname=steering@%h", "--max-tasks-per-child=1",
+                    f"--pidfile={PID_FILE}",
+                ],
+                cwd=str(backend_dir),
+                env=env,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        finally:
+            log_file.close()
 
         # Wait for worker to initialize
         for i in range(10):  # Try for 10 seconds
@@ -425,30 +431,34 @@ async def enter_steering_mode():
     backend_dir = settings.backend_dir
 
     try:
-        # Check if running in container (no venv) or development (with venv)
-        venv_path = backend_dir / "venv" / "bin" / "activate"
-        venv_activate = f"source {venv_path} && " if venv_path.exists() else ""
+        # Use venv celery binary if present (dev), otherwise system celery (container)
+        venv_celery = backend_dir / "venv" / "bin" / "celery"
+        celery_bin = str(venv_celery) if venv_celery.exists() else "celery"
+
+        # Pass CUDA restriction via env, not shell interpolation
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Use Popen to start worker in background without waiting
         # This avoids timeout issues with subprocess.run
-        # CUDA_VISIBLE_DEVICES=0 restricts to first GPU only
-        start_cmd = (
-            f"cd {backend_dir} && {venv_activate}"
-            f"CUDA_VISIBLE_DEVICES=0 celery -A src.core.celery_app worker "
-            f"-Q steering -c 1 --pool=solo --loglevel=info "
-            f'--hostname="steering@%h" --max-tasks-per-child=1 '
-            f'--pidfile="{PID_FILE}" > "{STEERING_LOG}" 2>&1'
-        )
-
-        # Start process in background - Popen returns immediately
-        process = subprocess.Popen(
-            start_cmd,
-            shell=True,
-            executable="/bin/bash",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,  # Detach from parent
-        )
+        # Redirect output to log file; child inherits fd after fork
+        log_file = open(STEERING_LOG, "a")
+        try:
+            subprocess.Popen(
+                [
+                    celery_bin, "-A", "src.core.celery_app", "worker",
+                    "-Q", "steering", "-c", "1", "--pool=solo", "--loglevel=info",
+                    "--hostname=steering@%h", "--max-tasks-per-child=1",
+                    f"--pidfile={PID_FILE}",
+                ],
+                cwd=str(backend_dir),
+                env=env,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # Detach from parent
+            )
+        finally:
+            log_file.close()
 
         # Wait for worker to initialize and create PID file
         for i in range(10):  # Try for 10 seconds
