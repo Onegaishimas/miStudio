@@ -457,6 +457,12 @@ async def fetch_openai_models(request: FetchModelsRequest):
     """
     api_key = request.api_key or getattr(settings, 'openai_api_key', None)
 
+    # Validate URL scheme — only http/https allowed to prevent SSRF via file://, ftp://, etc.
+    from urllib.parse import urlparse
+    parsed = urlparse(request.endpoint_url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="endpoint_url must use http or https scheme")
+
     # Normalize endpoint URL
     base_url = request.endpoint_url.rstrip('/')
     if not base_url.endswith('/v1'):

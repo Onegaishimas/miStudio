@@ -21,6 +21,7 @@ sio = socketio.AsyncServer(
     engineio_logger=settings.is_development,
     ping_interval=settings.websocket_ping_interval,
     ping_timeout=settings.websocket_ping_timeout,
+    max_http_buffer_size=1_000_000,  # 1MB cap — prevents unbounded binary attachment DoS
 )
 
 # ASGI app for mounting in FastAPI
