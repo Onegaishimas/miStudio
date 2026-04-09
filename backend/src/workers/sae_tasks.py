@@ -133,7 +133,7 @@ def download_sae_task(
             repo_id=repo_id,
             filepath=filepath,
             local_dir=local_path,
-            token=access_token,
+            access_token=access_token,
             revision=revision,
             progress_callback=progress_callback,
         )
@@ -233,7 +233,7 @@ def download_sae_task(
         logger.error(f"{error_msg}\n{traceback.format_exc()}")
 
         # Update database
-        update_sae_status(sae_id, SAEStatus.FAILED, progress=0.0, error_message=error_msg)
+        update_sae_status(sae_id, SAEStatus.ERROR, progress=0.0, error_message=error_msg)
 
         # Emit failure
         emit_sae_download_progress(
