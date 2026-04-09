@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useMemo } from 'react';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
-import { useSAEsStore } from '../stores/saesStore';
+import { useSAEsStore, setSAESubscriptionCallback } from '../stores/saesStore';
 import { SAEStatus } from '../types/sae';
 
 interface SAEProgressEvent {
@@ -103,12 +103,19 @@ export const useSAEWebSocket = (saeIds: string[]) => {
     on('sae:download', handleDownloadProgress);
     on('sae:upload', handleUploadProgress);
 
+    // Wire store callback so new downloads immediately get a channel subscription
+    setSAESubscriptionCallback((saeId: string) => {
+      subscribe(`sae/${saeId}/download`);
+      subscribe(`sae/${saeId}/upload`);
+    });
+
     handlersRegisteredRef.current = true;
 
     return () => {
       console.log('[SAE WS] Cleaning up SAE event handlers');
       off('sae:download', handleDownloadProgress);
       off('sae:upload', handleUploadProgress);
+      setSAESubscriptionCallback(() => {});
       handlersRegisteredRef.current = false;
     };
   }, [on, off, updateDownloadProgress, fetchSAEs]);

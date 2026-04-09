@@ -13,11 +13,12 @@
  * - Navigate to Steering panel with selected SAE
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useSAEsStore } from '../../stores/saesStore';
 import { useSteeringStore } from '../../stores/steeringStore';
 import { useNeuronpediaExportStore } from '../../stores/neuronpediaExportStore';
 import { useNeuronpediaPushStore } from '../../stores/neuronpediaPushStore';
+import { useSAEWebSocket } from '../../hooks/useSAEWebSocket';
 import { SAE, SAESource, SAEStatus } from '../../types/sae';
 import { SAECard } from '../saes/SAECard';
 import { DownloadFromHF } from '../saes/DownloadFromHF';
@@ -54,6 +55,18 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
 
   const { openExportDialog } = useNeuronpediaExportStore();
   const { fetchActivePushJobs } = useNeuronpediaPushStore();
+
+  // Subscribe to WebSocket progress for active SAEs
+  const activeSAEIds = useMemo(
+    () =>
+      saes
+        .filter((s) =>
+          [SAEStatus.PENDING, SAEStatus.DOWNLOADING, SAEStatus.CONVERTING].includes(s.status),
+        )
+        .map((s) => s.id),
+    [saes],
+  );
+  useSAEWebSocket(activeSAEIds);
 
   // Fetch SAEs on mount
   useEffect(() => {
