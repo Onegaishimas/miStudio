@@ -476,14 +476,16 @@ def train_sae_task(
                     raise ValueError(f"Checkpoint not found: {checkpoint_id}")
                 ckpt_path = Path(settings.resolve_data_path(ckpt.storage_path))
 
-            # Checkpoint files are stored per layer under checkpoint_dir/checkpoint_{step}/layer_{idx}/
-            # Try to load weights for each model
+            # ckpt_path is e.g. .../checkpoints/checkpoint_{step}/layer_{idx}_{hook}/checkpoint.safetensors
+            # so ckpt_path.parent.parent is the per-step directory already.
+            checkpoint_step_dir = ckpt_path.parent.parent
             for (layer_idx, hook_type), model in models.items():
-                layer_key = f"layer_{layer_idx}_{hook_type}" if len(layer_hook_combinations) > 1 or hook_type != "residual" else f"layer_{layer_idx}"
-                layer_ckpt = ckpt_path.parent.parent / f"checkpoint_{ckpt.step}" / layer_key / "checkpoint.safetensors"
-                # Fallback: the storage_path itself points to a layer checkpoint
+                # Try new naming (layer_{idx}_{hook_type}) then legacy (layer_{idx})
+                layer_ckpt = checkpoint_step_dir / f"layer_{layer_idx}_{hook_type}" / "checkpoint.safetensors"
                 if not layer_ckpt.exists():
-                    layer_ckpt = ckpt_path
+                    layer_ckpt = checkpoint_step_dir / f"layer_{layer_idx}" / "checkpoint.safetensors"
+                if not layer_ckpt.exists():
+                    layer_ckpt = ckpt_path  # Final fallback: the specific layer from the DB record
                 if layer_ckpt.exists():
                     CheckpointService.load_checkpoint(str(layer_ckpt), model=model, device=str(device))
                     logger.info(f"Loaded checkpoint for layer {layer_idx}/{hook_type} from {layer_ckpt}")
