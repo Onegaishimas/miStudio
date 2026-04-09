@@ -32,7 +32,7 @@ spec:
             - name: POSTGRES_USER
               value: mistudio
             - name: POSTGRES_PASSWORD
-              value: mistudio
+              value: changeme  # CHANGE THIS: use a strong password, must match DATABASE_URL below
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:
@@ -124,14 +124,19 @@ spec:
       labels:
         app: mistudio-backend
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: mcs-lnxgpu01
+      # nodeSelector: Pin to a specific node if your cluster requires it.
+      # Replace the hostname with your node's name, or remove this section
+      # for default scheduling.
+      # nodeSelector:
+      #   kubernetes.io/hostname: your-gpu-node-hostname
 
-      # Allow backend to resolve external hostname for Ollama access
-      hostAliases:
-        - ip: "192.168.244.61"
-          hostnames:
-            - "k8s-mistudio.hitsai.local"
+      # hostAliases: Required if your cluster nodes cannot resolve the ingress
+      # hostname via DNS. Set the IP to your ingress controller's external IP
+      # and the hostname to match your ingress rule.
+      # hostAliases:
+      #   - ip: "YOUR_INGRESS_IP"
+      #     hostnames:
+      #       - "k8s-mistudio.your-domain.local"
 
       # Migrations run automatically via docker-entrypoint.sh for SERVICE_TYPE=api
       # The entrypoint handles: wait-for-db, alembic upgrade head, fail-on-error
@@ -144,9 +149,9 @@ spec:
             - name: SERVICE_TYPE
               value: api
             - name: DATABASE_URL
-              value: postgresql+asyncpg://mistudio:mistudio@postgres:5432/mistudio
+              value: postgresql+asyncpg://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
             - name: DATABASE_URL_SYNC
-              value: postgresql+psycopg2://mistudio:mistudio@postgres:5432/mistudio
+              value: postgresql+psycopg2://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
             - name: REDIS_URL
               value: redis://redis:6379/0
             - name: CELERY_BROKER_URL
@@ -154,7 +159,7 @@ spec:
             - name: CELERY_RESULT_BACKEND
               value: redis://redis:6379/0
             - name: SECRET_KEY
-              value: mistudio-secret-key-change-in-production
+              value: changeme  # CHANGE THIS: generate with: python -c "import secrets; print(secrets.token_hex(32))"
             # Deployment portability env vars
             - name: DATA_DIR
               value: /data
@@ -164,11 +169,11 @@ spec:
               value: http://mistudio-backend:8000
             - name: OLLAMA_URL
               value: http://ollama-proxy:11434
-            # Neuronpedia local instance configuration
-            - name: NEURONPEDIA_LOCAL_DB_URL
-              value: postgresql://neuronpedia:neuronpedia_secure_pw_2026@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
-            - name: NEURONPEDIA_LOCAL_URL
-              value: http://k8s-neuron.hitsai.local
+            # Neuronpedia local instance configuration (optional - remove if not using Neuronpedia)
+            # - name: NEURONPEDIA_LOCAL_DB_URL
+            #   value: postgresql://neuronpedia:YOUR_NEURONPEDIA_PASSWORD@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
+            # - name: NEURONPEDIA_LOCAL_URL
+            #   value: http://your-neuronpedia-host.local
           resources:
             limits:
               nvidia.com/gpu: 1
@@ -182,9 +187,9 @@ spec:
             - name: SERVICE_TYPE
               value: celery-worker
             - name: DATABASE_URL
-              value: postgresql+asyncpg://mistudio:mistudio@postgres:5432/mistudio
+              value: postgresql+asyncpg://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
             - name: DATABASE_URL_SYNC
-              value: postgresql+psycopg2://mistudio:mistudio@postgres:5432/mistudio
+              value: postgresql+psycopg2://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
             - name: REDIS_URL
               value: redis://redis:6379/0
             - name: CELERY_BROKER_URL
@@ -192,7 +197,7 @@ spec:
             - name: CELERY_RESULT_BACKEND
               value: redis://redis:6379/0
             - name: SECRET_KEY
-              value: mistudio-secret-key-change-in-production
+              value: changeme  # CHANGE THIS: must match backend SECRET_KEY above
             # Deployment portability env vars
             - name: DATA_DIR
               value: /data
@@ -202,11 +207,11 @@ spec:
               value: http://mistudio-backend:8000
             - name: OLLAMA_URL
               value: http://ollama-proxy:11434
-            # Neuronpedia local instance configuration
-            - name: NEURONPEDIA_LOCAL_DB_URL
-              value: postgresql://neuronpedia:neuronpedia_secure_pw_2026@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
-            - name: NEURONPEDIA_LOCAL_URL
-              value: http://k8s-neuron.hitsai.local
+            # Neuronpedia local instance configuration (optional - remove if not using Neuronpedia)
+            # - name: NEURONPEDIA_LOCAL_DB_URL
+            #   value: postgresql://neuronpedia:YOUR_NEURONPEDIA_PASSWORD@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
+            # - name: NEURONPEDIA_LOCAL_URL
+            #   value: http://your-neuronpedia-host.local
           volumeMounts:
             - name: mistudio-data
               mountPath: /data
@@ -217,9 +222,9 @@ spec:
             - name: SERVICE_TYPE
               value: celery-beat
             - name: DATABASE_URL
-              value: postgresql+asyncpg://mistudio:mistudio@postgres:5432/mistudio
+              value: postgresql+asyncpg://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
             - name: DATABASE_URL_SYNC
-              value: postgresql+psycopg2://mistudio:mistudio@postgres:5432/mistudio
+              value: postgresql+psycopg2://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
             - name: REDIS_URL
               value: redis://redis:6379/0
             - name: CELERY_BROKER_URL
@@ -227,7 +232,7 @@ spec:
             - name: CELERY_RESULT_BACKEND
               value: redis://redis:6379/0
             - name: SECRET_KEY
-              value: mistudio-secret-key-change-in-production
+              value: changeme  # CHANGE THIS: must match backend SECRET_KEY above
             # Deployment portability env vars
             - name: DATA_DIR
               value: /data
