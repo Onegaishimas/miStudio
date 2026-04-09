@@ -140,4 +140,4 @@ The most direct integration point is miStudio's auto-labeling system. When confi
 
 ## License
 
-MIT
+Apache 2.0 — see [LICENSE](LICENSE) for details.
