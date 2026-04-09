@@ -41,6 +41,7 @@ jobs:
           --health-retries 5
 
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       DATABASE_URL: postgresql+asyncpg://mistudio:testpassword@localhost:5432/mistudio_test
       DATABASE_URL_SYNC: postgresql+psycopg2://mistudio:testpassword@localhost:5432/mistudio_test
       SECRET_KEY: ci-test-secret-key-minimum-32-characters-long
