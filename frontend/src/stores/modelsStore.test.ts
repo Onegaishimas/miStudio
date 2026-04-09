@@ -376,14 +376,13 @@ describe('modelsStore', () => {
       setModelSubscriptionCallback(mockSubscribe);
 
       const { extractActivations } = useModelsStore.getState();
-      await extractActivations(
-        'm_model1',
-        'd_dataset1',
-        [0, 5, 10],
-        ['residual', 'mlp'],
-        1000,
-        32
-      );
+      await extractActivations('m_model1', {
+        dataset_id: 'd_dataset1',
+        layer_indices: [0, 5, 10],
+        hook_types: ['residual', 'mlp'],
+        max_samples: 1000,
+        batch_size: 32,
+      });
 
       const state = useModelsStore.getState();
       expect(state.loading).toBe(false);

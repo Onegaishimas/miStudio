@@ -37,6 +37,7 @@ jobs:
       CELERY_BROKER_URL: redis://localhost:6379/0
       CELERY_RESULT_BACKEND: redis://localhost:6379/0
       REDIS_URL: redis://localhost:6379/0
+      DATA_DIR: /tmp/mistudio-ci
 
     steps:
       - uses: actions/checkout@v4
