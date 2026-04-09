@@ -24,7 +24,8 @@ from ....schemas.training import (
 )
 from ....services.training_service import TrainingService
 from ....services.checkpoint_service import CheckpointService
-from ....workers.training_tasks import train_sae_task
+from ....workers.training_tasks import train_sae_task, resume_training_task
+from ....core.celery_app import revoke_task
 
 logger = logging.getLogger(__name__)
 
@@ -237,11 +238,13 @@ async def control_training(
             message = "Training paused"
         elif action == "resume":
             db_training = await TrainingService.resume_training(db, training_id)
-            # TODO: Resume training task
+            if db_training:
+                resume_training_task.delay(training_id)
             message = "Training resumed"
         elif action == "stop":
             db_training = await TrainingService.stop_training(db, training_id)
-            # TODO: Cancel Celery task
+            if db_training and db_training.celery_task_id:
+                revoke_task(db_training.celery_task_id, terminate=True)
             message = "Training stopped"
         else:
             raise HTTPException(status_code=400, detail=f"Invalid action: {action}")

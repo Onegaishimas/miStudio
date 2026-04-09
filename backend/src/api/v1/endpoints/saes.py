@@ -13,7 +13,7 @@ This module defines REST API endpoints for SAE operations including:
 import logging
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -47,6 +47,7 @@ from ....schemas.extraction import (
 )
 from ....services.huggingface_sae_service import HuggingFaceSAEService
 from ....services.sae_manager_service import SAEManagerService
+from ....workers.sae_tasks import download_sae_task
 from ....services.extraction_service import ExtractionService
 
 logger = logging.getLogger(__name__)
@@ -158,13 +159,12 @@ async def preview_hf_repository(request: HFRepoPreviewRequest):
 @router.post("/download", response_model=SAEResponse)
 async def download_sae_from_hf(
     request: SAEDownloadRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Initiate an SAE download from HuggingFace.
 
-    Creates an SAE record and starts the download in the background.
+    Creates an SAE record and starts the download as a Celery task.
     Returns immediately with the SAE in PENDING status.
     Use the WebSocket or polling to track download progress.
     """
@@ -172,12 +172,13 @@ async def download_sae_from_hf(
         # Create SAE record
         sae = await SAEManagerService.initiate_download(db, request)
 
-        # Start download task in background
-        # TODO: Replace with Celery task for better reliability
-        background_tasks.add_task(
-            _download_sae_background,
+        # Start download as a Celery task for reliability and retry support
+        download_sae_task.delay(
             sae_id=sae.id,
-            request=request
+            repo_id=request.repo_id,
+            filepath=request.filepath,
+            access_token=request.access_token,
+            revision=request.revision,
         )
 
         return SAEResponse.model_validate(sae)
@@ -186,57 +187,6 @@ async def download_sae_from_hf(
         logger.error(f"Error initiating SAE download: {e}")
         raise HTTPException(500, f"Error initiating download: {str(e)}")
 
-
-async def _download_sae_background(sae_id: str, request: SAEDownloadRequest):
-    """Background task to download SAE from HuggingFace."""
-    from ....core.database import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as db:
-        try:
-            # Update status to downloading
-            await SAEManagerService.update_download_progress(
-                db, sae_id, progress=0.0, status=SAEStatus.DOWNLOADING
-            )
-
-            # Get storage path
-            local_path = HuggingFaceSAEService.get_sae_storage_path(sae_id)
-
-            # Download files
-            result = await HuggingFaceSAEService.download_sae(
-                repo_id=request.repo_id,
-                filepath=request.filepath,
-                local_dir=local_path,
-                revision=request.revision,
-                access_token=request.access_token
-            )
-
-            # Update with download info
-            await SAEManagerService.update_download_progress(
-                db, sae_id,
-                progress=100.0,
-                status=SAEStatus.READY,
-                metadata_updates={
-                    "files_downloaded": result.get("files_downloaded", []),
-                    "is_directory": result.get("is_directory", False)
-                }
-            )
-
-            # Update file size
-            await SAEManagerService.update_sae_info(
-                db, sae_id,
-                file_size_bytes=result.get("file_size_bytes")
-            )
-
-            logger.info(f"SAE download completed: {sae_id}")
-
-        except Exception as e:
-            logger.error(f"SAE download failed: {sae_id} - {e}")
-            await SAEManagerService.update_download_progress(
-                db, sae_id,
-                progress=0.0,
-                status=SAEStatus.ERROR,
-                error_message=str(e)
-            )
 
 
 @router.post("/upload", response_model=SAEUploadResponse)

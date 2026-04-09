@@ -34,6 +34,7 @@ import type {
 export const useTrainingWebSocket = (trainingIds: string[]) => {
   const { on, off, subscribe, unsubscribe, isConnected } = useWebSocketContext();
   const updateTrainingStatus = useTrainingsStore((state) => state.updateTrainingStatus);
+  const addCheckpoint = useTrainingsStore((state) => state.addCheckpoint);
 
   // Use refs to store handler references for cleanup
   const handlersRef = useRef<{
@@ -95,8 +96,16 @@ export const useTrainingWebSocket = (trainingIds: string[]) => {
 
   const handleCheckpointCreated = useCallback((data: CheckpointCreatedEvent) => {
     console.log('[Training WS] 💾 Checkpoint created:', data);
-    // TODO: Update checkpoints in store when we add checkpoint state management
-  }, []);
+    addCheckpoint(data.training_id, {
+      id: data.checkpoint_id,
+      training_id: data.training_id,
+      step: data.step,
+      loss: data.loss,
+      is_best: data.is_best,
+      storage_path: data.storage_path,
+      created_at: new Date().toISOString(),
+    });
+  }, [addCheckpoint]);
 
   // Register event handlers
   useEffect(() => {

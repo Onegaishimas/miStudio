@@ -33,6 +33,7 @@ from ....services.neuronpedia_export_service import (
     get_neuronpedia_export_service,
     ExportConfig,
 )
+from ....workers.neuronpedia_tasks import compute_dashboard_data_task
 from ....services.neuronpedia_local_service import (
     get_neuronpedia_local_push_service,
     LocalPushConfig,
@@ -290,8 +291,26 @@ async def compute_dashboard_data(
     features without creating a full export archive. Useful for populating
     dashboard data before export.
     """
-    # For now, compute synchronously for small feature sets
-    # TODO: Add background task for large feature sets
+    # For large feature sets, dispatch a Celery task and return immediately.
+    # For small sets (< 500 features), compute synchronously for low latency.
+    LARGE_FEATURE_THRESHOLD = 500
+    feature_count = len(request.feature_indices) if request.feature_indices is not None else LARGE_FEATURE_THRESHOLD + 1
+
+    if feature_count > LARGE_FEATURE_THRESHOLD:
+        task = compute_dashboard_data_task.delay(
+            sae_id=request.sae_id,
+            feature_indices=request.feature_indices,
+            include_logit_lens=request.include_logit_lens,
+            include_histograms=request.include_histograms,
+            include_top_tokens=request.include_top_tokens,
+            force_recompute=request.force_recompute,
+        )
+        return ComputeDashboardDataResponse(
+            job_id=task.id,
+            features_computed=0,
+            status="queued",
+            message=f"Dashboard data computation queued for {feature_count} features (job: {task.id})",
+        )
 
     from ....services.logit_lens_service import get_logit_lens_service
     from ....services.histogram_service import get_histogram_service

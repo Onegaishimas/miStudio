@@ -126,6 +126,9 @@ interface TrainingStoreState {
     completed: number;
     failed: number;
   };
+
+  // Checkpoints cache: trainingId -> Checkpoint[]
+  checkpoints: Record<string, Checkpoint[]>;
 }
 
 /**
@@ -156,6 +159,7 @@ interface TrainingStoreActions {
 
   // Real-time updates (WebSocket handler)
   updateTrainingStatus: (trainingId: string, updates: Partial<Training>) => void;
+  addCheckpoint: (trainingId: string, checkpoint: Checkpoint) => void;
 
   // UI state management
   setSelectedTraining: (training: Training | null) => void;
@@ -271,6 +275,7 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
     completed: 0,
     failed: 0,
   },
+  checkpoints: {},
 
   /**
    * Fetch list of training jobs.
@@ -555,11 +560,27 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
       const response = await axios.get<CheckpointListResponse>(
         `${API_BASE_URL}/${trainingId}/checkpoints`
       );
-      return response.data.data;
+      const checkpointList = response.data.data;
+      set((state) => ({
+        checkpoints: { ...state.checkpoints, [trainingId]: checkpointList },
+      }));
+      return checkpointList;
     } catch (error: any) {
       console.error('Failed to fetch checkpoints:', error);
       throw error;
     }
+  },
+
+  addCheckpoint: (trainingId: string, checkpoint: Checkpoint) => {
+    set((state) => {
+      const existing = state.checkpoints[trainingId] ?? [];
+      return {
+        checkpoints: {
+          ...state.checkpoints,
+          [trainingId]: [...existing, checkpoint],
+        },
+      };
+    });
   },
 
   /**

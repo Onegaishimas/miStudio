@@ -192,6 +192,8 @@ class TrainingTask(DatabaseTask):
 def train_sae_task(
     self,
     training_id: str,
+    start_step: int = 0,
+    checkpoint_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Main SAE training task.
@@ -207,6 +209,8 @@ def train_sae_task(
 
     Args:
         training_id: Training job ID
+        start_step: Step to start/resume from (0 = fresh start)
+        checkpoint_id: Checkpoint ID to resume from (None = fresh start)
 
     Returns:
         Dictionary with training results
@@ -461,6 +465,30 @@ def train_sae_task(
             training.checkpoint_dir = str(checkpoint_dir)
             training.status = TrainingStatus.RUNNING.value
             db.commit()
+
+        # Load checkpoint weights if resuming
+        if start_step > 0 and checkpoint_id:
+            logger.info(f"Resuming from checkpoint {checkpoint_id} at step {start_step}")
+            with self.get_db() as db:
+                from ..models.checkpoint import Checkpoint
+                ckpt = db.query(Checkpoint).filter_by(id=checkpoint_id).first()
+                if not ckpt:
+                    raise ValueError(f"Checkpoint not found: {checkpoint_id}")
+                ckpt_path = Path(settings.resolve_data_path(ckpt.storage_path))
+
+            # Checkpoint files are stored per layer under checkpoint_dir/checkpoint_{step}/layer_{idx}/
+            # Try to load weights for each model
+            for (layer_idx, hook_type), model in models.items():
+                layer_key = f"layer_{layer_idx}_{hook_type}" if len(layer_hook_combinations) > 1 or hook_type != "residual" else f"layer_{layer_idx}"
+                layer_ckpt = ckpt_path.parent.parent / f"checkpoint_{ckpt.step}" / layer_key / "checkpoint.safetensors"
+                # Fallback: the storage_path itself points to a layer checkpoint
+                if not layer_ckpt.exists():
+                    layer_ckpt = ckpt_path
+                if layer_ckpt.exists():
+                    CheckpointService.load_checkpoint(str(layer_ckpt), model=model, device=str(device))
+                    logger.info(f"Loaded checkpoint for layer {layer_idx}/{hook_type} from {layer_ckpt}")
+                else:
+                    logger.warning(f"Checkpoint file not found for layer {layer_idx}/{hook_type}: {layer_ckpt}")
 
         logger.info("Model initialized successfully")
 
@@ -1046,7 +1074,7 @@ def train_sae_task(
                         logger.info(f"    Sparsity warmup:     L1 alpha will ramp from 0 to {l1_alpha_val} over {sparsity_warmup_steps} steps")
             logger.info("=" * 70)
 
-        for step in range(total_steps):
+        for step in range(start_step, total_steps):
             # Check for pause/stop signals
             with self.get_db() as db:
                 training = db.query(Training).filter_by(id=training_id).first()
@@ -1812,19 +1840,60 @@ def train_sae_task(
 @get_celery_app().task(name="resume_training")
 def resume_training_task(training_id: str, checkpoint_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Resume a paused training job.
+    Resume a paused training job from its latest (or specified) checkpoint.
+
+    Queries the database for the checkpoint to resume from, then dispatches
+    train_sae_task with start_step set to the checkpoint step.
 
     Args:
         training_id: Training job ID
-        checkpoint_id: Optional checkpoint ID to resume from
+        checkpoint_id: Checkpoint ID to resume from (None = use latest)
 
     Returns:
         Dictionary with resume result
     """
-    # TODO: Implement resume logic
-    # This would load the latest (or specified) checkpoint and continue training
-    logger.info(f"Resume training not yet implemented: {training_id}")
-    return {"status": "not_implemented"}
+    from ..models.checkpoint import Checkpoint
+    from ..core.database import get_sync_db
+
+    logger.info(f"Resuming training {training_id} from checkpoint={checkpoint_id or 'latest'}")
+
+    with get_sync_db() as db:
+        training = db.query(Training).filter_by(id=training_id).first()
+        if not training:
+            raise ValueError(f"Training not found: {training_id}")
+
+        if checkpoint_id:
+            ckpt = db.query(Checkpoint).filter_by(id=checkpoint_id).first()
+        else:
+            # Use the best checkpoint, falling back to the latest by step
+            ckpt = (
+                db.query(Checkpoint)
+                .filter_by(training_id=training_id, is_best=True)
+                .order_by(Checkpoint.step.desc())
+                .first()
+            ) or (
+                db.query(Checkpoint)
+                .filter_by(training_id=training_id)
+                .order_by(Checkpoint.step.desc())
+                .first()
+            )
+
+        if not ckpt:
+            raise ValueError(
+                f"No checkpoint found for training {training_id}. "
+                "Cannot resume without a saved checkpoint."
+            )
+
+        start_step = ckpt.step
+        resolved_checkpoint_id = ckpt.id
+
+    logger.info(f"Resuming training {training_id} from step {start_step} (checkpoint {resolved_checkpoint_id})")
+    train_sae_task.delay(
+        training_id=training_id,
+        start_step=start_step,
+        checkpoint_id=resolved_checkpoint_id,
+    )
+    return {"status": "queued", "start_step": start_step, "checkpoint_id": resolved_checkpoint_id}
 
 
 @get_celery_app().task(name="src.workers.training_tasks.delete_training_files")

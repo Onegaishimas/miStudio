@@ -363,6 +363,95 @@ class FeatureFilter:
 
         return is_junk
 
+    def is_junk_feature_from_examples(self, examples: List[Dict]) -> bool:
+        """
+        Determine if feature is likely junk based on activation examples.
+
+        Extracts prime tokens from context examples and applies the same
+        junk/single-char heuristics as is_junk_feature.
+
+        Args:
+            examples: List of context example dicts containing 'prime_token' key
+
+        Returns:
+            True if feature should be skipped (is likely junk)
+        """
+        prime_tokens = [ex.get('prime_token', '') for ex in examples if ex.get('prime_token')]
+
+        if len(prime_tokens) < self.min_tokens_for_decision:
+            return False  # Not enough data, be conservative
+
+        junk_count = 0
+        single_char_count = 0
+        whitespace_count = 0
+
+        for token in prime_tokens[:10]:
+            cleaned = token.replace("Ġ", "").replace("▁", "").replace("##", "")
+
+            if not cleaned or cleaned.isspace():
+                whitespace_count += 1
+                junk_count += 1
+                continue
+
+            if len(cleaned) == 1:
+                single_char_count += 1
+                if not cleaned.isalnum():
+                    junk_count += 1
+            elif not any(c.isalnum() for c in cleaned):
+                junk_count += 1
+
+        total_analyzed = min(len(prime_tokens), 10)
+        junk_ratio = junk_count / total_analyzed
+        single_char_ratio = single_char_count / total_analyzed
+
+        return (
+            whitespace_count == total_analyzed
+            or junk_ratio >= self.junk_ratio_threshold
+            or single_char_ratio >= self.single_char_ratio_threshold
+        )
+
+    def filter_features_from_examples(
+        self,
+        features: List,
+        features_examples: List[List[Dict]],
+        all_features_examples: List[List[Dict]],
+    ) -> tuple:
+        """
+        Filter features using activation examples (context-based approach).
+
+        Args:
+            features: List of feature objects
+            features_examples: Parallel list of LLM-display example lists
+            all_features_examples: Parallel list of all-example lists (for NLP analysis)
+
+        Returns:
+            Tuple of (filtered_features, filtered_examples, filtered_all_examples, stats)
+        """
+        filtered_features = []
+        filtered_examples = []
+        filtered_all_examples = []
+        skipped_count = 0
+
+        for feature, examples, all_ex in zip(features, features_examples, all_features_examples):
+            if self.is_junk_feature_from_examples(examples):
+                skipped_count += 1
+            else:
+                filtered_features.append(feature)
+                filtered_examples.append(examples)
+                filtered_all_examples.append(all_ex)
+
+        total = len(features)
+        stats = {
+            "total_features": total,
+            "features_to_label": len(filtered_features),
+            "features_skipped": skipped_count,
+            "skip_percentage": (skipped_count / total * 100) if total else 0,
+            "junk_ratio_threshold": self.junk_ratio_threshold,
+            "single_char_ratio_threshold": self.single_char_ratio_threshold,
+        }
+
+        return filtered_features, filtered_examples, filtered_all_examples, stats
+
     def filter_features(
         self,
         features_with_stats: List[tuple]

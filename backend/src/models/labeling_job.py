@@ -85,6 +85,7 @@ class LabelingJob(Base):
 
     # LLM response configuration
     max_tokens = Column(Integer, nullable=False, default=300)  # Max tokens in LLM response (50-2000)
+    api_timeout = Column(Float, nullable=False, default=120.0)  # API request timeout in seconds (30-600)
 
     # Debugging configuration
     save_requests_for_testing = Column(Boolean, nullable=False, default=False)  # Save API requests to /tmp/ for testing

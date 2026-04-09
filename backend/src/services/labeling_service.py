@@ -202,6 +202,7 @@ class LabelingService:
             save_poor_quality_labels=config.get("save_poor_quality_labels", False),
             poor_quality_sample_rate=config.get("poor_quality_sample_rate", 1.0),
             max_tokens=config.get("max_tokens", 300),
+            api_timeout=config.get("api_timeout", 120.0),
             status=LabelingStatus.QUEUED.value,
             progress=0.0,
             features_labeled=0,
@@ -641,11 +642,8 @@ class LabelingService:
             if not all_features:
                 raise ValueError(f"No features found for extraction {labeling_job.extraction_job_id}")
 
-            # Pre-labeling feature filtering (DISABLED - requires refactoring for context-based approach)
-            # TODO: Refactor FeatureFilter to work with activation examples instead of token aggregation.
-            # The old token-based filtering is incompatible with the new context-based labeling system.
-            # For now, we label all features without pre-filtering.
-            logger.info("Pre-labeling filter disabled - labeling all features (context-based approach)")
+            # All features are retrieved for examples; filtering happens after retrieval
+            # using prime tokens from activation examples (context-based approach).
             features = all_features
 
             total_features = len(features)
@@ -787,6 +785,22 @@ class LabelingService:
                 logger.info(f"Batch {batch_start//BATCH_SIZE + 1} complete: {batch_end}/{total_features} features processed ({retrieval_progress*100:.1f}%)")
 
             logger.info(f"Examples retrieval complete for {len(features_examples)} features (K={max_examples})")
+
+            # Apply context-based pre-labeling filter: skip features whose prime tokens
+            # are predominantly junk (punctuation, whitespace, single non-alphanumeric chars).
+            from src.utils.token_filter import get_feature_filter
+            feature_filter = get_feature_filter()
+            features, features_examples, all_features_examples, filter_stats = (
+                feature_filter.filter_features_from_examples(
+                    features, features_examples, all_features_examples
+                )
+            )
+            total_features = len(features)
+            logger.info(
+                f"Pre-labeling filter: {filter_stats['features_to_label']}/{filter_stats['total_features']} "
+                f"features pass ({filter_stats['features_skipped']} skipped as junk, "
+                f"{filter_stats['skip_percentage']:.1f}%)"
+            )
 
             # Phase 2: Label Generation with progress tracking
             logger.info("Starting label generation phase")
@@ -979,9 +993,7 @@ class LabelingService:
                         top_p = template.top_p
                         logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
 
-                    # Use default API timeout (120s)
-                    # TODO: Add api_timeout column to labeling_jobs table for configurable timeout
-                    api_timeout = 120.0
+                    api_timeout = labeling_job.api_timeout
 
                     # Generate and persist labels in batches of 10
                     # This ensures progress is saved incrementally if the job fails
@@ -1019,6 +1031,30 @@ class LabelingService:
                             save_requests_sample_rate=labeling_job.save_requests_sample_rate,
                             labeling_job_id=labeling_job.id
                         )
+
+                        # Pre-load logit effects for all features (one bulk query, avoids N+1)
+                        feature_logit_effects: Dict[str, Optional[Dict]] = {}
+                        if template_config.get('include_logit_effects'):
+                            from src.models.feature_dashboard import FeatureDashboardData
+                            n_promoted = template_config.get('top_promoted_tokens_count', 10)
+                            n_suppressed = template_config.get('top_suppressed_tokens_count', 10)
+                            feature_ids = [f.id for f in features]
+                            dashboard_rows = self.db.query(
+                                FeatureDashboardData.feature_id,
+                                FeatureDashboardData.logit_lens_data
+                            ).filter(
+                                FeatureDashboardData.feature_id.in_(feature_ids)
+                            ).all()
+                            for row in dashboard_rows:
+                                lens = row.logit_lens_data or {}
+                                top_pos = lens.get('top_positive', [])[:n_promoted]
+                                top_neg = lens.get('top_negative', [])[:n_suppressed]
+                                feature_logit_effects[row.feature_id] = {
+                                    'top_promoted': [t['token'] for t in top_pos],
+                                    'top_suppressed': [t['token'] for t in top_neg],
+                                }
+                            logger.info(f"Pre-loaded logit effects for {len(feature_logit_effects)}/{len(feature_ids)} features")
+
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
@@ -1030,6 +1066,7 @@ class LabelingService:
                             # Pass all examples for NLP analysis to improve labeling
                             label_tasks = []
                             for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
+                                logit_effects = feature_logit_effects.get(feature.id)
                                 task = labeling_service.generate_label_from_examples(
                                     examples=examples,
                                     template_config=template_config,
@@ -1037,7 +1074,7 @@ class LabelingService:
                                     system_message=system_message,
                                     feature_id=feature.id,
                                     neuron_index=feature.neuron_index,
-                                    logit_effects=None,  # TODO: Implement in Sprint 4
+                                    logit_effects=logit_effects,
                                     all_examples=all_ex,  # Pass full 100 examples for NLP analysis
                                     nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
                                 )
@@ -1147,9 +1184,7 @@ class LabelingService:
                         top_p = template.top_p
                         logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
 
-                    # Use default API timeout (120s)
-                    # TODO: Add api_timeout column to labeling_jobs table for configurable timeout
-                    api_timeout = 120.0
+                    api_timeout = labeling_job.api_timeout
 
                     # Generate and persist labels in batches of 10
                     # This ensures progress is saved incrementally if the job fails
@@ -1188,6 +1223,30 @@ class LabelingService:
                             save_requests_sample_rate=labeling_job.save_requests_sample_rate,
                             labeling_job_id=labeling_job.id
                         )
+
+                        # Pre-load logit effects for all features (one bulk query, avoids N+1)
+                        feature_logit_effects: Dict[str, Optional[Dict]] = {}
+                        if template_config.get('include_logit_effects'):
+                            from src.models.feature_dashboard import FeatureDashboardData
+                            n_promoted = template_config.get('top_promoted_tokens_count', 10)
+                            n_suppressed = template_config.get('top_suppressed_tokens_count', 10)
+                            feature_ids = [f.id for f in features]
+                            dashboard_rows = self.db.query(
+                                FeatureDashboardData.feature_id,
+                                FeatureDashboardData.logit_lens_data
+                            ).filter(
+                                FeatureDashboardData.feature_id.in_(feature_ids)
+                            ).all()
+                            for row in dashboard_rows:
+                                lens = row.logit_lens_data or {}
+                                top_pos = lens.get('top_positive', [])[:n_promoted]
+                                top_neg = lens.get('top_negative', [])[:n_suppressed]
+                                feature_logit_effects[row.feature_id] = {
+                                    'top_promoted': [t['token'] for t in top_pos],
+                                    'top_suppressed': [t['token'] for t in top_neg],
+                                }
+                            logger.info(f"Pre-loaded logit effects for {len(feature_logit_effects)}/{len(feature_ids)} features")
+
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
@@ -1199,6 +1258,7 @@ class LabelingService:
                             # Pass all examples for NLP analysis to improve labeling
                             label_tasks = []
                             for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
+                                logit_effects = feature_logit_effects.get(feature.id)
                                 task = labeling_service.generate_label_from_examples(
                                     examples=examples,
                                     template_config=template_config,
@@ -1206,7 +1266,7 @@ class LabelingService:
                                     system_message=system_message,
                                     feature_id=feature.id,
                                     neuron_index=feature.neuron_index,
-                                    logit_effects=None,  # TODO: Implement in Sprint 4
+                                    logit_effects=logit_effects,
                                     all_examples=all_ex,  # Pass full 100 examples for NLP analysis
                                     nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
                                 )
