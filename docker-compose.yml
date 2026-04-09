@@ -80,7 +80,7 @@ services:
   # ============================================================================
 
   backend:
-    image: onegaionegai/mistudio-backend:latest
+    image: hitsai/mistudio-backend:latest
     container_name: mistudio-backend
     environment:
       SERVICE_TYPE: api
@@ -139,7 +139,7 @@ services:
       - mistudio-network
 
   celery-worker:
-    image: onegaionegai/mistudio-backend:latest
+    image: hitsai/mistudio-backend:latest
     container_name: mistudio-celery-worker
     healthcheck:
       disable: true  # Celery workers don't have HTTP endpoints
@@ -190,7 +190,7 @@ services:
       - mistudio-network
 
   celery-beat:
-    image: onegaionegai/mistudio-backend:latest
+    image: hitsai/mistudio-backend:latest
     container_name: mistudio-celery-beat
     healthcheck:
       disable: true  # Celery beat doesn't have HTTP endpoints
@@ -224,7 +224,7 @@ services:
   # ============================================================================
 
   frontend:
-    image: onegaionegai/mistudio-frontend:latest
+    image: hitsai/mistudio-frontend:latest
     container_name: mistudio-frontend
     environment:
       NODE_ENV: production
