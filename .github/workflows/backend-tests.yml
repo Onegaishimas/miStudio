@@ -76,7 +76,9 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: |
+          # test_activation_service.py does real GPU forward passes ("NO MOCKING") - requires CUDA
           python -m pytest tests/ \
             --ignore=tests/integration \
+            --ignore=tests/unit/test_activation_service.py \
             -m "not slow" \
             -v --no-cov --tb=short

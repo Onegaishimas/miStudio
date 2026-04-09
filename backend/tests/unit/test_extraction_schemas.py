@@ -35,14 +35,14 @@ class TestExtractionConfigRequest:
         assert config.top_k_examples == 500
 
     def test_evaluation_samples_minimum_boundary(self):
-        """Test evaluation_samples minimum constraint (1000)."""
+        """Test evaluation_samples minimum constraint (100)."""
         # Valid: exactly at minimum
-        config = ExtractionConfigRequest(evaluation_samples=1000)
-        assert config.evaluation_samples == 1000
+        config = ExtractionConfigRequest(evaluation_samples=100)
+        assert config.evaluation_samples == 100
 
         # Invalid: below minimum
         with pytest.raises(ValidationError) as exc_info:
-            ExtractionConfigRequest(evaluation_samples=999)
+            ExtractionConfigRequest(evaluation_samples=99)
 
         assert "greater_than_equal" in str(exc_info.value)
 
