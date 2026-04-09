@@ -26,9 +26,9 @@ celery = "^5.6.0"
 
 # ML & AI
 torch = "^2.9.0"
-transformers = "~4.50.0"  # Pinned to 4.50.x for Phi-4 support (requires SlidingWindowCache and LossKwargs)
+transformers = "^5.0.0"  # Upgraded from 4.50.x; SlidingWindowCache/LossKwargs constraints resolved
 datasets = "^2.14.0"  # Staying on 2.x until Phase 3 (datasets 4.x is major upgrade)
-tokenizers = "~0.21.0"  # Pinned to match transformers 4.50.0
+tokenizers = "^0.22.2"  # 0.22.2+ allows huggingface-hub>=1.0
 bitsandbytes = "^0.49.0"
 accelerate = "^1.12.0"
 
