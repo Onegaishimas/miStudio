@@ -5,6 +5,7 @@ This module contains background tasks for downloading SAEs from HuggingFace,
 uploading SAEs to HuggingFace, and format conversion operations.
 """
 
+import asyncio
 import logging
 import traceback
 from pathlib import Path
@@ -128,15 +129,15 @@ def download_sae_task(
             )
             update_sae_status(sae_id, SAEStatus.DOWNLOADING, progress=progress)
 
-        # Perform download
-        download_result = HuggingFaceSAEService.download_sae(
+        # Perform download (download_sae is async; run it in a fresh event loop)
+        download_result = asyncio.run(HuggingFaceSAEService.download_sae(
             repo_id=repo_id,
             filepath=filepath,
             local_dir=local_path,
             access_token=access_token,
             revision=revision,
             progress_callback=progress_callback,
-        )
+        ))
 
         # Update progress - download complete
         emit_sae_download_progress(
@@ -260,6 +261,7 @@ def upload_sae_task(
     sae_id: str,
     repo_id: str,
     access_token: str,
+    filepath: str = "",
     private: bool = False,
     commit_message: Optional[str] = None,
 ) -> dict:
@@ -359,14 +361,14 @@ def upload_sae_task(
                 stage="upload",
             )
 
-        repo_url = HuggingFaceSAEService.upload_sae(
-            local_dir=upload_dir,
+        repo_url = asyncio.run(HuggingFaceSAEService.upload_sae(
+            local_path=upload_dir,
             repo_id=repo_id,
-            token=access_token,
+            filepath=filepath,
+            access_token=access_token,
             private=private,
             commit_message=commit_message or f"Upload SAE {sae_id}",
-            progress_callback=progress_callback,
-        )
+        ))
 
         # Emit completion
         emit_sae_upload_progress(
