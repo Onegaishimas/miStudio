@@ -38,6 +38,8 @@ jobs:
       CELERY_RESULT_BACKEND: redis://localhost:6379/0
       REDIS_URL: redis://localhost:6379/0
       DATA_DIR: /tmp/mistudio-ci
+      HF_HOME: /tmp/mistudio-ci/huggingface_cache
+      HF_CACHE_DIR: /tmp/mistudio-ci/huggingface_cache
 
     steps:
       - uses: actions/checkout@v4
