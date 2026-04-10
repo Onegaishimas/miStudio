@@ -68,11 +68,24 @@ export function SettingsPanel() {
 // ─── Endpoints Tab ───────────────────────────────────────────────────────────
 
 function EndpointsTab() {
-  const { getByCategory, upsert, remove } = useSettingsStore();
+  const { settings, getByCategory, upsert, remove } = useSettingsStore();
   const endpoints = getByCategory('endpoints');
   const [url, setUrl] = useState('');
   const [label, setLabel] = useState('');
   const [toast, setToast] = useState<string | null>(null);
+
+  // Ollama URL setting
+  const ollamaUrlSetting = settings.find((s) => s.key === 'ollama_url');
+  const [ollamaUrl, setOllamaUrl] = useState(ollamaUrlSetting?.value ?? '');
+  useEffect(() => {
+    setOllamaUrl(ollamaUrlSetting?.value ?? '');
+  }, [ollamaUrlSetting?.value]);
+
+  const handleSaveOllamaUrl = async () => {
+    await upsert({ key: 'ollama_url', value: ollamaUrl.trim(), is_sensitive: false, category: 'endpoints' });
+    setToast('Ollama URL saved');
+    setTimeout(() => setToast(null), 2000);
+  };
 
   const handleAdd = async () => {
     const trimmed = url.trim();
@@ -107,6 +120,44 @@ function EndpointsTab() {
     <div className="max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-200 mb-1">API Endpoints</h2>
       <p className="text-xs text-slate-500 mb-4">Saved OpenAI-compatible endpoint URLs for labeling jobs.</p>
+
+      {/* Ollama / LLM Service URL */}
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-6">
+        <label className="block text-sm font-medium text-slate-200 mb-1">Ollama / LLM Service URL</label>
+        <p className="text-xs text-slate-500 mb-3">
+          Base URL for the local LLM service used for labeling. Overrides the server environment variable.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={ollamaUrl}
+            onChange={(e) => setOllamaUrl(e.target.value)}
+            placeholder="http://k8s-millm.hitsai.local"
+            className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+          />
+          <button
+            onClick={handleSaveOllamaUrl}
+            disabled={!ollamaUrl.trim()}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm rounded transition-colors"
+          >
+            <Save className="w-4 h-4" /> Save
+          </button>
+          {ollamaUrlSetting && (
+            <button
+              onClick={() => { remove('ollama_url'); setOllamaUrl(''); }}
+              className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+              title="Clear (revert to server default)"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        {ollamaUrlSetting && (
+          <p className="text-xs text-slate-600 mt-1">
+            Set {new Date(ollamaUrlSetting.updated_at).toLocaleDateString()}
+          </p>
+        )}
+      </div>
 
       {/* Add form */}
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4">

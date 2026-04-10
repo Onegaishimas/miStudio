@@ -375,7 +375,7 @@ async def label_extraction(
     "/labeling/models/available",
     summary="List available Ollama models"
 )
-async def list_available_ollama_models():
+async def list_available_ollama_models(db: AsyncSession = Depends(get_db)):
     """
     List available Ollama models for local labeling.
 
@@ -388,10 +388,36 @@ async def list_available_ollama_models():
     Raises:
         503: Ollama service unavailable
     """
+    # Resolve Ollama URL: DB setting takes precedence over env var
+    from src.models.app_setting import AppSetting
+    result = await db.execute(select(AppSetting).where(AppSetting.key == "ollama_url"))
+    db_setting = result.scalar_one_or_none()
+    ollama_url = (db_setting.value if db_setting else None) or settings.ollama_url
+
     try:
-        # Query Ollama API for available models
+        # Query Ollama/OpenAI-compatible API for available models
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.ollama_url}/api/tags")
+            # Try OpenAI-compatible /v1/models first, fall back to Ollama /api/tags
+            try:
+                response = await client.get(f"{ollama_url}/v1/models")
+                response.raise_for_status()
+                data = response.json()
+                models = []
+                for model in data.get("data", []):
+                    model_name = model.get("id", "")
+                    models.append({
+                        "name": model_name,
+                        "display_name": model_name,
+                        "size": 0,
+                        "size_gb": 0,
+                        "modified_at": "",
+                        "details": {},
+                    })
+                return {"models": models, "total": len(models)}
+            except Exception:
+                pass
+            # Fall back to Ollama /api/tags
+            response = await client.get(f"{ollama_url}/api/tags")
             response.raise_for_status()
             data = response.json()
 
