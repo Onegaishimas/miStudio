@@ -100,8 +100,8 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
           ))}
         </nav>
 
-        {/* Bottom nav (Settings + Manual link) */}
-        <div className="p-2 border-t border-slate-200 dark:border-slate-700/50">
+        {/* Bottom nav (Settings + Manual link) + version badge */}
+        <div className="p-2 border-t border-slate-200 dark:border-slate-700/50 space-y-1">
           {bottomNavItems.map((item) => (
             <div key={item.id} className="flex items-center">
               <button
@@ -135,22 +135,20 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
               )}
             </div>
           ))}
+          {!collapsed && (
+            <div className="px-3 pt-1">
+              <a
+                href="https://github.com/hitsainet/miStudio/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors font-mono"
+              >
+                v{APP_VERSION}
+              </a>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Version badge */}
-      {!collapsed && (
-        <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-700/50">
-          <a
-            href="https://github.com/hitsainet/miStudio/releases"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors font-mono"
-          >
-            v{APP_VERSION}
-          </a>
-        </div>
-      )}
 
       {/* Collapse Toggle */}
       <button
