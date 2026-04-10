@@ -18,11 +18,11 @@ echo "=================================="
 echo ""
 
 # Stop all services
-docker-compose down
+docker compose down
 
 echo ""
 echo -e "${GREEN}✓${NC} All services stopped"
 echo ""
 echo "To remove volumes (DELETE ALL DATA):"
-echo "  docker-compose down -v"
+echo "  docker compose down -v"
 echo ""

@@ -160,7 +160,7 @@ wait_for_redis() {
 
     echo -e " ${RED}failed${NC}"
     echo "Redis is not available. Make sure Docker services are running:"
-    echo "  docker-compose -f docker-compose.dev.yml up -d redis"
+    echo "  docker compose -f docker-compose.dev.yml up -d redis"
     return 1
 }
 

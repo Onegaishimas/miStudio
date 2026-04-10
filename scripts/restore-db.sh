@@ -45,4 +45,4 @@ fi
 echo "Database restored successfully!"
 echo ""
 echo "Please restart the backend to reconnect:"
-echo "  docker-compose restart backend"
+echo "  docker compose restart backend"

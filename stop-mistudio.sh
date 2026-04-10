@@ -97,7 +97,7 @@ if docker ps --format '{{.Names}}' | grep -q "^mistudio-ollama$"; then
 fi
 
 # Stop docker-compose services
-docker-compose -f docker-compose.dev.yml stop
+docker compose -f docker-compose.dev.yml stop
 
 echo ""
 echo -e "${GREEN}✓${NC} All services stopped"
@@ -130,7 +130,7 @@ fi
 
 echo ""
 echo "To completely remove containers and volumes:"
-echo "  cd $PROJECT_ROOT && docker-compose -f docker-compose.dev.yml down -v"
+echo "  cd $PROJECT_ROOT && docker compose -f docker-compose.dev.yml down -v"
 echo "  docker rm mistudio-ollm   # Remove oLLM container"
 echo "  docker rm mistudio-ollama  # Remove Ollama container (if exists)"
 echo ""

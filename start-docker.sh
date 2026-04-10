@@ -55,17 +55,17 @@ echo ""
 # Build or pull images based on mode
 if [ "$USE_HUB_IMAGES" = true ]; then
     echo "Step 2: Pulling Docker Hub images..."
-    docker-compose $COMPOSE_FILES pull
+    docker compose $COMPOSE_FILES pull
     echo -e "${GREEN}✓${NC} Images pulled from Docker Hub"
 else
     echo "Step 2: Building Docker images..."
-    docker-compose $COMPOSE_FILES build --parallel
+    docker compose $COMPOSE_FILES build --parallel
     echo -e "${GREEN}✓${NC} Images built"
 fi
 echo ""
 
 echo "Step 3: Starting services..."
-docker-compose $COMPOSE_FILES up -d
+docker compose $COMPOSE_FILES up -d
 echo ""
 
 # Wait for services to be healthy
@@ -129,7 +129,7 @@ echo ""
 echo "=================================="
 echo "Service Status"
 echo "=================================="
-docker-compose $COMPOSE_FILES ps
+docker compose $COMPOSE_FILES ps
 echo ""
 
 echo "=================================="
@@ -145,8 +145,8 @@ echo ""
 echo "=================================="
 echo "Logs"
 echo "=================================="
-echo "  All:        docker-compose logs -f"
-echo "  Backend:    docker-compose logs -f backend"
-echo "  Frontend:   docker-compose logs -f frontend"
-echo "  Celery:     docker-compose logs -f celery-worker"
+echo "  All:        docker compose logs -f"
+echo "  Backend:    docker compose logs -f backend"
+echo "  Frontend:   docker compose logs -f frontend"
+echo "  Celery:     docker compose logs -f celery-worker"
 echo ""

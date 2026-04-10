@@ -226,7 +226,7 @@ fi
 echo ""
 echo "Step 2: Starting Docker services (PostgreSQL, Redis, Nginx, Neuronpedia)..."
 cd "$PROJECT_ROOT"
-docker-compose -f docker-compose.dev.yml up -d postgres redis nginx neuronpedia-postgres neuronpedia
+docker compose -f docker-compose.dev.yml up -d postgres redis nginx neuronpedia-postgres neuronpedia
 
 # Wait for services to be healthy
 wait_for_service "PostgreSQL" "docker exec mistudio-postgres pg_isready -U postgres"
