@@ -16,6 +16,8 @@ import {
 import logoSvg from '../../assets/logo.svg';
 import { useUIStore } from '../../stores/uiStore';
 
+const APP_VERSION = '0.5.0';
+
 type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
 
 const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
@@ -135,6 +137,20 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
           ))}
         </div>
       </div>
+
+      {/* Version badge */}
+      {!collapsed && (
+        <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-700/50">
+          <a
+            href="https://github.com/hitsainet/miStudio/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors font-mono"
+          >
+            v{APP_VERSION}
+          </a>
+        </div>
+      )}
 
       {/* Collapse Toggle */}
       <button

@@ -6,7 +6,7 @@ This module aggregates all v1 API endpoints into a single router.
 
 from fastapi import APIRouter
 
-from .endpoints import datasets, models, workers, extraction_templates, training_templates, prompt_templates, system, trainings, task_queue, features, labeling, labeling_prompt_templates, saes, steering, neuronpedia, settings
+from .endpoints import datasets, models, workers, extraction_templates, training_templates, prompt_templates, system, trainings, task_queue, features, labeling, labeling_prompt_templates, saes, steering, neuronpedia, settings, version
 
 api_router = APIRouter(prefix="/v1")
 
@@ -27,3 +27,4 @@ api_router.include_router(saes.router)
 api_router.include_router(steering.router)
 api_router.include_router(neuronpedia.router)
 api_router.include_router(settings.router)
+api_router.include_router(version.router)

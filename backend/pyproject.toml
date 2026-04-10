@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mistudio-backend"
-version = "0.1.0"
+version = "0.5.0"
 description = "MechInterp Studio - Backend API for edge-deployed mechanistic interpretability"
 authors = ["MechInterp Studio Team"]
 readme = "README.md"
