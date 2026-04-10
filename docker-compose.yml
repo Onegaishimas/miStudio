@@ -106,7 +106,7 @@ services:
       DEBUG: ${DEBUG:-true}
       # Cross-deployment URLs (use Docker service names)
       INTERNAL_API_URL: http://backend:8000
-      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_URL: http://k8s-millm.hitsai.local
       # Neuronpedia local instance configuration
       NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
       NEURONPEDIA_LOCAL_URL: http://localhost:3001
@@ -165,7 +165,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Cross-deployment URLs (use Docker service names)
       INTERNAL_API_URL: http://backend:8000
-      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_URL: http://k8s-millm.hitsai.local
       # Neuronpedia local instance configuration
       NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
       NEURONPEDIA_LOCAL_URL: http://localhost:3001
@@ -209,7 +209,7 @@ services:
       BACKEND_DIR: /app
       # Cross-deployment URLs (use Docker service names)
       INTERNAL_API_URL: http://backend:8000
-      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_URL: http://k8s-millm.hitsai.local
       # Neuronpedia local instance configuration (for consistency)
       NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
       NEURONPEDIA_LOCAL_URL: http://localhost:3001
