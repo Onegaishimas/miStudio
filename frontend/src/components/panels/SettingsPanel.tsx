@@ -98,7 +98,8 @@ function EndpointsTab() {
     setAvailableModels([]);
     try {
       const data = await fetchAPI<{ models: { id: string }[]; total: number }>(
-        `/labeling/models/openai?endpoint=${encodeURIComponent(compatEndpoint.trim())}`
+        '/labeling/models/openai',
+        { method: 'POST', body: JSON.stringify({ endpoint_url: compatEndpoint.trim() }), headers: { 'Content-Type': 'application/json' } }
       );
       const ids = data.models.map((m) => m.id);
       setAvailableModels(ids);
