@@ -71,6 +71,16 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
   const { templates, fetchTemplates } = useLabelingPromptTemplatesStore();
   const { settings, upsert: upsertSetting, remove: removeSetting, fetchAll: fetchSettings } = useSettingsStore();
 
+  // Sync openai-compatible endpoint/model from shared settings keys (same as Settings → Endpoints)
+  const compatEndpointFromSettings = settings.find((s) => s.key === 'openai_compatible_endpoint')?.value;
+  const compatModelFromSettings = settings.find((s) => s.key === 'openai_compatible_model')?.value;
+  useEffect(() => {
+    if (compatEndpointFromSettings) setOpenaiCompatibleEndpoint(compatEndpointFromSettings);
+  }, [compatEndpointFromSettings]);
+  useEffect(() => {
+    if (compatModelFromSettings) setOpenaiCompatibleModel(compatModelFromSettings);
+  }, [compatModelFromSettings]);
+
   // Derive saved endpoints from DB-backed settings store
   const savedEndpoints = settings
     .filter((s) => s.category === 'endpoints')
@@ -256,6 +266,9 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
       // Auto-save endpoint URL when starting a job
       if (labelingMethod === LabelingMethod.OPENAI_COMPATIBLE && openaiCompatibleEndpoint.trim()) {
         addEndpoint(openaiCompatibleEndpoint.trim());
+        // Keep shared settings keys in sync so Settings → Endpoints reflects the latest values
+        upsertSetting({ key: 'openai_compatible_endpoint', value: openaiCompatibleEndpoint.trim(), is_sensitive: false, category: 'endpoints' });
+        upsertSetting({ key: 'openai_compatible_model', value: openaiCompatibleModel.trim(), is_sensitive: false, category: 'endpoints' });
       }
 
       await startLabeling({
