@@ -104,7 +104,11 @@ async def start_enhanced_labeling(
     db.add(job)
     await db.flush()
 
-    # Queue Celery task and store task ID
+    # Commit the job row first so the Celery worker can find it
+    await db.commit()
+    await db.refresh(job)
+
+    # Queue Celery task and persist its ID
     from src.workers.enhanced_labeling_tasks import enhanced_label_feature_task
 
     celery_result = enhanced_label_feature_task.delay(job_id)
