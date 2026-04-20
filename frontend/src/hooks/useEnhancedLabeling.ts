@@ -38,6 +38,8 @@ export interface UseEnhancedLabelingResult {
   progressPhrase: string | null;
   /** Populated when job completes — caller populates edit fields from this */
   completedLabel: CompletedLabel | null;
+  /** Set when the POST /label/enhanced API call itself fails (e.g. settings not configured) */
+  startError: string | null;
   start: () => Promise<void>;
   reset: () => void;
 }
@@ -47,6 +49,7 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
 
   const [job, setJob] = useState<EnhancedLabelingJob | null>(null);
   const [completedLabel, setCompletedLabel] = useState<CompletedLabel | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
   const subscribedChannelRef = useRef<string | null>(null);
 
   // ── helpers ────────────────────────────────────────────────────────────────
@@ -159,15 +162,21 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
 
   const start = useCallback(async () => {
     setCompletedLabel(null);
-    const newJob = await startEnhancedLabeling(featureId);
-    setJob(newJob);
-    _subscribeToJob(newJob.id);
+    setStartError(null);
+    try {
+      const newJob = await startEnhancedLabeling(featureId);
+      setJob(newJob);
+      _subscribeToJob(newJob.id);
+    } catch (err: any) {
+      setStartError(err?.message ?? 'Failed to start enhanced labeling');
+    }
   }, [featureId, _subscribeToJob]);
 
   const reset = useCallback(() => {
     _unsubscribeFromJob();
     setJob(null);
     setCompletedLabel(null);
+    setStartError(null);
   }, [_unsubscribeFromJob]);
 
   // ── progress phrase ────────────────────────────────────────────────────────
@@ -185,5 +194,5 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
     }
   }
 
-  return { job, progressPhrase, completedLabel, start, reset };
+  return { job, progressPhrase, completedLabel, startError, start, reset };
 }

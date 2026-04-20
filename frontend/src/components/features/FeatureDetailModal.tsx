@@ -54,7 +54,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
 
   // Enhanced labeling
-  const { job: enhancedJob, progressPhrase, completedLabel, start: startEnhanced } =
+  const { job: enhancedJob, progressPhrase, completedLabel, startError: enhancedStartError, start: startEnhanced } =
     useEnhancedLabeling(featureId);
 
   // Copy examples state
@@ -300,6 +300,11 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                   {enhancedJob?.status === 'failed' && (
                     <p className="text-xs text-red-400 self-center ml-1">
                       {enhancedJob.error_message ?? 'Enhanced labeling failed'}
+                    </p>
+                  )}
+                  {enhancedStartError && (
+                    <p className="text-xs text-red-400 self-center ml-1">
+                      {enhancedStartError}
                     </p>
                   )}
                 </>
