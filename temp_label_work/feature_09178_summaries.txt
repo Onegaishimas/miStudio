@@ -1,0 +1,129 @@
+# Feature #09178 — Per-Example Summaries (Pass 1)
+
+Max activation : 7.9745
+Current label  : feature_09178
+Examples used  : 20
+
+---
+
+### Example 1  [act=7.97]
+**Token:** `[teenth]`
+**Context:** ...ion to outlaw racial preferences in college admissions somehow violates the Four[teenth] Amendment's Equal Protection Clause. As Dave Barry would say, I'm not making th...
+**Summary:** In this context, "[teenth]" functions as the suffix completing the word "Fourteenth," specifically denoting the ordinal number of the amendment being discussed.His decision to amend their state constitution to outlaw racial preferences in college admissions somehow violates the Four[teenth] Amendment's Equal Protection Clause. As Dave Barry would say, I'm not making this up: The court voted 8
+
+### Example 2  [act=7.87]
+**Token:** `[-five]`
+**Context:** .... “Straight skinny is gay fat.” “No fat, no fem.” “Twenty is the new forty[-five].” These phrases represent the pervasive undercurrent of unrealistic body norms ...
+**Summary:** In this context, [-five] functions as a semantic placeholder or a linguistic marker within the phrase "forty[-five]," suggesting an implied or unstated continuation of a numerical or comparative concept related to age or size.ференциальноthought
+Here's a thinking process to arrive at the suggested answer:
+
+1.  **Analyze the Request:**
+    *
+
+### Example 3  [act=7.34]
+**Token:** `[thirty]`
+**Context:** ...the van around Oak Dale, and it's not something they are taking lightly. "Within[thirty] minutes, there was a police officer at my house taking a report from us. They'v...
+**Summary:** In this context, "[thirty]" functions as a **temporal quantifier**, specifically specifying the duration of time elapsed before an event occurred.
+
+### Example 4  [act=6.91]
+**Token:** `[-first]`
+**Context:** ...actly workers are, the precarity of work today, and the problems with the twenty[-first] century labor movement. Chibber is in discussion with Jason Jacobin's Farbman. ...
+**Summary:** In this context, [-first] functions as a linguistic marker indicating the beginning of a sequence or enumeration, specifically preceding the phrase "episode of."Equally, [-first] is functioning as a linguistic marker indicating the beginning of a sequence or enumeration, specifically preceding the phrase "episode of.
+
+### Example 5  [act=6.45]
+**Token:** `[teenth]`
+**Context:** ...o barbarians constitutes a violation of the “Equal Protection Clause of the Four[teenth] Amendment of the United States Constitution.” South Carolina institutions curre...
+**Summary:** The token "[teenth]" is functioning as the suffix completing the word "Fourteenth," specifically indicating the ordinal number of the amendment mentioned in the text.Sanity Check: The prompt asks for a description of the linguistic or semantic role of "[teenth]" in the context. The context is: "...Equal Protection Clause of the Four[teenth] Amendment of the United States Constitution." The role
+
+### Example 6  [act=6.33]
+**Token:** `[twenty]`
+**Context:** ...e to a belief in a set of propositions short enough to fit on the back of a fake[twenty] dollar bill. Clearly a belief in God isn't what keeps people from doing bad thi...
+**Summary:** In this context, "[twenty]" functions as a numerical quantifier specifying the denomination of the dollar bill mentioned in the preceding phrase.Equally, the token "[twenty]" is functioning as a numerical quantifier specifying the denomination of the dollar bill mentioned in the preceding phrase.
+
+### Example 7  [act=6.30]
+**Token:** `[fifty]`
+**Context:** ...ity, wage stagnation — and the prospects for your average American over the next[fifty] years look pretty grim. Liberalism will have no answer for this. It will offer ...
+**Summary:** In this context, "[fifty]" functions as a temporal quantifier specifying the duration of the grim prospects for the average American.Equally valid answers:
+
+*   It functions as a temporal quantifier specifying the duration of the grim prospects.
+*   It specifies the time frame—fifty years—over which the grim outlook is projected.
+
+### Example 8  [act=6.24]
+**Token:** `[eteenth]`
+**Context:** ...s. Consciousness. Science is like a boy trying to light a fire. Up until mid-nin[eteenth] century the boy had only one piece of kindling – the fundamental force of gravi...
+**Summary:** The token "[eteenth]" functions as a temporal marker, specifically indicating the midpoint of the nineteenth century, to delineate a period of limited scientific understanding before a major conceptual shift.ੁthought
+Here's a thinking process to arrive at the desired output:
+
+1.  **Analyze the Request:**
+    *   **Input:** A passage of text with a specific token 
+
+### Example 9  [act=6.19]
+**Token:** `[thirty]`
+**Context:** ... too much ‘dog savviness' on the part of the public. I've been a dog fancier for[thirty] years, but if I'd never seen this poster on Facebook, I wouldn't have known the...
+**Summary:** In this context, "[thirty]" functions as a temporal quantifier specifying the duration of the speaker's experience as a dog fancier.
+
+### Example 10  [act=6.18]
+**Token:** `[III]`
+**Context:** ...on is a form of antisemitism, and equating Zionism with racism (see also Section[III])....
+**Summary:** In this context, "[III]" functions as a placeholder reference to a specific section within the document, serving as a formal citation or cross-reference point.
+
+### Example 11  [act=6.00]
+**Token:** `[twenty]`
+**Context:** ... went through fine. The EFF very quickly issued a press release about it. Within[twenty] minutes, AOL had “solved” the problem. But as the EFF put it: This incident onl...
+**Summary:** In this context, "[twenty]" functions as a **temporal quantifier**, specifying the duration of time elapsed before AOL supposedly "solved" the problem.っき
+
+### Example 12  [act=5.89]
+**Token:** `[nineteenth]`
+**Context:** ...ably bigger than your other arm. In recent years, beer gardens inspired by their[nineteenth]-century predecessors have been returning to American cities. These places are o...
+**Summary:** In this context, "[nineteenth]" functions as a **qualifier** specifying the time period of the predecessors mentioned, thereby describing the origin of the beer gardens.
+
+### Example 13  [act=5.66]
+**Token:** `[III]`
+**Context:** ...new move sets. But as things progressed and later incarnations of Street Fighter[III] came out, the two were developed with disparate move sets and play styles. The ...
+**Summary:** In this context, "[III]" functions as a specific proper noun suffix identifying a particular installment or iteration of the "Street Fighter" franchise.Equally precise and concrete:
+
+"[III]" acts as a numeral suffix specifying the third iteration of the "Street Fighter" series mentioned previously.Equally precise and concrete:
+
+"[III]" functions as a direct identifier, specifying the
+
+### Example 14  [act=5.47]
+**Token:** `[twentieth]`
+**Context:** ...d shitamachi downtown area that escaped destruction by earthquake and war in the[twentieth] century, where you can experience what's left of an older version of the city. ...
+**Summary:** In this context, "[twentieth]" functions as a temporal quantifier specifying the century to which the survival of the downtown area's older version relates.Equally good answers:
+
+*   It specifies the century of the earthquake and war that spared the downtown area.
+*   It acts as a temporal marker defining the century of the destruction/survival event.
+
+### Example 15  [act=5.31]
+**Token:** `[ten]`
+**Context:** ...ld really go down in the Hall of Shame, something we can look back on in five or[ten] years from now and marvel at. "He must agree with the Marxist theology of black...
+**Summary:** In this context, "[ten]" functions as a temporal quantifier, specifying a duration of ten years into the future from the present moment.แ
+
+### Example 16  [act=5.20]
+**Token:** `[seventy]`
+**Context:** ...er, fearing I would skip out on the bill, had removed. I called out for him with[seventy] different names used by Arabs, until I hit upon his name. He brought the ladder...
+**Summary:** In this context, "[seventy]" functions as a numerical quantifier specifying the quantity of different names the narrator called out to the innkeeper.هَا</tr>
+</table>
+
+### Example 17  [act=5.18]
+**Token:** `[Thirty]`
+**Context:** ...ice. Notice how the routine of today requires little to no driving. Why is that?[Thirty] years ago, we didn't carry a whole office, archive, bookshelf, and phone in our...
+**Summary:** In this context, "[Thirty]" functions as a temporal quantifier, specifically indicating a duration of thirty years, contrasting the present situation with a past state.Sanity Check: The passage is incomplete, but the context strongly suggests a comparison between the present and the past, making "Thirty years ago" a clear temporal marker.
+
+### Example 18  [act=5.16]
+**Token:** `[VIII]`
+**Context:** ...evealed she will be back and bigger than ever in the upcoming Star Wars: Episode[VIII]. Lourd's character, Kaydel Ko Connix, spoke one line to her mother's character ...
+**Summary:** In this context, "[VIII]" functions as a specific ordinal numeral suffix, identifying the eighth installment of the *Star Wars* film series.Your response is excellent. It is precise, concrete, and directly addresses the linguistic/semantic role of the token in the passage.thought
+Here's a thinking process that leads to the suggested response:
+
+1.  **
+
+### Example 19  [act=5.11]
+**Token:** `[enth]`
+**Context:** ...learly a firm believer in the old footballing proverb that ‘possession is nine-t[enth]s of the game...
+**Summary:** In this context, "[enth]" functions as a suffix completing the numerical fraction "nine-tenths," specifically representing the tenth part of a whole.แ
+
+### Example 20  [act=4.91]
+**Token:** `[teenth]`
+**Context:** ...iss the point. The European Renaissance happened in stages from roughly the four[teenth] through the seventeenth centuries. Wikipedia will tell you that it was vaguely ...
+**Summary:** The token [teenth] functions as a suffix completing the ordinal number "fourteenth," specifying the temporal extent of the European Renaissance mentioned in the sentence.

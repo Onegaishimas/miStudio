@@ -1,0 +1,412 @@
+# Feature #09178
+
+**SAE:** SAE from LFM2.5-1.2B-Instruct (L12-residual)
+**Neuron index:** 9178
+**Feature ID:** feat_sae_20260417_101309_eb83_09178
+**Max Activation:** `7.9745`
+**Activation frequency:** 0.0695
+**Interpretability score:** 0.6999
+**Current label:** feature_09178  (source: auto)
+**Examples included:** 100
+
+---
+
+### Example 1 - Sample #6784
+**Max Activation:** `7.9745`
+> ion): Michiganders' decision to amend their state constitution to outlaw racial preferences in college admissions somehow violates the Four**[teenth]** Amendment's Equal Protection Clause. As Dave Barry would say, I'm not making this up: The court voted 8
+
+### Example 2 - Sample #2292
+**Max Activation:** `7.8713`
+> . “Straight skinny is gay fat.” “No fat, no fem.” “Twenty is the new forty**[-five]**.” These phrases represent the pervasive undercurrent of unrealistic body norms and expectations that runs rampant and unchecked in the gay
+
+### Example 3 - Sample #6692
+**Max Activation:** `7.3416`
+>  police say several people have reported seeing the van around Oak Dale, and it's not something they are taking lightly. "Within**[thirty]** minutes, there was a police officer at my house taking a report from us. They've been patrolling the area, and
+
+### Example 4 - Sample #6360
+**Max Activation:** `6.9077`
+>  deliver the goods" for workers, who exactly workers are, the precarity of work today, and the problems with the twenty**[-first]** century labor movement. Chibber is in discussion with Jason Jacobin's Farbman. This is the first episode of
+
+### Example 5 - Sample #7464
+**Max Activation:** `6.4459`
+> ), the lawsuit claims that denial of financial benefits to barbarians constitutes a violation of the “Equal Protection Clause of the Four**[teenth]** Amendment of the United States Constitution.” South Carolina institutions currently hold that the unwanted children of encroaching migrants, mostly of the
+
+### Example 6 - Sample #7206
+**Max Activation:** `6.3300`
+>  afterlife as long as they subscribe to a belief in a set of propositions short enough to fit on the back of a fake**[twenty]** dollar bill. Clearly a belief in God isn't what keeps people from doing bad things. But what makes people good? What
+
+### Example 7 - Sample #8986
+**Max Activation:** `6.3040`
+>  other trends of late capitalism — outsourcing, inequality, wage stagnation — and the prospects for your average American over the next**[fifty]** years look pretty grim. Liberalism will have no answer for this. It will offer the same useless panaceas it always
+
+### Example 8 - Sample #9738
+**Max Activation:** `6.2351`
+>  fundamental of all forces. Consciousness. Science is like a boy trying to light a fire. Up until mid-nin**[eteenth]** century the boy had only one piece of kindling – the fundamental force of gravity. Then the boy found the electromagnetic force
+
+### Example 9 - Sample #8612
+**Max Activation:** `6.1922`
+>  presume too much ‘dog savviness' on the part of the public. I've been a dog fancier for**[thirty]** years, but if I'd never seen this poster on Facebook, I wouldn't have known the significance of a yellow ribbon on
+
+### Example 10 - Sample #4022
+**Max Activation:** `6.1834`
+>  the right of Jewish self-determination is a form of antisemitism, and equating Zionism with racism (see also Section**[III]**).
+
+### Example 11 - Sample #957
+**Max Activation:** `6.0005`
+> ies of the same emails without the URL went through fine. The EFF very quickly issued a press release about it. Within**[twenty]** minutes, AOL had “solved” the problem. But as the EFF put it: This incident only increases our
+
+### Example 12 - Sample #575
+**Max Activation:** `5.8910`
+>  often enough, your drinking arm will get noticeably bigger than your other arm. In recent years, beer gardens inspired by their**[nineteenth]**-century predecessors have been returning to American cities. These places are often named with some variation of the classic German "bierg
+
+### Example 13 - Sample #6814
+**Max Activation:** `5.6600`
+>  your roster without the effort of creating new characters and new move sets. But as things progressed and later incarnations of Street Fighter**[III]** came out, the two were developed with disparate move sets and play styles. The old Mortal Kombat palette swap.
+
+### Example 14 - Sample #8266
+**Max Activation:** `5.4685`
+>  World War. But there's a part of the old shitamachi downtown area that escaped destruction by earthquake and war in the**[twentieth]** century, where you can experience what's left of an older version of the city. It's called Yanesen, from
+
+### Example 15 - Sample #6711
+**Max Activation:** `5.3129`
+>  high blood pressure. It should really go down in the Hall of Shame, something we can look back on in five or**[ten]** years from now and marvel at. "He must agree with the Marxist theology of black liberation theology." "I tagged Barack
+
+### Example 16 - Sample #1337
+**Max Activation:** `5.1978`
+> , which the innkeeper, fearing I would skip out on the bill, had removed. I called out for him with**[seventy]** different names used by Arabs, until I hit upon his name. He brought the ladder and I climbed down. I went out
+
+### Example 17 - Sample #8101
+**Max Activation:** `5.1783`
+>  time on a mobile app based taxi service. Notice how the routine of today requires little to no driving. Why is that?**[Thirty]** years ago, we didn't carry a whole office, archive, bookshelf, and phone in our pockets; we actually
+
+### Example 18 - Sample #1190
+**Max Activation:** `5.1610`
+> In a recent interview, Billie Lourd revealed she will be back and bigger than ever in the upcoming Star Wars: Episode**[VIII]**. Lourd's character, Kaydel Ko Connix, spoke one line to her mother's character in The Force Awak
+
+### Example 19 - Sample #9305
+**Max Activation:** `5.1119`
+>  play-makers. AVB is clearly a firm believer in the old footballing proverb that ‘possession is nine-t**[enth]**s of the game
+
+### Example 20 - Sample #9874
+**Max Activation:** `4.9145`
+>  are common, even with faire attendees, but they miss the point. The European Renaissance happened in stages from roughly the four**[teenth]** through the seventeenth centuries. Wikipedia will tell you that it was vaguely sandwiched in-between the Bar
+
+### Example 21 - Sample #2813
+**Max Activation:** `4.7642`
+>  attempt to do so. During the break periods between the monks' English lessons, I would go off by myself for ten or**[fifteen]** minutes and attempt to reconnect to the concentrated state by doing a short sit. Then I would come back and see if I
+
+### Example 22 - Sample #7549
+**Max Activation:** `4.6035`
+>  the play, it's almost as if the coaching staff couldn't help themselves and coach Clifford said to Patrick Ewing: "**[Ten]** bucks says that they fall for it again." Other than that it seems as if the rest of the league has this set
+
+### Example 23 - Sample #9964
+**Max Activation:** `4.5110`
+>  his more rapid coup d'oeil and wider vision discovered much more quickly. When one had the good fortune to work for**[forty]** years with a man like Marx, one usually does not during his lifetime get the recognition one thinks one deserves. Then, when
+
+### Example 24 - Sample #556
+**Max Activation:** `4.3547`
+>  has a great pace and I was hooked from the first chapter. I told myself I was only going to read the first**[fifty]** pages, but the story compels you to read on. I ended up not moving from my spot until I was finished.
+
+### Example 25 - Sample #8551
+**Max Activation:** `4.2384`
+>  have ever seen, and so detail oriented. And on the back on the display is a picture of London! As a twenty**[something]**, I'm building up an ornament collection and this is the best one I have now by far. Next to that, also
+
+### Example 26 - Sample #8439
+**Max Activation:** `3.9841`
+> <|startoftext|>Anyone who wants to know why network television news hasn't mattered since the**[sevent]**ies just needs to check out this appearance by Logan. Here's CBS's chief foreign correspondent saying out loud on TV that when
+
+### Example 27 - Sample #7641
+**Max Activation:** `3.9133`
+> <|startoftext|>Descarca**[VIII]**. Corpul A. (Mircea ÅŁi Dana) – Dana! Unde eÅŁti? – Sunt
+
+### Example 28 - Sample #2493
+**Max Activation:** `3.9120`
+> olonda Ross) grew up so close people said they could “go for sisters”, but time sent them down different paths.**[Twenty]** years later, those paths cross: Fontayne is a recovering addict fresh out of jail, and Bernice is her
+
+### Example 29 - Sample #7903
+**Max Activation:** `3.8984`
+>  question. Of course the Fourth Circuit is a court, and of course it is constituted to exercise the powers enumerated in Article**[III]** of the United States Constitution. It hears appeals from cases and controversies over which the Constitution and the Congress have given inferior federal
+
+### Example 30 - Sample #2207
+**Max Activation:** `3.8965`
+> -creating bureaucracies — just can't get it together. It's as true now as it has been for some**[twenty]** years: the Nation State is in precipitous decline. Once imbued with grandeur and majesty, personified by
+
+### Example 31 - Sample #5517
+**Max Activation:** `3.8607`
+>  because I haven't made my mind up on where I want to go yet. I haven't really even thought about a top**[five]**. If I choose a school within the next two weeks that I think I like the most and if they don't have any
+
+### Example 32 - Sample #1097
+**Max Activation:** `3.8357`
+>  our guys' carriages were still parked outside, only half of the bags still mounted on them. “Against a**[tenth]** their number,” I said. “There's no evidence of that,” Jessie said. “There's no telling what their
+
+### Example 33 - Sample #864
+**Max Activation:** `3.8033`
+>  shown to the masses, many Europeans experienced trepidation. Despite the advances in science and the efforts of the scientists of the**[sixteenth]** and seventeenth century to demonstrate that the world and universe were governed by discernible laws, the Scientific Revolution had little impact on the
+
+### Example 34 - Sample #1278
+**Max Activation:** `3.7361`
+>  Smith down. The beach thanks you. Now kick back. Relax. And enjoy The Gentleman's Handbook, Vol.**[IV]**: To the Beach!<|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|>
+
+### Example 35 - Sample #5268
+**Max Activation:** `3.6585`
+>  is eighty-three years old, with an alarming orange tan that does nothing to enhance his credibility. It is just after eight o**['clock]** on a December morning, in a darkened basketball stadium on the outskirts of San Antonio, and -- according to the
+
+### Example 36 - Sample #362
+**Max Activation:** `3.6107`
+>  the statements made about fine-tuning are not accurate. When theists talk about something being fine-tuned to one part in**[ten]** or a hundred orders of magnitude, they are simply incorrect. If you look more closely at the physics and cosmology, you
+
+### Example 37 - Sample #4447
+**Max Activation:** `3.5663`
+>  authorities have never helped us, neither economically or in the search for our husbands," she said. 'Bodies mounting up'**[Twenty]**-four thousand people have been reported missing, according to Mexico's Human Rights Commission, many trapped in the battle between organised crime groups
+
+### Example 38 - Sample #7586
+**Max Activation:** `3.4961`
+>  As for Baldur's Gate: EE, they've got this to say: We have been developing Baldur's Gate**[II]**: Enhanced Edition for some time now, but until all issues with our publishing partner are resolved we cannot officially announce or offer
+
+### Example 39 - Sample #801
+**Max Activation:** `3.4712`
+>  the syllables, if only in a muffled voice." Saenger's book asserts that only at the end of the seventh**[century]**, when Irish monks introduced regular word separation into medieval manuscripts, did swift, silent reading become feasible. Why is it so hard
+
+### Example 40 - Sample #5663
+**Max Activation:** `3.4168`
+>  the state's toughest gun laws. Legislation introduced by Senator Ray Lesniak would eliminate the mandatory minimum three-to**[-five]** year sentence for unlawful possession of a handgun and leave the punishment up to a judge. He says legal gun owners
+
+### Example 41 - Sample #1053
+**Max Activation:** `3.3517`
+>  music-based video games (and even music-based movies) are nothing new, Muya Agami, in collaboration with [email**[protected]**], has set out to create a novel based upon one of the most popular (and hardest) Vocaloid songs in Japanese
+
+### Example 42 - Sample #1710
+**Max Activation:** `3.3449`
+> amingos, the Hattiesburg American reports. Devin Nottis was pledging the Delta Nu Chapter of Pi K**[appa]** Alpha on Tuesday and was supposed to take a photograph with a flamingo for the scavenger hunt. Instead, police say
+
+### Example 43 - Sample #6725
+**Max Activation:** `3.1928`
+> <|startoftext|>Th**[irty]** U.S. companies — including software giant Adobe, TechCrunch owner AOL and SaaS CRM purveyor
+
+### Example 44 - Sample #4798
+**Max Activation:** `3.1921`
+> <|startoftext|>For my introductory post I have begun with a list of**[ten]** principles which I have found particularly influential on my journey of self development. The ideas here are presented in a list format for the
+
+### Example 45 - Sample #360
+**Max Activation:** `3.1810`
+> <|startoftext|>REG REAGAN runs the rule over every NSW and Queensland player ahead of Game**[II]** and he hasn't held back! NSW Sub-type: comment CAPTION: NSW Sub-type: comment CAPTION:
+
+### Example 46 - Sample #8897
+**Max Activation:** `3.1149`
+>  siblings encounter notable characters, locations and monsters that will be familiar to Final Fantasy fans, including the legendary Lightning from Final Fantasy**[XIII]** and the town of Cornelia from the original Final Fantasy. The new images showcase Mirages, powerful creatures that can turn the
+
+### Example 47 - Sample #8473
+**Max Activation:** `3.0885`
+> ose own list of amazing facts may be found right here). Lee was not in Naval Intelligence with Fleming; the six and a**[half]** foot tall future actor instead served in the Special Air Service (British special forces) during the second World War. Distant cousins
+
+### Example 48 - Sample #5920
+**Max Activation:** `3.0388`
+>  a Stockholm prep school, high school student Maja finds herself on trial for murder. Based on the best-selling novel.**[Twelve]** Forever-year-old Reggie's desire to remain a child is so powerful that it opens up a fantasy world where she never
+
+### Example 49 - Sample #2631
+**Max Activation:** `2.9988`
+>  skimpy outfits, or maybe we need to shout corny catchphrases as a giant robot goes through a**[ten]**-minute launch sequence. A little populist entertainment is good for the soul, but that doesn't mean that we should be willing
+
+### Example 50 - Sample #8523
+**Max Activation:** `2.9908`
+> , Understands, Realizes, Believes, Wants, Remembers, Imagines, Desires, and a**[hundred]** others you love to use. The list should also include: Loves and Hates. And it should include: Is and
+
+### Example 51 - Sample #4606
+**Max Activation:** `2.9609`
+>  she turned out to be a fusion, watched her "Stronger than You" song/fight sequence more times than**[I]** can count (seriously, glad was home alone that afternoon XD)))just wow. Rebecca Sugar has awakened in
+
+### Example 52 - Sample #5886
+**Max Activation:** `2.9583`
+>  was used as an additional seating area with the speakers being broadcasted on a large video screen. Here are some highlights from Day**[One]** of the conference. Cash Used More Than BTC for Crime They say that crime doesn't pay. It probably doesn't in
+
+### Example 53 - Sample #2380
+**Max Activation:** `2.9240`
+>  industry now commentating under the named “Annoyed Gamer.” The podcast was discussing the recent turn of events regarding Xbox**[One]** self-publishing, and how both Fish and Braid designer Jonathan Blow used Twitter to criticize the press for running towards
+
+### Example 54 - Sample #1620
+**Max Activation:** `2.9171`
+> ambitious, specific, and realistic plans” to raise incomes and tackle problems like college affordability, mass incarceration, and**[immigration]**. “Hillary isn't moving in a progressive direction. She's been there all along,” Brock will say. Clinton,
+
+### Example 55 - Sample #8126
+**Max Activation:** `2.9130`
+>  pressing and holding (U) and vice versa. The animation for that is pretty funny. Iron Man also has some moves of**[his]** own. By pressing (H), you can fire some missiles at enemies or objects. By pressing and holding down (H),
+
+### Example 56 - Sample #9903
+**Max Activation:** `2.8525`
+> <|startoftext|>Originally**[I]** was gonna draw something more hilarious than this, but my great-grandma died during the damn Yolanda/Haiyan
+
+### Example 57 - Sample #5797
+**Max Activation:** `2.8454`
+>  leadership qualities." Unusual leadership qualities, indeed. Without doubt, it was surprising when Gates inserted the following comment into the**[tenth]** paragraph of a speech last Friday at West Point: "But in my opinion, any future defense secretary who advises the president
+
+### Example 58 - Sample #9211
+**Max Activation:** `2.8416`
+>  to tailor service and treatment to suit each and every individual, and their unique needs. Bloor West Dental understands dentistry**[is]** a complex topic. Our professional team readily available to assist you with any questions or concerns. Currently, we are welcoming new
+
+### Example 59 - Sample #3834
+**Max Activation:** `2.8137`
+>  drawing charcoal portraits of golden retrievers, as was his childhood dream. I think: what would I do if I had a**[thousand]** dollars a week? And although that question invites all kinds of existential anxiety – because what should I be doing with this wild
+
+### Example 60 - Sample #8879
+**Max Activation:** `2.8093`
+>  Haworth , director of coffee production at Cartel Coffee Lab in Arizona, has been working in the coffee industry “since last**[century]**,” starting in high school when he got a job at a coffee cart in Tuscon. His boss had flown over a ro
+
+### Example 61 - Sample #1656
+**Max Activation:** `2.7573`
+>  of its cases don't get appealed to the Supreme Court. Hence the qualifier “Full N Circuit.” Going Full N**[inth]** Circuit is when you claim that that the Pledge of Allegiance is unconstitutional. That's a Simple Jack move, not
+
+### Example 62 - Sample #7149
+**Max Activation:** `2.7532`
+>  Security Secretary John Kelly confirmed Monday that the Trump administration is considering separating migrant parents from their children who cross the U.S.-Mex**[ico]** border together illegally. Speaking to CNN's Wolf Blitzer late Monday afternoon, Kelly confirmed the gist of a recent Reuters
+
+### Example 63 - Sample #8572
+**Max Activation:** `2.7468`
+> <|startoftext|>#notyourshield, a users' guide, “Public relations”**[is]** the biggest “fuck you” that real feminism ever endured. The art of public relations appoints men and women into
+
+### Example 64 - Sample #5958
+**Max Activation:** `2.6509`
+>  people to comment—don't we want every reader to participate, even if they're skittish about revealing their names?**[I]** can't speak for my bosses, who might feel differently than do. But as a writer, my answer is no
+
+### Example 65 - Sample #5330
+**Max Activation:** `2.6347`
+> able and effective customer services. Working Together We take extra care to choose the maximum quality of replacements parts, only using Grade**[A]** componants for your repairs allowing us to restore you Console, mobile phone or computer/laptop, back to its best in
+
+### Example 66 - Sample #880
+**Max Activation:** `2.6336`
+> as, it was not to be. Rich decides not to pick sides in the war, especially since there are more pressing matters**[developing]** at the fringes of the universe. Eventually everything comes to a head when the Annihilation Wave rolls out from the
+
+### Example 67 - Sample #3872
+**Max Activation:** `2.6326`
+>  as they were deemed unreliable. Some people have argued that Prince Andrew is not a paedophile as Virginia Roberts was**[seventeen]** at the time she claims she slept with Andrew. Granted, it may not fit your personal definition of what a paed
+
+### Example 68 - Sample #9803
+**Max Activation:** `2.6256`
+>  what didn't. Where did I find these people? Through an online registration and dedicated Instagram feed. Social media is a two**[-way]** street. I
+
+### Example 69 - Sample #6992
+**Max Activation:** `2.6219`
+> ive. • Bottom line, not football success, could force Baylor to take action Satellite camps were briefly banned by the Division**[I]** Council, but the decision was overturned by the NCAA's Board of Directors.<|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|>
+
+### Example 70 - Sample #8170
+**Max Activation:** `2.6181`
+> ine forest. On Sunday mornings I hear church bells ring and choirs sing. On Fridays at two o'**[clock]** in the afternoon I hear Muslim prayers recited over a loudspeaker. And on most holidays and weekend afternoons I
+
+### Example 71 - Sample #6213
+**Max Activation:** `2.6124`
+>  local officials and news reporters, Kelly addressed the Trump administration's travel ban, the effectiveness of border barriers and stepped-up ICE**[immigration]** arrests this week. In a meeting in a conference room at the San Ysidro Port of Entry with state, local
+
+### Example 72 - Sample #7649
+**Max Activation:** `2.6110`
+>  desire, monogamy. I don't want to be one of the many faces of one's endless one-night-**[stand]**s, I want to mean something. If that's not going to happen, I don't want sex at all. I
+
+### Example 73 - Sample #5035
+**Max Activation:** `2.6075`
+>  would miss you. Syria. Safe spaces. President Trump. What would you have made of these horrors? More times than**[I]** can count, strangers have come forward to say, “I miss Hitch.” Their words are always uttered in protest over some
+
+### Example 74 - Sample #7051
+**Max Activation:** `2.5946`
+>  Mr. Carlson, it isn't. What these schools are doing is providing a safe environment, early on in children's**[ten]**ures as students, to discuss what is wrong with hating other boys and girls because they are LGBT, or are perceived as
+
+### Example 75 - Sample #1843
+**Max Activation:** `2.5808`
+> <|startoftext|>Work**[ers]**' Voice, the AFL-CIO-affiliated super PAC is out with a harsh new ad campaign Thursday morning branding
+
+### Example 76 - Sample #8390
+**Max Activation:** `2.5651`
+> <|startoftext|>Getting home a bit late and the desire for a brew struck while the fridge was low.**[I]** broke into what should have been a full review beer but didn't get to land in front of the camera before she ended in
+
+### Example 77 - Sample #6036
+**Max Activation:** `2.5646`
+>  you did, Jimmy Fallon. If there was a time to pander to Trump or treat him like an ordinary candidate,**[it]** passed several hundred comments about banning Muslims and Mexicans ago. But Fallon being what he is—a fumbling deer who
+
+### Example 78 - Sample #8757
+**Max Activation:** `2.5629`
+>  Rights Union's Robert Knight, who has been encouraging Republicans to run on social issues such as hostility to abortion rights and opposition to**[LGBT]** equality, now thinks the GOP should campaign on denying the existence of evolution. Citing a Pew poll which shows that
+
+### Example 79 - Sample #4904
+**Max Activation:** `2.5327`
+>  Kim Richards. I think it's safe to say that this is the episode which will set the tone for the rest of season**[five]**. Sadly. Kyle took to her blog to share her feelings about the turn of events. Kyle said poker night felt “
+
+### Example 80 - Sample #5704
+**Max Activation:** `2.5250`
+> <|startoftext|>If there anything**[we]**'ve learned in the last few weeks, it's that little things on the internet can make big statements about your life when it
+
+### Example 81 - Sample #2113
+**Max Activation:** `2.5093`
+> <|startoftext|>As good as Google Maps is for most everyday Android users, many users still clamor for a high quality turn-by-t**[urn]** GPS solution. Enter TomTom. Having just released an official application for the iPhone platform, TomTom recently announced their interest toward
+
+### Example 82 - Sample #4511
+**Max Activation:** `2.5012`
+>  begowned, in front of the newly minted grads, you are already poised and primed to lie. Anything**[else]** would be a stretch: You would have to be a meanie to tell these plump youngsters anything resembling the truth, which
+
+### Example 83 - Sample #1282
+**Max Activation:** `2.4924`
+> . It is called the Blockchain Embassy. It is located the Balboa Boutiques Strip Mall of Balboa Avenue**[in]** Panama City. Also read: ICO Regulatory Round-Up: UK, Malaysia, and Switzerland's Crypto Valley Point to
+
+### Example 84 - Sample #5411
+**Max Activation:** `2.4887`
+>  the reason never attempted to get close to him, knew one day'd have to cut ties and do this.**[I]** think he'd cry, but he'd forget about me eventually. We didn't have much in common. He's a smart
+
+### Example 85 - Sample #9015
+**Max Activation:** `2.4811`
+>  Playstation, Steam, iTunes, Netflix and Google Play to name a few. Please refer to this guide to access Netflix-**[USA]**.<|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|><|pad|>
+
+### Example 86 - Sample #6407
+**Max Activation:** `2.4767`
+>  had the run I had. Didn't really have the greatest run when I first got to the WWE, but the last**[five]** years were unbelievable. They let me come out in the Rumble a couple of years back and drop a bunch of
+
+### Example 87 - Sample #1947
+**Max Activation:** `2.4750`
+>  Dean Heller has made a lot of noise about helping veterans while not doing a lot that was substantive, particularly dealing with**[staff]**ing shortages. A statement on the veterans suicide rate, a bill supposedly solving a transplant problem for veterans when the donor is a
+
+### Example 88 - Sample #6165
+**Max Activation:** `2.4654`
+>  In return, the ants act as caterpillar bodyguards. "While I had little idea at the time what I was**[looking]** at, my background in entomology was telling me one thing. This was something cool," Pomerantz says. That
+
+### Example 89 - Sample #5983
+**Max Activation:** `2.4585`
+> . The fit between the arm pieces is too tight and rubs against the shoulders painted metallic so yeah that is also great.**[I]** should have noticed it when test fitted and sanded those a bit. Alas it's not too late, and
+
+### Example 90 - Sample #5972
+**Max Activation:** `2.4578`
+> <|startoftext|>Donald Trump's most senior business representative has warned any post-Bre**[xit]** deal with Washington will hinge on the UK scrapping rules set by Brussels, including regulations governing imports of chlorinated chicken.
+
+### Example 91 - Sample #9650
+**Max Activation:** `2.4569`
+>  After all,'m a rather typical employee: hard working at the start of the day, incredibly lazy towards the end.**[I]**'ll therefore play the part of homo economicus What's this? What's this? - the economic actor. Three years
+
+### Example 92 - Sample #6884
+**Max Activation:** `2.4514`
+>  that risk by hiring an escort to protect you. With this said, should you succeed the individual payoff can be spectacular.**[We]** mention this not to dissuade you from flying a Hull-E, but to encourage you think about what considerations should be taken
+
+### Example 93 - Sample #3718
+**Max Activation:** `2.4375`
+>  in-depth review. Lower level cap, better matchmaking, etc. So I'm not going to bother talking about any of**[that]** unless it's extremely relevant. Way of the White Lets start with the most boring. Clearly this is the least spectacular covenant
+
+### Example 94 - Sample #9053
+**Max Activation:** `2.4311`
+> ophilia, no other putative ET has received much empirical study.” One candidate, they realized, might be an ET**[II]** associated with pedophilia — that is, situations in which pedophiles might be attracted to the idea of themselves as a
+
+### Example 95 - Sample #2756
+**Max Activation:** `2.4294`
+>  a chance to shine. As the feckless half of one of the most popular double acts on British television in the last**[decade]**, Robert Webb could have easily become a victim of his own success. Robert Webb and David Mitchell turned Peep Show into a
+
+### Example 96 - Sample #9519
+**Max Activation:** `2.4265`
+>  and it turns out that other people do it for exactly that reason. signing up required me to give them my postal address.**[I]**'ll be honest: felt insecure giving my address to a stranger, and almost quit the endeavor... but what is
+
+### Example 97 - Sample #4442
+**Max Activation:** `2.4251`
+> ills weren't worth the poor conditions, but a couple of loops around the perfectly track-set course was surprisingly fun despite the minus**[-five]**-degree temperature. Poor snow conditions aside, late afternoon skiing at Mt. Van Hoevenberg is a treat on a
+
+### Example 98 - Sample #8396
+**Max Activation:** `2.4126`
+> <|startoftext|>A communications**[strateg]**ist for more than two decades, Edan Gelt has often debated with colleagues and clients about which is more important, presentation
+
+### Example 99 - Sample #6922
+**Max Activation:** `2.4001`
+>  abilities of sulforaphane were recently published in the journal Oncogenesis, by researchers from Oregon State University and the Texas**[A]**&M Health Science Center. The work was supported by the National Institutes of Health. "There's significant evidence of the value of
+
+### Example 100 - Sample #2286
+**Max Activation:** `2.3987`
+>  old sins that break marriage were available, but there was condemnation, exclusion and punishment by society for sexual wrongdoing.**[I]**'m not suggesting we go back to those days because we can't. However, can express my frustration as a Catholic priest
