@@ -7,8 +7,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, Save, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { fetchAPI } from '../../api/client';
 
 type SettingsTab = 'endpoints' | 'api_keys' | 'labeling' | 'display';
 
@@ -74,7 +75,51 @@ function EndpointsTab() {
   const [label, setLabel] = useState('');
   const [toast, setToast] = useState<string | null>(null);
 
-  // Ollama URL setting
+  // ── OpenAI-compatible endpoint + model ──────────────────────────────────────
+  const compatEndpointSetting = settings.find((s) => s.key === 'openai_compatible_endpoint');
+  const compatModelSetting = settings.find((s) => s.key === 'openai_compatible_model');
+  const [compatEndpoint, setCompatEndpoint] = useState(compatEndpointSetting?.value ?? '');
+  const [compatModel, setCompatModel] = useState(compatModelSetting?.value ?? '');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCompatEndpoint(compatEndpointSetting?.value ?? '');
+  }, [compatEndpointSetting?.value]);
+  useEffect(() => {
+    setCompatModel(compatModelSetting?.value ?? '');
+  }, [compatModelSetting?.value]);
+
+  const handleFetchModels = async () => {
+    if (!compatEndpoint.trim()) return;
+    setFetchingModels(true);
+    setFetchModelsError(null);
+    setAvailableModels([]);
+    try {
+      const data = await fetchAPI<{ models: { id: string }[]; total: number }>(
+        `/labeling/models/openai?endpoint=${encodeURIComponent(compatEndpoint.trim())}`
+      );
+      const ids = data.models.map((m) => m.id);
+      setAvailableModels(ids);
+      if (ids.length > 0 && !compatModel) setCompatModel(ids[0]);
+    } catch (err: any) {
+      setFetchModelsError(err?.message ?? 'Failed to fetch models');
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const handleSaveCompatSettings = async () => {
+    await Promise.all([
+      upsert({ key: 'openai_compatible_endpoint', value: compatEndpoint.trim(), is_sensitive: false, category: 'endpoints' }),
+      upsert({ key: 'openai_compatible_model', value: compatModel.trim(), is_sensitive: false, category: 'endpoints' }),
+    ]);
+    setToast('Endpoint & model saved');
+    setTimeout(() => setToast(null), 2000);
+  };
+
+  // ── Ollama URL setting ──────────────────────────────────────────────────────
   const ollamaUrlSetting = settings.find((s) => s.key === 'ollama_url');
   const [ollamaUrl, setOllamaUrl] = useState(ollamaUrlSetting?.value ?? '');
   useEffect(() => {
@@ -120,6 +165,83 @@ function EndpointsTab() {
     <div className="max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-200 mb-1">API Endpoints</h2>
       <p className="text-xs text-slate-500 mb-4">Saved OpenAI-compatible endpoint URLs for labeling jobs.</p>
+
+      {/* Toast */}
+      {toast && (
+        <div className="flex items-center gap-2 text-emerald-400 text-xs mb-3">
+          <CheckCircle2 className="w-4 h-4" /> {toast}
+        </div>
+      )}
+
+      {/* OpenAI-Compatible Endpoint + Model */}
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-6">
+        <label className="block text-sm font-medium text-slate-200 mb-1">OpenAI-Compatible Endpoint</label>
+        <p className="text-xs text-slate-500 mb-3">
+          Used by enhanced per-feature labeling and batch labeling jobs.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Endpoint URL</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={compatEndpoint}
+                onChange={(e) => { setCompatEndpoint(e.target.value); setAvailableModels([]); setFetchModelsError(null); }}
+                placeholder="http://millm-backend.millm.svc.cluster.local:8000/v1"
+                className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+              />
+              <button
+                onClick={handleFetchModels}
+                disabled={fetchingModels || !compatEndpoint.trim()}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm rounded transition-colors whitespace-nowrap"
+              >
+                <RefreshCw className={`w-4 h-4 ${fetchingModels ? 'animate-spin' : ''}`} />
+                {fetchingModels ? 'Fetching…' : 'Fetch Models'}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Model</label>
+            {availableModels.length > 0 ? (
+              <select
+                value={compatModel}
+                onChange={(e) => setCompatModel(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+              >
+                {availableModels.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={compatModel}
+                onChange={(e) => setCompatModel(e.target.value)}
+                placeholder="e.g. gemma-3-27b-it"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+              />
+            )}
+            {fetchModelsError && (
+              <p className="text-xs text-red-400 mt-1">{fetchModelsError}</p>
+            )}
+            {!fetchModelsError && availableModels.length > 0 && (
+              <p className="text-xs text-slate-500 mt-1">{availableModels.length} model(s) available</p>
+            )}
+            {!fetchModelsError && availableModels.length === 0 && (
+              <p className="text-xs text-slate-600 mt-1">Click "Fetch Models" or type a model name manually</p>
+            )}
+          </div>
+
+          <button
+            onClick={handleSaveCompatSettings}
+            disabled={!compatEndpoint.trim() || !compatModel.trim()}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm rounded transition-colors"
+          >
+            <Save className="w-4 h-4" /> Save
+          </button>
+        </div>
+      </div>
 
       {/* Ollama / LLM Service URL */}
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-6">
@@ -191,13 +313,6 @@ function EndpointsTab() {
           </button>
         </div>
       </div>
-
-      {/* Toast */}
-      {toast && (
-        <div className="flex items-center gap-2 text-emerald-400 text-xs mb-3">
-          <CheckCircle2 className="w-4 h-4" /> {toast}
-        </div>
-      )}
 
       {/* Saved endpoints list */}
       <h3 className="text-sm font-medium text-slate-300 mb-2">Saved Endpoints</h3>
