@@ -344,6 +344,9 @@ CREATE TABLE extraction_jobs (
 - [x] Labeling: reasoning model support with think tag stripping (Mar 2026)
 - [x] Labeling: OpenAI-compatible endpoint support (e.g., miLLM, Ollama) (Mar 2026)
 - [x] Labeling: model/layer/hook display on job cards (Mar 2026)
+- [x] Enhanced per-feature labeling: two-pass LLM strategy from Feature Detail modal (Apr 2026)
+- [ ] Enhanced labeling: edge-tier analysis and open-question generation
+- [ ] Enhanced labeling: confidence threshold to auto-accept vs. flag for review
 
 ---
 

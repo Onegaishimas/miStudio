@@ -415,11 +415,13 @@ function LabelingTab() {
 
   const [batchSize, setBatchSize] = useState(getValue('labeling_default_batch_size', '10'));
   const [maxExamples, setMaxExamples] = useState(getValue('labeling_default_max_examples', '25'));
+  const [enhancedWorkers, setEnhancedWorkers] = useState(getValue('enhanced_labeling_max_workers', '8'));
 
   // Sync local state when settings load
   useEffect(() => {
     setBatchSize(getValue('labeling_default_batch_size', '10'));
     setMaxExamples(getValue('labeling_default_max_examples', '25'));
+    setEnhancedWorkers(getValue('enhanced_labeling_max_workers', '8'));
   }, [settings]);
 
   return (
@@ -466,6 +468,36 @@ function LabelingTab() {
           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded transition-colors"
         >
           <Save className="w-4 h-4" /> Save Defaults
+        </button>
+      </div>
+
+      {/* Enhanced labeling settings */}
+      <h2 className="text-lg font-semibold text-slate-200 mt-8 mb-1">Enhanced Labeling</h2>
+      <p className="text-xs text-slate-500 mb-4">
+        Settings for the two-pass per-feature labeling triggered from the Feature Detail modal.
+        Uses the OpenAI-compatible endpoint configured in the Endpoints tab.
+      </p>
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Max Parallel Workers (Pass 1)</label>
+          <input
+            type="number"
+            value={enhancedWorkers}
+            onChange={(e) => setEnhancedWorkers(e.target.value)}
+            min={1}
+            max={20}
+            className="w-32 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            Concurrent LLM calls during per-example summarization. Reduce if the
+            inference server returns 500 errors (recommended: 4–8 for a single GPU).
+          </p>
+        </div>
+        <button
+          onClick={() => handleSave('enhanced_labeling_max_workers', enhancedWorkers)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded transition-colors"
+        >
+          <Save className="w-4 h-4" /> Save
         </button>
       </div>
     </div>

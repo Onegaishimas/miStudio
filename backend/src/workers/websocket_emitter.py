@@ -1483,6 +1483,42 @@ def emit_neuronpedia_push_progress(
         return emit_progress(channel, event, data)
 
 
+def emit_enhanced_labeling_progress(job_id: str, data: Dict[str, Any]) -> bool:
+    """
+    Emit pass-1 per-example progress for an enhanced labeling job.
+
+    Channel: enhanced_labeling/{job_id}
+    Event:   enhanced_labeling:progress
+    Data:    {job_id, phase, examples_completed, examples_total, summary?}
+    """
+    channel = f"enhanced_labeling/{job_id}"
+    return emit_progress(channel, "enhanced_labeling:progress", data)
+
+
+def emit_enhanced_labeling_completed(job_id: str, data: Dict[str, Any]) -> bool:
+    """
+    Emit completion event for an enhanced labeling job.
+
+    Channel: enhanced_labeling/{job_id}
+    Event:   enhanced_labeling:completed
+    Data:    {job_id, name, category, description, notes}
+    """
+    channel = f"enhanced_labeling/{job_id}"
+    return emit_progress(channel, "enhanced_labeling:completed", data, timeout=10.0, retries=3)
+
+
+def emit_enhanced_labeling_failed(job_id: str, error: str) -> bool:
+    """
+    Emit failure event for an enhanced labeling job.
+
+    Channel: enhanced_labeling/{job_id}
+    Event:   enhanced_labeling:failed
+    Data:    {job_id, error_message}
+    """
+    channel = f"enhanced_labeling/{job_id}"
+    return emit_progress(channel, "enhanced_labeling:failed", {"job_id": job_id, "error_message": error})
+
+
 # Export public API
 __all__ = [
     "emit_progress",
@@ -1518,4 +1554,8 @@ __all__ = [
     "emit_steering_progress",
     # Neuronpedia push functions
     "emit_neuronpedia_push_progress",
+    # Enhanced per-feature labeling functions
+    "emit_enhanced_labeling_progress",
+    "emit_enhanced_labeling_completed",
+    "emit_enhanced_labeling_failed",
 ]

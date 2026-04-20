@@ -599,4 +599,53 @@ class LabelingConfig(BaseModel):
 
 ---
 
+## 12. Enhanced Per-Feature Labeling (Apr 2026)
+
+### 12.1 Overview
+A two-pass LLM strategy for on-demand deep labeling of individual features,
+triggered from the Feature Detail modal. Complements the existing batch labeling
+(which covers an entire extraction) with a slower, higher-quality single-feature path.
+
+### 12.2 Two-Pass Strategy
+**Pass 1 — Per-example summarization**
+For each of the top-N activation examples, a short prompt asks:
+*"What is this token doing in this specific context? One sentence."*
+Calls are parallelised using `ThreadPoolExecutor` (worker cap = `enhanced_labeling_max_workers` setting).
+
+**Pass 2 — Synthesis**
+All pass-1 summaries + a prime-token frequency table are fed to a single synthesis prompt that returns:
+`{name, category, description, confidence, reasoning}`
+
+**Notes field composition (Option B + A)**
+`notes` = synthesis reasoning paragraph + `---` separator + markdown summary table of pass-1 examples.
+
+### 12.3 Data Model
+New table: `enhanced_labeling_jobs`
+```
+id, feature_id (FK features), status, phase, examples_total, examples_completed,
+workers, endpoint, model, celery_task_id, pass1_summaries (JSONB),
+raw_synthesis (TEXT), error_message, created_at, updated_at, completed_at
+```
+New `label_source` enum value: `enhanced_llm`
+
+### 12.4 API
+```
+POST /api/v1/features/{feature_id}/label/enhanced   → start job (returns immediately)
+GET  /api/v1/features/{feature_id}/label/enhanced/latest → restore state on modal open
+```
+WebSocket channel: `enhanced_labeling/{job_id}`
+Events: `enhanced_labeling:progress`, `enhanced_labeling:completed`, `enhanced_labeling:failed`
+
+### 12.5 Configuration (Settings → Labeling tab)
+- `enhanced_labeling_max_workers` (int, default 8) — concurrent pass-1 calls
+- `openai_compatible_endpoint` + `openai_compatible_model` read from Endpoints tab (shared)
+
+### 12.6 UI Flow
+1. User opens Feature Detail modal for an interesting feature
+2. Clicks **Enhanced Label** button (violet, beside "Edit Details")
+3. Progress indicator shows "Summarizing example N / 20..." live via WebSocket
+4. On completion, edit form auto-populates with name/description/notes; user reviews and saves
+
+---
+
 *Related: [PRD](../prds/004_FPRD|Feature_Discovery.md) | [TID](../tids/004_FTID|Feature_Discovery.md) | [FTASKS](../tasks/004_FTASKS|Feature_Discovery.md)*

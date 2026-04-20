@@ -25,6 +25,7 @@ from .neuronpedia_export import NeuronpediaExportJob, ExportStatus
 from .feature_dashboard import FeatureDashboardData
 from .steering_experiment import SteeringExperiment
 from .app_setting import AppSetting
+from .enhanced_labeling_job import EnhancedLabelingJob, EnhancedLabelingStatus, EnhancedLabelingPhase
 
 __all__ = [
     "Dataset",
@@ -63,4 +64,7 @@ __all__ = [
     "FeatureDashboardData",
     "SteeringExperiment",
     "AppSetting",
+    "EnhancedLabelingJob",
+    "EnhancedLabelingStatus",
+    "EnhancedLabelingPhase",
 ]

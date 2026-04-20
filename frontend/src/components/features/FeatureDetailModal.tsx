@@ -9,8 +9,9 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, Save, Star, Info, Activity, GitBranch, Zap, Hash, Copy, Check, ChevronDown, Brain } from 'lucide-react';
+import { X, Save, Star, Info, Activity, GitBranch, Zap, Hash, Copy, Check, ChevronDown, Brain, Sparkles, Loader2 } from 'lucide-react';
 import { useFeaturesStore } from '../../stores/featuresStore';
+import { useEnhancedLabeling } from '../../hooks/useEnhancedLabeling';
 import { ExampleRow } from './ExampleRow';
 import { LogitLensView } from './LogitLensView';
 import { FeatureCorrelations } from './FeatureCorrelations';
@@ -52,6 +53,10 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
   const [editedNotes, setEditedNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Enhanced labeling
+  const { job: enhancedJob, progressPhrase, completedLabel, start: startEnhanced } =
+    useEnhancedLabeling(featureId);
+
   // Copy examples state
   const [copyCount, setCopyCount] = useState<number | 'all'>(10);
   const [copyFormat, setCopyFormat] = useState<ExportFormat>('text');
@@ -76,6 +81,16 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
       setEditedNotes(selectedFeature.notes || '');
     }
   }, [selectedFeature]);
+
+  // Auto-populate edit fields when enhanced labeling completes
+  useEffect(() => {
+    if (completedLabel) {
+      setEditedName(completedLabel.name);
+      setEditedDescription(completedLabel.description);
+      setEditedNotes(completedLabel.notes);
+      setIsEditing(true);
+    }
+  }, [completedLabel]);
 
   // Handle save
   const handleSave = async () => {
@@ -258,12 +273,36 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
-                >
-                  Edit Details
-                </button>
+                <>
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
+                  >
+                    Edit Details
+                  </button>
+
+                  {/* Enhanced Label button / in-progress indicator */}
+                  {enhancedJob?.status === 'running' || enhancedJob?.status === 'queued' ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-400 px-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+                      <span className="text-violet-300">{progressPhrase ?? 'Queued...'}</span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={startEnhanced}
+                      title="Run two-pass LLM labeling on this feature's activation examples"
+                      className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white rounded transition-colors"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Enhanced Label
+                    </button>
+                  )}
+                  {enhancedJob?.status === 'failed' && (
+                    <p className="text-xs text-red-400 self-center ml-1">
+                      {enhancedJob.error_message ?? 'Enhanced labeling failed'}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>

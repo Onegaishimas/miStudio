@@ -113,6 +113,9 @@ celery_app.conf.update(
         "src.workers.labeling_tasks.*": {
             "queue": "processing",
         },
+        "src.workers.enhanced_labeling_tasks.*": {
+            "queue": "processing",
+        },
         # Explicit route for label_features task (uses custom task name)
         "label_features": {
             "queue": "processing",
@@ -299,6 +302,7 @@ celery_app.autodiscover_tasks(
         "src.workers.neuronpedia_push_tasks",  # Push to local Neuronpedia
         "src.workers.nlp_analysis_tasks",
         "src.workers.steering_tasks",  # Steering operations in dedicated GPU worker
+        "src.workers.enhanced_labeling_tasks",  # Enhanced per-feature two-pass labeling
     ],
     force=True,
 )

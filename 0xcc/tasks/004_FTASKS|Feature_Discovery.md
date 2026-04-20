@@ -399,4 +399,24 @@
 
 ---
 
+## Enhanced Per-Feature Labeling Tasks (Apr 2026)
+
+### Completed ✅
+- [x] T1: Alembic migration — `enhanced_labeling_jobs` table + `enhanced_llm` enum value
+- [x] T2: `EnhancedLabelingJob` SQLAlchemy model + `__init__.py` registration
+- [x] T5: `emit_enhanced_labeling_progress/completed/failed` in `websocket_emitter.py`
+- [x] T6: `EnhancedLabelingService` — two-pass logic with `ThreadPoolExecutor` pass-1
+- [x] T7: `enhanced_label_feature_task` Celery task + celery_app routing
+- [x] T3+T8: `enhanced_labeling.py` schemas + API endpoints + router registration
+- [x] T9+T10+T11: `enhancedLabeling.ts` types + API client + `useEnhancedLabeling` hook
+- [x] T12: `FeatureDetailModal.tsx` — Enhanced Label button + progress display + auto-populate effect
+- [x] T4+T13: Settings panel Labeling tab — `enhanced_labeling_max_workers` field
+
+### Future / Nice-to-have
+- [ ] Edge-tier analysis: separate pass-1 summarization for low-activation tail examples
+- [ ] Confidence gating: auto-accept labels above threshold, flag below for review
+- [ ] Batch enhanced labeling: run enhanced labeling across a filtered subset of features
+
+---
+
 *Related: [PRD](../prds/004_FPRD|Feature_Discovery.md) | [TDD](../tdds/004_FTDD|Feature_Discovery.md) | [TID](../tids/004_FTID|Feature_Discovery.md)*

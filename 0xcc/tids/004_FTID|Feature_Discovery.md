@@ -1111,4 +1111,39 @@ export function ExtractionProgressChart({ extractionId }: Props) {
 
 ---
 
+## Enhanced Per-Feature Labeling — Implementation Notes (Apr 2026)
+
+### New Files
+| File | Purpose |
+|------|---------|
+| `backend/alembic/versions/r5s6t7u8v9w0_add_enhanced_labeling_jobs.py` | Migration: new table + enum value |
+| `backend/src/models/enhanced_labeling_job.py` | SQLAlchemy model |
+| `backend/src/schemas/enhanced_labeling.py` | Pydantic response schema |
+| `backend/src/services/enhanced_labeling_service.py` | Two-pass LLM logic (`EnhancedLabelingService`) |
+| `backend/src/workers/enhanced_labeling_tasks.py` | Celery task (`enhanced_label_feature_task`) |
+| `backend/src/api/v1/endpoints/enhanced_labeling.py` | API endpoints |
+| `frontend/src/types/enhancedLabeling.ts` | TypeScript types |
+| `frontend/src/api/enhancedLabeling.ts` | API client |
+| `frontend/src/hooks/useEnhancedLabeling.ts` | WebSocket hook + state |
+
+### Modified Files
+| File | Change |
+|------|--------|
+| `backend/src/models/__init__.py` | Add `EnhancedLabelingJob` exports |
+| `backend/src/workers/websocket_emitter.py` | Add 3 emit functions + `__all__` entries |
+| `backend/src/core/celery_app.py` | Add task routing + autodiscover entry |
+| `backend/src/api/v1/router.py` | Register enhanced_labeling router |
+| `frontend/src/components/features/FeatureDetailModal.tsx` | Add hook, button, auto-populate effect |
+| `frontend/src/components/panels/SettingsPanel.tsx` | Add `enhanced_labeling_max_workers` field |
+
+### Key Implementation Details
+- `EnhancedLabelingService` uses `httpx.Client` (sync) + `ThreadPoolExecutor` for pass-1 parallelism
+- Worker cap read from `enhanced_labeling_max_workers` app setting at job-creation time and stored on the job row
+- Retry logic: 3 attempts with 2×attempt backoff per LLM call
+- If a queued/running job already exists for a feature, `POST .../label/enhanced` returns it (HTTP 200) rather than creating a duplicate
+- `useEnhancedLabeling` hook restores in-progress state on modal open via `GET .../latest`
+- On completion, `completedLabel` triggers a `useEffect` that populates edit fields and opens edit mode — user must still click Save
+
+---
+
 *Related: [PRD](../prds/004_FPRD|Feature_Discovery.md) | [TDD](../tdds/004_FTDD|Feature_Discovery.md) | [FTASKS](../tasks/004_FTASKS|Feature_Discovery.md)*
