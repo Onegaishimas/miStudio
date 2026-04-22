@@ -85,6 +85,8 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
       setJob(latestJob);
       if (latestJob.status === 'queued' || latestJob.status === 'running') {
         _subscribeToJob(latestJob.id);
+        // Sync store star color — DB is authoritative, but store may be stale if modal was closed
+        setStarColor(featureId, 'purple').catch(() => {});
       }
     });
     return () => {

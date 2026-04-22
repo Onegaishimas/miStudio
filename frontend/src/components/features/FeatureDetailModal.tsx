@@ -57,6 +57,8 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
   const { job: enhancedJob, progressPhrase, completedLabel, startError: enhancedStartError, start: startEnhanced } =
     useEnhancedLabeling(featureId);
 
+  const [notesExpanded, setNotesExpanded] = useState(false);
+
   // Copy examples state
   const [copyCount, setCopyCount] = useState<number | 'all'>(10);
   const [copyFormat, setCopyFormat] = useState<ExportFormat>('text');
@@ -245,9 +247,17 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                   <p className="text-sm text-slate-400">{selectedFeature.description}</p>
                 )}
                 {selectedFeature.notes && (
-                  <div className="mt-2 p-3 bg-slate-800/50 rounded">
-                    <p className="text-xs text-slate-400 mb-1">Notes:</p>
-                    <p className="text-sm text-slate-300">{selectedFeature.notes}</p>
+                  <div className="mt-2 bg-slate-800/50 rounded">
+                    <button
+                      onClick={() => setNotesExpanded((v) => !v)}
+                      className="flex items-center justify-between w-full px-3 py-2 text-xs text-slate-400 hover:text-slate-300 transition-colors"
+                    >
+                      <span>Notes</span>
+                      <ChevronDown className={`w-3 h-3 transition-transform ${notesExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                    {notesExpanded && (
+                      <p className="px-3 pb-3 text-sm text-slate-300">{selectedFeature.notes}</p>
+                    )}
                   </div>
                 )}
                 <p className="text-xs text-slate-500">
