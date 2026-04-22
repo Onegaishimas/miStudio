@@ -147,6 +147,9 @@ celery_app.conf.update(
         "src.workers.cleanup_stuck_activations.*": {
             "queue": "low_priority",
         },
+        "src.workers.cleanup_stuck_enhanced_labeling.*": {
+            "queue": "low_priority",
+        },
 
         # SAE operations: HuggingFace downloads/uploads
         "src.workers.sae_tasks.*": {
@@ -254,6 +257,15 @@ celery_app.conf.update(
                 "queue": "low_priority",
             },
         },
+        # Cleanup stuck enhanced labeling jobs - runs every 5 minutes
+        # Short threshold because enhanced labeling jobs are short-lived (seconds to minutes)
+        "cleanup-stuck-enhanced-labeling": {
+            "task": "cleanup_stuck_enhanced_labeling",
+            "schedule": 300.0,  # Run every 5 minutes
+            "options": {
+                "queue": "low_priority",
+            },
+        },
         # GPU Memory Watchdog - runs every minute to detect stuck processes
         # This is critical for preventing zombie processes from holding GPU memory
         "gpu-memory-watchdog": {
@@ -296,6 +308,7 @@ celery_app.autodiscover_tasks(
         "src.workers.cleanup_stuck_extractions",
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
+        "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes
         "src.workers.sae_tasks",
         "src.workers.neuronpedia_tasks",
