@@ -42,7 +42,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
     fetchFeatureDetail,
     fetchFeatureExamples,
     updateFeature,
-    toggleFavorite,
+    setStarColor,
     clearSelectedFeature,
   } = useFeaturesStore();
 
@@ -111,11 +111,15 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
     }
   };
 
-  // Handle favorite toggle
+  // Handle favorite toggle — aqua is never downgraded by manual starring
   const handleToggleFavorite = async () => {
     if (!selectedFeature) return;
     try {
-      await toggleFavorite(featureId, !selectedFeature.is_favorite);
+      if (selectedFeature.is_favorite) {
+        await setStarColor(featureId, null);
+      } else {
+        await setStarColor(featureId, selectedFeature.star_color === 'aqua' ? 'aqua' : 'yellow');
+      }
     } catch (error) {
       console.error('Failed to toggle favorite:', error);
     }
@@ -188,7 +192,11 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               >
                 <Star
                   className={`w-5 h-5 ${
-                    selectedFeature.is_favorite
+                    selectedFeature.star_color === 'aqua'
+                      ? 'fill-cyan-400 text-cyan-400'
+                      : selectedFeature.star_color === 'purple'
+                      ? 'fill-purple-400 text-purple-400'
+                      : selectedFeature.is_favorite
                       ? 'fill-yellow-400 text-yellow-400'
                       : 'text-slate-500'
                   }`}

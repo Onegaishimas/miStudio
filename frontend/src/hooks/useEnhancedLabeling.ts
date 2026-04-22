@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { startEnhancedLabeling, getLatestEnhancedLabelingJob } from '../api/enhancedLabeling';
+import { useFeaturesStore } from '../stores/featuresStore';
 import type {
   EnhancedLabelingJob,
   EnhancedLabelingCompletedEvent,
@@ -46,6 +47,7 @@ export interface UseEnhancedLabelingResult {
 
 export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResult {
   const { on, off, subscribe, unsubscribe, isConnected } = useWebSocketContext();
+  const setStarColor = useFeaturesStore((s) => s.setStarColor);
 
   const [job, setJob] = useState<EnhancedLabelingJob | null>(null);
   const [completedLabel, setCompletedLabel] = useState<CompletedLabel | null>(null);
@@ -127,6 +129,8 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
         description: data.description,
         notes: data.notes,
       });
+      // Mark feature aqua — permanent signal that enhanced labeling completed
+      setStarColor(featureId, 'aqua').catch(() => {});
       _unsubscribeFromJob();
     };
 
@@ -167,10 +171,12 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
       const newJob = await startEnhancedLabeling(featureId);
       setJob(newJob);
       _subscribeToJob(newJob.id);
+      // Mark feature purple so it's visible in starred filter while job runs
+      setStarColor(featureId, 'purple').catch(() => {});
     } catch (err: any) {
       setStartError(err?.message ?? 'Failed to start enhanced labeling');
     }
-  }, [featureId, _subscribeToJob]);
+  }, [featureId, _subscribeToJob, setStarColor]);
 
   const reset = useCallback(() => {
     _unsubscribeFromJob();

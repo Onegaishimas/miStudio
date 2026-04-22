@@ -432,6 +432,34 @@ async def toggle_favorite(
     return {"is_favorite": new_favorite_status}
 
 
+@router.post(
+    "/features/{feature_id}/star",
+    response_model=dict,
+    summary="Set star color for a feature"
+)
+async def set_star_color(
+    feature_id: str,
+    star_color: Optional[str] = Query(None, description="Star color: 'yellow', 'purple', 'aqua', or null to unstar"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Set the star color for a feature.
+
+    - 'yellow': manually starred
+    - 'purple': enhanced labeling in flight
+    - 'aqua': enhanced labeling completed (permanent — never downgraded by yellow)
+    - null: unstar the feature
+
+    Aqua is only ever set by enhanced labeling completion and is never
+    downgraded to yellow by manual starring.
+    """
+    feature_service = FeatureService(db)
+    result = await feature_service.set_star_color(feature_id, star_color)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Feature {feature_id} not found")
+    return result
+
+
 @router.get(
     "/features/{feature_id}/examples",
     response_model=List[FeatureActivationExample],

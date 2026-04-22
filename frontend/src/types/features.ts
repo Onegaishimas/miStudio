@@ -161,6 +161,8 @@ export interface Feature {
   max_activation: number;
   mean_activation: number | null;
   is_favorite: boolean;
+  /** 'yellow' = manually starred, 'purple' = enhanced labeling in flight, 'aqua' = enhanced labeling completed */
+  star_color: 'yellow' | 'purple' | 'aqua' | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

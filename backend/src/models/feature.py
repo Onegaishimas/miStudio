@@ -80,6 +80,8 @@ class Feature(Base):
 
     # User metadata
     is_favorite = Column(Boolean, nullable=False, default=False, index=True)
+    # star_color: null=unstarred, 'yellow'=manually starred, 'purple'=enhanced labeling in flight, 'aqua'=enhanced labeling completed
+    star_color = Column(String(20), nullable=True)
     notes = Column(Text, nullable=True)
 
     # Quick preview of top prime tokens (populated during labeling)

@@ -126,6 +126,7 @@ interface FeaturesStoreState {
   }) => Promise<void>;
   updateFeature: (featureId: string, updates: FeatureUpdateRequest) => Promise<void>;
   toggleFavorite: (featureId: string, isFavorite: boolean) => Promise<void>;
+  setStarColor: (featureId: string, starColor: 'yellow' | 'purple' | 'aqua' | null) => Promise<void>;
   setSearchFilters: (trainingId: string, filters: FeatureSearchRequest) => void;
   clearSelectedFeature: () => void;
 
@@ -467,6 +468,45 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
           featuresByExtraction: updatedFeaturesByExtraction,
           selectedFeature: state.selectedFeature?.id === featureId
             ? { ...state.selectedFeature, is_favorite: isFavorite }
+            : state.selectedFeature,
+        };
+      });
+    } catch (error: any) {
+      throw error;
+    }
+  },
+
+  /**
+   * Set star color for a feature.
+   * 'yellow' = manually starred, 'purple' = enhanced labeling in flight,
+   * 'aqua' = enhanced labeling completed (never downgraded to yellow).
+   * null = unstar.
+   */
+  setStarColor: async (featureId: string, starColor: 'yellow' | 'purple' | 'aqua' | null) => {
+    try {
+      const response = await axios.post<{ is_favorite: boolean; star_color: string | null }>(
+        `/api/v1/features/${featureId}/star`,
+        null,
+        { params: { star_color: starColor } }
+      );
+      const { is_favorite } = response.data;
+      const star_color = (response.data.star_color ?? null) as 'yellow' | 'purple' | 'aqua' | null;
+
+      const applyUpdate = (feature: any) =>
+        feature.id === featureId ? { ...feature, is_favorite, star_color } : feature;
+
+      set((state) => {
+        const updatedByTraining = Object.fromEntries(
+          Object.entries(state.featuresByTraining).map(([k, v]) => [k, v.map(applyUpdate)])
+        );
+        const updatedByExtraction = Object.fromEntries(
+          Object.entries(state.featuresByExtraction).map(([k, v]) => [k, v.map(applyUpdate)])
+        );
+        return {
+          featuresByTraining: updatedByTraining,
+          featuresByExtraction: updatedByExtraction,
+          selectedFeature: state.selectedFeature?.id === featureId
+            ? { ...state.selectedFeature, is_favorite, star_color }
             : state.selectedFeature,
         };
       });

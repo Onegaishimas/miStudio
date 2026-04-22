@@ -101,7 +101,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
     isLoadingFeatures,
     featuresError,
     fetchExtractionFeatures,
-    toggleFavorite,
+    setStarColor,
     setSearchFilters,
     updateExtractionById,
   } = useFeaturesStore();
@@ -633,10 +633,14 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
   /**
    * Handle favorite toggle for a feature.
    */
-  const handleToggleFavorite = async (featureId: string, currentFavorite: boolean, event: React.MouseEvent) => {
+  const handleToggleFavorite = async (featureId: string, feature: { is_favorite: boolean; star_color: string | null }, event: React.MouseEvent) => {
     event.stopPropagation();
     try {
-      await toggleFavorite(featureId, !currentFavorite);
+      if (feature.is_favorite) {
+        await setStarColor(featureId, null);
+      } else {
+        await setStarColor(featureId, feature.star_color === 'aqua' ? 'aqua' : 'yellow');
+      }
     } catch (error) {
       console.error('Failed to toggle favorite:', error);
     }
@@ -1823,12 +1827,16 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                         </td>
                         <td className="px-4 py-3">
                           <button
-                            onClick={(e) => handleToggleFavorite(feature.id, feature.is_favorite, e)}
+                            onClick={(e) => handleToggleFavorite(feature.id, feature, e)}
                             className={`p-1 rounded ${COMPONENTS.button.ghost}`}
                           >
                             <Star
                               className={`w-4 h-4 ${
-                                feature.is_favorite
+                                feature.star_color === 'aqua'
+                                  ? 'fill-cyan-400 text-cyan-400'
+                                  : feature.star_color === 'purple'
+                                  ? 'fill-purple-400 text-purple-400'
+                                  : feature.is_favorite
                                   ? 'fill-yellow-400 text-yellow-400'
                                   : 'text-slate-500'
                               }`}

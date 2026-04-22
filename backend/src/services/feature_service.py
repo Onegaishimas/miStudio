@@ -669,6 +669,11 @@ class FeatureService:
             return None
 
         feature.is_favorite = is_favorite
+        # When un-starring, clear the color; when starring, default to yellow unless already aqua
+        if not is_favorite:
+            feature.star_color = None
+        elif feature.star_color != "aqua":
+            feature.star_color = "yellow"
         feature.updated_at = datetime.now(timezone.utc)
 
         await self.db.commit()
@@ -676,6 +681,41 @@ class FeatureService:
         logger.info(f"Toggled favorite for feature {feature_id}: is_favorite={is_favorite}")
 
         return is_favorite
+
+    async def set_star_color(self, feature_id: str, star_color: Optional[str]) -> Optional[dict]:
+        """
+        Set star color for a feature, auto-managing is_favorite.
+
+        Rules:
+          - 'purple' or 'aqua': sets is_favorite=True, star_color=value
+          - 'yellow': sets is_favorite=True, star_color='yellow' (only if not already aqua)
+          - None: sets is_favorite=False, star_color=None (unstar)
+          - Aqua is never downgraded by this method except via explicit None.
+        """
+        feature_result = await self.db.execute(select(Feature).where(Feature.id == feature_id))
+        feature = feature_result.scalar_one_or_none()
+        if not feature:
+            return None
+
+        if star_color is None:
+            feature.is_favorite = False
+            feature.star_color = None
+        elif star_color == "aqua":
+            feature.is_favorite = True
+            feature.star_color = "aqua"
+        elif star_color == "purple":
+            feature.is_favorite = True
+            feature.star_color = "purple"
+        elif star_color == "yellow":
+            feature.is_favorite = True
+            if feature.star_color != "aqua":
+                feature.star_color = "yellow"
+
+        feature.updated_at = datetime.now(timezone.utc)
+        await self.db.commit()
+
+        logger.info("Set star_color for feature %s: %s", feature_id, feature.star_color)
+        return {"is_favorite": feature.is_favorite, "star_color": feature.star_color}
 
     async def get_feature_examples(
         self,

@@ -145,6 +145,7 @@ class FeatureResponse(BaseModel):
     max_activation: float
     mean_activation: Optional[float] = None
     is_favorite: bool
+    star_color: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -208,6 +209,7 @@ class FeatureDetailResponse(BaseModel):
     max_activation: float
     mean_activation: Optional[float] = None
     is_favorite: bool
+    star_color: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -235,6 +237,7 @@ class FeatureUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = Field(default=None)
     notes: Optional[str] = Field(default=None)
+    star_color: Optional[str] = Field(default=None, description="Star color: 'yellow', 'purple', 'aqua', or null to unstar")
 
 
 class LogitLensResponse(BaseModel):
