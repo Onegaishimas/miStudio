@@ -116,8 +116,11 @@ celery_app.conf.update(
         "src.workers.enhanced_labeling_tasks.*": {
             "queue": "processing",
         },
-        # Explicit route for label_features task (uses custom task name)
+        # Explicit routes for tasks with custom names (module-path pattern won't match)
         "label_features": {
+            "queue": "processing",
+        },
+        "enhanced_label_feature": {
             "queue": "processing",
         },
 

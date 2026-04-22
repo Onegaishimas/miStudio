@@ -102,6 +102,11 @@ async def start_enhanced_labeling(
         examples_total=_EXAMPLES_TOTAL,
     )
     db.add(job)
+
+    # Mark feature purple immediately so it's visible in the starred filter
+    feature.is_favorite = True
+    feature.star_color = "purple"
+
     await db.flush()
 
     # Commit the job row first so the Celery worker can find it

@@ -239,7 +239,7 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                 },
             )
 
-            # Write label to feature
+            # Write label to feature and mark star aqua (permanent enhanced labeling marker)
             feature = db.query(Feature).filter(Feature.id == job.feature_id).first()
             if feature:
                 feature.name = result["name"]
@@ -249,6 +249,8 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                 feature.label_source = LabelSource.ENHANCED_LLM.value if hasattr(LabelSource, "ENHANCED_LLM") else "enhanced_llm"
                 feature.labeled_at = datetime.now(timezone.utc)
                 feature.updated_at = datetime.now(timezone.utc)
+                feature.is_favorite = True
+                feature.star_color = "aqua"
 
             # Mark job completed
             job.status = EnhancedLabelingStatus.COMPLETED.value
