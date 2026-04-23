@@ -885,6 +885,11 @@ class LabelingService:
 
                             # Persist this batch immediately
                             for feature, label, examples in zip(batch_features, batch_labels, batch_examples):
+                                # Never overwrite features completed by enhanced labeling
+                                if feature.star_color == 'aqua':
+                                    logger.debug("Skipping feature %s (star_color=aqua, enhanced labeling result preserved)", feature.id)
+                                    continue
+
                                 feature.category = label["category"]
                                 feature.name = label["specific"]
                                 feature.description = label.get("description", "")
@@ -1092,6 +1097,11 @@ class LabelingService:
                                     logger.error(f"Error generating label for feature {feature.id}: {label}")
                                     label = {"category": "error_feature", "specific": f"feature_{feature.neuron_index}", "description": ""}
 
+                                # Never overwrite features completed by enhanced labeling
+                                if feature.star_color == 'aqua':
+                                    logger.debug("Skipping feature %s (star_color=aqua, enhanced labeling result preserved)", feature.id)
+                                    continue
+
                                 feature.category = label["category"]
                                 feature.name = label["specific"]
                                 feature.description = label.get("description", "")
@@ -1283,6 +1293,11 @@ class LabelingService:
                                 if isinstance(label, Exception):
                                     logger.error(f"Error generating label for feature {feature.id}: {label}")
                                     label = {"category": "error_feature", "specific": f"feature_{feature.neuron_index}", "description": ""}
+
+                                # Never overwrite features completed by enhanced labeling
+                                if feature.star_color == 'aqua':
+                                    logger.debug("Skipping feature %s (star_color=aqua, enhanced labeling result preserved)", feature.id)
+                                    continue
 
                                 feature.category = label["category"]
                                 feature.name = label["specific"]
