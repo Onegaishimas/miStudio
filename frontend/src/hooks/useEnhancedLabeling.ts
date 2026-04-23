@@ -48,6 +48,7 @@ export interface UseEnhancedLabelingResult {
 export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResult {
   const { on, off, subscribe, unsubscribe, isConnected } = useWebSocketContext();
   const setStarColor = useFeaturesStore((s) => s.setStarColor);
+  const patchFeatureLocally = useFeaturesStore((s) => s.patchFeatureLocally);
 
   const [job, setJob] = useState<EnhancedLabelingJob | null>(null);
   const [completedLabel, setCompletedLabel] = useState<CompletedLabel | null>(null);
@@ -125,12 +126,15 @@ export function useEnhancedLabeling(featureId: string): UseEnhancedLabelingResul
           ? { ...prev, status: 'completed', phase: null }
           : prev
       );
-      setCompletedLabel({
+      const label = {
         name: data.name,
         category: data.category,
         description: data.description,
         notes: data.notes,
-      });
+      };
+      setCompletedLabel(label);
+      // Immediately reflect new label in feature list rows and open modal view
+      patchFeatureLocally(featureId, { ...label, label_source: 'enhanced_llm' });
       // Mark feature aqua — permanent signal that enhanced labeling completed
       setStarColor(featureId, 'aqua').catch(() => {});
       _unsubscribeFromJob();

@@ -13,7 +13,7 @@ export type ExtractionStatus = 'queued' | 'extracting' | 'finalizing' | 'complet
 /**
  * Feature label source.
  */
-export type LabelSource = 'auto' | 'user';
+export type LabelSource = 'auto' | 'user' | 'llm' | 'local_llm' | 'openai' | 'enhanced_llm';
 
 /**
  * Extraction configuration request.

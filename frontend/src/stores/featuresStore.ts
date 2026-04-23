@@ -125,6 +125,7 @@ interface FeaturesStoreState {
     filterStopWords?: boolean;
   }) => Promise<void>;
   updateFeature: (featureId: string, updates: FeatureUpdateRequest) => Promise<void>;
+  patchFeatureLocally: (featureId: string, fields: Partial<Pick<Feature, 'name' | 'category' | 'description' | 'notes' | 'label_source'>>) => void;
   toggleFavorite: (featureId: string, isFavorite: boolean) => Promise<void>;
   setStarColor: (featureId: string, starColor: 'yellow' | 'purple' | 'aqua' | null) => Promise<void>;
   setSearchFilters: (trainingId: string, filters: FeatureSearchRequest) => void;
@@ -417,6 +418,26 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
     } catch (error: any) {
       throw error;
     }
+  },
+
+  /**
+   * Patch label fields on a feature in all store slices without a network call.
+   * Called immediately on enhanced labeling completion so list rows and the
+   * open modal reflect the new values before the user does anything.
+   */
+  patchFeatureLocally: (featureId, fields) => {
+    const applyUpdate = (f: Feature) => f.id === featureId ? { ...f, ...fields } : f;
+    set((state) => ({
+      featuresByTraining: Object.fromEntries(
+        Object.entries(state.featuresByTraining).map(([k, v]) => [k, v.map(applyUpdate)])
+      ),
+      featuresByExtraction: Object.fromEntries(
+        Object.entries(state.featuresByExtraction).map(([k, v]) => [k, v.map(applyUpdate)])
+      ),
+      selectedFeature: state.selectedFeature?.id === featureId
+        ? { ...state.selectedFeature, ...fields }
+        : state.selectedFeature,
+    }));
   },
 
   /**

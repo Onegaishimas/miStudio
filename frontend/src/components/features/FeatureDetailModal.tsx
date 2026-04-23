@@ -84,14 +84,17 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
     }
   }, [selectedFeature]);
 
-  // Auto-populate edit fields when enhanced labeling completes
+  // Auto-populate edit fields when enhanced labeling completes.
+  // Skip if user was already editing to avoid clobbering unsaved changes.
   useEffect(() => {
-    if (completedLabel) {
+    if (completedLabel && !isEditing) {
       setEditedName(completedLabel.name);
       setEditedDescription(completedLabel.description);
       setEditedNotes(completedLabel.notes);
       setIsEditing(true);
     }
+    // isEditing intentionally omitted — only react when completedLabel changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedLabel]);
 
   // Handle save
@@ -261,7 +264,12 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                   </div>
                 )}
                 <p className="text-xs text-slate-500">
-                  Label source: {selectedFeature.label_source === 'auto' ? 'Automatic' : 'User'}
+                  Label source: {
+                    selectedFeature.label_source === 'auto' ? 'Automatic'
+                    : selectedFeature.label_source === 'enhanced_llm' ? 'Enhanced LLM'
+                    : selectedFeature.label_source === 'llm' || selectedFeature.label_source === 'local_llm' || selectedFeature.label_source === 'openai' ? 'LLM'
+                    : 'User'
+                  }
                 </p>
               </div>
             )}
