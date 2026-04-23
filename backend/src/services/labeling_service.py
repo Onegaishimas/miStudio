@@ -25,6 +25,7 @@ from src.services.local_labeling_service import LocalLabelingService
 from src.services.openai_labeling_service import OpenAILabelingService
 from src.workers.websocket_emitter import emit_labeling_progress, emit_labeling_result
 from src.utils.token_filters import filter_token_stats
+from src.utils.millm_utils import ensure_model_loaded
 
 logger = logging.getLogger(__name__)
 
@@ -1203,6 +1204,11 @@ class LabelingService:
                     LABEL_BATCH_SIZE = job_batch_size
 
                     logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
+
+                    # Ensure the miLLM model is loaded before making inference calls.
+                    # No-ops silently for non-miLLM endpoints (Ollama, vLLM, etc.).
+                    logger.info(f"Ensuring model {model_name!r} is loaded at {endpoint}")
+                    ensure_model_loaded(endpoint, model_name)
 
                     # Create event loop BEFORE the OpenAI service so that httpx
                     # AsyncClient and asyncio.Semaphore bind to this loop.
