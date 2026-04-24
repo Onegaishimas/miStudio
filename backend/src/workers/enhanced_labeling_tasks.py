@@ -112,7 +112,7 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                 ).first()
                 if db_setting:
                     api_key = (
-                        decrypt_value(db_setting.value)
+                        decrypt_value(db_setting.value, setting_key="openai_api_key")
                         if db_setting.is_sensitive
                         else db_setting.value
                     )

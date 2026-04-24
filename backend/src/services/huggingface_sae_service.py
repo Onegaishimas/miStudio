@@ -74,7 +74,7 @@ class HuggingFaceSAEService:
                 with SyncSessionLocal() as db_session:
                     db_setting = db_session.query(AppSetting).filter(AppSetting.key == "hf_token").first()
                     if db_setting:
-                        token = decrypt_value(db_setting.value) if db_setting.is_sensitive else db_setting.value
+                        token = decrypt_value(db_setting.value, setting_key="hf_token") if db_setting.is_sensitive else db_setting.value
             except Exception:
                 pass
         if not token or not token.strip() or token.strip().lower() == "none":
@@ -263,7 +263,7 @@ class HuggingFaceSAEService:
                 with SyncSessionLocal() as db_session:
                     db_setting = db_session.query(AppSetting).filter(AppSetting.key == "hf_token").first()
                     if db_setting:
-                        token = decrypt_value(db_setting.value) if db_setting.is_sensitive else db_setting.value
+                        token = decrypt_value(db_setting.value, setting_key="hf_token") if db_setting.is_sensitive else db_setting.value
             except Exception:
                 pass
         if not token or not token.strip() or token.strip().lower() == "none":

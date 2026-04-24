@@ -498,7 +498,7 @@ async def fetch_openai_models(
         db_setting = result.scalar_one_or_none()
         if db_setting and db_setting.value:
             api_key = (
-                decrypt_value(db_setting.value)
+                decrypt_value(db_setting.value, setting_key="openai_api_key")
                 if db_setting.is_sensitive
                 else db_setting.value
             )

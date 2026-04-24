@@ -65,9 +65,9 @@ class AppSettingService:
             # Expunge to prevent in-place mutation from dirtying the session
             db.expunge(setting)
             if unmask:
-                setting.value = decrypt_value(setting.value)
+                setting.value = decrypt_value(setting.value, setting_key=setting.key)
             else:
-                decrypted = decrypt_value(setting.value)
+                decrypted = decrypt_value(setting.value, setting_key=setting.key)
                 setting.value = mask_value(decrypted)
         return setting
 
@@ -86,7 +86,7 @@ class AppSettingService:
             if s.is_sensitive:
                 db.expunge(s)
                 try:
-                    decrypted = decrypt_value(s.value)
+                    decrypted = decrypt_value(s.value, setting_key=s.key)
                     s.value = mask_value(decrypted)
                 except Exception:
                     s.value = "***"
@@ -103,7 +103,7 @@ class AppSettingService:
             if s.is_sensitive:
                 db.expunge(s)
                 try:
-                    decrypted = decrypt_value(s.value)
+                    decrypted = decrypt_value(s.value, setting_key=s.key)
                     s.value = mask_value(decrypted)
                 except Exception:
                     s.value = "***"
@@ -130,5 +130,5 @@ class AppSettingService:
         if not setting:
             return None
         if setting.is_sensitive:
-            return decrypt_value(setting.value)
+            return decrypt_value(setting.value, setting_key=setting.key)
         return setting.value

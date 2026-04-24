@@ -59,18 +59,59 @@ def encrypt_value(plaintext: str) -> str:
     return base64.b64encode(nonce + ciphertext).decode("ascii")
 
 
-def decrypt_value(encrypted: str) -> str:
+def decrypt_value(encrypted: str, *, setting_key: str | None = None) -> str:
     """Decrypt a base64-encoded AES-256-GCM ciphertext.
 
     Expects the format produced by encrypt_value(): base64(nonce + ciphertext + tag).
+
+    Forgiving for legacy/corrupted rows: if the value isn't a valid AES-GCM
+    envelope (bad base64 padding, too short, or auth tag mismatch), logs a
+    warning describing exactly why and returns the value as-is. This handles
+    rows that were saved plaintext under an earlier code path despite being
+    flagged is_sensitive.
+
+    Args:
+        encrypted: The stored value (expected to be base64 ciphertext).
+        setting_key: Optional name of the setting being decrypted, used to
+            identify the row in the warning log. Pass it whenever available.
     """
     key = _get_encryption_key()
-    raw = base64.b64decode(encrypted)
-    nonce = raw[:12]
-    ciphertext = raw[12:]
-    aesgcm = AESGCM(key)
-    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
-    return plaintext.decode("utf-8")
+    try:
+        raw = base64.b64decode(encrypted, validate=True)
+        if len(raw) < 12 + 16:  # nonce + GCM tag minimum
+            raise ValueError(
+                f"ciphertext too short for AES-GCM envelope "
+                f"(got {len(raw)} bytes, need ≥28)"
+            )
+        nonce = raw[:12]
+        ciphertext = raw[12:]
+        aesgcm = AESGCM(key)
+        plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+        return plaintext.decode("utf-8")
+    except Exception as exc:
+        # Diagnose the most common failure modes for the operator log
+        if isinstance(exc, base64.binascii.Error):
+            cause = "value is not valid base64 — was likely stored as plaintext"
+        elif isinstance(exc, ValueError) and "too short" in str(exc):
+            cause = str(exc) + " — likely plaintext or truncated"
+        elif "InvalidTag" in type(exc).__name__:
+            cause = (
+                "AES-GCM authentication tag mismatch — most often caused by "
+                "SETTINGS_ENCRYPTION_KEY (or fallback SECRET_KEY) changing "
+                "since the row was written"
+            )
+        else:
+            cause = f"{type(exc).__name__}: {exc}"
+
+        which = f"setting {setting_key!r}" if setting_key else "an app_setting row"
+        logger.warning(
+            "decrypt_value: returning %s as-is — %s. "
+            "If the value is valid (e.g. an API key) this is harmless, but to "
+            "encrypt it at rest re-enter and save it via Settings → API Keys.",
+            which,
+            cause,
+        )
+        return encrypted
 
 
 def mask_value(plaintext: str, visible_prefix: int = 3, visible_suffix: int = 4) -> str:

@@ -957,7 +957,7 @@ class LabelingService:
                             from src.core.encryption import decrypt_value
                             db_setting = self.db.query(AppSetting).filter(AppSetting.key == "openai_api_key").first()
                             if db_setting:
-                                openai_api_key = decrypt_value(db_setting.value) if db_setting.is_sensitive else db_setting.value
+                                openai_api_key = decrypt_value(db_setting.value, setting_key="openai_api_key") if db_setting.is_sensitive else db_setting.value
                                 logger.info("Using OpenAI API key from DB settings")
                         except Exception as e:
                             logger.warning(f"Failed to read API key from DB settings: {e}")
