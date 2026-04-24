@@ -17,6 +17,9 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    # Skip on Onegaishimas/miStudio — private repos require GitHub Advanced Security
+    # to upload SARIF. The public mirror hitsainet/miStudio scans for free.
+    if: github.repository != 'Onegaishimas/miStudio'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
