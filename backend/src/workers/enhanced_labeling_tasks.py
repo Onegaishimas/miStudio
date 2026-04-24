@@ -99,13 +99,37 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                     "No activation examples found for feature — run extraction first"
                 )
 
-            # Ensure the target model is loaded in miLLM before making LLM calls
+            # Resolve API key for the "openai" method (api.openai.com requires auth).
+            # For "openai_compatible" there is no key — local endpoints don't need auth.
+            api_key: str | None = None
+            method = getattr(job, "method", None) or "openai_compatible"
+            if method == "openai":
+                from src.models.app_setting import AppSetting
+                from src.core.encryption import decrypt_value
+
+                db_setting = db.query(AppSetting).filter(
+                    AppSetting.key == "openai_api_key"
+                ).first()
+                if db_setting:
+                    api_key = (
+                        decrypt_value(db_setting.value)
+                        if db_setting.is_sensitive
+                        else db_setting.value
+                    )
+                if not api_key:
+                    raise EnhancedLabelingError(
+                        "OpenAI API key not configured — set it in Settings → API Keys"
+                    )
+
+            # Ensure the target model is loaded in miLLM before making LLM calls.
+            # No-ops for api.openai.com (not a miLLM instance).
             _ensure_model_loaded(job.endpoint, job.model)
 
             service = EnhancedLabelingService(
                 endpoint=job.endpoint,
                 model=job.model,
                 workers=job.workers,
+                api_key=api_key,
             )
 
             # Progress callback for pass 1

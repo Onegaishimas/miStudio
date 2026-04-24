@@ -57,6 +57,7 @@ class EnhancedLabelingJob(Base):
     celery_task_id = Column(String(255), nullable=True)
 
     # Configuration (copied from settings at job creation time)
+    method = Column(String(50), nullable=False, default="openai_compatible")
     endpoint = Column(String(500), nullable=False)
     model = Column(String(255), nullable=False)
     workers = Column(Integer, nullable=False, default=8)

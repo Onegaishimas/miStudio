@@ -22,10 +22,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_METHOD_SETTING_KEY = "enhanced_labeling_method"  # "openai" | "openai_compatible"
 _ENDPOINT_SETTING_KEY = "openai_compatible_endpoint"
 _MODEL_SETTING_KEY = "openai_compatible_model"
+_OPENAI_MODEL_SETTING_KEY = "enhanced_labeling_openai_model"
+_OPENAI_API_KEY_SETTING_KEY = "openai_api_key"
 _WORKERS_SETTING_KEY = "enhanced_labeling_max_workers"
 _EXAMPLES_TOTAL = 20  # fixed for now; could become a setting later
+_OPENAI_ENDPOINT = "https://api.openai.com/v1"
 
 
 @router.post(
@@ -72,17 +76,48 @@ async def start_enhanced_labeling(
     if existing:
         return EnhancedLabelingJobResponse.model_validate(existing)
 
-    # Read settings
-    endpoint = await AppSettingService.get_decrypted_value(db, _ENDPOINT_SETTING_KEY)
-    model = await AppSettingService.get_decrypted_value(db, _MODEL_SETTING_KEY)
+    # Resolve method + endpoint/model based on settings
+    method = (
+        await AppSettingService.get_decrypted_value(db, _METHOD_SETTING_KEY)
+        or "openai_compatible"
+    )
 
-    if not endpoint or not model:
+    if method == "openai":
+        # Real OpenAI API — model from dedicated setting, key from API Keys tab
+        model = await AppSettingService.get_decrypted_value(db, _OPENAI_MODEL_SETTING_KEY)
+        api_key = await AppSettingService.get_decrypted_value(db, _OPENAI_API_KEY_SETTING_KEY)
+        if not model:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "enhanced_labeling_openai_model must be configured in "
+                    "Settings → Labeling → Enhanced Labeling when method is 'openai'."
+                ),
+            )
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "openai_api_key must be configured in Settings → API Keys "
+                    "when enhanced labeling method is 'openai'."
+                ),
+            )
+        endpoint = _OPENAI_ENDPOINT
+    elif method == "openai_compatible":
+        endpoint = await AppSettingService.get_decrypted_value(db, _ENDPOINT_SETTING_KEY)
+        model = await AppSettingService.get_decrypted_value(db, _MODEL_SETTING_KEY)
+        if not endpoint or not model:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "openai_compatible_endpoint and openai_compatible_model must be configured "
+                    "in Settings → Endpoints before using enhanced labeling."
+                ),
+            )
+    else:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "openai_compatible_endpoint and openai_compatible_model must be configured "
-                "in Settings → Endpoints before using enhanced labeling."
-            ),
+            detail=f"Unknown enhanced_labeling_method: {method!r}",
         )
 
     raw_workers = await AppSettingService.get_decrypted_value(db, _WORKERS_SETTING_KEY)
@@ -96,6 +131,7 @@ async def start_enhanced_labeling(
         id=job_id,
         feature_id=feature_id,
         status=EnhancedLabelingStatus.QUEUED.value,
+        method=method,
         endpoint=endpoint,
         model=model,
         workers=workers,

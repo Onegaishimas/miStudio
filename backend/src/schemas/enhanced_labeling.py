@@ -13,6 +13,7 @@ class EnhancedLabelingJobResponse(BaseModel):
     feature_id: str
     status: str          # queued | running | completed | failed
     phase: Optional[str]  # pass1 | pass2 | None
+    method: str = "openai_compatible"  # openai | openai_compatible
     examples_total: int
     examples_completed: int
     workers: int

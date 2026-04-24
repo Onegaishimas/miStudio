@@ -43,16 +43,29 @@ class EnhancedLabelingService:
     Two-pass enhanced labeling for a single SAE feature.
 
     Args:
-        endpoint: OpenAI-compatible base URL (e.g. http://k8s-millm.hitsai.local/v1)
-        model:    Model identifier (e.g. gemma-4-E4B-it)
+        endpoint: OpenAI-compatible base URL (e.g. http://k8s-millm.hitsai.local/v1,
+                  or https://api.openai.com/v1 for the real OpenAI API)
+        model:    Model identifier (e.g. gemma-4-E4B-it or gpt-4o-mini)
         workers:  Max concurrent HTTP calls during pass 1
+        api_key:  Optional Bearer token. Required for api.openai.com; ignored by
+                  unauthenticated local endpoints (miLLM/Ollama/vLLM).
     """
 
-    def __init__(self, endpoint: str, model: str, workers: int = 8) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        model: str,
+        workers: int = 8,
+        api_key: str | None = None,
+    ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.workers = workers
-        self._client = httpx.Client(timeout=httpx.Timeout(90.0, connect=10.0))
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(90.0, connect=10.0),
+            headers=headers,
+        )
 
     def close(self) -> None:
         self._client.close()

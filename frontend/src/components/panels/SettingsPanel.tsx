@@ -532,12 +532,19 @@ function LabelingTab() {
   const [batchSize, setBatchSize] = useState(getValue('labeling_default_batch_size', '10'));
   const [maxExamples, setMaxExamples] = useState(getValue('labeling_default_max_examples', '25'));
   const [enhancedWorkers, setEnhancedWorkers] = useState(getValue('enhanced_labeling_max_workers', '8'));
+  const [enhancedMethod, setEnhancedMethod] = useState(getValue('enhanced_labeling_method', 'openai_compatible'));
+  const [enhancedOpenaiModel, setEnhancedOpenaiModel] = useState(getValue('enhanced_labeling_openai_model', 'gpt-4o-mini'));
+
+  // Has an OpenAI API key been configured on the API Keys tab?
+  const hasOpenaiApiKey = settings.some((s) => s.key === 'openai_api_key' && s.value);
 
   // Sync local state when settings load
   useEffect(() => {
     setBatchSize(getValue('labeling_default_batch_size', '10'));
     setMaxExamples(getValue('labeling_default_max_examples', '25'));
     setEnhancedWorkers(getValue('enhanced_labeling_max_workers', '8'));
+    setEnhancedMethod(getValue('enhanced_labeling_method', 'openai_compatible'));
+    setEnhancedOpenaiModel(getValue('enhanced_labeling_openai_model', 'gpt-4o-mini'));
   }, [settings]);
 
   return (
@@ -591,9 +598,48 @@ function LabelingTab() {
       <h2 className="text-lg font-semibold text-slate-200 mt-8 mb-1">Enhanced Labeling</h2>
       <p className="text-xs text-slate-500 mb-4">
         Settings for the two-pass per-feature labeling triggered from the Feature Detail modal.
-        Uses the OpenAI-compatible endpoint configured in the Endpoints tab.
       </p>
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Labeling Method</label>
+          <select
+            value={enhancedMethod}
+            onChange={(e) => setEnhancedMethod(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+          >
+            <option value="openai">OpenAI (requires api-key)</option>
+            <option value="openai_compatible">OpenAI-Compatible (miLLM, Ollama, vLLM, etc.)</option>
+          </select>
+        </div>
+
+        {enhancedMethod === 'openai' && (
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">OpenAI Model</label>
+            <input
+              type="text"
+              value={enhancedOpenaiModel}
+              onChange={(e) => setEnhancedOpenaiModel(e.target.value)}
+              placeholder="e.g. gpt-4o-mini"
+              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+            />
+            {hasOpenaiApiKey ? (
+              <p className="text-xs text-emerald-500 mt-1">
+                ✓ OpenAI API key is configured on the API Keys tab
+              </p>
+            ) : (
+              <p className="text-xs text-amber-400 mt-1">
+                ⚠ Set the OpenAI API key on the <strong>API Keys</strong> tab before starting a job.
+              </p>
+            )}
+          </div>
+        )}
+
+        {enhancedMethod === 'openai_compatible' && (
+          <p className="text-xs text-slate-500 -mt-2">
+            Uses the endpoint and model configured on the <strong>Endpoints</strong> tab.
+          </p>
+        )}
+
         <div>
           <label className="block text-xs text-slate-400 mb-1">Max Parallel Workers (Pass 1)</label>
           <input
@@ -610,7 +656,13 @@ function LabelingTab() {
           </p>
         </div>
         <button
-          onClick={() => handleSave('enhanced_labeling_max_workers', enhancedWorkers)}
+          onClick={async () => {
+            await handleSave('enhanced_labeling_method', enhancedMethod);
+            if (enhancedMethod === 'openai') {
+              await handleSave('enhanced_labeling_openai_model', enhancedOpenaiModel);
+            }
+            await handleSave('enhanced_labeling_max_workers', enhancedWorkers);
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded transition-colors"
         >
           <Save className="w-4 h-4" /> Save
