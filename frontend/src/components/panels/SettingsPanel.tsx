@@ -534,9 +534,39 @@ function LabelingTab() {
   const [enhancedWorkers, setEnhancedWorkers] = useState(getValue('enhanced_labeling_max_workers', '8'));
   const [enhancedMethod, setEnhancedMethod] = useState(getValue('enhanced_labeling_method', 'openai_compatible'));
   const [enhancedOpenaiModel, setEnhancedOpenaiModel] = useState(getValue('enhanced_labeling_openai_model', 'gpt-4o-mini'));
+  const [openaiModels, setOpenaiModels] = useState<string[]>([]);
+  const [fetchingOpenaiModels, setFetchingOpenaiModels] = useState(false);
+  const [openaiModelsError, setOpenaiModelsError] = useState<string | null>(null);
 
   // Has an OpenAI API key been configured on the API Keys tab?
   const hasOpenaiApiKey = settings.some((s) => s.key === 'openai_api_key' && s.value);
+
+  const handleFetchOpenaiModels = async () => {
+    setFetchingOpenaiModels(true);
+    setOpenaiModelsError(null);
+    try {
+      const data = await fetchAPI<{ models: { id: string }[]; total: number }>(
+        '/labeling/models/openai',
+        {
+          method: 'POST',
+          body: JSON.stringify({ endpoint_url: 'https://api.openai.com/v1' }),
+        }
+      );
+      const ids = (data.models || []).map((m) => m.id).filter(Boolean);
+      if (ids.length === 0) {
+        setOpenaiModelsError('No models returned from OpenAI API.');
+      } else {
+        setOpenaiModels(ids);
+        if (!ids.includes(enhancedOpenaiModel)) {
+          setEnhancedOpenaiModel(ids.find((id) => id === 'gpt-4o-mini') || ids[0]);
+        }
+      }
+    } catch (err) {
+      setOpenaiModelsError(err instanceof Error ? err.message : 'Failed to fetch models');
+    } finally {
+      setFetchingOpenaiModels(false);
+    }
+  };
 
   // Sync local state when settings load
   useEffect(() => {
@@ -615,21 +645,52 @@ function LabelingTab() {
         {enhancedMethod === 'openai' && (
           <div>
             <label className="block text-xs text-slate-400 mb-1">OpenAI Model</label>
-            <input
-              type="text"
-              value={enhancedOpenaiModel}
-              onChange={(e) => setEnhancedOpenaiModel(e.target.value)}
-              placeholder="e.g. gpt-4o-mini"
-              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
-            />
-            {hasOpenaiApiKey ? (
-              <p className="text-xs text-emerald-500 mt-1">
-                ✓ OpenAI API key is configured on the API Keys tab
-              </p>
-            ) : (
-              <p className="text-xs text-amber-400 mt-1">
-                ⚠ Set the OpenAI API key on the <strong>API Keys</strong> tab before starting a job.
-              </p>
+            <div className="flex gap-2">
+              {openaiModels.length > 0 ? (
+                <select
+                  value={enhancedOpenaiModel}
+                  onChange={(e) => setEnhancedOpenaiModel(e.target.value)}
+                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                >
+                  {openaiModels.map((m) => (
+                    <option key={m} value={m}>{m}{m === 'gpt-4o-mini' ? ' (recommended)' : ''}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={enhancedOpenaiModel}
+                  onChange={(e) => setEnhancedOpenaiModel(e.target.value)}
+                  placeholder="e.g. gpt-4o-mini"
+                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+                />
+              )}
+              <button
+                onClick={handleFetchOpenaiModels}
+                disabled={fetchingOpenaiModels || !hasOpenaiApiKey}
+                title={!hasOpenaiApiKey ? 'Set the OpenAI API key first' : 'Fetch available models from OpenAI'}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-sm rounded transition-colors whitespace-nowrap"
+              >
+                <RefreshCw className={`w-4 h-4 ${fetchingOpenaiModels ? 'animate-spin' : ''}`} />
+                {fetchingOpenaiModels ? 'Fetching…' : 'Fetch Models'}
+              </button>
+            </div>
+            {openaiModelsError && (
+              <p className="text-xs text-red-400 mt-1">{openaiModelsError}</p>
+            )}
+            {!openaiModelsError && openaiModels.length > 0 && (
+              <p className="text-xs text-slate-500 mt-1">{openaiModels.length} model(s) available from OpenAI</p>
+            )}
+            {!openaiModelsError && openaiModels.length === 0 && (
+              hasOpenaiApiKey ? (
+                <p className="text-xs text-emerald-500 mt-1">
+                  ✓ OpenAI API key is configured on the API Keys tab — click "Fetch Models" to list available models
+                </p>
+              ) : (
+                <p className="text-xs text-amber-400 mt-1">
+                  ⚠ Set the OpenAI API key on the <strong>API Keys</strong> tab before starting a job.
+                </p>
+              )
             )}
           </div>
         )}

@@ -473,15 +473,37 @@ class FetchModelsRequest(BaseModel):
     "/labeling/models/openai",
     summary="Fetch available models from OpenAI or compatible endpoint"
 )
-async def fetch_openai_models(request: FetchModelsRequest):
+async def fetch_openai_models(
+    request: FetchModelsRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Fetch available models from any OpenAI-compatible endpoint.
     Proxied through the backend to avoid CORS and DNS resolution issues.
 
-    API key is optional — endpoints like Ollama and vLLM don't require auth.
-    Falls back to the server's configured OpenAI key if available.
+    API key resolution order:
+      1. request.api_key (explicit in POST body)
+      2. Database AppSetting 'openai_api_key' (set via Settings → API Keys)
+      3. Environment variable settings.openai_api_key
+      4. None (unauthenticated — fine for Ollama / vLLM / miLLM)
     """
-    api_key = request.api_key or getattr(settings, 'openai_api_key', None)
+    api_key = request.api_key
+    if not api_key:
+        from src.models.app_setting import AppSetting
+        from src.core.encryption import decrypt_value
+
+        result = await db.execute(
+            select(AppSetting).where(AppSetting.key == "openai_api_key")
+        )
+        db_setting = result.scalar_one_or_none()
+        if db_setting and db_setting.value:
+            api_key = (
+                decrypt_value(db_setting.value)
+                if db_setting.is_sensitive
+                else db_setting.value
+            )
+    if not api_key:
+        api_key = getattr(settings, 'openai_api_key', None)
 
     # Validate URL scheme — only http/https allowed to prevent SSRF via file://, ftp://, etc.
     from urllib.parse import urlparse
