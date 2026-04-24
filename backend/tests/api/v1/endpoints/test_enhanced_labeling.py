@@ -90,7 +90,12 @@ class TestStartEnhancedLabeling:
             patch(
                 "src.api.v1.endpoints.enhanced_labeling.AppSettingService.get_decrypted_value",
                 new_callable=AsyncMock,
-                side_effect=["http://llm.local/v1", "my-model", "4"],
+                side_effect=[
+                    "openai_compatible",   # enhanced_labeling_method
+                    "http://llm.local/v1",  # openai_compatible_endpoint
+                    "my-model",             # openai_compatible_model
+                    "4",                    # enhanced_labeling_max_workers
+                ],
             ),
             patch(
                 "src.workers.enhanced_labeling_tasks.enhanced_label_feature_task.delay",
@@ -103,12 +108,70 @@ class TestStartEnhancedLabeling:
         data = response.json()
         assert data["feature_id"] == feature.id
         assert data["status"] == "queued"
+        assert data["method"] == "openai_compatible"
         assert data["endpoint"] == "http://llm.local/v1"
         assert data["model"] == "my-model"
         assert data["workers"] == 4
         assert data["examples_total"] == 20
         assert data["examples_completed"] == 0
         assert data["celery_task_id"] == "celery-task-xyz"
+
+    async def test_success_openai_method_uses_openai_endpoint(
+        self, client: AsyncClient, async_session: AsyncSession
+    ):
+        ext_job = await _make_extraction_job(async_session, job_id="test-ext-oai")
+        feature = await _make_feature(
+            async_session, ext_job.id, feature_id="feat_oai_001", neuron_index=101
+        )
+
+        fake_celery = MagicMock()
+        fake_celery.id = "celery-task-oai"
+
+        with (
+            patch(
+                "src.api.v1.endpoints.enhanced_labeling.AppSettingService.get_decrypted_value",
+                new_callable=AsyncMock,
+                side_effect=[
+                    "openai",                # enhanced_labeling_method
+                    "gpt-4o-mini",           # enhanced_labeling_openai_model
+                    "sk-test-key",           # openai_api_key
+                    "4",                     # enhanced_labeling_max_workers
+                ],
+            ),
+            patch(
+                "src.workers.enhanced_labeling_tasks.enhanced_label_feature_task.delay",
+                return_value=fake_celery,
+            ),
+        ):
+            response = await client.post(f"/api/v1/features/{feature.id}/label/enhanced")
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["method"] == "openai"
+        assert data["endpoint"] == "https://api.openai.com/v1"
+        assert data["model"] == "gpt-4o-mini"
+
+    async def test_openai_method_without_api_key_returns_400(
+        self, client: AsyncClient, async_session: AsyncSession
+    ):
+        ext_job = await _make_extraction_job(async_session, job_id="test-ext-oai2")
+        feature = await _make_feature(
+            async_session, ext_job.id, feature_id="feat_oai_002", neuron_index=102
+        )
+
+        with patch(
+            "src.api.v1.endpoints.enhanced_labeling.AppSettingService.get_decrypted_value",
+            new_callable=AsyncMock,
+            side_effect=[
+                "openai",         # enhanced_labeling_method
+                "gpt-4o-mini",    # enhanced_labeling_openai_model
+                None,             # openai_api_key (missing)
+            ],
+        ):
+            response = await client.post(f"/api/v1/features/{feature.id}/label/enhanced")
+
+        assert response.status_code == 400
+        assert "openai_api_key" in response.json()["detail"]
 
     async def test_duplicate_active_job_returns_existing(
         self, client: AsyncClient, async_session: AsyncSession
