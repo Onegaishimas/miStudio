@@ -56,10 +56,14 @@ async def upsert_setting(
     """Create or update a setting (upsert). Sensitive values are encrypted at rest."""
     try:
         setting, is_new = await AppSettingService.upsert(db, data)
-        # Return masked response for sensitive values
+        # Return masked response for sensitive values. CRITICAL: expunge the row from
+        # the session before mutating its `value` field, otherwise SQLAlchemy will
+        # autoflush/commit the masked string back over the encrypted ciphertext on
+        # request teardown — silently corrupting the row each save.
         if setting.is_sensitive:
             from ....core.encryption import decrypt_value, mask_value
-            setting.value = mask_value(decrypt_value(setting.value))
+            db.expunge(setting)
+            setting.value = mask_value(decrypt_value(setting.value, setting_key=setting.key))
         return setting
     except Exception as e:
         logger.error(f"Failed to upsert setting '{data.key}': {e}")
@@ -80,7 +84,10 @@ async def bulk_upsert_settings(
             setting, is_new = await AppSettingService.upsert(db, item)
             if setting.is_sensitive:
                 from ....core.encryption import decrypt_value, mask_value
-                setting.value = mask_value(decrypt_value(setting.value))
+                # Expunge before mutating — otherwise the masked string overwrites
+                # the encrypted ciphertext on session commit (see upsert_setting).
+                db.expunge(setting)
+                setting.value = mask_value(decrypt_value(setting.value, setting_key=setting.key))
             results.append(setting)
             if is_new:
                 created += 1
