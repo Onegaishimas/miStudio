@@ -72,28 +72,59 @@ class EnhancedLabelingService:
 
     # ── LLM call ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _is_reasoning_model(model_name: str) -> bool:
+        """
+        OpenAI reasoning-class models (o1*, o3*, o4*, gpt-5*) reject ``temperature``
+        and require ``max_completion_tokens`` instead of ``max_tokens``. Detect by
+        prefix so we send the right shape on /chat/completions.
+        """
+        m = model_name.lower()
+        return (
+            m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+            or m.startswith("gpt-5")
+        )
+
     def _call_llm(self, prompt: str, max_tokens: int, retries: int = 3) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
-        last_err: Exception | None = None
+        if self._is_reasoning_model(self.model):
+            # Reasoning models: max_completion_tokens, no custom temperature
+            payload["max_completion_tokens"] = max_tokens
+        else:
+            payload["max_tokens"] = max_tokens
+            payload["temperature"] = 0.1
+
+        last_err: str | None = None
         for attempt in range(retries):
             try:
                 resp = self._client.post(
                     f"{self.endpoint}/chat/completions",
                     json=payload,
                 )
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Surface OpenAI's actual error body — otherwise httpx's
+                    # HTTPStatusError swallows the JSON detail and operators
+                    # see only the status code.
+                    body = resp.text[:1000]
+                    last_err = f"HTTP {resp.status_code} — {body}"
+                    raise EnhancedLabelingError(last_err)
                 return resp.json()["choices"][0]["message"]["content"].strip()
-            except Exception as exc:
-                last_err = exc
+            except EnhancedLabelingError:
                 wait = 2.0 * (attempt + 1)
                 logger.warning(
                     "Enhanced labeling LLM call attempt %d/%d failed: %s — retrying in %.0fs",
-                    attempt + 1, retries, exc, wait,
+                    attempt + 1, retries, last_err, wait,
+                )
+                time.sleep(wait)
+            except Exception as exc:
+                last_err = f"{type(exc).__name__}: {exc}"
+                wait = 2.0 * (attempt + 1)
+                logger.warning(
+                    "Enhanced labeling LLM call attempt %d/%d failed: %s — retrying in %.0fs",
+                    attempt + 1, retries, last_err, wait,
                 )
                 time.sleep(wait)
         raise EnhancedLabelingError(

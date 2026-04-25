@@ -27,9 +27,11 @@ def service():
     return svc
 
 
-def _make_llm_response(content: str):
+def _make_llm_response(content: str, status_code: int = 200):
     """Build a minimal httpx-like response mock."""
     resp = MagicMock()
+    resp.status_code = status_code
+    resp.text = content if status_code >= 400 else ""
     resp.raise_for_status = MagicMock()
     resp.json.return_value = {
         "choices": [{"message": {"content": content}}]
