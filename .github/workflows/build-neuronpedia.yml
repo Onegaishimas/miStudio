@@ -12,6 +12,9 @@ env:
   REGISTRY: docker.io
   IMAGE_NAME: hitsai/neuronpedia-webapp
 
+permissions:
+  contents: read
+
 jobs:
   build:
     # Only run in hitsainet/miStudio (same as docker-images.yml)
