@@ -23,19 +23,30 @@ def service():
         model="test-model",
         workers=4,
     )
+    # Mock the OpenAI SDK client so tests don't make real HTTP calls.
+    svc._openai = MagicMock()
+    # Backwards-compatible alias for the old tests that referenced ._client.post
     svc._client = MagicMock()
+    svc._client.post = svc._openai.chat.completions.create
     return svc
 
 
 def _make_llm_response(content: str, status_code: int = 200):
-    """Build a minimal httpx-like response mock."""
+    """Build a minimal OpenAI-SDK-shaped response mock."""
     resp = MagicMock()
+    # OpenAI SDK chat completion shape: resp.choices[0].message.content
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = content
+    resp.choices[0].finish_reason = "stop"
+    resp.usage = MagicMock()
+    resp.usage.model_dump = MagicMock(return_value={})
+    # Legacy httpx-like attributes for any tests that still poke at them
     resp.status_code = status_code
     resp.text = content if status_code >= 400 else ""
     resp.raise_for_status = MagicMock()
-    resp.json.return_value = {
+    resp.json = MagicMock(return_value={
         "choices": [{"message": {"content": content}}]
-    }
+    })
     return resp
 
 

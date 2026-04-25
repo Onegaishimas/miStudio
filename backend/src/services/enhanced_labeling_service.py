@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 import httpx
+from openai import OpenAI, BadRequestError, OpenAIError
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +68,21 @@ class EnhancedLabelingService:
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.workers = workers
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self._client = httpx.Client(
+        # Use the official OpenAI Python SDK. It handles retries, parameter
+        # quirks per model family, error parsing, and connection pooling out
+        # of the box — so we don't hand-roll any of that.
+        self._openai = OpenAI(
+            api_key=api_key or "not-needed",
+            base_url=self.endpoint,
             timeout=httpx.Timeout(90.0, connect=10.0),
-            headers=headers,
+            max_retries=0,  # we handle retries at this layer for our own logging
         )
 
     def close(self) -> None:
-        self._client.close()
+        try:
+            self._openai.close()
+        except Exception:
+            pass
 
     # ── LLM call ─────────────────────────────────────────────────────────────
 
@@ -92,57 +100,57 @@ class EnhancedLabelingService:
         )
 
     def _call_llm(self, prompt: str, max_tokens: int, retries: int = 3) -> str:
+        """
+        Single chat-completion call via the official OpenAI Python SDK.
+
+        The SDK handles per-model parameter validation (e.g. reasoning models
+        rejecting ``temperature``, accepting ``max_completion_tokens`` etc.)
+        and surfaces real error text on failure. We do NOT hand-roll
+        model-family heuristics anymore — let the API tell us what it wants.
+        """
         is_reasoning = self._is_reasoning_model(self.model)
-        payload: dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
         }
         if is_reasoning:
-            # Reasoning models: max_completion_tokens covers reasoning+output,
-            # no custom temperature, prefer minimal reasoning effort because
-            # this is a JSON-shaping task (deep reasoning isn't needed and
-            # would just consume the token budget before any output).
-            payload["max_completion_tokens"] = max_tokens
-            # reasoning_effort is supported by gpt-5* and o3*; safe to send
-            # to o1* (it'll be ignored or 400 — handled by caller).
-            payload["reasoning_effort"] = "minimal"
+            # Reasoning-class models: budget is shared between reasoning trace
+            # and output, so use the larger configured cap. Don't pass
+            # temperature (rejected) or reasoning_effort (value set varies by
+            # model — let the model use its default).
+            kwargs["max_completion_tokens"] = max_tokens
         else:
-            payload["max_tokens"] = max_tokens
-            payload["temperature"] = 0.1
+            kwargs["max_tokens"] = max_tokens
+            kwargs["temperature"] = 0.1
 
         last_err: str | None = None
         for attempt in range(retries):
             try:
-                resp = self._client.post(
-                    f"{self.endpoint}/chat/completions",
-                    json=payload,
-                )
-                if resp.status_code >= 400:
-                    # Surface OpenAI's actual error body — otherwise httpx's
-                    # HTTPStatusError swallows the JSON detail and operators
-                    # see only the status code.
-                    body = resp.text[:1000]
-                    last_err = f"HTTP {resp.status_code} — {body}"
-                    raise EnhancedLabelingError(last_err)
-                payload_resp = resp.json()
-                choice = (payload_resp.get("choices") or [{}])[0]
-                content = (choice.get("message") or {}).get("content") or ""
-                content = content.strip()
-                # Reasoning-model failure mode: content empty because reasoning
-                # consumed the entire max_completion_tokens budget. Detect and
-                # raise a helpful error instead of returning "" upstream.
+                resp = self._openai.chat.completions.create(**kwargs)
+                content = (resp.choices[0].message.content or "").strip()
                 if not content:
-                    finish = choice.get("finish_reason", "unknown")
-                    usage = payload_resp.get("usage", {})
+                    finish = resp.choices[0].finish_reason
+                    usage = resp.usage.model_dump() if resp.usage else {}
                     last_err = (
                         f"OpenAI returned empty content (finish_reason={finish}, "
-                        f"usage={usage}). For reasoning models, this usually means "
+                        f"usage={usage}). For reasoning models this usually means "
                         f"max_completion_tokens={max_tokens} was too small — the "
                         f"reasoning trace consumed the budget. Increase the budget "
                         f"or pick a non-reasoning model (e.g. gpt-4o-mini)."
                     )
                     raise EnhancedLabelingError(last_err)
                 return content
+            except BadRequestError as exc:
+                # 400 from the API — don't retry, the request shape is wrong
+                # and won't get better next attempt. Surface OpenAI's exact
+                # error message so the caller can fix configuration.
+                detail = getattr(exc, "message", None) or str(exc)
+                last_err = f"OpenAI 400: {detail}"
+                logger.warning(
+                    "Enhanced labeling LLM call rejected: %s (not retrying)",
+                    last_err,
+                )
+                break
             except EnhancedLabelingError:
                 wait = 2.0 * (attempt + 1)
                 logger.warning(
@@ -151,6 +159,8 @@ class EnhancedLabelingService:
                 )
                 time.sleep(wait)
             except Exception as exc:
+                # Catches OpenAIError (rate limits, server errors, timeouts)
+                # and generic network failures. Retry with backoff.
                 last_err = f"{type(exc).__name__}: {exc}"
                 wait = 2.0 * (attempt + 1)
                 logger.warning(
