@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 PER_EXAMPLE_MAX_TOKENS = 80
 SYNTHESIS_MAX_TOKENS = 500
+# Reasoning models (gpt-5*, o1*, o3*, o4*) consume max_completion_tokens
+# for *both* internal reasoning and output. The 80/500 budgets above only
+# cover OUTPUT — for reasoning models we add headroom so the JSON answer
+# isn't truncated to empty by the reasoning trace.
+REASONING_PER_EXAMPLE_MAX_TOKENS = 4000
+REASONING_SYNTHESIS_MAX_TOKENS = 16000
 _BPE_SPACE = "\u0120"  # Ġ — BPE space-prefix marker
 
 
@@ -86,13 +92,20 @@ class EnhancedLabelingService:
         )
 
     def _call_llm(self, prompt: str, max_tokens: int, retries: int = 3) -> str:
+        is_reasoning = self._is_reasoning_model(self.model)
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
         }
-        if self._is_reasoning_model(self.model):
-            # Reasoning models: max_completion_tokens, no custom temperature
+        if is_reasoning:
+            # Reasoning models: max_completion_tokens covers reasoning+output,
+            # no custom temperature, prefer minimal reasoning effort because
+            # this is a JSON-shaping task (deep reasoning isn't needed and
+            # would just consume the token budget before any output).
             payload["max_completion_tokens"] = max_tokens
+            # reasoning_effort is supported by gpt-5* and o3*; safe to send
+            # to o1* (it'll be ignored or 400 — handled by caller).
+            payload["reasoning_effort"] = "minimal"
         else:
             payload["max_tokens"] = max_tokens
             payload["temperature"] = 0.1
@@ -111,7 +124,25 @@ class EnhancedLabelingService:
                     body = resp.text[:1000]
                     last_err = f"HTTP {resp.status_code} — {body}"
                     raise EnhancedLabelingError(last_err)
-                return resp.json()["choices"][0]["message"]["content"].strip()
+                payload_resp = resp.json()
+                choice = (payload_resp.get("choices") or [{}])[0]
+                content = (choice.get("message") or {}).get("content") or ""
+                content = content.strip()
+                # Reasoning-model failure mode: content empty because reasoning
+                # consumed the entire max_completion_tokens budget. Detect and
+                # raise a helpful error instead of returning "" upstream.
+                if not content:
+                    finish = choice.get("finish_reason", "unknown")
+                    usage = payload_resp.get("usage", {})
+                    last_err = (
+                        f"OpenAI returned empty content (finish_reason={finish}, "
+                        f"usage={usage}). For reasoning models, this usually means "
+                        f"max_completion_tokens={max_tokens} was too small — the "
+                        f"reasoning trace consumed the budget. Increase the budget "
+                        f"or pick a non-reasoning model (e.g. gpt-4o-mini)."
+                    )
+                    raise EnhancedLabelingError(last_err)
+                return content
             except EnhancedLabelingError:
                 wait = 2.0 * (attempt + 1)
                 logger.warning(
@@ -170,7 +201,8 @@ class EnhancedLabelingService:
             f"In ONE sentence, describe the precise linguistic or semantic role "
             f"[{prime.strip()}] is playing here. Be concrete."
         )
-        raw = self._call_llm(prompt, PER_EXAMPLE_MAX_TOKENS)
+        max_t = REASONING_PER_EXAMPLE_MAX_TOKENS if self._is_reasoning_model(self.model) else PER_EXAMPLE_MAX_TOKENS
+        raw = self._call_llm(prompt, max_t)
         # Strip wrapping quotes/fences the model sometimes adds
         return re.sub(r'^["\'`]+|["\'`]+$', "", raw.strip())
 
@@ -216,7 +248,8 @@ class EnhancedLabelingService:
             f'  "reasoning": "One paragraph explaining the unifying pattern and any notable edge cases."\n'
             f'}}'
         )
-        raw = self._call_llm(prompt, SYNTHESIS_MAX_TOKENS)
+        max_t = REASONING_SYNTHESIS_MAX_TOKENS if self._is_reasoning_model(self.model) else SYNTHESIS_MAX_TOKENS
+        raw = self._call_llm(prompt, max_t)
         return self._parse_json(raw), raw
 
     @staticmethod
