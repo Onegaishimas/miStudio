@@ -195,7 +195,8 @@ services:
     image: hitsai/mistudio-frontend:latest
     container_name: mistudio-frontend
     ports:
-      - "3000:80"
+      # Container listens on 8080 (non-root nginx-unprivileged image).
+      - "3000:8080"
     depends_on:
       - backend
     restart: unless-stopped
