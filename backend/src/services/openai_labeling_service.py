@@ -287,7 +287,10 @@ class OpenAILabelingService:
                 curl_file = f"{base_filename}.curl.txt"
                 headers = []
                 if self.api_key and self.api_key != "not-needed" and self.api_key != "dummy-key-not-required":
-                    headers.append(f"-H 'Authorization: Bearer {self.api_key}'")
+                    # NEVER write the real bearer token to disk — these files are
+                    # debug artifacts that get checked into bug reports / shared.
+                    # Replace with a placeholder the user substitutes manually.
+                    headers.append("-H \"Authorization: Bearer $OPENAI_API_KEY\"")
                 headers.append("-H 'Content-Type: application/json'")
 
                 # Use just the filename (not full path) for portability

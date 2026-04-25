@@ -36,7 +36,7 @@ class TextCleaner:
     # Enhanced URL patterns - catches more variants
     URL_PATTERNS = [
         # Full URLs with protocol
-        re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'),
+        re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[-$_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'),
         # URLs without protocol (www., ftp.)
         re.compile(r'\b(?:www|ftp)\.[a-zA-Z0-9\-._~:/?#\[\]@!$&\'()*+,;=]+'),
         # Domain-like patterns with common TLDs
