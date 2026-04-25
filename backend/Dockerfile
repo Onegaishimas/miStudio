@@ -53,8 +53,10 @@ COPY requirements.txt .
 
 # Install Python dependencies
 # Note: PyTorch with CUDA is included in requirements.txt
-# Explicitly upgrade pip, setuptools, and wheel to fix CVEs in base image
-RUN python3.12 -m pip install --upgrade pip "setuptools>=78.1.1" "wheel>=0.46.2" \
+# Explicitly upgrade pip, setuptools, and wheel to fix CVEs in base image.
+# setuptools>=82 bundles vendored wheel>=0.46.3, closing CVE-2026-24049
+# (path traversal in wheel <0.46.2) at the vendored copy Scout flags.
+RUN python3.12 -m pip install --upgrade pip "setuptools>=82.0.1" "wheel>=0.46.2" \
     && python3.12 -m pip install -r requirements.txt
 
 # Pre-install spaCy model for NLP analysis
