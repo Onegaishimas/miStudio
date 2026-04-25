@@ -259,7 +259,9 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                       <ChevronDown className={`w-3 h-3 transition-transform ${notesExpanded ? 'rotate-180' : ''}`} />
                     </button>
                     {notesExpanded && (
-                      <p className="px-3 pb-3 text-sm text-slate-300">{selectedFeature.notes}</p>
+                      <p className="px-3 pb-3 text-sm text-slate-300 whitespace-pre-wrap break-words">
+                        {selectedFeature.notes}
+                      </p>
                     )}
                   </div>
                 )}

@@ -26,6 +26,9 @@ export function SettingsPanel() {
 
   useEffect(() => {
     fetchAll();
+    // Reset scroll on mount — without this, navigating in from another page
+    // (e.g. Features) lands on Settings already scrolled past the tab bar.
+    window.scrollTo(0, 0);
   }, [fetchAll]);
 
   return (
