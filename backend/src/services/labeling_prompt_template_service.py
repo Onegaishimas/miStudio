@@ -5,6 +5,7 @@ This module contains the LabelingPromptTemplateService class which handles all
 labeling prompt template-related business logic and database operations.
 """
 
+import logging
 from typing import List, Optional, Dict, Any
 from uuid import uuid4
 from datetime import datetime, UTC
@@ -12,6 +13,8 @@ from datetime import datetime, UTC
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+
+logger = logging.getLogger(__name__)
 
 from ..models.labeling_prompt_template import LabelingPromptTemplate
 from ..models.labeling_job import LabelingJob
@@ -558,9 +561,11 @@ class LabelingPromptTemplateService:
                     imported_count += 1
                     details.append(f"Imported '{template_name}'")
 
-            except Exception as e:
+            except Exception:
+                template_name = template_data.get('name', 'unknown')
+                logger.exception("Failed to import labeling prompt template %s", template_name)
                 failed_count += 1
-                details.append(f"Failed to import '{template_data.get('name', 'unknown')}': {str(e)}")
+                details.append(f"Failed to import '{template_name}' — check the server log for details")
 
         await db.commit()
 

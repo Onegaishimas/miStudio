@@ -5,6 +5,7 @@ This module contains the ExtractionTemplateService class which handles all
 extraction template-related business logic and database operations.
 """
 
+import logging
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime, UTC
@@ -12,6 +13,8 @@ import json
 
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from ..models.extraction_template import ExtractionTemplate
 from ..schemas.extraction_template import (
@@ -395,10 +398,12 @@ class ExtractionTemplateService:
                     db.add(new_template)
                     created_count += 1
 
-            except Exception as e:
+            except Exception:
+                template_name = template_data.get("name", "unknown")
+                logger.exception("Failed to import extraction template %s", template_name)
                 errors.append({
-                    "template_name": template_data.get("name", "unknown"),
-                    "error": str(e)
+                    "template_name": template_name,
+                    "error": "Failed to import — check the server log for details",
                 })
 
         # Commit all changes
