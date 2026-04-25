@@ -68,7 +68,10 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           push: true
           tags: ${{ steps.version.outputs.tags }}
-          provenance: true
+          # mode=max attaches full build step provenance (not the default
+          # minimal mode), which is what Docker Scout's supply-chain
+          # attestation policy checks for.
+          provenance: mode=max
           sbom: true
 
       - name: Attest build provenance
