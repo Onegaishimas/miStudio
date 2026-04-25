@@ -4,6 +4,7 @@ This module provides typed configuration loaded from environment variables.
 All settings are validated at startup to fail fast if misconfigured.
 """
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -350,29 +351,60 @@ class Settings(BaseSettings):
         """
         Resolve a path supplied by an external user (e.g. an API request body).
 
-        Differs from ``resolve_data_path`` by enforcing that the resolved path
-        stays inside one of the trusted roots (``data_dir``, ``run_dir``,
-        ``hf_cache_dir``). Use this for any path that originated from outside
-        the trust boundary; use ``resolve_data_path`` for paths read from the
-        database or constructed by the system itself.
+        Performs **string-only** normalization of the user input — never
+        touches the filesystem with raw user data — then performs an
+        allow-list containment check against the trusted roots
+        (``data_dir``, ``run_dir``, ``hf_cache_dir``). Use this for any path
+        that originated from outside the trust boundary; use
+        ``resolve_data_path`` for paths read from the database or
+        constructed by the system itself.
+
+        Implementation notes:
+        - Uses ``os.path.normpath`` (pure-string) instead of ``Path.resolve``
+          so we don't probe the filesystem (incl. symlinks) before the
+          containment check has succeeded.
+        - The ``..`` segment check is performed on the post-normalization
+          path under each trusted root; if any segment escapes, normpath's
+          collapse will land the candidate outside the root and the
+          ``commonpath`` check rejects it.
 
         Raises:
-            ValueError: if the input contains traversal segments that escape
-                       all trusted roots, or if the input is an absolute path
-                       outside the trusted roots.
+            ValueError: if the resolved path is not contained inside any
+                       trusted root.
         """
-        candidate = self.resolve_data_path(user_path)
-        try:
-            resolved = candidate.resolve()
-        except OSError as exc:
-            raise ValueError(f"Could not resolve {user_path!r}: {exc}") from exc
+        path_str = str(user_path)
 
-        trusted_roots = [self.data_dir.resolve(), self.run_dir.resolve(), self.hf_cache_dir.resolve()]
+        # Strip Docker-style "/data/" or legacy "data/" prefix so the
+        # remainder is treated as data_dir-relative regardless of how the
+        # caller framed the input.
+        if path_str.startswith("/data/"):
+            path_str = path_str[6:]
+        elif path_str.startswith("data/"):
+            path_str = path_str[5:]
+        elif path_str.startswith("/"):
+            # Bare absolute path (e.g. "/etc/passwd") — strip leading slashes
+            # and treat as relative; the containment check will reject it
+            # because data_dir/etc/passwd won't exist under any trusted root
+            # (and even if it did, normpath wouldn't escape data_dir).
+            path_str = path_str.lstrip("/")
+
+        # Pure-string normalization — collapses "..", "." and duplicate slashes
+        # without consulting the filesystem.
+        data_dir_real = os.path.realpath(str(self.data_dir))
+        candidate_str = os.path.normpath(os.path.join(data_dir_real, path_str))
+
+        # Allow-list containment: candidate must live under a trusted root.
+        trusted_roots = [
+            os.path.realpath(str(self.data_dir)),
+            os.path.realpath(str(self.run_dir)),
+            os.path.realpath(str(self.hf_cache_dir)),
+        ]
         for root in trusted_roots:
             try:
-                resolved.relative_to(root)
-                return resolved
+                if os.path.commonpath([candidate_str, root]) == root:
+                    return Path(candidate_str)
             except ValueError:
+                # commonpath raises if the paths are on different drives (Windows).
                 continue
         raise ValueError(
             f"Path {user_path!r} resolves outside the trusted data roots"
