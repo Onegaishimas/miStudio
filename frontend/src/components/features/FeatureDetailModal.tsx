@@ -9,6 +9,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { X, Save, Star, Info, Activity, GitBranch, Zap, Hash, Copy, Check, ChevronDown, Brain, Sparkles, Loader2 } from 'lucide-react';
 import { useFeaturesStore } from '../../stores/featuresStore';
 import { useEnhancedLabeling } from '../../hooks/useEnhancedLabeling';
@@ -259,9 +261,37 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                       <ChevronDown className={`w-3 h-3 transition-transform ${notesExpanded ? 'rotate-180' : ''}`} />
                     </button>
                     {notesExpanded && (
-                      <p className="px-3 pb-3 text-sm text-slate-300 whitespace-pre-wrap break-words">
-                        {selectedFeature.notes}
-                      </p>
+                      <div className="px-3 pb-3 max-h-96 overflow-y-auto text-sm text-slate-300">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            // Compact, dark-theme-aware markdown rendering
+                            p: ({ children }) => <p className="mb-3 leading-relaxed">{children}</p>,
+                            h1: ({ children }) => <h3 className="text-base font-semibold text-slate-200 mt-3 mb-2">{children}</h3>,
+                            h2: ({ children }) => <h4 className="text-sm font-semibold text-slate-200 mt-3 mb-1">{children}</h4>,
+                            h3: ({ children }) => <h4 className="text-sm font-semibold text-slate-200 mt-2 mb-1">{children}</h4>,
+                            strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
+                            ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
+                            li: ({ children }) => <li className="text-slate-300">{children}</li>,
+                            code: ({ children }) => <code className="px-1 py-0.5 rounded bg-slate-900 text-slate-200 font-mono text-xs">{children}</code>,
+                            pre: ({ children }) => <pre className="p-2 my-2 rounded bg-slate-900 overflow-x-auto text-xs">{children}</pre>,
+                            hr: () => <hr className="my-3 border-slate-700" />,
+                            table: ({ children }) => (
+                              <div className="my-3 overflow-x-auto">
+                                <table className="text-xs border border-slate-700 border-collapse">{children}</table>
+                              </div>
+                            ),
+                            thead: ({ children }) => <thead className="bg-slate-900">{children}</thead>,
+                            tbody: ({ children }) => <tbody>{children}</tbody>,
+                            tr: ({ children }) => <tr className="border-b border-slate-800">{children}</tr>,
+                            th: ({ children }) => <th className="px-2 py-1 text-left font-semibold text-slate-200 border-r border-slate-800 last:border-r-0">{children}</th>,
+                            td: ({ children }) => <td className="px-2 py-1 text-slate-300 border-r border-slate-800 last:border-r-0 align-top">{children}</td>,
+                          }}
+                        >
+                          {selectedFeature.notes}
+                        </ReactMarkdown>
+                      </div>
                     )}
                   </div>
                 )}
