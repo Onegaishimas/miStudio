@@ -346,6 +346,38 @@ class Settings(BaseSettings):
 
         return self.data_dir / path_str
 
+    def resolve_user_path(self, user_path: str | Path) -> Path:
+        """
+        Resolve a path supplied by an external user (e.g. an API request body).
+
+        Differs from ``resolve_data_path`` by enforcing that the resolved path
+        stays inside one of the trusted roots (``data_dir``, ``run_dir``,
+        ``hf_cache_dir``). Use this for any path that originated from outside
+        the trust boundary; use ``resolve_data_path`` for paths read from the
+        database or constructed by the system itself.
+
+        Raises:
+            ValueError: if the input contains traversal segments that escape
+                       all trusted roots, or if the input is an absolute path
+                       outside the trusted roots.
+        """
+        candidate = self.resolve_data_path(user_path)
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            raise ValueError(f"Could not resolve {user_path!r}: {exc}") from exc
+
+        trusted_roots = [self.data_dir.resolve(), self.run_dir.resolve(), self.hf_cache_dir.resolve()]
+        for root in trusted_roots:
+            try:
+                resolved.relative_to(root)
+                return resolved
+            except ValueError:
+                continue
+        raise ValueError(
+            f"Path {user_path!r} resolves outside the trusted data roots"
+        )
+
 
 # Global settings instance
 settings = Settings()

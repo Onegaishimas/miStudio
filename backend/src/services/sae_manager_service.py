@@ -537,7 +537,10 @@ class SAEManagerService:
         Returns:
             Created ExternalSAE
         """
-        source_path = settings.resolve_data_path(request.file_path)
+        # request.file_path is user-supplied — use the strict resolver that
+        # rejects paths escaping the trusted data roots (prevents path injection
+        # like ../../../etc/passwd or /etc/shadow).
+        source_path = settings.resolve_user_path(request.file_path)
 
         if not source_path.exists():
             raise ValueError(f"File not found: {request.file_path}")
