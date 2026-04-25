@@ -931,11 +931,12 @@ async def get_dataset_samples(
                     }
                 except Exception as e:
                     # If decoding fails, show truncated token IDs
+                    logger.exception("Failed to decode tokenized sample")
                     sample = {
                         "input_ids": sample['input_ids'][:50],  # Show first 50 tokens
                         "_metadata": {
                             "source": "tokenized_dataset_raw",
-                            "error": f"Failed to decode: {str(e)}",
+                            "error": "Failed to decode tokenized sample",
                             "total_tokens": len(sample['input_ids'])
                         }
                     }

@@ -422,9 +422,9 @@ async def import_templates(
             overwrite_duplicates
         )
         return result
-    except Exception as e:
-        logger.error(f"Failed to import templates: {str(e)}")
+    except Exception:
+        logger.exception("Failed to import labeling prompt templates")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import templates: {str(e)}"
+            detail="Failed to import templates — check the server log for details",
         )

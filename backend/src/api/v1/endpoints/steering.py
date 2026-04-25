@@ -218,11 +218,12 @@ async def cleanup_steering_gpu():
             "task_id": result.id,
             **cleanup_result,
         }
-    except Exception as e:
+    except Exception:
+        logger.exception("GPU cleanup task did not complete in time")
         return {
             "message": "Cleanup task submitted but result pending",
             "task_id": result.id,
-            "error": str(e),
+            "error": "Task is still running or failed — check the server log for details",
         }
 
 

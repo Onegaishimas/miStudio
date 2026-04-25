@@ -304,9 +304,9 @@ async def list_local_models(db: AsyncSession = Depends(get_db)):
 
         return {"models": model_names}
 
-    except Exception as e:
-        logger.error(f"Error listing local models: {e}")
-        return {"models": [], "error": str(e)}
+    except Exception:
+        logger.exception("Error listing local models")
+        return {"models": [], "error": "Failed to list local models"}
 
 
 @router.get("/{model_id}", response_model=ModelResponse)

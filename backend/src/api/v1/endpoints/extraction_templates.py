@@ -319,15 +319,15 @@ async def import_templates(
             overwrite_duplicates
         )
         return JSONResponse(content=result)
-    except ValueError as e:
-        logger.error(f"Invalid import data: {str(e)}")
+    except ValueError:
+        logger.exception("Invalid extraction template import data")
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid import data: {str(e)}"
+            detail="Invalid import data — check the server log for details",
         )
-    except Exception as e:
-        logger.error(f"Failed to import templates: {str(e)}")
+    except Exception:
+        logger.exception("Failed to import extraction templates")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import templates: {str(e)}"
+            detail="Failed to import templates — check the server log for details",
         )

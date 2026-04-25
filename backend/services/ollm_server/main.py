@@ -258,21 +258,21 @@ async def chat_completions(request: ChatCompletionRequest):
                         data = chunk.model_dump_json()
                         yield f"data: {data}\n\n"
                     yield "data: [DONE]\n\n"
-                except ModelTooLargeError as e:
-                    logger.error(f"Model too large for streaming: {e}")
+                except ModelTooLargeError:
+                    logger.exception("Model too large for streaming")
                     error_chunk = {
                         "error": {
-                            "message": str(e),
+                            "message": "The selected model is too large for the available memory",
                             "type": "model_too_large",
                             "code": "model_too_large",
                         }
                     }
                     yield f"data: {json.dumps(error_chunk)}\n\n"
-                except Exception as e:
-                    logger.error(f"Streaming error: {e}")
+                except Exception:
+                    logger.exception("Streaming error")
                     error_chunk = {
                         "error": {
-                            "message": str(e),
+                            "message": "An internal server error occurred during streaming",
                             "type": "server_error",
                         }
                     }
