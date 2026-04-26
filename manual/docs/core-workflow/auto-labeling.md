@@ -108,7 +108,7 @@ Many features fire on common tokens (`the`, `and`, `of`) but encode completely d
 
 To use it: in the **Start Labeling** dialog, select **"Context-Aware Labeling (Semantic Pattern)"** from the Template dropdown.
 
-<!-- SCREENSHOT NEEDED: The Start Labeling dialog with the Template dropdown open, showing "Context-Aware Labeling (Semantic Pattern)" highlighted in the list. -->
+![Start Semantic Labeling dialog — Template dropdown, Method selector, and model configuration](/img/miStudio_Labeling-Start_Dialog.jpg)
 
 ### Creating Custom Templates
 

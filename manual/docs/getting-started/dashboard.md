@@ -57,4 +57,4 @@ The **Settings** panel provides persistent configuration:
 API keys are stored with AES-256-GCM encryption in the database — never in plain text or environment variables. Set your OpenAI key once here and all labeling jobs (bulk and enhanced) use it automatically.
 :::
 
-<!-- SCREENSHOT NEEDED: Settings panel open to the API Keys tab, showing the OpenAI API Key row with a masked value (sk-...XXXX) and the Edit/Delete buttons. Annotate the encryption note. -->
+![Settings API Keys tab — OpenAI key stored as masked value, HuggingFace token also saved](/img/miStudio_Settings_APIKeys-Saved.jpg)

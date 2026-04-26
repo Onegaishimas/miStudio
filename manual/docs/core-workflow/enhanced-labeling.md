@@ -16,11 +16,11 @@ Use enhanced labeling when:
 - You're preparing features for export to Neuronpedia
 :::
 
-## The Sparkle Button
+## The Enhanced Label Button
 
-In the **Feature Detail Modal**, look for the **✨ sparkle button** next to the star:
+In the **Feature Detail Modal**, click the **Enhanced Label** button next to Edit Details:
 
-<!-- SCREENSHOT NEEDED: Feature Detail Modal showing the ✨ sparkle button, the star with aqua color indicator, and the feature's name/category/description. Annotate: (1) the sparkle button, (2) the star color indicator -->
+![Feature Detail Modal — the Enhanced Label button with tooltip explaining two-pass LLM labeling](/img/miStudio_Feature_Modal-Enhanced_Label_Button.jpg)
 
 Click it to start enhanced labeling for that feature. The job is queued immediately and runs in the background.
 
@@ -55,7 +55,7 @@ The LLM produces a structured JSON response with:
 - **Description:** one precise sentence grounding the pattern
 - **Notes:** a reasoning paragraph + a markdown table of the per-example summaries
 
-<!-- SCREENSHOT NEEDED: Feature Detail Modal during Pass 1, showing the progress display "Summarizing example 12 / 20..." with the phase indicator. Annotate the progress counter and phase label. -->
+![Feature Detail Modal during Pass 1 — "Queued..." status while waiting for a worker slot](/img/miStudio_Feature_Modal-Enhanced_Labeling_Queued.jpg)
 
 ## Progress Tracking
 
@@ -78,7 +78,7 @@ The star on each feature card tracks the labeling lifecycle:
 | 🟣 Purple | Enhanced labeling is in-flight |
 | 🔵 Aqua | Enhanced labeling completed — permanent |
 
-<!-- SCREENSHOT NEEDED: Feature list showing several features with different star colors — one yellow, one purple (in-flight), one aqua (completed). The aqua star should be clearly visible against the slate background. -->
+![Feature list showing yellow, purple (in-flight), and aqua (completed) star colors](/img/miStudio_Feature_List-Star_Colors.jpg)
 
 **Aqua is permanent.** It signals that a human-quality interpretation has been applied. Bulk auto-labeling jobs will automatically skip aqua-starred features, so a subsequent bulk job won't overwrite your carefully enhanced labels.
 
@@ -86,7 +86,7 @@ The star on each feature card tracks the labeling lifecycle:
 
 When synthesis completes, the Feature Detail modal auto-populates the **Edit** form with the new name, category, description, and notes. Review them, make any edits, and click **Save**.
 
-<!-- SCREENSHOT NEEDED: Feature Detail Modal after enhanced labeling completes — the edit form pre-populated with the generated name/description/notes, and the Notes section expanded showing the markdown-rendered synthesis paragraph and per-example summary table. -->
+![Feature Detail Modal after completion — Notes section expanded showing the markdown synthesis paragraph and per-example summary table](/img/miStudio_Feature_Modal-Enhanced_Labeling_Completed.jpg)
 
 The **Notes** section renders as markdown:
 - The synthesis reasoning paragraph at the top
@@ -98,7 +98,15 @@ This gives you a full audit trail of how the label was derived.
 
 Configure enhanced labeling in **Settings → Labeling → Enhanced Labeling**:
 
-<!-- SCREENSHOT NEEDED: Settings panel, Labeling tab, Enhanced Labeling section — showing the Method dropdown (OpenAI selected), the model input field with Fetch Models button, the API key configured indicator, and the Max Parallel Workers field. -->
+![Settings → Labeling tab — Enhanced Labeling section with OpenAI method selected, model dropdown with Fetch Models, and Max Parallel Workers](/img/miStudio_Settings_Labeling-Enhanced_OpenAI.jpg)
+
+The **Method** dropdown lets you switch between OpenAI and any local OpenAI-compatible endpoint:
+
+![Method dropdown showing OpenAI and OpenAI-Compatible options](/img/miStudio_Settings_Labeling-Enhanced_Method_Dropdown.jpg)
+
+After clicking **Fetch Models**, a scrollable dropdown lists all models available in your account:
+
+![Model dropdown populated with 134 GPT-5 models from Fetch Models](/img/miStudio_Settings_Labeling-Enhanced_Model_Dropdown.jpg)
 
 | Setting | Description |
 |---------|-------------|
@@ -125,9 +133,13 @@ The `OpenAI` method requires your OpenAI API key. Set it once in **Settings → 
 2. Click **Edit** next to **OpenAI API Key**
 3. Paste your `sk-proj-...` key and click **Save**
 
-The key is stored encrypted at rest (AES-256-GCM) — it's never stored in plain text or visible in full after saving.
+![Settings API Keys tab with OpenAI key in edit mode and HuggingFace token already saved](/img/miStudio_Settings_APIKeys-Edit.jpg)
 
-After saving, the **Labeling** tab will show ✓ *"OpenAI API key is configured"* next to the model selector.
+The key is stored encrypted at rest (AES-256-GCM). After saving it is only shown in masked form (`sk-...XXXX`) — never in full:
+
+![Settings API Keys tab after saving — both keys masked, with Edit/Delete actions](/img/miStudio_Settings_APIKeys-Saved.jpg)
+
+After saving, the **Labeling** tab will show ✓ *"134 model(s) available from OpenAI"* once you click **Fetch Models**.
 
 ## Enhanced vs. Bulk Labeling
 

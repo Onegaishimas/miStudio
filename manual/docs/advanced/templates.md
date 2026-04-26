@@ -55,7 +55,11 @@ The built-in **"Context-Aware Labeling (Semantic Pattern)"** system template use
 
 You cannot delete system templates, but you can duplicate them to create customized variants.
 
-<!-- SCREENSHOT NEEDED: The Labeling Prompt Templates panel showing the "Context-Aware Labeling (Semantic Pattern)" system template card, with its description visible. Annotate the "System" badge that distinguishes it from user templates. -->
+![Labeling Prompt Templates panel — Context-Aware template at top, with miStudio Brand templates below](/img/miStudio_Templates_Labeling-Context_Aware.jpg)
+
+Clicking the eye icon on any template shows a full preview of its system message and user prompt:
+
+![Context-Aware template preview — system message instructs the model to identify semantic patterns, not token names](/img/miStudio_Templates_Labeling-Context_Aware_Preview.jpg)
 
 ## Steering Prompt Templates
 
