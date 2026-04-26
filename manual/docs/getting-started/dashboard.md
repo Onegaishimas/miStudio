@@ -48,11 +48,13 @@ The **Settings** panel provides persistent configuration:
 
 | Tab | What It Controls |
 |-----|-----------------|
-| **Endpoints** | Saved API endpoints for labeling (OpenAI-compatible URLs) |
-| **API Keys** | Encrypted storage (AES-256-GCM) for OpenAI, HuggingFace tokens |
-| **Labeling** | Default batch size, token filtering preferences |
+| **Endpoints** | OpenAI-compatible endpoint URL + model for all labeling. **Fetch Models** button queries the endpoint and populates a dropdown. Saved endpoint bookmarks for switching. |
+| **API Keys** | Encrypted storage (AES-256-GCM) for OpenAI API key and HuggingFace token. Keys are never returned in full after saving. |
+| **Labeling** | Default batch size, max examples per feature. **Enhanced Labeling** section: choose between OpenAI API or local OpenAI-compatible endpoint, select the model (with Fetch Models button), set max parallel workers. |
 | **Display** | Theme and UI customization |
 
 :::info Encrypted Settings
-API keys are stored with AES-256-GCM encryption in the database — never in plain text or environment variables.
+API keys are stored with AES-256-GCM encryption in the database — never in plain text or environment variables. Set your OpenAI key once here and all labeling jobs (bulk and enhanced) use it automatically.
 :::
+
+<!-- SCREENSHOT NEEDED: Settings panel open to the API Keys tab, showing the OpenAI API Key row with a masked value (sk-...XXXX) and the Edit/Delete buttons. Annotate the encryption note. -->

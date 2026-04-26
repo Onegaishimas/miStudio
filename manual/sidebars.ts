@@ -29,6 +29,7 @@ const sidebars: SidebarsConfig = {
         'core-workflow/sae-training',
         'core-workflow/feature-extraction',
         'core-workflow/auto-labeling',
+        'core-workflow/enhanced-labeling',
         'core-workflow/steering',
       ],
     },

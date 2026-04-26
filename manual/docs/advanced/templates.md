@@ -35,6 +35,28 @@ Save any training configuration as a template for reproducibility. Export as JSO
 
 Customize how the LLM analyzes features by editing labeling prompt templates. Change the "persona" of the labeling assistant, adjust analysis instructions, and add domain-specific context.
 
+### Template Types
+
+miStudio supports two template formats, controlled by the **Template Type** field:
+
+| Type | Placeholder | Data Shown to LLM | Best For |
+|------|------------|-------------------|---------|
+| `legacy` | `{tokens_table}` | Token → occurrence count table | Fast, token-focused labeling |
+| `mistudio_context` | `{examples_block}` | Full context: prefix `<< token >>` suffix per example | Semantic pattern labeling |
+
+### The Context-Aware System Template
+
+The built-in **"Context-Aware Labeling (Semantic Pattern)"** system template uses `mistudio_context` format and is the recommended starting point for new labeling jobs. It:
+
+- Shows full context windows for each activation example (not just token frequencies)
+- Instructs the LLM to identify the shared **semantic pattern** across all examples, not just name the prime token
+- Includes 3 negative (low-activation) counter-examples for contrastive grounding
+- Produces labels structured as `{category, specific, description}` where `specific` names the pattern
+
+You cannot delete system templates, but you can duplicate them to create customized variants.
+
+<!-- SCREENSHOT NEEDED: The Labeling Prompt Templates panel showing the "Context-Aware Labeling (Semantic Pattern)" system template card, with its description visible. Annotate the "System" badge that distinguishes it from user templates. -->
+
 ## Steering Prompt Templates
 
 ![Creating a Steering Prompt Template](/img/miStudio_Template_Panel-CreateSteeringPromptTemplate.jpg)
