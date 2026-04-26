@@ -4,14 +4,28 @@ yes
 ## Current Status
 - **Phase:** Active Development & Maintenance
 - **Last Session:** 2026-04-26
-- **Current Task:** Documentation alignment and bug fixes
-- **Active Work:** Test suite maintenance and API stability improvements
+- **Current Task:** Documentation update complete (v3.0)
+- **Active Work:** None — stable, all services running
 - **Completed:**
-  - HP-1 System Monitoring WebSocket Migration (10/10 sub-tasks) ✅
-  - Integration test fixes (15 tests fixed) ✅
-  - Dataset samples endpoint bytes handling fix ✅
-- **Test Status:** 961 passed, 4 skipped (conditional on external dependencies)
-- **Services Status:** Backend (port 8000) ✅, Frontend (port 3000) ✅, PostgreSQL ✅, Redis ✅, Celery Worker ✅, Celery Beat ✅, Nginx ✅
+  - Enhanced per-feature two-pass LLM labeling ✅
+  - OpenAI API integration (enhanced + bulk labeling) ✅
+  - OpenAI SDK standardization in EnhancedLabelingService ✅
+  - Context-Aware Labeling template (semantic pattern focus) ✅
+  - Settings Panel — encrypted API keys (AES-256-GCM), Fetch Models ✅
+  - Security hardening — path injection, stack-trace exposure, non-root containers ✅
+  - Supply-chain security — CodeQL, Docker Scout, SLSA provenance ✅
+  - Feature notes markdown rendering (react-markdown + remark-gfm) ✅
+  - v0.5.0 public release (Apache 2.0, CI/CD, K8s deployment) ✅
+  - 0xcc documentation updated to v3.0 (PPRD, PADR, FPRD, FTASKS) ✅
+  - Docusaurus manual updated with enhanced labeling docs + 12 screenshots ✅
+- **Test Status:** 995 passed, 4 skipped (conditional on external dependencies)
+- **Services Status:** K8s (mistudio namespace) ✅, Docker Compose (192.168.244.222) ✅
+  - Backend (port 8000) ✅, Frontend (nginx-unprivileged, port 8080→80) ✅
+  - PostgreSQL ✅, Redis ✅, Celery Worker ✅, Celery Beat ✅, Nginx ✅
+- **K8s Manifest:** Restored and in sync at /home/sean/app/k8s-mistudio.hitsai.local/mistudio-deployment.yaml
+- **Pending (deferred):**
+  - Backend non-root container (entrypoint refactor + K8s fsGroup — its own session)
+  - Pytest 9 bump for miLLM (pre-existing test env issues, not blocking)
 
 ## PRIMARY UI/UX REFERENCE
 
