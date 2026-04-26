@@ -1,8 +1,8 @@
 # Feature PRD: Feature Discovery
 
 **Document ID:** 004_FPRD|Feature_Discovery
-**Version:** 1.3 (Labeling Enhancements & Reasoning Model Support)
-**Last Updated:** 2026-03-21
+**Version:** 1.4 (Enhanced Per-Feature Labeling, Star Colors & Context-Aware Templates)
+**Last Updated:** 2026-04-26
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
 
@@ -121,15 +121,85 @@ A comprehensive feature discovery system with batch extraction, statistical anal
 | FR-10.5 | Continue batch even if one job's NLP fails | Implemented |
 | FR-10.6 | Batch ID linking related extraction jobs | Implemented |
 
+### 2.11 Enhanced Per-Feature Labeling (Sub-feature - Added March 2026)
+
+The highest-quality labeling path. Two-pass LLM interpretation of a single feature triggered from the Feature Detail modal via the sparkle (✨) button.
+
+| Requirement | Description | Status |
+|-------------|-------------|--------|
+| FR-11.1 | Two-pass strategy: per-example summaries then synthesis | Implemented |
+| FR-11.2 | Parallel Pass-1 workers (configurable count via Settings) | Implemented |
+| FR-11.3 | Support OpenAI API (`api.openai.com`) with stored API key | Implemented |
+| FR-11.4 | Support any OpenAI-compatible endpoint (miLLM, Ollama, vLLM) | Implemented |
+| FR-11.5 | Support reasoning-class models (gpt-5*, o1*, o3*, o4*) with correct token budgets | Implemented |
+| FR-11.6 | Writes `name`, `category`, `description`, `notes` (markdown synthesis) | Implemented |
+| FR-11.7 | Live progress via WebSocket (phase + examples_completed) | Implemented |
+| FR-11.8 | Prevent duplicate active jobs per feature | Implemented |
+| FR-11.9 | Restore in-progress job state when modal reopens | Implemented |
+| FR-11.10 | Auto-populate edit form with completed label | Implemented |
+| FR-11.11 | miLLM model pre-loading before inference calls | Implemented |
+| FR-11.12 | Cleanup task for stuck queued/running jobs | Implemented |
+
+**Pass 1 (per-example summarization):**
+- For each of up to 20 activation examples, asks: *"What is this token doing in THIS specific context?"*
+- Workers run in parallel (default 8)
+- Result: list of one-sentence observations, one per example
+
+**Pass 2 (synthesis):**
+- Feeds all per-example summaries + prime token frequency distribution
+- Asks: *"What single unifying concept explains all examples?"*
+- Output: `{name, category, description, notes}` where `notes` contains the reasoning paragraph + a markdown table of per-example summaries
+
+### 2.12 Star Color System (Sub-feature - Added March 2026)
+
+Visual indicator on every feature card and the feature detail modal tracking labeling lifecycle.
+
+| Color | Meaning | Transition |
+|-------|---------|-----------|
+| None (unstarred) | No special status | — |
+| Yellow ⭐ | Manually starred by user | User clicks star |
+| Purple 🔮 | Enhanced labeling in-flight | Set at job queue time |
+| Aqua 🔵 | Enhanced labeling completed | Set on job completion — permanent |
+
+**Key behavior:**
+- Aqua is the only permanent state — never downgraded
+- Bulk auto-labeling jobs skip features with `star_color='aqua'` (guard in all three persist loops)
+- Star color persists in DB; frontend syncs from DB on modal mount
+- `patchFeatureLocally()` in Zustand updates feature list rows and open modal simultaneously on WebSocket completion event
+
+| Requirement | Description | Status |
+|-------------|-------------|--------|
+| FR-12.1 | star_color column on features table (yellow/purple/aqua/null) | Implemented |
+| FR-12.2 | Purple set when enhanced labeling job starts | Implemented |
+| FR-12.3 | Aqua set when enhanced labeling job completes | Implemented |
+| FR-12.4 | Aqua features skipped in bulk labeling jobs | Implemented |
+| FR-12.5 | Star color included in all feature API responses | Implemented |
+| FR-12.6 | Live update of feature row + modal on job completion | Implemented |
+
+### 2.13 Context-Aware Labeling Template (Sub-feature - Added April 2026)
+
+A new system template for bulk labeling that shifts focus from prime-token naming to semantic pattern identification.
+
+| Requirement | Description | Status |
+|-------------|-------------|--------|
+| FR-13.1 | Template uses `mistudio_context` type (full context windows) | Implemented |
+| FR-13.2 | System message explicitly deprioritizes the prime token | Implemented |
+| FR-13.3 | User prompt asks model to identify shared semantic pattern across ALL examples | Implemented |
+| FR-13.4 | Includes 3 negative (low-activation) counter-examples | Implemented |
+| FR-13.5 | Output `specific` slug names the pattern, not the token | Implemented |
+| FR-13.6 | Template marked `is_system=true` — visible to all users, cannot be deleted | Implemented |
+
 ---
 
 ## 3. Feature Detail Modal
 
 ### 3.1 Components
-- **Summary**: Feature index, activation stats, labels
+- **Summary**: Feature index, activation stats, labels, label source badge
+- **Enhanced Labeling Panel**: Sparkle button (✨), progress display (phase + examples), completed label auto-populate
+- **Notes Section**: Collapsible, renders markdown (tables, lists, bold) via react-markdown + remark-gfm; bounded to max-h-96 with scroll
 - **Top Activations**: Examples with context highlighting
 - **Token Analysis**: Distribution of activating tokens
-- **Edit Labels**: Manual label input
+- **Edit Labels**: Manual label input (auto-populated from enhanced labeling on completion)
 
 ### 3.2 Token Highlighting
 ```
@@ -192,9 +262,12 @@ Context: "The cat sat on the [mat] and looked around"
 | `/api/v1/features/extraction/{id}` | GET | Get extraction status |
 | `/api/v1/features/labeling` | POST | Start auto-labeling |
 | `/api/v1/features/labeling/{id}` | GET | Get labeling status |
+| `/api/v1/features/{id}/label/enhanced` | POST | Start enhanced two-pass labeling job |
+| `/api/v1/features/{id}/label/enhanced/latest` | GET | Get latest enhanced labeling job for a feature |
 | `/api/v1/features/export` | POST | Export to JSON |
 | `/api/v1/extraction-templates` | GET/POST | Template CRUD |
 | `/api/v1/labeling-prompt-templates` | GET/POST | Prompt CRUD |
+| `/api/v1/labeling/models/openai` | POST | Fetch available models from any OpenAI-compatible endpoint |
 
 ---
 
@@ -207,14 +280,41 @@ CREATE TABLE features (
     training_id UUID REFERENCES trainings(id),
     external_sae_id UUID REFERENCES external_saes(id),
     neuron_index INTEGER NOT NULL,
-    label VARCHAR(500),  -- Semantic label
-    category VARCHAR(255),  -- Category label
-    label_confidence FLOAT,
-    label_source VARCHAR(50),  -- manual, auto, imported
-    statistics JSONB,  -- frequency, max, mean, interpretability
+    name VARCHAR(500),           -- Feature slug label
+    category VARCHAR(255),       -- Category label
+    description TEXT,            -- Long-form description
+    notes TEXT,                  -- Markdown-formatted synthesis notes (enhanced labeling)
+    label_source VARCHAR(50),    -- auto, user, llm, local_llm, openai, enhanced_llm
+    star_color VARCHAR(20),      -- null, 'yellow', 'purple', 'aqua'
+    is_favorite BOOLEAN,
+    statistics JSONB,            -- frequency, max, mean, interpretability
     top_tokens JSONB,
+    nlp_analysis JSONB,          -- pre-computed spaCy analysis
     created_at TIMESTAMP,
     updated_at TIMESTAMP
+);
+```
+
+### 6.4 EnhancedLabelingJob Table (Added March 2026)
+```sql
+CREATE TABLE enhanced_labeling_jobs (
+    id VARCHAR(255) PRIMARY KEY,   -- elj_{neuron_index}_{timestamp_ms}
+    feature_id VARCHAR(255) REFERENCES features(id) ON DELETE CASCADE,
+    status VARCHAR(50),            -- queued, running, completed, failed
+    phase VARCHAR(50),             -- pass1, pass2, null
+    method VARCHAR(50),            -- openai, openai_compatible
+    endpoint VARCHAR(500),
+    model VARCHAR(255),
+    workers INTEGER,
+    examples_total INTEGER,
+    examples_completed INTEGER,
+    pass1_summaries JSONB,
+    raw_synthesis TEXT,
+    error_message TEXT,
+    celery_task_id VARCHAR(255),
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    completed_at TIMESTAMP
 );
 ```
 
@@ -262,6 +362,9 @@ CREATE TABLE extraction_jobs (
 | `labeling/{id}` | `progress` | `{progress, labeled_count}` |
 | `labeling/{id}` | `results` | `{feature_id, label, confidence}` |
 | `labeling/{id}` | `completed` | `{total_labeled}` |
+| `enhanced_labeling/{job_id}` | `enhanced_labeling:progress` | `{job_id, phase, examples_completed, examples_total}` |
+| `enhanced_labeling/{job_id}` | `enhanced_labeling:completed` | `{job_id, name, category, description, notes}` |
+| `enhanced_labeling/{job_id}` | `enhanced_labeling:failed` | `{job_id, error_message}` |
 
 ### 7.1 Extraction Progress Payload (Jan 2026)
 ```json
@@ -290,18 +393,25 @@ CREATE TABLE extraction_jobs (
 ### Backend
 - `backend/src/services/extraction_service.py` - Extraction logic
 - `backend/src/services/feature_service.py` - Feature management
-- `backend/src/services/labeling_service.py` - Labeling orchestration
-- `backend/src/services/openai_labeling_service.py` - GPT-4o integration
+- `backend/src/services/labeling_service.py` - Labeling orchestration (bulk)
+- `backend/src/services/openai_labeling_service.py` - OpenAI SDK integration (bulk)
+- `backend/src/services/enhanced_labeling_service.py` - Two-pass enhanced labeling (per-feature)
 - `backend/src/workers/extraction_tasks.py` - Celery extraction task
-- `backend/src/api/v1/endpoints/features.py` - API routes
+- `backend/src/workers/enhanced_labeling_tasks.py` - Celery enhanced labeling task
+- `backend/src/workers/cleanup_stuck_enhanced_labeling.py` - Stuck job cleanup
+- `backend/src/api/v1/endpoints/features.py` - Feature API routes
+- `backend/src/api/v1/endpoints/enhanced_labeling.py` - Enhanced labeling API routes
+- `backend/src/models/enhanced_labeling_job.py` - EnhancedLabelingJob model
 
 ### Frontend
 - `frontend/src/components/panels/FeaturesPanel.tsx` - Main panel
-- `frontend/src/components/features/FeatureDetailModal.tsx` - Detail view
+- `frontend/src/components/features/FeatureDetailModal.tsx` - Detail view (+ enhanced labeling panel + markdown notes)
 - `frontend/src/components/features/StartExtractionModal.tsx` - Extraction config
 - `frontend/src/components/features/TokenHighlight.tsx` - Context display
 - `frontend/src/components/panels/ExtractionTemplatesPanel.tsx` - Templates
 - `frontend/src/components/panels/LabelingPromptTemplatesPanel.tsx` - Prompts
+- `frontend/src/hooks/useEnhancedLabeling.ts` - Enhanced labeling lifecycle hook
+- `frontend/src/stores/featuresStore.ts` - Zustand store (incl. `patchFeatureLocally()`, `setStarColor()`)
 
 ---
 
@@ -344,7 +454,15 @@ CREATE TABLE extraction_jobs (
 - [x] Labeling: reasoning model support with think tag stripping (Mar 2026)
 - [x] Labeling: OpenAI-compatible endpoint support (e.g., miLLM, Ollama) (Mar 2026)
 - [x] Labeling: model/layer/hook display on job cards (Mar 2026)
-- [x] Enhanced per-feature labeling: two-pass LLM strategy from Feature Detail modal (Apr 2026)
+- [x] Enhanced per-feature labeling: two-pass LLM strategy from Feature Detail modal (Mar 2026)
+- [x] Enhanced labeling: OpenAI API support with stored API key (Apr 2026)
+- [x] Enhanced labeling: reasoning model support (gpt-5, o1, o3, o4) with max_completion_tokens (Apr 2026)
+- [x] Enhanced labeling: OpenAI SDK replaces hand-rolled httpx (Apr 2026)
+- [x] Star color system: yellow/purple/aqua tracking labeling lifecycle (Mar 2026)
+- [x] Bulk labeling guards: skip aqua features (Apr 2026)
+- [x] Feature notes: collapsible, markdown-rendered (react-markdown + remark-gfm) with bounded scroll (Apr 2026)
+- [x] Context-Aware Labeling template: semantic pattern focus vs prime-token naming (Apr 2026)
+- [x] Settings-driven enhanced labeling: method (OpenAI vs OpenAI-Compatible), model, Fetch Models button (Apr 2026)
 - [ ] Enhanced labeling: edge-tier analysis and open-question generation
 - [ ] Enhanced labeling: confidence threshold to auto-accept vs. flag for review
 

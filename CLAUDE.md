@@ -3,7 +3,7 @@ yes
 
 ## Current Status
 - **Phase:** Active Development & Maintenance
-- **Last Session:** 2026-03-21
+- **Last Session:** 2026-04-26
 - **Current Task:** Documentation alignment and bug fixes
 - **Active Work:** Test suite maintenance and API stability improvements
 - **Completed:**
@@ -768,6 +768,22 @@ The application uses a consistent WebSocket-first approach for all real-time upd
   - Integration with miLLM for labeling via OpenAI-compatible endpoint
 - **Duration:** ~6 sessions
 
+### Session 13: 2026-03-22 to 2026-04-26 — Enhanced Labeling, Security Hardening & Production Release
+- **Accomplished:**
+  - **Enhanced Per-Feature Labeling (major new feature):** Two-pass LLM labeling triggered from Feature Detail modal — Pass 1 parallel per-example summarization, Pass 2 synthesis. WebSocket progress, auto-populate edit form, live Zustand patch on completion.
+  - **Star Color System:** yellow (starred), purple (in-flight), aqua (completed, permanent, protected from bulk overwrite)
+  - **OpenAI API Integration for Labeling:** both enhanced and bulk labeling now target api.openai.com. API key stored AES-256-GCM encrypted in Settings → API Keys. Reasoning-class models (gpt-5, o1, o3, o4) auto-detected and use `max_completion_tokens`.
+  - **OpenAI SDK Standardization:** EnhancedLabelingService refactored from hand-rolled httpx to official OpenAI Python SDK — eliminates per-model parameter whack-a-mole.
+  - **Settings Panel:** Encrypted API keys (openai_api_key, hf_token), endpoint management, Labeling defaults, Fetch Models buttons. Critical encryption bug fixed: upsert endpoint no longer commits masked display string back over ciphertext.
+  - **Context-Aware Labeling Template:** New system template using full context windows; instructs model to find shared semantic PATTERN across all examples rather than naming prime token. Seeded to production.
+  - **Security Hardening:** Resolved all Dependabot CVEs and CodeQL findings — path injection (resolve_user_path), stack-trace exposure (6 endpoints), supply-chain attestations (SLSA mode=max), non-root frontend (nginx-unprivileged uid 101 port 8080).
+  - **Feature Notes UX:** react-markdown + remark-gfm renders synthesis markdown tables and paragraphs. Max-height + scroll. Settings page scroll-to-top on mount.
+  - **v0.5.0 Public Release:** Apache 2.0, GitHub Actions CI/CD, Docker Scout scanning, CodeQL via hitsainet Default Setup.
+  - **K8s Production:** Kubernetes deployment (mcs-lnxgpu01), Cloudflare → mistudio.hitsai.net. K8s manifest restored and cleaned from placeholder-secrets incident.
+  - **miLLM GraniteMoEHybrid Fix:** KV cache bug fixed for granite-4.0-micro hybrid models; monkey-patched `_update_mamba_mask` for attention-only configs.
+  - **Documentation Update (this session):** PPRD v3.0, PADR v2.4 (IDL-18 through IDL-24), Feature Discovery FPRD v1.4 and FTASKS v1.3 with all post-March 2026 phases.
+- **Duration:** ~30 sessions over 5 weeks
+
 *[Add new sessions as they occur]*
 
 ## Research Integration
@@ -829,7 +845,7 @@ project-root/
 ---
 
 **Framework Version:** 1.1
-**Last Updated:** 2026-03-21
+**Last Updated:** 2026-04-26
 **Project Started:** 2025-10-05
 **Project:** MechInterp Studio (miStudio)
 **Structure:** 0xcc framework with MCP research integration

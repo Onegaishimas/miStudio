@@ -1,8 +1,8 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 2.3 (Architecture Updates, GCP Deployment & Dynamic Discovery)
+**Version:** 2.4 (Enhanced Labeling, Security Hardening & Production Deployment)
 **Created:** 2025-10-05
-**Updated:** 2026-03-21
+**Updated:** 2026-04-26
 **Status:** Active
 **Document Type:** Project-Level Architecture Decision Record
 
@@ -2788,13 +2788,151 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-18: Enhanced Per-Feature Two-Pass LLM Labeling
+
+**Date:** 2026-03-28
+**Context:** Bulk auto-labeling produces category/specific label pairs in a single LLM call, which anchors too heavily on the prime token. Researchers need higher-quality interpretation of individual features — understanding WHY a feature fires, not just WHAT token it fires on.
+
+**Decision:** Implement a separate two-pass enhanced labeling system triggered per-feature from the Feature Detail modal.
+
+**Implementation:**
+- **Pass 1 (parallel):** For each activation example, ask the LLM "What is this token doing in this specific context?" — N concurrent workers (configurable via Settings)
+- **Pass 2 (synthesis):** Feed all per-example summaries and ask for the unifying concept; output structured JSON with `name`, `category`, `description`, `notes`
+- Async Celery task (`enhanced_labeling_tasks.py`) with WebSocket progress
+- Star color system: yellow (manually starred) → purple (in-flight) → aqua (completed, permanent)
+- Zustand `patchFeatureLocally()` updates feature row and open modal instantly on completion (no page reload)
+- Bulk labeling guards skip features with `star_color='aqua'` to protect enhanced labels
+
+**Rationale:**
+- Two-pass mimics how human researchers work (examine individual examples, then synthesize)
+- Per-example summaries capture contextual nuance the prime-token-centric bulk approach misses
+- Parallel workers in Pass 1 keep latency acceptable even for 20 examples
+
+---
+
+### IDL-19: OpenAI SDK as Standard LLM Client
+
+**Date:** 2026-04-25
+**Context:** The enhanced labeling service and several labeling paths used hand-rolled `httpx` HTTP calls to `/chat/completions`. When targeting different model families (gpt-5, o1, o3), each had different accepted parameter sets (`temperature`, `max_tokens` vs `max_completion_tokens`, `reasoning_effort` enum values varying by model). Each discovery required a new commit to patch the heuristics.
+
+**Decision:** Standardize all LLM calls in enhanced labeling on the official OpenAI Python SDK (`openai.OpenAI`). Bulk labeling (`OpenAILabelingService`) already used the SDK.
+
+**Implementation:**
+- `EnhancedLabelingService.__init__` creates `OpenAI(api_key=..., base_url=..., max_retries=0)`
+- For reasoning-class models (`gpt-5*`, `o1*`, `o3*`, `o4*`), send `max_completion_tokens` (shared reasoning+output budget, 16K for synthesis); for others, send `max_tokens` + `temperature=0.1`
+- `BadRequestError` from SDK is caught and surfaced verbatim without retry — 400s reflect misconfiguration, not transient failures
+- Transient errors (`OpenAIError`, network) retry with 2s/4s/6s backoff
+
+**Rationale:**
+- SDK handles per-model parameter negotiation — no in-house heuristics to maintain
+- `BadRequestError` contains OpenAI's full JSON error body, making debugging immediate
+- `base_url` parameter allows the same code to target miLLM, Ollama, vLLM, or `api.openai.com`
+
+---
+
+### IDL-20: DB-Backed Application Settings with AES-256-GCM Encryption
+
+**Date:** 2026-02-20
+**Context:** API keys (OpenAI, HuggingFace), endpoint URLs, and labeling defaults were configured via environment variables, requiring server restarts for changes and exposing secrets in the process list.
+
+**Decision:** Implement `AppSetting` model (key/value/is_sensitive/category) with transparent AES-256-GCM encryption for sensitive values.
+
+**Implementation:**
+- `encryption.py`: HKDF-SHA256 derives 256-bit key from `SETTINGS_ENCRYPTION_KEY` env var (falls back to `SECRET_KEY`); `encrypt_value()`/`decrypt_value()` handles base64(nonce + ciphertext + GCM tag)
+- `AppSettingService.upsert()`: encrypts before storage; `get_decrypted_value()` decrypts transparently
+- Settings Panel UI with four tabs: Endpoints, API Keys, Labeling, Display
+- Fetch Models buttons query available models from the configured endpoint and populate a dropdown
+- **Critical bug fixed (April 2026):** The `PUT /api/v1/settings` endpoint previously mutated the SQLAlchemy row's `.value` field to the masked form for the response. Because the row was still attached to the session, SQLAlchemy committed the masked string (`sk-...XXXX`) back to the DB on request teardown, silently corrupting the ciphertext on every save. Fixed by calling `db.expunge(setting)` before masking.
+
+**Rationale:**
+- Configuration changes take effect immediately, no restart required
+- AES-256-GCM provides authenticated encryption — any tampering detected on decrypt
+- Graceful fallback: `decrypt_value()` returns the value as-is if it isn't a valid GCM envelope (handles pre-encryption legacy rows with a warning log)
+
+---
+
+### IDL-21: Context-Aware Labeling Template Strategy
+
+**Date:** 2026-04-25
+**Context:** Bulk labeling prompts historically showed token statistics and asked "what does this feature detect?" — naturally anchoring the model on the prime token. Features like "fires on 'the'" can encode dozens of different phenomena; naming the token misses the actual semantic pattern.
+
+**Decision:** Add a `mistudio_context` template type that shows full `prefix <<prime>> suffix` context windows and instructs the model to identify the shared SEMANTIC PATTERN across examples rather than naming the prime token.
+
+**Key Prompt Design Principles:**
+- Explicitly deprioritize the highlighted token: *"The token is just the trigger location; the meaning lives in the surrounding text"*
+- Ask per-example: *"What is semantically happening in this passage?"*
+- Cross-example question: *"Could examples with DIFFERENT marked tokens share this feature? If so, it is about context, not the token."*
+- Include 3 negative (low-activation) counter-examples for contrast
+- Output `specific` names the pattern, not the token (e.g. `definite_reference_introduction` not `article_the`)
+
+**Rationale:** Mirrors Pass 2 synthesis logic from enhanced labeling but applied in a single bulk call. Works best with GPT-4o/GPT-5 class models that can hold 10+ examples in context and reason across them.
+
+---
+
+### IDL-22: Security Hardening — Path Injection & Stack-Trace Exposure
+
+**Date:** 2026-04-24
+**Context:** CodeQL scans on the public hitsainet mirror surfaced high-severity path injection findings in `resolve_data_path()` and medium-severity stack-trace exposure across 6 endpoints.
+
+**Decision (Path Injection):** Add `resolve_user_path()` alongside the existing `resolve_data_path()`. Only the user-path variant enforces containment.
+
+**Implementation:**
+- `resolve_user_path()` performs purely string-based normalization (`os.path.normpath`, no `Path.resolve()` — which would follow symlinks before validation) then verifies the result is under `data_dir`, `run_dir`, or `hf_cache_dir` via `os.path.commonpath()`
+- `sae_manager_service.import_sae_from_file()` uses `resolve_user_path()` for the API-supplied `file_path`
+- `resolve_data_path()` is unchanged — trusted callers (DB-stored paths) don't need containment validation
+
+**Decision (Stack-Trace Exposure):** Replace `detail=str(e)` / `"error": str(e)` with generic messages. Log full traceback server-side via `logger.exception()`.
+
+**Rationale:**
+- Path injection: a malicious `file_path` like `../../etc/passwd` could exfiltrate files; OS-level probe before containment check is itself a minor info leak
+- Stack traces reveal module paths, line numbers, and internal state; no value to a legitimate API consumer
+
+---
+
+### IDL-23: Supply-Chain Security — CodeQL, Docker Scout, SLSA Provenance
+
+**Date:** 2026-04-10
+**Context:** Public release (v0.5.0) requires demonstrable security posture — static analysis, image scanning, and build attestations.
+
+**Decision:** Enable three complementary layers of supply-chain security.
+
+**Implementation:**
+- **CodeQL:** GitHub Default Setup on `hitsainet/miStudio` (public repo) — scans Python + JS/TS on every push with `security-extended` queries; auto-closes alerts when code is fixed
+- **Docker Scout:** `hitsai` org configured; `docker scout cves` and `docker scout policy` run against each image; "Default Non-Root User" and "Missing Supply Chain Attestations" policies enforced
+- **SLSA Provenance + SBOM:** `docker/build-push-action` with `provenance: mode=max` and `sbom: true`; separate `actions/attest-build-provenance` step signs with OIDC
+- **Non-root frontend:** `nginx:alpine` → `nginxinc/nginx-unprivileged:alpine` (uid 101, port 8080); K8s Service maps external 80 → container 8080
+- **GitHub Actions permissions:** All workflows declare `permissions: { contents: read }` at minimum
+
+**Rationale:** Defense-in-depth — static analysis catches code-level issues, Scout catches image-level CVEs, SLSA proves the image was built from the declared source commit.
+
+---
+
+### IDL-24: Feature Notes Markdown Rendering
+
+**Date:** 2026-04-26
+**Context:** Enhanced labeling writes structured notes: a synthesis reasoning paragraph followed by a markdown table (`| Act | Token | Summary |`) of per-example observations. Rendering as plain text (`<p>{notes}</p>`) collapses all whitespace into an unreadable block.
+
+**Decision:** Render feature notes with `react-markdown` + `remark-gfm` (GitHub-Flavored Markdown, required for table support). Cap display height to prevent the notes panel from dominating the modal.
+
+**Implementation:**
+- `ReactMarkdown` component with custom renderers for `table`, `th`, `td`, `tr`, `p`, `code`, `ul`, `li`, `strong` — all styled with slate dark-theme Tailwind classes
+- Container: `max-h-96 overflow-y-auto` — long notes scroll inside the modal
+- Collapsible: controlled by `notesExpanded` state with ChevronDown toggle
+
+**Rationale:**
+- The notes content IS markdown by design — the enhanced labeling synthesis prompt asks for it
+- `react-markdown` + `remark-gfm` is 40KB gzipped; the value to readability is immediate
+- Height cap prevents a 20-example synthesis from pushing all other modal content off-screen
+
+---
+
 ## Document Control
 
-**Version:** 2.3
+**Version:** 2.4
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-03-21
-**Status:** Active - Post-MVP Enhancements
+**Last Updated:** 2026-04-26
+**Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
 - [x] Technical Lead (Backend/ML) Review
@@ -2813,6 +2951,9 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 1.0 | 2025-10-05 | Initial architecture decisions |
 | 2.0 | 2025-12-05 | Added Implementation Decision Log for MVP |
 | 2.1 | 2025-12-16 | Added IDL-8 through IDL-12: Ollama, NLP Analysis, bytes handling, Celery resilience, WebSocket standardization |
+| 2.2 | 2026-01-21 | IDL-13 through IDL-14: Steering async migration, dynamic layer discovery |
+| 2.3 | 2026-03-21 | IDL-15 through IDL-17: Sidebar navigation, schema validation tooling, Neuronpedia local push |
+| 2.4 | 2026-04-26 | IDL-18 through IDL-24: Enhanced labeling two-pass, OpenAI SDK standardization, encrypted settings, context-aware labeling template, path injection hardening, supply-chain security (CodeQL/Scout/SLSA), feature notes markdown rendering |
 
 ---
 

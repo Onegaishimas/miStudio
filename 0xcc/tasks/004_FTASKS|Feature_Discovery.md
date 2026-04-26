@@ -1,8 +1,8 @@
 # Feature Tasks: Feature Discovery
 
 **Document ID:** 004_FTASKS|Feature_Discovery
-**Version:** 1.2
-**Last Updated:** 2026-01-21
+**Version:** 1.3
+**Last Updated:** 2026-04-26
 **Status:** Implemented
 **Related PRD:** [004_FPRD|Feature_Discovery](../prds/004_FPRD|Feature_Discovery.md)
 
@@ -20,8 +20,13 @@
 | Phase 6: Frontend Browser | 6 tasks | ✅ Complete |
 | Phase 7: Labeling UI | 4 tasks | ✅ Complete |
 | Phase 8: Batch Extraction & Live Metrics (Jan 2026) | 8 tasks | ✅ Complete |
+| Phase 9: Enhanced Per-Feature Labeling (Mar–Apr 2026) | 13 tasks | ✅ Complete |
+| Phase 10: Star Color System (Mar 2026) | 6 tasks | ✅ Complete |
+| Phase 11: OpenAI API Integration & SDK Standardization (Apr 2026) | 5 tasks | ✅ Complete |
+| Phase 12: Context-Aware Labeling Template (Apr 2026) | 3 tasks | ✅ Complete |
+| Phase 13: Notes UX — Markdown Rendering (Apr 2026) | 3 tasks | ✅ Complete |
 
-**Total: 40 tasks**
+**Total: 80 tasks** (40 original + 40 post-March 2026)
 
 ---
 
@@ -399,23 +404,143 @@
 
 ---
 
-## Enhanced Per-Feature Labeling Tasks (Apr 2026)
+## Phase 9: Enhanced Per-Feature Labeling (Mar–Apr 2026)
 
-### Completed ✅
-- [x] T1: Alembic migration — `enhanced_labeling_jobs` table + `enhanced_llm` enum value
-- [x] T2: `EnhancedLabelingJob` SQLAlchemy model + `__init__.py` registration
-- [x] T5: `emit_enhanced_labeling_progress/completed/failed` in `websocket_emitter.py`
-- [x] T6: `EnhancedLabelingService` — two-pass logic with `ThreadPoolExecutor` pass-1
-- [x] T7: `enhanced_label_feature_task` Celery task + celery_app routing
-- [x] T3+T8: `enhanced_labeling.py` schemas + API endpoints + router registration
-- [x] T9+T10+T11: `enhancedLabeling.ts` types + API client + `useEnhancedLabeling` hook
-- [x] T12: `FeatureDetailModal.tsx` — Enhanced Label button + progress display + auto-populate effect
-- [x] T4+T13: Settings panel Labeling tab — `enhanced_labeling_max_workers` field
+### Task 9.1: Database — EnhancedLabelingJob
+- [x] Alembic migration — `enhanced_labeling_jobs` table + `enhanced_llm` to `label_source` enum
+- [x] `EnhancedLabelingJob` SQLAlchemy model with status, phase, method, endpoint, model, workers columns
+- [x] Migration for `method` column (default `openai_compatible`)
+
+**Files:** `backend/alembic/versions/`, `backend/src/models/enhanced_labeling_job.py`
+
+### Task 9.2: Backend Service — EnhancedLabelingService
+- [x] Two-pass strategy with `ThreadPoolExecutor` for parallel Pass-1 workers
+- [x] Pass-1: per-example LLM summarization ("what is this token doing in context?")
+- [x] Pass-2: synthesis across all summaries → structured label
+- [x] Uses official OpenAI Python SDK (`OpenAI(api_key=..., base_url=...)`)
+- [x] Reasoning-model detection (gpt-5*, o1*, o3*, o4*) → `max_completion_tokens` budget (16K synthesis)
+- [x] `BadRequestError` from SDK: surface verbatim, no retry
+
+**Files:** `backend/src/services/enhanced_labeling_service.py`
+
+### Task 9.3: Backend — Celery Task + API
+- [x] `enhanced_label_feature_task` Celery task with DatabaseTask base
+- [x] DB-first approach: commit job record before dispatching Celery task
+- [x] Queue routing: `enhanced_labeling` queue
+- [x] Cleanup task for stuck queued/running jobs
+- [x] API: `POST /features/{id}/label/enhanced` — reads settings for method/endpoint/model
+- [x] API: `GET /features/{id}/label/enhanced/latest` — restore state on modal reopen
+- [x] WebSocket emission: `enhanced_labeling:progress`, `completed`, `failed`
+
+**Files:** `backend/src/workers/enhanced_labeling_tasks.py`, `backend/src/api/v1/endpoints/enhanced_labeling.py`
+
+### Task 9.4: Frontend — Hook + UI
+- [x] `useEnhancedLabeling.ts` hook: manages job lifecycle, WebSocket subscription, re-subscribe on reconnect
+- [x] `FeatureDetailModal.tsx`: sparkle (✨) button, phase display, progress counter, auto-populate edit form on completion
+- [x] Settings Labeling tab: `enhanced_labeling_method` (OpenAI vs OpenAI-Compatible), `enhanced_labeling_openai_model`, Fetch Models button, `enhanced_labeling_max_workers`
+
+**Files:** `frontend/src/hooks/useEnhancedLabeling.ts`, `frontend/src/components/features/FeatureDetailModal.tsx`, `frontend/src/components/panels/SettingsPanel.tsx`
 
 ### Future / Nice-to-have
 - [ ] Edge-tier analysis: separate pass-1 summarization for low-activation tail examples
 - [ ] Confidence gating: auto-accept labels above threshold, flag below for review
 - [ ] Batch enhanced labeling: run enhanced labeling across a filtered subset of features
+
+---
+
+## Phase 10: Star Color System (Mar 2026)
+
+### Task 10.1: Database
+- [x] `star_color` VARCHAR(20) column on features table (Alembic migration)
+- [x] `star_color` included in all `FeatureResponse` / `FeatureDetailResponse` constructors
+
+**Files:** `backend/alembic/versions/s6t7u8v9w0x1_add_star_color_to_features.py`, `backend/src/services/feature_service.py`
+
+### Task 10.2: Backend Logic
+- [x] Backend endpoint sets `star_color='purple'` when enhanced labeling job queued
+- [x] Celery task sets `star_color='aqua'` on completion
+- [x] Bulk labeling service: guard in all 3 persist loops — skip features where `star_color='aqua'`
+- [x] `PATCH /features/{id}/star_color` endpoint for frontend to set yellow/null
+
+**Files:** `backend/src/api/v1/endpoints/enhanced_labeling.py`, `backend/src/workers/enhanced_labeling_tasks.py`, `backend/src/services/labeling_service.py`
+
+### Task 10.3: Frontend
+- [x] `setStarColor(featureId, color)` in Zustand featuresStore
+- [x] `patchFeatureLocally(featureId, fields)` — synchronous patch across `featuresByExtraction`, `featuresByTraining`, `selectedFeature` without network call
+- [x] Star color rendered on feature list rows and Feature Detail modal header
+- [x] `useEnhancedLabeling.ts`: calls `setStarColor('purple')` on start, `setStarColor('aqua')` on completion
+- [x] Mount effect: syncs store to DB star color when modal opens for in-flight job
+
+**Files:** `frontend/src/stores/featuresStore.ts`, `frontend/src/hooks/useEnhancedLabeling.ts`
+
+---
+
+## Phase 11: OpenAI API Integration & SDK Standardization (Apr 2026)
+
+### Task 11.1: Settings — OpenAI API Key & Enhanced Labeling Method
+- [x] API Keys tab: `openai_api_key` stored encrypted (AES-256-GCM)
+- [x] Labeling tab: `enhanced_labeling_method` (openai | openai_compatible) + `enhanced_labeling_openai_model`
+- [x] Fetch Models button on Labeling tab: calls `POST /labeling/models/openai` with stored key → populates dropdown
+- [x] `/labeling/models/openai` endpoint falls back to DB AppSetting when `api_key` not in request body
+
+**Files:** `backend/src/api/v1/endpoints/labeling.py`, `frontend/src/components/panels/SettingsPanel.tsx`
+
+### Task 11.2: Enhanced Labeling → OpenAI SDK
+- [x] `EnhancedLabelingService.__init__` creates `OpenAI(api_key, base_url)` instead of raw httpx
+- [x] `_call_llm()` uses `self._openai.chat.completions.create()` — SDK handles per-model parameter differences
+- [x] Reasoning model detection: `gpt-5*`, `o1*`, `o3*`, `o4*` → `max_completion_tokens=16000` (synthesis)
+- [x] `BadRequestError` surfaces verbatim without retry; transient errors retry with backoff
+- [x] Empty-content detection (reasoning budget exhausted) surfaces clear diagnostic
+
+**Files:** `backend/src/services/enhanced_labeling_service.py`
+
+### Task 11.3: Bulk Labeling — miLLM Pre-Loading
+- [x] `ensure_model_loaded()` in `src/utils/millm_utils.py` — shared utility
+- [x] Called in `labeling_service.py` before OPENAI_COMPATIBLE inference loop
+- [x] Called in `enhanced_labeling_tasks.py` before `EnhancedLabelingService` is constructed
+
+**Files:** `backend/src/utils/millm_utils.py`, `backend/src/services/labeling_service.py`, `backend/src/workers/enhanced_labeling_tasks.py`
+
+---
+
+## Phase 12: Context-Aware Labeling Template (Apr 2026)
+
+### Task 12.1: Design
+- [x] System message: explicitly deprioritizes prime token; instructs model to read full passages and find shared semantic pattern
+- [x] User prompt: shows `{examples_block}` (full context windows); asks "what is semantically happening?"; cross-example question forces pattern-level thinking
+- [x] 3 negative counter-examples included via `include_negative_examples=True`
+
+### Task 12.2: Implementation
+- [x] `template_type='mistudio_context'` — uses `{examples_block}` formatter (prefix <<prime>> suffix)
+- [x] `is_system=True` — visible to all users, cannot be deleted
+- [x] Seed script: `backend/scripts/seed_context_aware_template.py`
+- [x] Seeded to both K8s and Docker Compose production databases via REST API
+
+**Files:** `backend/scripts/seed_context_aware_template.py`
+
+### Task 12.3: Documentation
+- [x] Template description explains intent and best-fit models (GPT-4o / GPT-5)
+- [x] Updated Feature Discovery PRD with FR-13 requirements
+
+---
+
+## Phase 13: Notes UX — Markdown Rendering (Apr 2026)
+
+### Task 13.1: Install Dependencies
+- [x] `npm install react-markdown remark-gfm`
+- [x] Added to `package.json` as runtime dependencies
+
+### Task 13.2: Notes Rendering Component
+- [x] Replace `<p className="whitespace-pre-wrap">{notes}</p>` with `<ReactMarkdown remarkPlugins={[remarkGfm]}>`
+- [x] Custom component renderers for `table`, `th`, `td`, `tr`, `p`, `code`, `pre`, `ul`, `li`, `strong`, `hr` — all dark-theme slate Tailwind classes
+- [x] Container: `max-h-96 overflow-y-auto` — notes scroll inside modal, don't push other sections off-screen
+
+**Files:** `frontend/src/components/features/FeatureDetailModal.tsx`
+
+### Task 13.3: Settings Scroll Fix
+- [x] `window.scrollTo(0, 0)` in `SettingsPanel` `useEffect` on mount — page no longer opens scrolled to bottom
+
+**Files:** `frontend/src/components/panels/SettingsPanel.tsx`
 
 ---
 
