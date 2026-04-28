@@ -23,45 +23,44 @@ from src.models.labeling_prompt_template import LabelingPromptTemplate
 TEMPLATE_ID = "lpt_context_aware_v1"
 
 SYSTEM_MESSAGE = """\
-You are an expert in mechanistic interpretability analyzing sparse autoencoder (SAE) features from language models.
+You are an expert in mechanistic interpretability analyzing sparse autoencoder (SAE) features.
 
-Your task is to identify the semantic or functional PATTERN that a feature has learned — not to name the token it fires on.
+Your task: identify the semantic or functional PATTERN a feature has learned — what situation, role, or linguistic function do all its activation examples share?
 
-Key principle: A feature's identity is the PATTERN OF CONTEXTS in which it activates, not the surface form of the highlighted token. Two features that both fire on the word "the" can encode completely different things (one might track "definite reference to a specific person", another "sentence-initial topic introduction"). The token is just the trigger location; the meaning lives in the surrounding text.
+The marked token is the trigger location. The feature's true identity is what the surrounding passages have in common — not the surface form of the token.
 
-Your analysis process:
-1. Read each example as a complete passage and understand what it is saying
-2. Note what meaning, situation, grammatical role, or discourse function is present in THAT passage
-3. Find what is SHARED across all examples at the semantic or functional level
-4. Produce a label that names that shared pattern — even if the prime token varies across examples\
+Process:
+1. Read each example as a complete passage and understand what it means
+2. Ask: what situation, role, or linguistic function is operating HERE?
+3. Find the concept, function, or situation SHARED across nearly all examples
+4. Name it specifically and precisely
+
+Critical constraint: Do NOT use the words "context", "contextual", "trigger", "feature", or "pattern" in the specific field. These words describe the meta-task, not the feature — reaching for them means you have not found the real pattern yet.
+
+If the examples are genuinely diverse with no coherent shared pattern (common for very high-frequency features), classify as noise: use category "noise" and specific "high_frequency_polysemantic".\
 """
 
 USER_PROMPT_TEMPLATE = """\
-Below are activation examples for SAE feature {feature_id}. In each example, the token with the highest activation is marked with << >>.
+Below are activation examples for SAE feature {feature_id}. The highest-activation token is marked with << >>.
 
 {examples_block}
 
 ---
 
-Study the examples above. For each one, consider: what is semantically happening in the full passage? What meaning, grammatical role, situation, or discourse function is present?
+For each example, ask: what is the sentence ABOUT? What semantic domain, grammatical role, entity type, or discourse function is operating?
 
-Now identify the single unifying pattern that appears across ALL (or nearly all) examples. Ask yourself:
-- If someone described all these passages to you without showing the marked token, what concept would come up every time?
-- Is this about a syntactic construction, a semantic domain, a discourse function, a type of entity or event?
-- Could examples with DIFFERENT marked tokens still share this feature? (If so, the feature is about context, not token.)
+Now find the shared concept, role, or function across ALL examples. The marked token is a clue, not the answer — features routinely fire on different surface tokens that share a deeper semantic situation (e.g., all introduce a new entity, all mark a causal relation, all appear in obligation contexts).
 
-Respond with ONLY this JSON — no explanation outside it:
-{{
-  "category": "syntactic|semantic|positional|discourse|entity|mixed",
-  "specific": "snake_case_label_max_5_words",
-  "description": "One precise sentence describing the shared contextual pattern, grounded in what the passages have in common."
-}}
+If examples look completely unrelated with no coherent pattern, this is a polysemantic or noise feature — use the noise output.
+
+Respond ONLY with this JSON — no text outside it:
+{{"category": "syntactic|semantic|positional|discourse|entity|noise|mixed", "specific": "snake_case_label_max_5_words", "description": "Fires on: [precise one-sentence description of the shared semantic or functional pattern]."}}
 
 Rules:
-- specific: snake_case, 2–5 words, names the PATTERN not the token (e.g. "definite_known_entity_reference", "modal_epistemic_uncertainty", "list_enumeration_continuation")
-- description: start with "This feature activates in contexts where..." and complete with the semantic pattern
-- Do NOT simply name the prime token — if the label could be replaced by "fires on <token>", it is not good enough
-- If examples cluster into two distinct patterns, name the dominant one and note the other in description\
+- specific: 2–5 words, snake_case, names the SEMANTIC PATTERN or FUNCTION — good examples: source_attribution_from, modal_epistemic_obligation, entity_introduction_definite, comparative_clause_than
+- FORBIDDEN in specific: "context", "contextual", "trigger", "feature", "pattern" — if you reach for these, look harder for the actual pattern
+- description: must start with "Fires on:" then precisely describe what passages share
+- noise: if examples have no coherent pattern or activation frequency is very high, use category "noise" and specific "high_frequency_polysemantic"\
 """
 
 
@@ -82,8 +81,8 @@ async def seed():
             id=TEMPLATE_ID,
             name="Context-Aware Labeling (Semantic Pattern)",
             description=(
-                "Focuses on the full semantic context of each example rather than the prime token. "
-                "Produces labels that describe WHAT IS HAPPENING across examples — the shared "
+                "Focuses on full semantic context. Prohibits generic fallbacks (context, trigger, feature). "
+                "Includes noise escape hatch for polysemantic features. "
                 "meaning, function, or discourse role — rather than naming the surface token. "
                 "Recommended for OpenAI GPT-4o / GPT-5 class models."
             ),
