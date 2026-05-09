@@ -57,16 +57,14 @@ export function SettingsPanel() {
         </div>
       </div>
 
-      {/* Tab Content — wrapped in PIN gate */}
-      <PinGate>
-        {isLoading && (
-          <div className="text-slate-500 text-sm py-4">Loading settings...</div>
-        )}
-        {activeTab === 'endpoints' && <EndpointsTab />}
-        {activeTab === 'api_keys' && <ApiKeysTab />}
-        {activeTab === 'labeling' && <LabelingTab />}
-        {activeTab === 'display' && <DisplayTab />}
-      </PinGate>
+      {/* Tab Content */}
+      {isLoading && (
+        <div className="text-slate-500 text-sm py-4">Loading settings...</div>
+      )}
+      {activeTab === 'endpoints' && <EndpointsTab />}
+      {activeTab === 'api_keys' && <PinGate><ApiKeysTab /></PinGate>}
+      {activeTab === 'labeling' && <LabelingTab />}
+      {activeTab === 'display' && <DisplayTab />}
     </div>
   );
 }
