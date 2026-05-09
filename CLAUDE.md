@@ -26,6 +26,7 @@ yes
 - **Pending (deferred):**
   - Backend non-root container (entrypoint refactor + K8s fsGroup — its own session)
   - Pytest 9 bump for miLLM (pre-existing test env issues, not blocking)
+  - Multi-GPU distributed training (DDP/NCCL) — monitoring + job routing already complete since Dec 2025
 
 ## PRIMARY UI/UX REFERENCE
 

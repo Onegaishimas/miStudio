@@ -1,10 +1,10 @@
 # Feature PRD: Multi-GPU Scalability
 
 **Document ID:** 009_FPRD|Multi_GPU_Scalability
-**Version:** 1.0 (Planning)
-**Last Updated:** 2025-12-05
-**Status:** Planned
-**Priority:** P2 (Future Feature)
+**Version:** 1.1
+**Last Updated:** 2026-05-09
+**Status:** Partially Complete — Phases 1 & 2 implemented; Phase 3 (DDP training) planned
+**Priority:** P2
 
 ---
 
@@ -15,13 +15,15 @@ Enable distributed SAE training across multiple GPUs and provide enhanced monito
 
 ### 1.2 User Problem
 Researchers with multi-GPU systems cannot fully utilize their hardware:
-- Training runs on single GPU only
-- No visibility into per-GPU resource usage
-- Cannot leverage data parallelism for faster training
-- Memory constraints on single GPU limit model/SAE size
+- ~~Training runs on single GPU only~~ → single-GPU training, but jobs routable to any GPU ✅
+- ~~No visibility into per-GPU resource usage~~ → per-GPU monitoring implemented ✅
+- Cannot leverage data parallelism for faster training *(DDP — still planned)*
+- Memory constraints on single GPU limit model/SAE size *(DDP — still planned)*
 
 ### 1.3 Solution
 Multi-GPU support with distributed training, configurable GPU selection, and enhanced monitoring views.
+
+**Implementation status as of Dec 2025:** GPU monitoring infrastructure (Phase 1) and per-GPU job routing (Phase 2) are complete. Distributed DDP training (Phase 3) remains planned.
 
 ---
 
@@ -32,33 +34,33 @@ Multi-GPU support with distributed training, configurable GPU selection, and enh
 |-------------|-------------|--------|
 | FR-1.1 | Data parallel training across GPUs | Planned |
 | FR-1.2 | Gradient synchronization | Planned |
-| FR-1.3 | GPU selection for training jobs | Planned |
+| FR-1.3 | GPU selection for training jobs | ✅ Complete (Dec 2025) |
 | FR-1.4 | Automatic batch size scaling | Planned |
 | FR-1.5 | Mixed precision per GPU | Planned |
 
 ### 2.2 GPU Selection
 | Requirement | Description | Status |
 |-------------|-------------|--------|
-| FR-2.1 | List available GPUs with specs | Planned |
-| FR-2.2 | Select GPUs for training job | Planned |
-| FR-2.3 | Exclude busy GPUs | Planned |
+| FR-2.1 | List available GPUs with specs | ✅ Complete — `GPUMonitorService.get_all_gpu_info()`, `/api/v1/system/gpu-list` |
+| FR-2.2 | Select GPUs for training/extraction job | ✅ Complete — `gpu_id` param wired through API → schema → worker |
+| FR-2.3 | Exclude busy GPUs | Partial — GPU watchdog tracks usage; no UI exclusion yet |
 | FR-2.4 | Memory-based GPU recommendation | Planned |
 
 ### 2.3 Enhanced Monitoring
 | Requirement | Description | Status |
 |-------------|-------------|--------|
-| FR-3.1 | Toggle: Aggregated vs. Per-GPU view | Planned |
-| FR-3.2 | Aggregated VRAM usage (total across GPUs) | Planned |
-| FR-3.3 | Aggregated utilization (average) | Planned |
-| FR-3.4 | Per-GPU separate meters | Planned |
-| FR-3.5 | Per-GPU temperature/power display | Planned |
+| FR-3.1 | Toggle: Aggregated vs. Per-GPU view | ✅ Complete — GPU comparison view (commit 8cbe31c) |
+| FR-3.2 | Aggregated VRAM usage (total across GPUs) | ✅ Complete |
+| FR-3.3 | Aggregated utilization (average) | ✅ Complete |
+| FR-3.4 | Per-GPU separate meters | ✅ Complete — per-GPU WebSocket channels `system/gpu/{gpu_id}` |
+| FR-3.5 | Per-GPU temperature/power display | ✅ Complete |
 
 ### 2.4 Load Balancing
 | Requirement | Description | Status |
 |-------------|-------------|--------|
-| FR-4.1 | Automatic workload distribution | Planned |
+| FR-4.1 | Automatic workload distribution | Partial — manual `gpu_id` routing; no auto-scheduling |
 | FR-4.2 | Memory-aware batch allocation | Planned |
-| FR-4.3 | Straggler detection and handling | Planned |
+| FR-4.3 | Straggler detection and handling | Planned (DDP dependency) |
 
 ---
 
@@ -243,19 +245,20 @@ per_gpu_batch_size = base_batch_size
 
 ## 10. Implementation Phases
 
-### Phase 1: Enhanced Monitoring
-- [ ] Per-GPU metrics collection
-- [ ] Aggregated vs. per-GPU view toggle
-- [ ] Per-GPU charts in dashboard
+### Phase 1: Enhanced Monitoring ✅ Complete (Dec 2025)
+- [x] Per-GPU metrics collection — `GPUMonitorService.get_all_gpu_metrics()`
+- [x] Aggregated vs. per-GPU view toggle — GPU comparison view (commit 8cbe31c)
+- [x] Per-GPU charts in dashboard — WebSocket channels `system/gpu/{gpu_id}`
 
-### Phase 2: GPU Selection
-- [ ] GPU availability detection
-- [ ] GPU selection UI in training modal
-- [ ] Busy GPU exclusion
+### Phase 2: GPU Selection ✅ Complete (Dec 2025)
+- [x] GPU availability detection — `pynvml` enumeration, `/api/v1/system/gpu-list`
+- [x] GPU selection for extraction jobs — `gpu_id` param wired API → schema → worker
+- [x] GPU watchdog task — monitors processes per device
+- [ ] Busy GPU exclusion from UI (partial)
 
-### Phase 3: Distributed Training
+### Phase 3: Distributed Training ⏳ Planned
 - [ ] PyTorch DDP integration
-- [ ] Gradient synchronization
+- [ ] Gradient synchronization (NCCL)
 - [ ] Batch size scaling
 - [ ] Multi-GPU progress tracking
 

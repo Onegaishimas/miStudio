@@ -2290,7 +2290,8 @@ Closes #123
 ### Open Questions
 
 - [ ] Exact Jetson TensorRT optimization strategy (defer to implementation)
-- [ ] Multi-GPU support (future enhancement)
+- [x] Multi-GPU monitoring and job routing — complete (Dec 2025); per-GPU WebSocket channels, `gpu_id` routing for extraction
+- [ ] Multi-GPU distributed training (DDP/NCCL) — still planned
 - [ ] ONNX export for cross-platform (future consideration)
 - [ ] Optional cloud sync for backups (future feature)
 

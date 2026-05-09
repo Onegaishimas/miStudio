@@ -36,7 +36,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | **Real-time Feedback** | Immediate progress updates for long-running operations | Achieved |
 | **LLM-Assisted Interpretation** | AI-powered per-feature labeling (single and bulk) | Achieved |
 | **Production Security** | Non-root containers, CVE scanning, supply-chain attestations | Achieved |
-| **Scalability** | Multi-GPU support with aggregated/per-GPU monitoring | Planned |
+| **Scalability** | Multi-GPU monitoring, per-GPU job routing, per-GPU WebSocket metrics | Achieved |
 
 ### 1.3 Success Criteria
 - [x] Users can download datasets from HuggingFace and tokenize them
@@ -50,7 +50,9 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 - [x] Bulk labeling runs against OpenAI API or any OpenAI-compatible local LLM (miLLM, Ollama, vLLM)
 - [x] Platform ships with hardened security posture (non-root containers, CodeQL, supply-chain attestations)
 - [x] API keys and sensitive settings are encrypted at rest (AES-256-GCM)
-- [ ] Users can distribute training across multiple GPUs (planned)
+- [x] Users can monitor each GPU individually (VRAM, utilization, temperature, power) via per-GPU WebSocket channels
+- [x] Users can route extraction jobs to a specific GPU via `gpu_id` parameter
+- [ ] Users can distribute SAE training across multiple GPUs simultaneously (DDP — planned)
 
 ---
 
@@ -69,7 +71,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 7 | Neuronpedia Export | Community-format export + push to local Neuronpedia instance | Complete |
 | 8 | System Monitoring | GPU/CPU/Memory/Disk/Network monitoring | Complete |
 | 9 | Settings & Configuration | Encrypted API keys, endpoints, labeling defaults | Complete |
-| 10 | Multi-GPU Scalability | Distributed training, aggregated monitoring | Planned |
+| 10 | Multi-GPU Scalability | Per-GPU monitoring, job routing, aggregated/per-GPU views | Partially Complete (DDP training planned) |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -417,18 +419,25 @@ The highest-quality labeling path. Two-pass strategy:
 
 ---
 
-### 3.10 Multi-GPU Scalability (Planned)
+### 3.10 Multi-GPU Scalability (Partially Complete)
 
 **Purpose:** Enable distributed training and enhanced multi-GPU monitoring.
 
-**Planned Capabilities:**
-- Distributed SAE training across multiple GPUs
-- Data parallelism with gradient synchronization
-- Aggregated vs. per-GPU monitoring toggle
-- Separate meters for each GPU's VRAM and utilization
-- GPU selection for training jobs
+**Implemented (Dec 2025):**
+- Per-GPU metrics collection via `GPUMonitorService` (`pynvml`-based enumeration)
+- Real-time per-GPU WebSocket channels: `system/gpu/{gpu_id}` — utilization, VRAM, temperature, power
+- Aggregated vs. per-GPU comparison view in System Monitor (commit 8cbe31c)
+- `gpu_id` parameter for routing extraction jobs to specific GPUs
+- GPU validation: error if requested GPU index exceeds `torch.cuda.device_count()`
+- Emergency cleanup iterates all GPUs on worker shutdown
+- GPU watchdog Celery task monitors per-device processes
+- API endpoints: `/api/v1/system/gpu-list`, `/system/gpu/{gpu_id}`, `/system/gpu-metrics`, `/system/gpu-processes`
 
-**Status:** Not implemented — planned for post-MVP
+**Still Planned:**
+- Distributed SAE training across multiple GPUs simultaneously (PyTorch DDP + NCCL)
+- Data parallelism with gradient synchronization
+- Automatic batch size scaling per GPU count
+- Memory-based GPU recommendation
 
 ---
 

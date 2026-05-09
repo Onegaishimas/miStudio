@@ -1,9 +1,9 @@
 # Feature Tasks: Multi-GPU Scalability
 
 **Document ID:** 009_FTASKS|Multi_GPU_Scalability
-**Version:** 1.0
-**Last Updated:** 2025-12-05
-**Status:** Planned
+**Version:** 1.1
+**Last Updated:** 2026-05-09
+**Status:** Phases 1 & 2 Complete; Phase 3 (DDP) Planned
 **Related PRD:** [009_FPRD|Multi_GPU_Scalability](../prds/009_FPRD|Multi_GPU_Scalability.md)
 
 ---
@@ -12,87 +12,74 @@
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
-| Phase 1: Enhanced Monitoring | 4 tasks | ⏳ Planned |
-| Phase 2: GPU Selection | 5 tasks | ⏳ Planned |
+| Phase 1: Enhanced Monitoring | 4 tasks | ✅ Complete (Dec 2025) |
+| Phase 2: GPU Selection | 5 tasks | ✅ Complete (Dec 2025) |
 | Phase 3: Distributed Training | 6 tasks | ⏳ Planned |
-| Phase 4: Testing | 4 tasks | ⏳ Planned |
+| Phase 4: Testing | 4 tasks | ⏳ Planned (DDP only) |
 
-**Total: 19 tasks**
-
----
-
-## Phase 1: Enhanced Monitoring (Week 1-2)
-
-### Task 1.1: Per-GPU Metrics Storage
-- [ ] Create gpu_metrics_history table
-- [ ] Add job association columns
-- [ ] Add time-based indexes
-- [ ] Implement cleanup for old data
-
-**Files:**
-- `backend/alembic/versions/xxx_create_gpu_metrics_history.py`
-
-### Task 1.2: Update System Monitor Service
-- [ ] Store metrics in database (optional)
-- [ ] Add job tracking per GPU
-- [ ] Track which job uses which GPU
-
-### Task 1.3: Per-GPU vs Aggregated View
-- [ ] Create view toggle in frontend
-- [ ] Implement AggregatedView component
-- [ ] Implement PerGPUView component
-- [ ] Add to systemMonitorStore
-
-**Files:**
-- `frontend/src/components/SystemMonitor/PerGPUView.tsx`
-- `frontend/src/components/SystemMonitor/AggregatedView.tsx`
-
-### Task 1.4: Multi-GPU WebSocket Channels
-- [ ] Dynamic channel subscription
-- [ ] Handle variable GPU count
-- [ ] Efficient subscription management
+**Total: 19 tasks — 9 complete, 10 planned**
 
 ---
 
-## Phase 2: GPU Selection (Week 3)
+## Phase 1: Enhanced Monitoring ✅ Complete (Dec 2025)
 
-### Task 2.1: GPU Availability Service
-- [ ] Implement get_all_gpus() method
-- [ ] Implement _check_gpu_busy() method
-- [ ] Implement get_available_gpus() method
-- [ ] Implement recommend_gpus() method
+### Task 1.1: Per-GPU Metrics Storage ✅
+- [x] `GPUMonitorService` collects per-GPU utilization, VRAM, temperature, power
+- [x] Real-time emission via WebSocket channels `system/gpu/{gpu_id}`
+- [x] `pynvml`-based enumeration at service startup
 
 **Files:**
-- `backend/src/services/gpu_availability_service.py`
+- `backend/src/services/gpu_monitor_service.py`
+
+### Task 1.2: System Monitor Service — Multi-GPU ✅
+- [x] `get_all_gpu_metrics()` — all GPUs in one call
+- [x] `get_all_gpu_info()` — static specs per GPU
+- [x] `get_all_gpu_processes()` — process tracking per GPU
+
+### Task 1.3: Per-GPU vs Aggregated View ✅
+- [x] GPU comparison view (commit 8cbe31c)
+- [x] Per-GPU cards with util/VRAM/temp/power
+- [x] Aggregated totals
+
+### Task 1.4: Multi-GPU WebSocket Channels ✅
+- [x] Dynamic channels `system/gpu/{gpu_id}` per detected GPU
+- [x] `useSystemMonitorWebSocket` hook handles variable GPU count
+
+---
+
+## Phase 2: GPU Selection ✅ Complete (Dec 2025)
+
+### Task 2.1: GPU Availability Service ✅
+- [x] `GPUMonitorService.get_device_count()` — total GPU count
+- [x] `GPUMonitorService.get_all_gpu_info()` — specs per GPU
+- [x] GPU watchdog task monitors per-device processes
+- [ ] `recommend_gpus()` — memory-based recommendation (not implemented)
+
+**Files:**
+- `backend/src/services/gpu_monitor_service.py`
+- `backend/src/workers/gpu_watchdog_task.py`
 
 ### Task 2.2: Memory Estimation
-- [ ] Implement estimate_memory_requirement()
-- [ ] Consider model size
-- [ ] Consider batch size
-- [ ] Consider dtype
+- [ ] `estimate_memory_requirement()` — not yet implemented
 
-### Task 2.3: GPU Selection API
-- [ ] GET /system/gpus - List with availability
-- [ ] GET /system/gpus/recommend - Recommendations
-- [ ] POST /system/gpus/validate - Validate selection
+### Task 2.3: GPU Selection API ✅
+- [x] `GET /api/v1/system/gpu-list` — all GPUs with counts
+- [x] `GET /api/v1/system/gpu/{gpu_id}` — per-GPU details
+- [x] `GET /api/v1/system/gpu-metrics?gpu_id=N` — per-GPU live metrics
+- [x] `GET /api/v1/system/gpu-processes?gpu_id=N` — per-GPU processes
 
 **Files:**
 - `backend/src/api/v1/endpoints/system.py`
 
-### Task 2.4: GPUSelector Component
-- [ ] Display all GPUs
-- [ ] Show availability status
-- [ ] Show memory usage
-- [ ] Multi-select support
-- [ ] Memory requirement indicator
+### Task 2.4: GPU Routing for Jobs ✅
+- [x] `gpu_id` parameter in extraction API and schema
+- [x] `torch.device(f"cuda:{gpu_id}")` used in activation service and workers
+- [x] Validation: "GPU {gpu_id} not available. System has {num_gpus} GPU(s)"
+- [x] Emergency cleanup iterates all GPUs on shutdown
 
-**Files:**
-- `frontend/src/components/training/GPUSelector.tsx`
-
-### Task 2.5: Integrate into Training Form
-- [ ] Add GPUSelector to form
-- [ ] Update config schema
-- [ ] Pass gpu_ids to backend
+### Task 2.5: Integrate into Extraction Form ✅
+- [x] `gpu_id` field in extraction request schema
+- [x] Passed through to `extract_activations()` Celery task
 
 ---
 
