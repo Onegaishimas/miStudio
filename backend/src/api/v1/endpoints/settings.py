@@ -5,24 +5,103 @@ Provides CRUD operations for persistent application settings with
 transparent encryption for sensitive values (API keys, tokens).
 """
 
+import hashlib
+import hmac
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ....core.config import settings
 from ....core.deps import get_db
 from ....schemas.app_setting import (
     AppSettingUpsert,
     AppSettingResponse,
     AppSettingBulkUpsert,
     AppSettingBulkResponse,
+    PinStatusResponse,
+    PinVerifyRequest,
+    PinVerifyResponse,
+    PinSetRequest,
 )
 from ....services.app_setting_service import AppSettingService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+# Key used to store the PIN hash in app_settings
+_PIN_HASH_KEY = "settings_pin_hash"
+
+
+def _hash_pin(pin: str) -> str:
+    """Hash a PIN with PBKDF2-SHA256 and a random salt."""
+    salt = os.urandom(32)
+    dk = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, 600_000)
+    return f"pbkdf2:sha256:600000:{salt.hex()}:{dk.hex()}"
+
+
+def _verify_pin(pin: str, stored: str) -> bool:
+    """Verify a PIN against a stored PBKDF2 hash."""
+    try:
+        _, algo, iters_str, salt_hex, hash_hex = stored.split(":")
+        if algo != "sha256":
+            return False
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+        dk = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, int(iters_str))
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
+
+
+@router.get("/pin/status", response_model=PinStatusResponse)
+async def get_pin_status(db: AsyncSession = Depends(get_db)):
+    """Return whether a settings PIN is configured and whether the bypass flag is active."""
+    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY)
+    return PinStatusResponse(
+        configured=existing is not None,
+        bypass_active=settings.bypass_settings_pin,
+    )
+
+
+@router.post("/pin/verify", response_model=PinVerifyResponse)
+async def verify_pin(body: PinVerifyRequest, db: AsyncSession = Depends(get_db)):
+    """Verify the settings PIN. Returns {valid: true} on success."""
+    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, unmask=True)
+    if not existing:
+        # No PIN configured — trivially valid
+        return PinVerifyResponse(valid=True)
+    return PinVerifyResponse(valid=_verify_pin(body.pin, existing.value))
+
+
+@router.post("/pin/set", status_code=200)
+async def set_pin(body: PinSetRequest, db: AsyncSession = Depends(get_db)):
+    """Set or change the settings PIN.
+
+    Requires the current PIN when one is already configured, unless
+    MISTUDIO_BYPASS_PIN=true is active (the recovery path).
+    """
+    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, unmask=True)
+
+    if existing and not settings.bypass_settings_pin:
+        if not body.current_pin:
+            raise HTTPException(status_code=400, detail="current_pin is required to change an existing PIN")
+        if not _verify_pin(body.current_pin, existing.value):
+            raise HTTPException(status_code=401, detail="Current PIN is incorrect")
+
+    await AppSettingService.upsert(
+        db,
+        AppSettingUpsert(
+            key=_PIN_HASH_KEY,
+            value=_hash_pin(body.pin),
+            is_sensitive=False,
+            category="system",
+        ),
+    )
+    return {"success": True}
 
 
 @router.get("", response_model=list[AppSettingResponse])

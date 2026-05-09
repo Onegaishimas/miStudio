@@ -6,8 +6,8 @@
  * Sensitive values (API keys) are encrypted at rest.
  */
 
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Save, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Eye, EyeOff, Save, AlertCircle, CheckCircle2, RefreshCw, Lock } from 'lucide-react';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { fetchAPI } from '../../api/client';
 
@@ -57,14 +57,298 @@ export function SettingsPanel() {
         </div>
       </div>
 
-      {/* Tab Content */}
-      {isLoading && (
-        <div className="text-slate-500 text-sm py-4">Loading settings...</div>
+      {/* Tab Content — wrapped in PIN gate */}
+      <PinGate>
+        {isLoading && (
+          <div className="text-slate-500 text-sm py-4">Loading settings...</div>
+        )}
+        {activeTab === 'endpoints' && <EndpointsTab />}
+        {activeTab === 'api_keys' && <ApiKeysTab />}
+        {activeTab === 'labeling' && <LabelingTab />}
+        {activeTab === 'display' && <DisplayTab />}
+      </PinGate>
+    </div>
+  );
+}
+
+// ─── PIN Gate ────────────────────────────────────────────────────────────────
+
+type PinStatus = { configured: boolean; bypass_active: boolean };
+
+function PinGate({ children }: { children: React.ReactNode }) {
+  const [status, setStatus] = useState<PinStatus | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (sessionStorage.getItem('mistudio_settings_unlocked') === 'true') {
+      setUnlocked(true);
+    }
+    fetchAPI<PinStatus>('/settings/pin/status')
+      .then(setStatus)
+      .catch(() => setStatus({ configured: false, bypass_active: false }));
+  }, []);
+
+  useEffect(() => {
+    if (status && status.configured && !status.bypass_active && !unlocked) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [status, unlocked]);
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChecking(true);
+    setError(null);
+    try {
+      const result = await fetchAPI<{ valid: boolean }>('/settings/pin/verify', {
+        method: 'POST',
+        body: JSON.stringify({ pin }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (result.valid) {
+        sessionStorage.setItem('mistudio_settings_unlocked', 'true');
+        setUnlocked(true);
+      } else {
+        setError('Incorrect PIN');
+        setPin('');
+        inputRef.current?.focus();
+      }
+    } catch {
+      setError('Failed to verify PIN');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (!status) {
+    return <div className="text-slate-500 text-sm py-4">Loading...</div>;
+  }
+
+  // Bypass active: show warning banner but render content normally
+  if (status.bypass_active) {
+    return (
+      <>
+        <div className="mb-6 px-4 py-3 bg-amber-900/30 border border-amber-700/50 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-300">PIN bypass active</p>
+            <p className="text-xs text-amber-400/80 mt-0.5">
+              <code className="bg-amber-900/40 px-1 rounded">MISTUDIO_BYPASS_PIN=true</code> is set in your
+              environment. Reset your PIN below, then remove the flag and restart the backend.
+            </p>
+          </div>
+        </div>
+        {children}
+      </>
+    );
+  }
+
+  // No PIN configured, or already unlocked this session
+  if (!status.configured || unlocked) {
+    return <>{children}</>;
+  }
+
+  // Locked — show PIN gate
+  return (
+    <div className="flex flex-col items-center justify-center py-20 gap-8">
+      <div className="text-center">
+        <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-6 h-6 text-slate-500" />
+        </div>
+        <h3 className="text-slate-200 font-medium mb-1">Settings are PIN-protected</h3>
+        <p className="text-slate-500 text-sm">Enter your PIN to access settings.</p>
+      </div>
+
+      <form onSubmit={handleVerify} className="flex flex-col items-center gap-3 w-64">
+        <input
+          ref={inputRef}
+          type="password"
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setError(null); }}
+          placeholder="Enter PIN"
+          className="w-full bg-slate-800 border border-slate-700 rounded px-4 py-2.5 text-center text-slate-200 text-lg tracking-widest focus:border-emerald-500 focus:outline-none placeholder:tracking-normal placeholder:text-sm placeholder:text-slate-600"
+        />
+        {error && <p className="text-red-400 text-xs">{error}</p>}
+        <button
+          type="submit"
+          disabled={!pin || checking}
+          className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium rounded transition-colors"
+        >
+          {checking ? 'Verifying…' : 'Unlock'}
+        </button>
+      </form>
+
+      {/* Recovery instructions */}
+      <div className="max-w-xs text-center border-t border-slate-800 pt-6">
+        <p className="text-xs text-slate-500 font-medium mb-2">Forgot your PIN?</p>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Set{' '}
+          <code className="text-slate-500 bg-slate-800 px-1 rounded">MISTUDIO_BYPASS_PIN=true</code>{' '}
+          in your server's{' '}
+          <code className="text-slate-500 bg-slate-800 px-1 rounded">.env</code>{' '}
+          file and restart the backend. The Settings panel will be accessible without a PIN.
+          Reset your PIN in the API Keys tab, then remove the bypass flag and restart again.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── PIN Management Section ───────────────────────────────────────────────────
+
+function PinManagementSection() {
+  const { remove } = useSettingsStore();
+  const [pinStatus, setPinStatus] = useState<PinStatus | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [currentPin, setCurrentPin] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchAPI<PinStatus>('/settings/pin/status').then(setPinStatus).catch(() => {});
+  }, []);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  };
+
+  const resetForm = () => {
+    setNewPin(''); setConfirmPin(''); setCurrentPin(''); setError(null); setShowForm(false);
+  };
+
+  const handleSetPin = async () => {
+    if (newPin !== confirmPin) { setError('PINs do not match'); return; }
+    if (newPin.length < 4) { setError('PIN must be at least 4 characters'); return; }
+    setError(null);
+    setSaving(true);
+    try {
+      await fetchAPI('/settings/pin/set', {
+        method: 'POST',
+        body: JSON.stringify({
+          pin: newPin,
+          current_pin: pinStatus?.configured && !pinStatus.bypass_active ? currentPin : undefined,
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      sessionStorage.setItem('mistudio_settings_unlocked', 'true');
+      setPinStatus((s) => s ? { ...s, configured: true } : null);
+      showToast(pinStatus?.configured ? 'PIN changed' : 'PIN set — settings are now protected');
+      resetForm();
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to set PIN');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemovePin = async () => {
+    try {
+      await remove('settings_pin_hash');
+      sessionStorage.removeItem('mistudio_settings_unlocked');
+      setPinStatus((s) => s ? { ...s, configured: false } : null);
+      showToast('PIN removed');
+    } catch {
+      setError('Failed to remove PIN');
+    }
+  };
+
+  if (!pinStatus) return null;
+
+  return (
+    <div className="mt-8">
+      <h3 className="text-base font-semibold text-slate-200 mb-1">Settings Access PIN</h3>
+      <p className="text-xs text-slate-500 mb-4">
+        {pinStatus.configured
+          ? 'A PIN is required to open the Settings panel.'
+          : 'Optionally set a PIN to require authentication before accessing Settings.'}
+      </p>
+
+      {toast && (
+        <div className="flex items-center gap-2 text-emerald-400 text-xs mb-3">
+          <CheckCircle2 className="w-4 h-4" /> {toast}
+        </div>
       )}
-      {activeTab === 'endpoints' && <EndpointsTab />}
-      {activeTab === 'api_keys' && <ApiKeysTab />}
-      {activeTab === 'labeling' && <LabelingTab />}
-      {activeTab === 'display' && <DisplayTab />}
+
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+        {pinStatus.configured && !showForm ? (
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
+              <Lock className="w-3.5 h-3.5" /> PIN is set
+            </span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setShowForm(true)}
+                className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+              >
+                Change
+              </button>
+              <button
+                onClick={handleRemovePin}
+                className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pinStatus.configured && !pinStatus.bypass_active && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Current PIN</label>
+                <input
+                  type="password"
+                  value={currentPin}
+                  onChange={(e) => setCurrentPin(e.target.value)}
+                  placeholder="Enter current PIN"
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">New PIN</label>
+              <input
+                type="password"
+                value={newPin}
+                onChange={(e) => { setNewPin(e.target.value); setError(null); }}
+                placeholder="Min 4 characters"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Confirm PIN</label>
+              <input
+                type="password"
+                value={confirmPin}
+                onChange={(e) => { setConfirmPin(e.target.value); setError(null); }}
+                placeholder="Repeat new PIN"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleSetPin}
+                disabled={saving || !newPin || !confirmPin}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm rounded transition-colors"
+              >
+                {saving ? 'Saving…' : pinStatus.configured ? 'Change PIN' : 'Set PIN'}
+              </button>
+              {showForm && (
+                <button onClick={resetForm} className="px-3 py-1.5 text-slate-400 hover:text-slate-200 text-sm">
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -511,6 +795,8 @@ function ApiKeysTab() {
           );
         })}
       </div>
+
+      <PinManagementSection />
     </div>
   );
 }

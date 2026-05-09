@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(
         default=30, ge=1, le=10080, description="Access token expiration in minutes"
     )
+    bypass_settings_pin: bool = Field(
+        default=False,
+        description=(
+            "Bypass the Settings panel PIN gate. Set MISTUDIO_BYPASS_PIN=true to recover "
+            "from a forgotten PIN — requires filesystem access to the server. "
+            "Remove after resetting the PIN and restart the backend."
+        ),
+    )
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(

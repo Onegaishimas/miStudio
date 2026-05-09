@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 
 # Valid setting categories
-SettingCategory = Literal["endpoints", "api_keys", "labeling", "display", "general"]
+SettingCategory = Literal["endpoints", "api_keys", "labeling", "display", "general", "system"]
 
 
 class AppSettingUpsert(BaseModel):
@@ -37,6 +37,28 @@ class AppSettingResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PinStatusResponse(BaseModel):
+    """Whether a settings PIN is configured and whether the bypass flag is active."""
+
+    configured: bool
+    bypass_active: bool
+
+
+class PinVerifyRequest(BaseModel):
+    pin: str = Field(..., min_length=1, max_length=128)
+
+
+class PinVerifyResponse(BaseModel):
+    valid: bool
+
+
+class PinSetRequest(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=128, description="New PIN (min 4 chars)")
+    current_pin: str | None = Field(
+        None, description="Current PIN — required when changing an existing PIN (waived if bypass active)"
+    )
 
 
 class AppSettingBulkUpsert(BaseModel):
