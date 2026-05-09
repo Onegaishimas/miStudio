@@ -84,9 +84,6 @@ function PinGate({ children }: { children: React.ReactNode }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (sessionStorage.getItem('mistudio_settings_unlocked') === 'true') {
-      setUnlocked(true);
-    }
     fetchAPI<PinStatus>('/settings/pin/status')
       .then(setStatus)
       .catch(() => setStatus({ configured: false, bypass_active: false }));
@@ -109,7 +106,6 @@ function PinGate({ children }: { children: React.ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
       });
       if (result.valid) {
-        sessionStorage.setItem('mistudio_settings_unlocked', 'true');
         setUnlocked(true);
       } else {
         setError('Incorrect PIN');
@@ -237,7 +233,6 @@ function PinManagementSection() {
         }),
         headers: { 'Content-Type': 'application/json' },
       });
-      sessionStorage.setItem('mistudio_settings_unlocked', 'true');
       setPinStatus((s) => s ? { ...s, configured: true } : null);
       showToast(pinStatus?.configured ? 'PIN changed' : 'PIN set — settings are now protected');
       resetForm();
@@ -251,7 +246,6 @@ function PinManagementSection() {
   const handleRemovePin = async () => {
     try {
       await remove('settings_pin_hash');
-      sessionStorage.removeItem('mistudio_settings_unlocked');
       setPinStatus((s) => s ? { ...s, configured: false } : null);
       showToast('PIN removed');
     } catch {
