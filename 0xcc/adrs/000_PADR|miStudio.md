@@ -2927,12 +2927,39 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-25: Settings Panel PIN Protection
+
+**Date:** 2026-05-09
+
+**Context:** Security review identified that the entire Settings panel — including stored API keys (OpenAI, HuggingFace) — was accessible to any host on the local network with no authentication. Full application auth was considered disproportionate for a research tool; a targeted, low-friction defense for the sensitive surface was preferred.
+
+**Decision:** Add an optional PIN gate to the Settings panel backed by a PBKDF2-SHA256 hash stored in `app_settings`, with a server-side env-var bypass (`MISTUDIO_BYPASS_PIN=true`) for recovery.
+
+**Implementation details:**
+- PIN hash format: `pbkdf2:sha256:600000:{salt_hex}:{hash_hex}` — 600k iterations, `os.urandom(32)` salt per set, `hmac.compare_digest` for timing-safe comparison
+- Stored under key `settings_pin_hash` in `app_settings` table (category `system`, `is_sensitive=false` — it is a hash, not a secret)
+- No new dependencies — stdlib `hashlib`, `hmac`, `os` only
+- `bypass_settings_pin: bool` config field reads `MISTUDIO_BYPASS_PIN` env var; defaults false
+- Frontend `PinGate` component wraps all tab content; unlock state persisted in `sessionStorage` (cleared on tab/window close)
+- Bypass banner rendered in amber when bypass is active — instructs user to reset PIN then remove flag
+- Recovery instructions embedded directly in the locked gate UI (no need to know SQL)
+- `PinManagementSection` in API Keys tab for first-time set, change (requires current PIN), and remove
+
+**Recovery flow:** Set `MISTUDIO_BYPASS_PIN=true` in `.env` → restart backend → open Settings → reset PIN → remove flag → restart. Requires server filesystem access, which is the intended security bar.
+
+**Tradeoffs:**
+- Protects against local-network access to API keys without full auth friction for daily research use
+- Does not protect against direct `curl` calls to the backend API (no server-side enforcement on other endpoints)
+- Session-scoped unlock avoids repeated PIN entry during a working session
+
+---
+
 ## Document Control
 
-**Version:** 2.4
+**Version:** 2.5
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-04-26
+**Last Updated:** 2026-05-09
 **Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
@@ -2955,6 +2982,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.2 | 2026-01-21 | IDL-13 through IDL-14: Steering async migration, dynamic layer discovery |
 | 2.3 | 2026-03-21 | IDL-15 through IDL-17: Sidebar navigation, schema validation tooling, Neuronpedia local push |
 | 2.4 | 2026-04-26 | IDL-18 through IDL-24: Enhanced labeling two-pass, OpenAI SDK standardization, encrypted settings, context-aware labeling template, path injection hardening, supply-chain security (CodeQL/Scout/SLSA), feature notes markdown rendering |
+| 2.5 | 2026-05-09 | IDL-25: Settings panel PIN protection (PBKDF2-SHA256 gate, env-var bypass recovery) |
 
 ---
 

@@ -1,8 +1,8 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.0 (Security, Enhanced Labeling & Production Hardening)
-**Last Updated:** 2026-04-26
+**Version:** 3.1 (Settings PIN Protection)
+**Last Updated:** 2026-05-09
 **Status:** Active
 
 ---
@@ -50,6 +50,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 - [x] Bulk labeling runs against OpenAI API or any OpenAI-compatible local LLM (miLLM, Ollama, vLLM)
 - [x] Platform ships with hardened security posture (non-root containers, CodeQL, supply-chain attestations)
 - [x] API keys and sensitive settings are encrypted at rest (AES-256-GCM)
+- [x] Settings panel is optionally PIN-protected against local-network access (PBKDF2-SHA256 hash, bypass via env var for recovery)
 - [x] Users can monitor each GPU individually (VRAM, utilization, temperature, power) via per-GPU WebSocket channels
 - [x] Users can route extraction jobs to a specific GPU via `gpu_id` parameter
 - [ ] Users can distribute SAE training across multiple GPUs simultaneously (DDP — planned)
@@ -401,6 +402,7 @@ The highest-quality labeling path. Two-pass strategy:
 - Masked display (e.g. `sk-...XXXX`) returned to frontend — real plaintext never sent to client after initial save
 - `decrypt_value()` gracefully handles legacy plaintext rows (logs warning, returns as-is)
 - Critical bug fixed (April 2026): upsert endpoint no longer commits the masked display string back to the DB
+- **Settings panel PIN protection (May 2026):** optional PBKDF2-SHA256 PIN gate prevents unauthorised access to the Settings panel from the local network. PIN stored as hash (not encrypted value) in `app_settings` under key `settings_pin_hash`. Session unlocked in `sessionStorage` — one entry per browser session. Bypass via `MISTUDIO_BYPASS_PIN=true` env var requires server filesystem access, making it a safe recovery mechanism without needing DB access.
 
 **Fetch Models Buttons:**
 - Endpoints tab: queries the configured OpenAI-Compatible endpoint for available models
@@ -416,6 +418,9 @@ The highest-quality labeling path. Two-pass strategy:
 - `PUT /api/v1/settings` - Upsert a setting (encrypts if `is_sensitive=true`)
 - `DELETE /api/v1/settings/{key}` - Remove a setting
 - `POST /api/v1/labeling/models/openai` - Fetch available models from any OpenAI-compatible endpoint
+- `GET /api/v1/settings/pin/status` - Check if PIN is configured and whether bypass is active
+- `POST /api/v1/settings/pin/verify` - Verify PIN (returns `{valid: bool}`)
+- `POST /api/v1/settings/pin/set` - Set or change PIN (requires current PIN when changing, waived when bypass active)
 
 ---
 
@@ -517,6 +522,7 @@ Community Standard format ensures interoperability:
 
 ### 5.5 Security Architecture
 - **At-rest encryption:** AES-256-GCM with HKDF-SHA256 key derivation for all sensitive settings
+- **Settings panel PIN gate:** optional PBKDF2-SHA256 PIN (600k iterations, random salt) protects the Settings panel from local-network access; env-var bypass (`MISTUDIO_BYPASS_PIN=true`) provides a recovery path that requires server filesystem access
 - **Path injection prevention:** `resolve_user_path()` performs string-only normalization + containment check against trusted roots before any filesystem operation
 - **Non-root containers:** Frontend (`nginx-unprivileged`, uid 101, port 8080); Backend entrypoint drops privileges to `mistudio` user after init
 - **Supply-chain security:** SLSA provenance, SBOM, Docker Scout scanning on all image builds
@@ -640,8 +646,9 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 2.0 | 2025-12-05 | MVP complete — reflects actual implementation |
 | 2.1 | 2025-12-16 | Post-MVP: NLP analysis, Ollama integration, infrastructure improvements |
 | 3.0 | 2026-04-26 | Enhanced labeling, OpenAI API integration, context-aware labeling template, Settings Panel, security hardening, v0.5.0 public release, K8s production deployment, CI/CD pipeline |
+| 3.1 | 2026-05-09 | Settings panel PIN protection (PBKDF2-SHA256 gate + env-var bypass); multi-GPU doc corrections (Phases 1 & 2 retrospectively marked complete) |
 
 ---
 
-*Generated: 2026-04-26*
+*Generated: 2026-05-09*
 *MechInterp Studio — v0.5.0 Production Release*

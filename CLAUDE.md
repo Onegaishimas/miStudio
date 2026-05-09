@@ -3,8 +3,8 @@ yes
 
 ## Current Status
 - **Phase:** Active Development & Maintenance
-- **Last Session:** 2026-04-26
-- **Current Task:** Documentation update complete (v3.0)
+- **Last Session:** 2026-05-09
+- **Current Task:** Security hardening — Settings PIN protection
 - **Active Work:** None — stable, all services running
 - **Completed:**
   - Enhanced per-feature two-pass LLM labeling ✅
@@ -18,6 +18,9 @@ yes
   - v0.5.0 public release (Apache 2.0, CI/CD, K8s deployment) ✅
   - 0xcc documentation updated to v3.0 (PPRD, PADR, FPRD, FTASKS) ✅
   - Docusaurus manual updated with enhanced labeling docs + 12 screenshots ✅
+  - Settings panel PIN protection — PBKDF2-SHA256 gate + MISTUDIO_BYPASS_PIN recovery ✅
+  - Multi-GPU doc corrections — Phases 1 & 2 retrospectively marked complete ✅
+  - Full end-to-end security review (multi-agent) — 7 findings identified and documented ✅
 - **Test Status:** 995 passed, 4 skipped (conditional on external dependencies)
 - **Services Status:** K8s (mistudio namespace) ✅, Docker Compose (192.168.244.222) ✅
   - Backend (port 8000) ✅, Frontend (nginx-unprivileged, port 8080→80) ✅
