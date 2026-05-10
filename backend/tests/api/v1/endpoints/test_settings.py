@@ -79,3 +79,104 @@ class TestUpsertPreservesEncryptedValue:
         row = result.scalar_one()
         assert len(row.value) > len(REAL_OPENAI_KEY)
         assert "..." not in row.value
+
+
+class TestPinPersistence:
+    """Settings PIN must survive across request/session boundaries.
+
+    Regression coverage for Phase 3 (review finding #1): confirms that the
+    get_db dependency's auto-commit causes the PIN hash to actually reach the
+    database, not just the in-memory session.
+    """
+
+    async def test_pin_set_persists_to_db(
+        self, client: AsyncClient, async_session: AsyncSession
+    ):
+        """POST /pin/set → DB row exists with a PBKDF2 hash value."""
+        response = await client.post(
+            "/api/v1/settings/pin/set",
+            json={"pin": "testpin123"},
+        )
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+        # Verify the hash landed in the database — not just the session.
+        result = await async_session.execute(
+            select(AppSetting).where(AppSetting.key == "settings_pin_hash")
+        )
+        row = result.scalar_one_or_none()
+        assert row is not None, "PIN hash row not found in DB — commit did not happen"
+        assert row.value.startswith("pbkdf2:sha256:"), (
+            f"Unexpected hash format in DB: {row.value[:40]}"
+        )
+        assert row.is_sensitive is False
+
+    async def test_pin_status_reflects_configured(self, client: AsyncClient):
+        """After setting a PIN, /pin/status must report configured=true."""
+        await client.post(
+            "/api/v1/settings/pin/set",
+            json={"pin": "testpin123"},
+        )
+        response = await client.get("/api/v1/settings/pin/status")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["configured"] is True
+
+    async def test_pin_verify_correct(self, client: AsyncClient):
+        """Correct PIN must verify successfully."""
+        await client.post("/api/v1/settings/pin/set", json={"pin": "correct-pin"})
+        response = await client.post(
+            "/api/v1/settings/pin/verify", json={"pin": "correct-pin"}
+        )
+        assert response.status_code == 200
+        assert response.json()["valid"] is True
+
+    async def test_pin_verify_wrong(self, client: AsyncClient):
+        """Wrong PIN must return valid=false, not raise."""
+        await client.post("/api/v1/settings/pin/set", json={"pin": "correct-pin"})
+        response = await client.post(
+            "/api/v1/settings/pin/verify", json={"pin": "wrong-pin"}
+        )
+        assert response.status_code == 200
+        assert response.json()["valid"] is False
+
+    async def test_pin_change_requires_current_pin(self, client: AsyncClient):
+        """Changing PIN without current_pin must return 400."""
+        await client.post("/api/v1/settings/pin/set", json={"pin": "original-pin"})
+        response = await client.post(
+            "/api/v1/settings/pin/set",
+            json={"pin": "new-pin"},
+        )
+        assert response.status_code == 400
+
+    async def test_pin_change_with_wrong_current_pin(self, client: AsyncClient):
+        """Changing PIN with incorrect current_pin must return 401."""
+        await client.post("/api/v1/settings/pin/set", json={"pin": "original-pin"})
+        response = await client.post(
+            "/api/v1/settings/pin/set",
+            json={"pin": "new-pin", "current_pin": "wrong"},
+        )
+        assert response.status_code == 401
+
+    async def test_pin_change_succeeds_with_correct_current_pin(
+        self, client: AsyncClient
+    ):
+        """Changing PIN with correct current_pin must succeed and new PIN verifies."""
+        await client.post("/api/v1/settings/pin/set", json={"pin": "original-pin"})
+        change = await client.post(
+            "/api/v1/settings/pin/set",
+            json={"pin": "new-pin", "current_pin": "original-pin"},
+        )
+        assert change.status_code == 200
+
+        # Old PIN no longer works
+        old = await client.post(
+            "/api/v1/settings/pin/verify", json={"pin": "original-pin"}
+        )
+        assert old.json()["valid"] is False
+
+        # New PIN works
+        new = await client.post(
+            "/api/v1/settings/pin/verify", json={"pin": "new-pin"}
+        )
+        assert new.json()["valid"] is True

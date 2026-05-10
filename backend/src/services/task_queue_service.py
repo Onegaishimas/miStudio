@@ -8,7 +8,7 @@ user-controlled retry of failed operations.
 import logging
 import uuid
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
@@ -102,9 +102,9 @@ class TaskQueueService:
 
         # Update timestamps
         if status == "running" and not entry.started_at:
-            entry.started_at = datetime.utcnow()
+            entry.started_at = datetime.now(timezone.utc)
         elif status in ("completed", "failed", "cancelled"):
-            entry.completed_at = datetime.utcnow()
+            entry.completed_at = datetime.now(timezone.utc)
 
         await db.commit()
         await db.refresh(entry)
@@ -366,7 +366,7 @@ class TaskQueueService:
         """
         from datetime import timedelta
 
-        cutoff_date = datetime.utcnow() - timedelta(days=days_old)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_old)
 
         result = await db.execute(
             select(TaskQueue).where(

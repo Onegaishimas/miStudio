@@ -1438,7 +1438,7 @@ class ExtractionService:
                                     # Use decode() for proper Unicode handling across all tokenizer types
                                     decoded_text = tokenizer.decode(batch_input_ids[-1], skip_special_tokens=False)
                                     batch_texts.append(decoded_text)
-                                except:
+                                except Exception:
                                     batch_texts.append(f"[Tokens: {len(batch_input_ids[-1])}]")
 
                         if not batch_input_ids:

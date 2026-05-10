@@ -920,7 +920,7 @@ def tokenize_dataset_task(
         # Force cleanup of input dataset to prevent multiprocessing cleanup issues
         try:
             del dataset
-        except:
+        except Exception:
             pass
 
         # Force garbage collection to clean up multiprocessing resources

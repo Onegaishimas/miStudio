@@ -102,7 +102,7 @@ def _emergency_gpu_cleanup():
         # Last resort - try to at least log the error
         try:
             logger.error(f"[Emergency GPU Cleanup] Failed: {e}")
-        except:
+        except Exception:
             pass  # If logging fails, silently ignore
 
 
@@ -200,7 +200,7 @@ class GenerationWatchdog:
                         # Clean up GPU first
                         try:
                             _emergency_gpu_cleanup()
-                        except:
+                        except Exception:
                             pass
                         # Forcefully terminate - let supervisor restart
                         logger.error("[Watchdog] Calling os._exit(1) to terminate process")

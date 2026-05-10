@@ -401,7 +401,7 @@ def steering_sweep_task(
         try:
             from ..services.steering_service import get_steering_service
             get_steering_service().cleanup_gpu()
-        except:
+        except Exception:
             pass
         raise
 

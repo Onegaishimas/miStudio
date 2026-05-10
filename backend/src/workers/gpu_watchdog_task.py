@@ -141,7 +141,7 @@ def is_process_zombie(pid: int) -> bool:
             for line in f:
                 if line.startswith("State:"):
                     return "Z" in line  # Z = zombie
-    except:
+    except Exception:
         pass
     return False
 
@@ -158,7 +158,7 @@ def get_process_cpu_percent(pid: int) -> Optional[float]:
         )
         if result.returncode == 0:
             return float(result.stdout.strip())
-    except:
+    except Exception:
         pass
     return None
 
