@@ -406,7 +406,6 @@ def download_dataset_task(
                         error_message=error_message,
                         retry_params={
                             "repo_id": repo_id,
-                            "access_token": access_token,
                             "split": split,
                             "config": config,
                         },

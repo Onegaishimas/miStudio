@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.deps import get_db
+from ....services.app_setting_service import AppSettingService
 from ....services.task_queue_service import TaskQueueService
 from ....schemas.task_queue import (
     TaskQueueResponse,
@@ -324,6 +325,9 @@ async def retry_task(
     if request.param_overrides:
         retry_params.update(request.param_overrides)
 
+    # Fetch HF token from encrypted app_settings — never stored in retry_params
+    hf_token = await AppSettingService.get_decrypted_value(db, "hf_token")
+
     # Increment retry count
     await TaskQueueService.increment_retry_count(db, task_queue_id)
 
@@ -335,7 +339,7 @@ async def retry_task(
             model_id=task.entity_id,
             repo_id=retry_params.get("repo_id"),
             quantization=retry_params.get("quantization"),
-            access_token=retry_params.get("access_token"),
+            access_token=hf_token,
             trust_remote_code=retry_params.get("trust_remote_code", False),
         )
 
@@ -351,7 +355,7 @@ async def retry_task(
         celery_task = download_dataset_task.delay(
             dataset_id=task.entity_id,
             repo_id=retry_params.get("repo_id"),
-            access_token=retry_params.get("access_token"),
+            access_token=hf_token,
             split=retry_params.get("split"),
             config=retry_params.get("config"),
         )

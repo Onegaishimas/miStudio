@@ -458,7 +458,6 @@ def download_and_load_model(
                         retry_params={
                             "repo_id": repo_id,
                             "quantization": quantization,
-                            "access_token": access_token,
                             "trust_remote_code": trust_remote_code,
                         },
                         retry_count=0,

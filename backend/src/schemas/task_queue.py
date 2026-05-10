@@ -5,7 +5,7 @@ This module defines the request and response schemas for task queue operations.
 """
 
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TaskQueueBase(BaseModel):
@@ -48,6 +48,16 @@ class TaskQueueData(BaseModel):
     entity_info: Optional[Dict[str, Any]] = Field(None, description="Information about the associated entity")
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _redact_sensitive_retry_params(self) -> "TaskQueueData":
+        """Strip credentials from retry_params before they leave the backend."""
+        if self.retry_params:
+            self.retry_params = {
+                k: v for k, v in self.retry_params.items()
+                if k not in {"access_token", "api_key", "token", "password", "secret"}
+            }
+        return self
 
 
 class TaskQueueResponse(BaseModel):
