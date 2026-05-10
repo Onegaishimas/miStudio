@@ -48,6 +48,7 @@ class TestEmitProgress:
                 "event": "progress",
                 "data": {"progress": 50.0, "status": "processing"}
             },
+            headers={"X-Internal-Token": mock_settings.internal_api_secret},
             timeout=5.0  # Default timeout in emit_progress
         )
 
