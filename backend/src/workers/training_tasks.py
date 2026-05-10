@@ -1772,7 +1772,7 @@ def train_sae_task(
 
         # Emit training:completed WebSocket event
         from ..workers.websocket_emitter import emit_training_progress
-        emit_training_progress(
+        _emit_ok = emit_training_progress(
             training_id=training_id,
             event="training:completed",
             data={
@@ -1781,6 +1781,8 @@ def train_sae_task(
                 "final_loss": avg_loss,
             }
         )
+        if not _emit_ok:
+            logger.warning(f"[Training {training_id}] WebSocket emit for 'training:completed' failed — frontend may not update")
 
         return {
             "status": "completed",
@@ -1827,7 +1829,7 @@ def train_sae_task(
 
         # Emit training:failed WebSocket event
         from ..workers.websocket_emitter import emit_training_progress
-        emit_training_progress(
+        _emit_ok = emit_training_progress(
             training_id=training_id,
             event="training:failed",
             data={
@@ -1835,6 +1837,8 @@ def train_sae_task(
                 "error_message": str(e),
             }
         )
+        if not _emit_ok:
+            logger.warning(f"[Training {training_id}] WebSocket emit for 'training:failed' failed — frontend may not update")
 
         raise
 

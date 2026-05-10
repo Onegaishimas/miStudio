@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
     bind=True,
     base=DatabaseTask,
     name="label_features",
-    max_retries=0,  # No automatic retries
-    autoretry_for=(),  # Explicit no auto-retry (empty tuple)
+    max_retries=3,
+    default_retry_delay=60,  # 1-minute back-off between retries
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
 def label_features_task(
     self,

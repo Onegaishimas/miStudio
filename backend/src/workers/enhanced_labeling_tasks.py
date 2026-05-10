@@ -29,8 +29,9 @@ def _ensure_model_loaded(endpoint_url: str, model_name: str) -> None:
     bind=True,
     base=DatabaseTask,
     name="enhanced_label_feature",
-    max_retries=0,
-    autoretry_for=(),
+    max_retries=3,
+    default_retry_delay=60,  # 1-minute back-off between retries
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
 def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
     """

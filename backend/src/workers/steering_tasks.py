@@ -168,12 +168,14 @@ def steering_compare_task(
         )
 
         # Emit completion
-        emit_steering_progress(
+        _ok = emit_steering_progress(
             task_id=task_id,
             percent=100,
             message="Complete",
             result=result,
         )
+        if not _ok:
+            logger.warning(f"[Steering Task {task_id}] WebSocket emit for \'completed\' event failed — frontend may not update")
 
         logger.info(f"[Steering Task {task_id}] Completed successfully")
         return result
@@ -380,12 +382,14 @@ def steering_sweep_task(
             progress_callback=progress_callback,
         )
 
-        emit_steering_progress(
+        _ok = emit_steering_progress(
             task_id=task_id,
             percent=100,
             message="Complete",
             result=result,
         )
+        if not _ok:
+            logger.warning(f"[Sweep Task {task_id}] WebSocket emit for 'completed' event failed — frontend may not update")
 
         logger.info(f"[Sweep Task {task_id}] Completed successfully")
         return result
@@ -660,12 +664,14 @@ def steering_combined_task(
         )
 
         # Emit completion
-        emit_steering_progress(
+        _ok = emit_steering_progress(
             task_id=task_id,
             percent=100,
             message="Complete",
             result=result,
         )
+        if not _ok:
+            logger.warning(f"[Combined Task {task_id}] WebSocket emit for \'completed\' event failed — frontend may not update")
 
         logger.info(f"[Combined Task {task_id}] Completed successfully")
         return result

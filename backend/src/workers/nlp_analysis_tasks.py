@@ -48,8 +48,9 @@ def emit_nlp_analysis_progress(
     bind=True,
     base=DatabaseTask,
     name="src.workers.nlp_analysis_tasks.analyze_features_nlp",
-    max_retries=0,
-    autoretry_for=(),
+    max_retries=3,
+    default_retry_delay=60,  # 1-minute back-off between retries
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
 def analyze_features_nlp_task(
     self,
@@ -343,8 +344,9 @@ def analyze_features_nlp_task(
     bind=True,
     base=DatabaseTask,
     name="src.workers.nlp_analysis_tasks.analyze_single_feature_nlp",
-    max_retries=0,
-    autoretry_for=(),
+    max_retries=3,
+    default_retry_delay=60,  # 1-minute back-off between retries
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
 def analyze_single_feature_nlp_task(
     self,

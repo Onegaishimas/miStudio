@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
     bind=True,
     base=DatabaseTask,
     name="src.workers.extraction_tasks.extract_features_from_sae",
-    max_retries=0,
-    autoretry_for=(),
+    max_retries=3,
+    default_retry_delay=60,  # 1-minute back-off between retries
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
 def extract_features_from_sae_task(
     self,
@@ -155,7 +156,9 @@ def extract_features_from_sae_task(
     bind=True,
     base=DatabaseTask,
     name="delete_extraction",
-    max_retries=0,
+    max_retries=3,
+    default_retry_delay=60,  # 1-minute back-off between retries
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
 def delete_extraction_task(self, extraction_id: str) -> Dict[str, Any]:
     """
@@ -266,8 +269,16 @@ def delete_extraction_task(self, extraction_id: str) -> Dict[str, Any]:
 
             logger.info(f"Successfully deleted extraction {extraction_id} with {feature_count} features")
 
-            # Emit final WebSocket event to notify frontend
-            emit_extraction_deleted(extraction_id, feature_count)
+            # Emit final WebSocket event to notify frontend.
+            # Wrapped in try/except so an emit failure cannot roll back the
+            # already-committed deletion — the data is gone either way.
+            try:
+                emit_extraction_deleted(extraction_id, feature_count)
+            except Exception:
+                logger.warning(
+                    f"WebSocket emit for extraction deletion failed "
+                    f"(extraction={extraction_id}) — frontend may not update"
+                )
 
             return {
                 "extraction_id": extraction_id,
