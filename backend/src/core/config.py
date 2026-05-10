@@ -160,6 +160,22 @@ class Settings(BaseSettings):
         """WebSocket emission endpoint URL derived from internal_api_url."""
         return f"{self.internal_api_url}/api/internal/ws/emit"
 
+    @property
+    def internal_api_secret(self) -> str:
+        """Shared secret for internal Celery → backend API calls.
+
+        Derived deterministically from secret_key so no extra env var is needed.
+        All containers share the same secret_key, so this is consistent across
+        the backend and all Celery workers.
+        """
+        import hashlib
+        import hmac as _hmac
+        return _hmac.new(
+            self.secret_key.encode("utf-8"),
+            b"mistudio-internal-api-v1",
+            hashlib.sha256,
+        ).hexdigest()
+
     # System Monitoring Configuration
     system_monitor_interval_seconds: int = Field(
         default=2, ge=1, le=30, description="System metrics collection interval in seconds (via WebSocket)"

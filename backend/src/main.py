@@ -7,7 +7,9 @@ Main application entry point for the backend API.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import hmac
+
+from fastapi import FastAPI, Header, HTTPException
 
 from .api.v1.router import api_router
 from .core.config import settings
@@ -133,12 +135,18 @@ async def root():
 
 
 @app.post("/api/internal/ws/emit")
-async def emit_websocket_event(request: dict):
-    """
-    Internal endpoint for Celery workers to emit WebSocket events.
+async def emit_websocket_event(
+    request: dict,
+    x_internal_token: str = Header(..., alias="X-Internal-Token"),
+):
+    """Internal endpoint for Celery workers to emit WebSocket events.
 
-    This endpoint should only be called from within the backend system.
+    Protected by a shared secret derived from SECRET_KEY. Nginx also
+    blocks this path from external traffic via `deny all`.
     """
+    if not hmac.compare_digest(x_internal_token, settings.internal_api_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     channel = request.get("channel")
     event = request.get("event")
     data = request.get("data")

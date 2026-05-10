@@ -95,6 +95,7 @@ def emit_progress(
                 response = client.post(
                     api_url,
                     json=payload,
+                    headers={"X-Internal-Token": settings.internal_api_secret},
                     timeout=timeout,
                 )
 
