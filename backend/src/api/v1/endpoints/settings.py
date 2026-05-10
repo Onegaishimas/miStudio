@@ -101,8 +101,11 @@ async def set_pin(body: PinSetRequest, db: AsyncSession = Depends(get_db)):
             category="system",
         ),
     )
-    # Commit is handled by the get_db dependency: it calls await session.commit()
-    # after the endpoint returns without raising, so no explicit commit is needed here.
+    # Explicit commit before returning so the row is visible to any immediately-
+    # following request (e.g. the frontend's set-then-GET /pin/status pattern).
+    # get_db also commits after the endpoint returns, but that happens after the
+    # HTTP response is sent — too late for rapid sequential callers.
+    await db.commit()
     return {"success": True}
 
 

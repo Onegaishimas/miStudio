@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 
 import hmac
 
+from typing import Optional
+
 from fastapi import FastAPI, Header, HTTPException
 
 from .api.v1.router import api_router
@@ -137,14 +139,16 @@ async def root():
 @app.post("/api/internal/ws/emit")
 async def emit_websocket_event(
     request: dict,
-    x_internal_token: str = Header(..., alias="X-Internal-Token"),
+    x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token"),
 ):
     """Internal endpoint for Celery workers to emit WebSocket events.
 
     Protected by a shared secret derived from SECRET_KEY. Nginx also
     blocks this path from external traffic via `deny all`.
+    Missing or incorrect token always returns 403 — never 422 — so the
+    existence of the header requirement is not disclosed to callers.
     """
-    if not hmac.compare_digest(x_internal_token, settings.internal_api_secret):
+    if x_internal_token is None or not hmac.compare_digest(x_internal_token, settings.internal_api_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     channel = request.get("channel")
