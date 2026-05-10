@@ -64,10 +64,10 @@ async def create_training(
 
         return db_training
     except Exception as e:
-        logger.error(f"Failed to create training: {e}")
+        logger.exception("Failed to create training")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create training: {str(e)}"
+            detail="Failed to create training"
         )
 
 
@@ -265,10 +265,10 @@ async def control_training(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to {action} training {training_id}: {e}")
+        logger.exception(f"Failed to {action} training {training_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to {action} training: {str(e)}"
+            detail="Failed to {action} training"
         )
 
 

@@ -89,7 +89,7 @@ async def download_model(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to initiate model download: {str(e)}"
+            detail="Failed to initiate model download"
         )
 
 
@@ -200,10 +200,10 @@ async def redownload_model(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to initiate re-download for model {model_id}: {e}")
+        logger.exception(f"Failed to initiate re-download for model {model_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to initiate model re-download: {str(e)}"
+            detail="Failed to initiate model re-download"
         )
 
 
@@ -452,7 +452,7 @@ async def delete_model(
     except Exception as e:
         # Log error but don't fail the deletion
         # (database record is already deleted)
-        logger.error(f"Failed to queue file cleanup for model {model_id}: {e}")
+        logger.exception(f"Failed to queue file cleanup for model {model_id}")
 
 
 @router.post("/{model_id}/estimate-extraction", status_code=200)
@@ -633,7 +633,7 @@ async def extract_model_activations(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to queue extraction job: {str(e)}"
+            detail="Failed to queue extraction job"
         )
 
 
@@ -699,7 +699,7 @@ async def cancel_model_download(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to cancel download: {str(e)}"
+            detail="Failed to cancel download"
         )
 
 
@@ -1000,7 +1000,7 @@ async def cancel_extraction(
                 )
                 logger.info(f"Revoked Celery task {extraction.celery_task_id} for extraction {extraction_id}")
             except Exception as e:
-                logger.error(f"Failed to revoke Celery task: {e}")
+                logger.exception("Failed to revoke Celery task")
                 # Continue anyway - will update database status
 
         # Update database to CANCELLED
@@ -1021,7 +1021,7 @@ async def cancel_extraction(
             message="Extraction cancelled by user"
         )
     except Exception as e:
-        logger.error(f"Failed to emit cancellation event: {e}")
+        logger.exception("Failed to emit cancellation event")
         # Don't fail the request - cancellation was successful
 
     return ExtractionCancelResponse(
@@ -1132,10 +1132,10 @@ async def retry_extraction(
         )
 
     except Exception as e:
-        logger.error(f"Failed to queue retry extraction: {e}")
+        logger.exception("Failed to queue retry extraction")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to queue extraction retry: {str(e)}"
+            detail="Failed to queue extraction retry"
         )
 
 
@@ -1206,7 +1206,7 @@ async def delete_extractions(
             deleted_ids.append(extraction_id)
 
         except Exception as e:
-            logger.error(f"Failed to delete extraction {extraction_id}: {e}")
+            logger.exception(f"Failed to delete extraction {extraction_id}")
             failed_ids.append(extraction_id)
             errors[extraction_id] = str(e)
 

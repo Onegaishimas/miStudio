@@ -156,8 +156,8 @@ async def upsert_setting(
             setting.value = mask_value(decrypt_value(setting.value, setting_key=setting.key))
         return setting
     except Exception as e:
-        logger.error(f"Failed to upsert setting '{data.key}': {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save setting: {str(e)}")
+        logger.exception(f"Failed to upsert setting '{data.key}'")
+        raise HTTPException(status_code=500, detail="Failed to save setting")
 
 
 @router.put("/bulk", response_model=AppSettingBulkResponse)
@@ -185,8 +185,8 @@ async def bulk_upsert_settings(
                 updated += 1
         return AppSettingBulkResponse(data=results, created=created, updated=updated)
     except Exception as e:
-        logger.error(f"Failed to bulk upsert settings: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
+        logger.exception("Failed to bulk upsert settings")
+        raise HTTPException(status_code=500, detail="Failed to save settings")
 
 
 @router.delete("/{key}", status_code=204)

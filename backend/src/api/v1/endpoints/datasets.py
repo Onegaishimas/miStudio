@@ -75,7 +75,7 @@ async def create_dataset(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create dataset: {str(e)}"
+            detail="Failed to create dataset"
         )
 
 
@@ -466,7 +466,7 @@ async def tokenize_dataset(
         logger.error(f"AttributeError while fetching dataset: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch dataset: {str(e)}"
+            detail="Failed to fetch dataset"
         )
     except Exception as e:
         logger.error(f"Unexpected error while fetching dataset: {e}", exc_info=True)
@@ -568,7 +568,7 @@ async def tokenize_dataset(
             redis_client.delete(lock_key)  # Release lock
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to prepare tokenization: {str(e)}"
+                detail="Failed to prepare tokenization"
             )
 
         # Update status to processing and save filter configuration
@@ -616,7 +616,7 @@ async def tokenize_dataset(
         redis_client.delete(lock_key)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to start tokenization: {str(e)}"
+            detail="Failed to start tokenization"
         )
 
 
@@ -661,10 +661,10 @@ async def clear_tokenization(
         dataset = await DatasetService.clear_tokenization(db, dataset_id)
         return dataset
     except Exception as e:
-        logger.error(f"Failed to clear tokenization for dataset {dataset_id}: {e}")
+        logger.exception(f"Failed to clear tokenization for dataset {dataset_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to clear tokenization: {str(e)}"
+            detail="Failed to clear tokenization"
         )
 
 
@@ -730,7 +730,7 @@ async def cancel_dataset_download(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to cancel download/processing: {str(e)}"
+            detail="Failed to cancel download/processing"
         )
 
 
@@ -819,7 +819,7 @@ async def get_dataset_samples(
                 hf_dataset = load_from_disk(dataset_path)
                 logger.info(f"Loaded dataset from disk: {dataset_path}")
             except Exception as e:
-                logger.warning(f"Failed to load from disk path {dataset_path}: {e}")
+                logger.exception(f"Failed to load from disk path {dataset_path}")
                 # Fall through to HuggingFace fallback
 
         # If loading from disk failed or no path, try loading from HuggingFace
@@ -842,10 +842,10 @@ async def get_dataset_samples(
                 )
                 logger.info(f"Loaded dataset {dataset.hf_repo_id} from HuggingFace cache (split={split_name})")
             except Exception as e:
-                logger.error(f"Failed to load from HuggingFace: {e}", exc_info=True)
+                logger.exception("Failed to load dataset from HuggingFace")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Failed to load dataset from HuggingFace: {str(e) or type(e).__name__}"
+                    detail="Failed to load dataset from HuggingFace"
                 )
 
         if not hf_dataset:
@@ -964,10 +964,10 @@ async def get_dataset_samples(
         }
 
     except Exception as e:
-        logger.error(f"Samples endpoint error: {e}", exc_info=True)
+        logger.exception("Failed to load dataset samples")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load samples: {str(e) or type(e).__name__} - {repr(e)}"
+            detail="Failed to load samples"
         )
 
 
@@ -1097,7 +1097,7 @@ async def tokenize_preview(
         # General error
         raise HTTPException(
             status_code=500,
-            detail=f"Tokenization failed: {str(e)}"
+            detail="Tokenization failed"
         )
 
 
@@ -1373,7 +1373,7 @@ async def cancel_dataset_tokenization(
             current_app.control.revoke(tokenization.celery_task_id, terminate=True, signal='SIGKILL')
             logger.info(f"Revoked Celery task {tokenization.celery_task_id} for tokenization {tokenization.id}")
         except Exception as e:
-            logger.warning(f"Failed to revoke Celery task {tokenization.celery_task_id}: {e}")
+            logger.exception(f"Failed to revoke Celery task {tokenization.celery_task_id}")
 
     # Update tokenization status to ERROR
     tokenization.status = TokenizationStatus.ERROR

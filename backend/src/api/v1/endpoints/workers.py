@@ -5,9 +5,12 @@ This module provides endpoints for monitoring Celery workers, queues,
 and task execution status.
 """
 
+import logging
 from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger(__name__)
 
 from ....core.celery_app import (
     get_queue_lengths,
@@ -41,9 +44,10 @@ async def get_queues():
     try:
         return get_queue_lengths()
     except Exception as e:
+        logger.exception("Failed to get queue lengths")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get queue lengths: {str(e)}"
+            detail="Failed to get queue lengths"
         )
 
 
@@ -75,9 +79,10 @@ async def get_active():
     try:
         return get_active_tasks()
     except Exception as e:
+        logger.exception("Failed to get active tasks")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get active tasks: {str(e)}"
+            detail="Failed to get active tasks"
         )
 
 
@@ -116,9 +121,10 @@ async def get_stats():
     try:
         return get_worker_stats()
     except Exception as e:
+        logger.exception("Failed to get worker stats")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get worker stats: {str(e)}"
+            detail="Failed to get worker stats"
         )
 
 
@@ -201,7 +207,8 @@ async def get_health():
             "warnings": warnings,
         }
     except Exception as e:
+        logger.exception("Failed to get health status")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get health status: {str(e)}"
+            detail="Failed to get health status"
         )

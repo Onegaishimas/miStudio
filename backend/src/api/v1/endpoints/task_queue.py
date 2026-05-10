@@ -187,7 +187,7 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
                 },
             })
     except Exception as e:
-        logger.warning(f"Failed to query labeling jobs: {e}")
+        logger.exception("Failed to query labeling jobs")
 
     # Also include active Neuronpedia push jobs
     try:
@@ -226,7 +226,7 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
                 },
             })
     except Exception as e:
-        logger.warning(f"Failed to query neuronpedia pushes: {e}")
+        logger.exception("Failed to query neuronpedia pushes")
 
     return {"data": enriched_tasks}
 

@@ -311,7 +311,7 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
         except ProcessLookupError:
             pass  # Already dead
         except Exception as e:
-            logger.warning(f"Could not kill worker {existing_pid}: {e}")
+            logger.exception(f"Could not kill worker {existing_pid}")
 
         # Also kill by pattern to catch orphans
         try:
@@ -374,7 +374,7 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
         return False, None
 
     except Exception as e:
-        logger.error(f"Failed to auto-start steering worker: {e}")
+        logger.exception("Failed to auto-start steering worker")
         return False, None
 
 
@@ -476,7 +476,7 @@ async def enter_steering_mode():
             logger.error("Steering worker failed to start within timeout")
 
     except Exception as e:
-        logger.error(f"Failed to start steering worker: {e}")
+        logger.exception("Failed to start steering worker")
         result["message"] = f"Failed to start worker: {e}"
 
     return result
@@ -533,7 +533,7 @@ async def exit_steering_mode():
             logger.info(f"Process {existing_pid} not found (already dead)")
             killed = True
         except Exception as e:
-            logger.warning(f"Could not kill PID {existing_pid}: {e}")
+            logger.exception(f"Could not kill PID {existing_pid}")
 
     # Also kill by pattern to catch any orphans
     try:

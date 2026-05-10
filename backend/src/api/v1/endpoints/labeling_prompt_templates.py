@@ -48,10 +48,10 @@ async def create_template(
         db_template = await LabelingPromptTemplateService.create_template(db, template)
         return db_template
     except Exception as e:
-        logger.error(f"Failed to create labeling prompt template: {str(e)}")
+        logger.exception("Failed to create labeling prompt template")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create labeling prompt template: {str(e)}"
+            detail="Failed to create labeling prompt template"
         )
 
 
@@ -204,10 +204,10 @@ async def update_template(
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Failed to update labeling prompt template {template_id}: {str(e)}")
+        logger.exception(f"Failed to update labeling prompt template {template_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update template: {str(e)}"
+            detail="Failed to update template"
         )
 
 
@@ -260,10 +260,10 @@ async def delete_template(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete labeling prompt template {template_id}: {str(e)}")
+        logger.exception(f"Failed to delete labeling prompt template {template_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete template: {str(e)}"
+            detail="Failed to delete template"
         )
 
 
@@ -307,10 +307,10 @@ async def clone_template(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to clone labeling prompt template {template_id}: {str(e)}")
+        logger.exception(f"Failed to clone labeling prompt template {template_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to clone template: {str(e)}"
+            detail="Failed to clone template"
         )
 
 
@@ -392,10 +392,10 @@ async def export_templates(
         export_data = await LabelingPromptTemplateService.export_templates(db, template_ids)
         return export_data
     except Exception as e:
-        logger.error(f"Failed to export templates: {str(e)}")
+        logger.exception("Failed to export templates")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to export templates: {str(e)}"
+            detail="Failed to export templates"
         )
 
 

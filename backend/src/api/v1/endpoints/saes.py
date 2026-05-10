@@ -152,7 +152,7 @@ async def preview_hf_repository(request: HFRepoPreviewRequest):
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        logger.error(f"Error previewing repository: {e}")
+        logger.exception("Error previewing repository")
         raise HTTPException(500, f"Error previewing repository: {str(e)}")
 
 
@@ -184,7 +184,7 @@ async def download_sae_from_hf(
         return SAEResponse.model_validate(sae)
 
     except Exception as e:
-        logger.error(f"Error initiating SAE download: {e}")
+        logger.exception("Error initiating SAE download")
         raise HTTPException(500, f"Error initiating download: {str(e)}")
 
 
@@ -236,7 +236,7 @@ async def upload_sae_to_hf(
         )
 
     except Exception as e:
-        logger.error(f"Error uploading SAE: {e}")
+        logger.exception("Error uploading SAE")
         raise HTTPException(500, f"Error uploading SAE: {str(e)}")
 
 
@@ -262,7 +262,7 @@ async def get_available_saes_from_training(
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        logger.error(f"Error getting available SAEs from training: {e}")
+        logger.exception("Error getting available SAEs from training")
         raise HTTPException(500, f"Error listing available SAEs: {str(e)}")
 
 
@@ -287,7 +287,7 @@ async def import_sae_from_training(
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        logger.error(f"Error importing SAE from training: {e}")
+        logger.exception("Error importing SAE from training")
         raise HTTPException(500, f"Error importing SAE: {str(e)}")
 
 
@@ -308,7 +308,7 @@ async def import_sae_from_file(
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        logger.error(f"Error importing SAE from file: {e}")
+        logger.exception("Error importing SAE from file")
         raise HTTPException(500, f"Error importing SAE: {str(e)}")
 
 
@@ -687,7 +687,7 @@ async def cancel_sae_extraction(
             )
             logger.info(f"Revoked Celery task {extraction_job.celery_task_id} for extraction {extraction_job.id}")
         except Exception as e:
-            logger.error(f"Failed to revoke Celery task: {e}")
+            logger.exception("Failed to revoke Celery task")
             # Continue anyway - will update database status
 
     # Update status to FAILED with cancellation message

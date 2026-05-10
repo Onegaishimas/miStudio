@@ -50,7 +50,7 @@ async def create_template(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create extraction template: {str(e)}"
+            detail="Failed to create extraction template"
         )
 
 
@@ -285,10 +285,10 @@ async def export_templates(
         export_data = await ExtractionTemplateService.export_templates(db, template_ids)
         return JSONResponse(content=export_data)
     except Exception as e:
-        logger.error(f"Failed to export templates: {str(e)}")
+        logger.exception("Failed to export templates")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to export templates: {str(e)}"
+            detail="Failed to export templates"
         )
 
 

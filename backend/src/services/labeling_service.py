@@ -612,6 +612,14 @@ class LabelingService:
         Raises:
             ValueError: If labeling job not found or extraction invalid
         """
+        # This method uses sync SQLAlchemy Session (.query() calls throughout).
+        # It must be called from a Celery worker that injects a sync session,
+        # not from an async FastAPI endpoint that uses AsyncSession.
+        assert isinstance(self.db, Session), (
+            "label_features_for_extraction requires a sync SQLAlchemy Session; "
+            f"got {type(self.db).__name__}. Call from a Celery worker, not an async endpoint."
+        )
+
         # Fetch labeling job
         labeling_job = self.db.query(LabelingJob).filter(
             LabelingJob.id == labeling_job_id
@@ -620,7 +628,21 @@ class LabelingService:
         if not labeling_job:
             raise ValueError(f"Labeling job {labeling_job_id} not found")
 
-        # Update status to labeling
+        # Validate extraction job and features BEFORE transitioning to LABELING.
+        # This prevents the job being stuck in LABELING if the extraction is missing.
+        extraction_job = self.db.query(ExtractionJob).filter(
+            ExtractionJob.id == labeling_job.extraction_job_id
+        ).first()
+        if not extraction_job:
+            raise ValueError(f"Extraction job {labeling_job.extraction_job_id} not found")
+
+        all_features = self.db.query(Feature).filter(
+            Feature.extraction_job_id == labeling_job.extraction_job_id
+        ).order_by(Feature.neuron_index).all()
+        if not all_features:
+            raise ValueError(f"No features found for extraction {labeling_job.extraction_job_id}")
+
+        # Validation passed — safe to transition to LABELING
         labeling_job.status = LabelingStatus.LABELING.value
         labeling_job.updated_at = datetime.now(timezone.utc)
         self.db.commit()
@@ -628,21 +650,11 @@ class LabelingService:
         start_time = datetime.now(timezone.utc)
 
         try:
-            # Fetch extraction job
-            extraction_job = self.db.query(ExtractionJob).filter(
-                ExtractionJob.id == labeling_job.extraction_job_id
-            ).first()
-
-            if not extraction_job:
-                raise ValueError(f"Extraction job {labeling_job.extraction_job_id} not found")
-
-            # Fetch all features for this extraction
-            all_features = self.db.query(Feature).filter(
-                Feature.extraction_job_id == labeling_job.extraction_job_id
-            ).order_by(Feature.neuron_index).all()
-
-            if not all_features:
-                raise ValueError(f"No features found for extraction {labeling_job.extraction_job_id}")
+            # NOTE: Batch commits throughout this method mean that if labeling fails
+            # mid-run, some features will already be committed as labeled while others
+            # are not. The job status is set to FAILED below, but the partial labels
+            # remain. A full transactional rollback would require buffering all writes
+            # until completion — deferred as a future improvement (high memory cost).
 
             # All features are retrieved for examples; filtering happens after retrieval
             # using prime tokens from activation examples (context-based approach).
@@ -1423,16 +1435,10 @@ class LabelingService:
 
             except Exception as e:
                 logger.error(f"Batch labeling failed: {e}", exc_info=True)
-                # Close HTTP client on error to release file descriptors
-                if 'labeling_service' in locals() and hasattr(labeling_service, 'close'):
-                    labeling_service.close()
                 raise
 
         except Exception as e:
             logger.error(f"Feature labeling failed for job {labeling_job_id}: {e}", exc_info=True)
-            # Close HTTP client on error to release file descriptors
-            if 'labeling_service' in locals() and hasattr(labeling_service, 'close'):
-                labeling_service.close()
 
             # Mark labeling job as failed
             labeling_job.status = LabelingStatus.FAILED.value
@@ -1454,6 +1460,13 @@ class LabelingService:
             )
 
             raise
+        finally:
+            # Always release HTTP client file descriptors, whether we succeeded or failed.
+            if 'labeling_service' in locals() and hasattr(labeling_service, 'close'):
+                try:
+                    labeling_service.close()
+                except Exception:
+                    pass
 
     async def get_labeling_job(self, labeling_job_id: str) -> Optional[LabelingJob]:
         """

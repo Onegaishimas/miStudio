@@ -736,7 +736,7 @@ async def cleanup_analysis_gpu():
             result["message"] = "CUDA not available"
 
     except Exception as e:
-        logger.error(f"Error during analysis GPU cleanup: {e}")
+        logger.exception("Error during analysis GPU cleanup")
         result["error"] = str(e)
 
     return result

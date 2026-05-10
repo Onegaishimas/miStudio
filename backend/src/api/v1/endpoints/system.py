@@ -140,8 +140,8 @@ async def get_gpu_list():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get GPU list: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get GPU list: {str(e)}")
+        logger.exception("Failed to get GPU list")
+        raise HTTPException(status_code=500, detail="Failed to get GPU list")
 
 
 @router.get("/gpu-metrics", response_model=GPUMetricsResponse)
@@ -189,8 +189,8 @@ async def get_gpu_metrics(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get GPU metrics for GPU {gpu_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get GPU metrics: {str(e)}")
+        logger.exception(f"Failed to get GPU metrics for GPU {gpu_id}")
+        raise HTTPException(status_code=500, detail="Failed to get GPU metrics")
 
 
 @router.get("/gpu-metrics/all")
@@ -223,8 +223,8 @@ async def get_all_gpu_metrics():
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get all GPU metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get GPU metrics: {str(e)}")
+        logger.exception("Failed to get all GPU metrics")
+        raise HTTPException(status_code=500, detail="Failed to get GPU metrics")
 
 
 @router.get("/gpu-info", response_model=GPUInfoResponse)
@@ -272,8 +272,8 @@ async def get_gpu_info(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get GPU info for GPU {gpu_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get GPU info: {str(e)}")
+        logger.exception(f"Failed to get GPU info for GPU {gpu_id}")
+        raise HTTPException(status_code=500, detail="Failed to get GPU info")
 
 
 @router.get("/gpu-processes", response_model=GPUProcessesResponse)
@@ -322,8 +322,8 @@ async def get_gpu_processes(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get GPU processes for GPU {gpu_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get GPU processes: {str(e)}")
+        logger.exception(f"Failed to get GPU processes for GPU {gpu_id}")
+        raise HTTPException(status_code=500, detail="Failed to get GPU processes")
 
 
 @router.get("/metrics", response_model=SystemMetricsResponse)
@@ -346,8 +346,8 @@ async def get_system_metrics():
         )
 
     except Exception as e:
-        logger.error(f"Failed to get system metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get system metrics: {str(e)}")
+        logger.exception("Failed to get system metrics")
+        raise HTTPException(status_code=500, detail="Failed to get system metrics")
 
 
 @router.get("/disk-usage")
@@ -381,8 +381,8 @@ async def get_disk_usage(
         }
 
     except Exception as e:
-        logger.error(f"Failed to get disk usage: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get disk usage: {str(e)}")
+        logger.exception("Failed to get disk usage")
+        raise HTTPException(status_code=500, detail="Failed to get disk usage")
 
 
 @router.get("/network-rates")
@@ -406,8 +406,8 @@ async def get_network_rates():
         }
 
     except Exception as e:
-        logger.error(f"Failed to get network rates: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get network rates: {str(e)}")
+        logger.exception("Failed to get network rates")
+        raise HTTPException(status_code=500, detail="Failed to get network rates")
 
 
 @router.get("/disk-rates")
@@ -431,8 +431,8 @@ async def get_disk_rates():
         }
 
     except Exception as e:
-        logger.error(f"Failed to get disk rates: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get disk rates: {str(e)}")
+        logger.exception("Failed to get disk rates")
+        raise HTTPException(status_code=500, detail="Failed to get disk rates")
 
 
 @router.get("/all")
@@ -484,8 +484,8 @@ async def get_all_monitoring_data(
         return response
 
     except Exception as e:
-        logger.error(f"Failed to get all monitoring data: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get monitoring data: {str(e)}")
+        logger.exception("Failed to get all monitoring data")
+        raise HTTPException(status_code=500, detail="Failed to get monitoring data")
 
 
 @router.get("/resource-estimate", response_model=ResourceEstimateResponse)
@@ -581,8 +581,8 @@ async def get_resource_estimate(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to estimate resources for training {training_id}: {e}")
+        logger.exception(f"Failed to estimate resources for training {training_id}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to estimate resources: {str(e)}"
+            detail="Failed to estimate resources"
         )

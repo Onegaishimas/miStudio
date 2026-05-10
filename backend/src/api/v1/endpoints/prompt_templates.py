@@ -50,7 +50,7 @@ async def create_template(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create prompt template: {str(e)}"
+            detail="Failed to create prompt template"
         )
 
 
@@ -317,10 +317,10 @@ async def export_templates(
         export_data = await PromptTemplateService.export_templates(db, template_ids)
         return JSONResponse(content=export_data)
     except Exception as e:
-        logger.error(f"Failed to export templates: {str(e)}")
+        logger.exception("Failed to export templates")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to export templates: {str(e)}"
+            detail="Failed to export templates"
         )
 
 
@@ -352,14 +352,14 @@ async def import_templates(
         )
         return JSONResponse(content=result)
     except ValueError as e:
-        logger.error(f"Invalid import data: {str(e)}")
+        logger.exception("Invalid import data")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid import data: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"Failed to import templates: {str(e)}")
+        logger.exception("Failed to import templates")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import templates: {str(e)}"
+            detail="Failed to import templates"
         )

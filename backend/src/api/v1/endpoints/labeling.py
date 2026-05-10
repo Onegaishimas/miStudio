@@ -451,16 +451,16 @@ async def list_available_ollama_models(db: AsyncSession = Depends(get_db)):
             }
 
     except httpx.RequestError as e:
-        logger.error(f"Failed to connect to Ollama: {e}")
+        logger.exception("Failed to connect to Ollama")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Ollama service is not available. Please ensure Ollama is running."
         )
     except Exception as e:
-        logger.error(f"Error listing Ollama models: {e}")
+        logger.exception("Error listing Ollama models")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list Ollama models: {str(e)}"
+            detail="Failed to list Ollama models"
         )
 
 
@@ -573,14 +573,14 @@ async def fetch_openai_models(
             detail=f"API returned HTTP {e.response.status_code}: {e.response.text[:200]}"
         )
     except httpx.RequestError as e:
-        logger.error(f"Failed to connect to endpoint: {e}")
+        logger.exception("Failed to connect to endpoint")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Cannot connect to {base_url}. Check the endpoint URL."
         )
     except Exception as e:
-        logger.error(f"Error fetching models: {e}")
+        logger.exception("Error fetching models")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch models: {str(e)}"
+            detail="Failed to fetch models"
         )

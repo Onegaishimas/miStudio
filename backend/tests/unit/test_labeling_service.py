@@ -373,3 +373,113 @@ class TestDeleteLabelingJob:
         assert result is True
         mock_async_session.delete.assert_awaited_once_with(mock_job)
         mock_async_session.commit.assert_awaited()
+
+
+class TestLabelFeaturesStatusTransition:
+    """Phase 5 regression tests — labeling_job status transition ordering.
+
+    Covers review findings #7 and #8:
+    - Extraction job and features must be validated BEFORE the job is set to LABELING.
+    - If validation fails, the labeling_job must never reach LABELING status.
+    """
+
+    def _make_sync_session(self):
+        from sqlalchemy.orm import Session
+        session = Mock(spec=Session)
+        session.commit = Mock()
+        return session
+
+    def _make_labeling_job(self, extraction_job_id="extr_test_123"):
+        job = Mock(spec=LabelingJob)
+        job.id = "label_test_456"
+        job.extraction_job_id = extraction_job_id
+        job.status = LabelingStatus.QUEUED.value
+        job.updated_at = None
+        return job
+
+    def test_extraction_not_found_never_sets_labeling(self):
+        """If extraction job is missing, status must stay QUEUED — never LABELING."""
+        session = self._make_sync_session()
+        labeling_job = self._make_labeling_job()
+
+        def query_side_effect(model):
+            mock_q = Mock()
+            mock_q.filter.return_value = mock_q
+            mock_q.order_by.return_value = mock_q
+            if model is LabelingJob:
+                mock_q.first.return_value = labeling_job
+            elif model is ExtractionJob:
+                mock_q.first.return_value = None
+            else:
+                mock_q.first.return_value = None
+                mock_q.all.return_value = []
+            return mock_q
+
+        session.query = Mock(side_effect=query_side_effect)
+        service = LabelingService(session)
+
+        with pytest.raises(ValueError, match="Extraction job"):
+            service.label_features_for_extraction("label_test_456")
+
+        assert labeling_job.status == LabelingStatus.QUEUED.value, (
+            f"Status was set to {labeling_job.status} before validation completed"
+        )
+        session.commit.assert_not_called()
+
+    def test_no_features_never_sets_labeling(self):
+        """If no features exist for the extraction, status must stay QUEUED."""
+        session = self._make_sync_session()
+        labeling_job = self._make_labeling_job()
+
+        extraction_job = Mock(spec=ExtractionJob)
+        extraction_job.id = "extr_test_123"
+        extraction_job.status = ExtractionStatus.COMPLETED.value
+
+        def query_side_effect(model):
+            mock_q = Mock()
+            mock_q.filter.return_value = mock_q
+            mock_q.order_by.return_value = mock_q
+            if model is LabelingJob:
+                mock_q.first.return_value = labeling_job
+            elif model is ExtractionJob:
+                mock_q.first.return_value = extraction_job
+            elif model is Feature:
+                mock_q.all.return_value = []
+                mock_q.first.return_value = None
+            return mock_q
+
+        session.query = Mock(side_effect=query_side_effect)
+        service = LabelingService(session)
+
+        with pytest.raises(ValueError, match="No features found"):
+            service.label_features_for_extraction("label_test_456")
+
+        assert labeling_job.status == LabelingStatus.QUEUED.value
+        session.commit.assert_not_called()
+
+    def test_labeling_job_not_found_raises(self):
+        """Missing labeling job must raise ValueError immediately."""
+        session = self._make_sync_session()
+
+        def query_side_effect(model):
+            mock_q = Mock()
+            mock_q.filter.return_value = mock_q
+            mock_q.first.return_value = None
+            return mock_q
+
+        session.query = Mock(side_effect=query_side_effect)
+        service = LabelingService(session)
+
+        with pytest.raises(ValueError, match="Labeling job"):
+            service.label_features_for_extraction("nonexistent_job")
+
+        session.commit.assert_not_called()
+
+    def test_async_session_raises_assertion(self):
+        """Passing an AsyncSession must raise AssertionError immediately."""
+        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+        async_session = Mock(spec=_AsyncSession)
+        service = LabelingService(async_session)
+
+        with pytest.raises(AssertionError, match="sync SQLAlchemy Session"):
+            service.label_features_for_extraction("label_test_456")
