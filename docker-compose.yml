@@ -43,7 +43,7 @@ services:
     container_name: mistudio-neuronpedia-postgres
     environment:
       POSTGRES_USER: neuronpedia
-      POSTGRES_PASSWORD: neuronpedia_local_dev
+      POSTGRES_PASSWORD: ${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}
       POSTGRES_DB: neuronpedia
     ports:
       - "5433:5432"  # Use different host port to avoid conflict
@@ -107,7 +107,7 @@ services:
       INTERNAL_API_URL: http://backend:8000
       OLLAMA_URL: ${OLLAMA_URL:-http://k8s-millm.hitsai.local}
       # Neuronpedia local instance configuration
-      NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
+      NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}@neuronpedia-postgres:5432/neuronpedia
       NEURONPEDIA_LOCAL_URL: http://localhost:3001
     ports:
       - "8000:8000"
@@ -166,7 +166,7 @@ services:
       INTERNAL_API_URL: http://backend:8000
       OLLAMA_URL: ${OLLAMA_URL:-http://k8s-millm.hitsai.local}
       # Neuronpedia local instance configuration
-      NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
+      NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}@neuronpedia-postgres:5432/neuronpedia
       NEURONPEDIA_LOCAL_URL: http://localhost:3001
     volumes:
       - ./backend/data:/data  # Mount host data directory for SAEs, models, etc.
@@ -210,7 +210,7 @@ services:
       INTERNAL_API_URL: http://backend:8000
       OLLAMA_URL: ${OLLAMA_URL:-http://k8s-millm.hitsai.local}
       # Neuronpedia local instance configuration (for consistency)
-      NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
+      NEURONPEDIA_LOCAL_DB_URL: postgresql://neuronpedia:${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}@neuronpedia-postgres:5432/neuronpedia
       NEURONPEDIA_LOCAL_URL: http://localhost:3001
     restart: unless-stopped
     depends_on:
@@ -261,9 +261,9 @@ services:
     container_name: mistudio-neuronpedia
     environment:
       # Database connection - use Docker service name
-      POSTGRES_PRISMA_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia?pgbouncer=true
-      POSTGRES_URL_NON_POOLING: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
-      DATABASE_URL: postgresql://neuronpedia:neuronpedia_local_dev@neuronpedia-postgres:5432/neuronpedia
+      POSTGRES_PRISMA_URL: postgresql://neuronpedia:${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}@neuronpedia-postgres:5432/neuronpedia?pgbouncer=true
+      POSTGRES_URL_NON_POOLING: postgresql://neuronpedia:${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}@neuronpedia-postgres:5432/neuronpedia
+      DATABASE_URL: postgresql://neuronpedia:${NEURONPEDIA_POSTGRES_PASSWORD:-neuronpedia_local_dev}@neuronpedia-postgres:5432/neuronpedia
       # Required environment variables
       NEXTAUTH_SECRET: neuronpedia-dev-secret-change-in-production
       NEXTAUTH_URL: http://localhost:3001

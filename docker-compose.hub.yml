@@ -43,7 +43,9 @@ services:
       - redis_data:/data
     restart: always
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Use redis-cli if available (Redis 7 Alpine includes it); fall back to
+      # raw TCP PING so the check survives if the binary is ever stripped.
+      test: ["CMD-SHELL", "redis-cli ping 2>/dev/null | grep -q PONG || (exec 3<>/dev/tcp/localhost/6379 && printf '*1\\r\\n$4\\r\\nPING\\r\\n' >&3 && grep -q PONG <&3)"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -178,6 +180,12 @@ services:
     environment:
       NODE_ENV: production
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
     networks:
       - mistudio-network
 
@@ -194,8 +202,16 @@ services:
       - ./nginx/nginx.docker.conf:/etc/nginx/nginx.conf:ro
     restart: always
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
     networks:
       - mistudio-network
 
