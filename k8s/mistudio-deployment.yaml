@@ -32,7 +32,10 @@ spec:
             - name: POSTGRES_USER
               value: mistudio
             - name: POSTGRES_PASSWORD
-              value: changeme  # CHANGE THIS: use a strong password, must match DATABASE_URL below
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: postgres-password
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:
@@ -149,9 +152,15 @@ spec:
             - name: SERVICE_TYPE
               value: api
             - name: DATABASE_URL
-              value: postgresql+asyncpg://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
             - name: DATABASE_URL_SYNC
-              value: postgresql+psycopg2://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
             - name: REDIS_URL
               value: redis://redis:6379/0
             - name: CELERY_BROKER_URL
@@ -159,7 +168,10 @@ spec:
             - name: CELERY_RESULT_BACKEND
               value: redis://redis:6379/0
             - name: SECRET_KEY
-              value: changeme  # CHANGE THIS: generate with: python -c "import secrets; print(secrets.token_hex(32))"
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
             # Deployment portability env vars
             - name: DATA_DIR
               value: /data
@@ -187,9 +199,15 @@ spec:
             - name: SERVICE_TYPE
               value: celery-worker
             - name: DATABASE_URL
-              value: postgresql+asyncpg://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
             - name: DATABASE_URL_SYNC
-              value: postgresql+psycopg2://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
             - name: REDIS_URL
               value: redis://redis:6379/0
             - name: CELERY_BROKER_URL
@@ -197,7 +215,10 @@ spec:
             - name: CELERY_RESULT_BACKEND
               value: redis://redis:6379/0
             - name: SECRET_KEY
-              value: changeme  # CHANGE THIS: must match backend SECRET_KEY above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
             # Deployment portability env vars
             - name: DATA_DIR
               value: /data
@@ -222,9 +243,15 @@ spec:
             - name: SERVICE_TYPE
               value: celery-beat
             - name: DATABASE_URL
-              value: postgresql+asyncpg://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
             - name: DATABASE_URL_SYNC
-              value: postgresql+psycopg2://mistudio:changeme@postgres:5432/mistudio  # CHANGE THIS: match POSTGRES_PASSWORD above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
             - name: REDIS_URL
               value: redis://redis:6379/0
             - name: CELERY_BROKER_URL
@@ -232,7 +259,10 @@ spec:
             - name: CELERY_RESULT_BACKEND
               value: redis://redis:6379/0
             - name: SECRET_KEY
-              value: changeme  # CHANGE THIS: must match backend SECRET_KEY above
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
             # Deployment portability env vars
             - name: DATA_DIR
               value: /data

@@ -18,6 +18,13 @@ from ..schemas.app_setting import AppSettingUpsert, AppSettingResponse
 
 logger = logging.getLogger(__name__)
 
+# Keys that are always encrypted at rest regardless of what the client sends.
+_SENSITIVE_KEYS: frozenset[str] = frozenset({
+    "openai_api_key",
+    "hf_token",
+    "neuronpedia_api_key",
+})
+
 
 class AppSettingService:
     """Service class for application settings operations."""
@@ -33,11 +40,14 @@ class AppSettingService:
         )
         existing = result.scalar_one_or_none()
 
-        store_value = encrypt_value(data.value) if data.is_sensitive else data.value
+        # Server-side sensitivity: known secrets are always encrypted regardless
+        # of the client-supplied is_sensitive flag, preventing plaintext downgrade.
+        is_sensitive = data.key in _SENSITIVE_KEYS or data.is_sensitive
+        store_value = encrypt_value(data.value) if is_sensitive else data.value
 
         if existing:
             existing.value = store_value
-            existing.is_sensitive = data.is_sensitive
+            existing.is_sensitive = is_sensitive
             existing.category = data.category
             await db.flush()
             await db.refresh(existing)
@@ -46,7 +56,7 @@ class AppSettingService:
             setting = AppSetting(
                 key=data.key,
                 value=store_value,
-                is_sensitive=data.is_sensitive,
+                is_sensitive=is_sensitive,
                 category=data.category,
             )
             db.add(setting)

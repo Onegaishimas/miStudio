@@ -21,6 +21,7 @@ from src.models.labeling_job import LabelingJob, LabelingStatus, LabelingMethod
 from src.models.feature import Feature, LabelSource
 from src.models.feature_activation import FeatureActivation
 from src.core.config import settings
+from src.core.encryption import decrypt_value, encrypt_value
 from src.services.local_labeling_service import LocalLabelingService
 from src.services.openai_labeling_service import OpenAILabelingService
 from src.workers.websocket_emitter import emit_labeling_progress, emit_labeling_result
@@ -187,7 +188,7 @@ class LabelingService:
             extraction_job_id=extraction_job_id,
             labeling_method=config.get("labeling_method", "openai"),
             openai_model=config.get("openai_model"),
-            openai_api_key=config.get("openai_api_key"),
+            openai_api_key=encrypt_value(config["openai_api_key"]) if config.get("openai_api_key") else None,
             openai_compatible_endpoint=config.get("openai_compatible_endpoint"),
             openai_compatible_model=config.get("openai_compatible_model"),
             local_model=config.get("local_model"),
@@ -946,24 +947,26 @@ class LabelingService:
                         labeling_service.unload_model()
 
                 elif labeling_method == LabelingMethod.OPENAI.value:
-                    # Get API key from labeling job, fallback to DB settings, then env settings
-                    openai_api_key = labeling_job.openai_api_key
+                    # Decrypt key stored in labeling_job (encrypt_value on write, decrypt here).
+                    # decrypt_value() gracefully handles legacy plaintext rows.
+                    # Fallback chain: labeling_job → DB app_settings → env.
+                    openai_api_key = None
+                    if labeling_job.openai_api_key:
+                        openai_api_key = decrypt_value(labeling_job.openai_api_key, setting_key="openai_api_key")
 
-                    # Validate API key - if None, empty, or looks corrupted, try DB settings then env
-                    if not openai_api_key or len(openai_api_key) > 200 or any(ord(c) > 127 for c in openai_api_key):
-                        logger.warning("Invalid/missing OpenAI API key in labeling job, checking DB settings")
+                    if not openai_api_key:
+                        logger.warning("No API key in labeling job, checking DB app_settings")
                         try:
                             from src.models.app_setting import AppSetting
-                            from src.core.encryption import decrypt_value
                             db_setting = self.db.query(AppSetting).filter(AppSetting.key == "openai_api_key").first()
                             if db_setting:
-                                openai_api_key = decrypt_value(db_setting.value, setting_key="openai_api_key") if db_setting.is_sensitive else db_setting.value
-                                logger.info("Using OpenAI API key from DB settings")
+                                openai_api_key = decrypt_value(db_setting.value, setting_key="openai_api_key")
+                                logger.info("Using OpenAI API key from DB app_settings")
                         except Exception as e:
-                            logger.warning(f"Failed to read API key from DB settings: {e}")
+                            logger.warning(f"Failed to read API key from DB app_settings: {e}")
 
-                    if not openai_api_key or len(openai_api_key) > 200 or any(ord(c) > 127 for c in openai_api_key):
-                        logger.warning("Falling back to settings.openai_api_key from environment")
+                    if not openai_api_key:
+                        logger.warning("Falling back to OPENAI_API_KEY environment variable")
                         openai_api_key = getattr(settings, 'openai_api_key', None)
 
                     if not openai_api_key:

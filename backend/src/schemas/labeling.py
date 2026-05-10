@@ -158,6 +158,15 @@ class LabelingConfigRequest(BaseModel):
         # This validation will be enhanced in the service layer to check env var
         return v
 
+    @field_validator('openai_compatible_endpoint')
+    @classmethod
+    def validate_endpoint_url(cls, v: Optional[str]) -> Optional[str]:
+        """Block cloud metadata endpoints while allowing internal LLM servers."""
+        if v is None:
+            return v
+        from src.utils.url_validation import validate_llm_endpoint_url
+        return validate_llm_endpoint_url(v)
+
 
 class LabelingStatusResponse(BaseModel):
     """

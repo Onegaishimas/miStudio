@@ -127,12 +127,21 @@ async def get_setting(
     return setting
 
 
+_URL_VALIDATED_KEYS = frozenset({"ollama_url", "openai_compatible_endpoint"})
+
+
 @router.put("", response_model=AppSettingResponse, status_code=200)
 async def upsert_setting(
     data: AppSettingUpsert,
     db: AsyncSession = Depends(get_db),
 ):
     """Create or update a setting (upsert). Sensitive values are encrypted at rest."""
+    if data.key in _URL_VALIDATED_KEYS:
+        from ....utils.url_validation import validate_llm_endpoint_url
+        try:
+            validate_llm_endpoint_url(data.value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     try:
         setting, is_new = await AppSettingService.upsert(db, data)
         # Return masked response for sensitive values. CRITICAL: expunge the row from
