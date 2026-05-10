@@ -26,6 +26,7 @@ import {
   Loader,
   Trash2,
   AlertTriangle,
+  AlertCircle,
   Save,
   X,
 } from 'lucide-react';
@@ -80,6 +81,7 @@ export const TrainingPanel: React.FC = () => {
   const [latentMultiplier, setLatentMultiplier] = useState(8);
   const [availableExtractions, setAvailableExtractions] = useState<any[]>([]);
   const [isLoadingExtractions, setIsLoadingExtractions] = useState(false);
+  const [extractionFetchError, setExtractionFetchError] = useState<string | null>(null);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
@@ -206,10 +208,12 @@ export const TrainingPanel: React.FC = () => {
     const fetchExtractions = async () => {
       if (!config.model_id) {
         setAvailableExtractions([]);
+        setExtractionFetchError(null);
         return;
       }
 
       setIsLoadingExtractions(true);
+      setExtractionFetchError(null);
       try {
         const response = await fetch(`/api/v1/models/${config.model_id}/extractions`);
         if (response.ok) {
@@ -220,11 +224,17 @@ export const TrainingPanel: React.FC = () => {
           );
           setAvailableExtractions(completedExtractions);
         } else {
+          // Surface non-OK response as a visible error rather than silently
+          // clearing the dropdown — users need to know why the list is empty.
+          const statusText = `${response.status} ${response.statusText}`;
           setAvailableExtractions([]);
+          setExtractionFetchError(`Failed to load extractions (${statusText})`);
+          console.error('Failed to fetch extractions:', statusText);
         }
       } catch (error) {
-        console.error('Failed to fetch extractions:', error);
         setAvailableExtractions([]);
+        setExtractionFetchError('Failed to load extractions — check network connection');
+        console.error('Failed to fetch extractions:', error);
       } finally {
         setIsLoadingExtractions(false);
       }
@@ -269,6 +279,15 @@ export const TrainingPanel: React.FC = () => {
   // Subscribe to WebSocket updates for all trainings
   useTrainingWebSocket(trainings.map((t) => t.id));
 
+  // Stable content-based key: only changes when a training's id or status changes.
+  // Memoised so the inline .map().join() doesn't create a new value on every render,
+  // which would cause the polling interval to be torn down and recreated constantly.
+  const trainingStatusKey = useMemo(
+    () => trainings.map((t) => `${t.id}:${t.status}`).join(','),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trainings.map((t) => `${t.id}:${t.status}`).join(',')]
+  );
+
   // Polling fallback for running trainings (in case WebSocket isn't working)
   useEffect(() => {
     const runningTrainingIds = trainings
@@ -287,7 +306,7 @@ export const TrainingPanel: React.FC = () => {
     }, 5000);
 
     return () => clearInterval(pollInterval);
-  }, [trainings.map((t) => `${t.id}:${t.status}`).join(','), fetchTraining]);
+  }, [trainingStatusKey, fetchTraining]);
 
   // Handle deletion progress updates via WebSocket
   const handleDeletionTaskUpdate = React.useCallback((update: {
@@ -859,6 +878,12 @@ export const TrainingPanel: React.FC = () => {
                   </p>
                   {config.extraction_ids !== undefined && (
                     <>
+                      {extractionFetchError && !isLoadingExtractions && (
+                        <div className="flex items-center gap-2 text-xs text-red-400 mb-2 px-1">
+                          <AlertCircle size={13} className="shrink-0" />
+                          <span>{extractionFetchError}</span>
+                        </div>
+                      )}
                       {isLoadingExtractions ? (
                         <div className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 text-sm flex items-center gap-2">
                           <Loader size={14} className="animate-spin" />

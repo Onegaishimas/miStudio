@@ -135,6 +135,12 @@ interface FeaturesStoreState {
   updateExtractionById: (extractionId: string, updates: Partial<ExtractionStatusResponse>) => void;
 }
 
+// Module-level refs for the in-flight cleanup request.
+// Stored outside the store so clearSelectedFeature() can cancel a previous
+// call when the user switches features rapidly, preventing request pile-up.
+let _cleanupAbortController: AbortController | null = null;
+let _cleanupTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Features store implementation.
  */
@@ -322,7 +328,9 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * Fetch max-activating examples for a feature.
    */
   fetchFeatureExamples: async (featureId: string, limit: number = 100) => {
-    set({ isLoadingExamples: true });
+    // Clear stale examples immediately so the UI doesn't show data from the
+    // previous feature while the new request is in-flight.
+    set({ isLoadingExamples: true, featureExamples: [] });
 
     try {
       const response = await axios.get<FeatureActivationExample[]>(
@@ -355,7 +363,9 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
       filterStopWords?: boolean;
     }
   ) => {
-    set({ isLoadingTokenAnalysis: true });
+    // Clear stale analysis immediately so the UI doesn't show data from the
+    // previous feature while the new request is in-flight.
+    set({ isLoadingTokenAnalysis: true, featureTokenAnalysis: null });
 
     try {
       const params = {
@@ -554,17 +564,48 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * allocated by logit lens or other analysis operations.
    */
   clearSelectedFeature: () => {
-    set({ selectedFeature: null, featureExamples: [] });
+    set({ selectedFeature: null, featureExamples: [], featureTokenAnalysis: null });
 
-    // Fire-and-forget cleanup call - don't block UI
-    axios.post('/api/v1/analysis/cleanup')
+    // Cancel any previous in-flight cleanup (user switched features rapidly).
+    if (_cleanupAbortController) {
+      _cleanupAbortController.abort();
+      _cleanupAbortController = null;
+    }
+    if (_cleanupTimeoutId !== null) {
+      clearTimeout(_cleanupTimeoutId);
+      _cleanupTimeoutId = null;
+    }
+
+    const controller = new AbortController();
+    _cleanupAbortController = controller;
+
+    // Hard 5-second timeout — abort if the backend takes too long.
+    _cleanupTimeoutId = setTimeout(() => {
+      controller.abort();
+      _cleanupAbortController = null;
+      _cleanupTimeoutId = null;
+    }, 5000);
+
+    // Fire-and-forget — result doesn't block the UI.
+    axios.post('/api/v1/analysis/cleanup', undefined, { signal: controller.signal })
       .then((response) => {
+        _cleanupAbortController = null;
+        if (_cleanupTimeoutId !== null) { clearTimeout(_cleanupTimeoutId); _cleanupTimeoutId = null; }
         if (response.data.vram_freed_gb > 0) {
           console.log(`[Analysis Cleanup] Freed ${response.data.vram_freed_gb} GB VRAM`);
         }
       })
-      .catch((error) => {
-        // Log but don't fail - cleanup is best-effort
+      .catch((error: any) => {
+        _cleanupAbortController = null;
+        _cleanupTimeoutId = null;
+        // AbortError / CanceledError means a newer clearSelectedFeature() call
+        // superseded this one — not a real failure, no need to log.
+        if (
+          error?.name === 'AbortError' ||
+          error?.name === 'CanceledError' ||
+          error?.code === 'ERR_CANCELED'
+        ) return;
+        // Log but don't surface — cleanup is best-effort.
         console.warn('[Analysis Cleanup] Failed:', error.message);
       });
   },

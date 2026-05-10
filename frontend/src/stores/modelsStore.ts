@@ -19,6 +19,28 @@ import { API_BASE_URL } from '../config/api';
 import { getModel, cancelExtraction, retryExtraction } from '../api/models';
 import { startPolling } from '../utils/polling';
 
+/** Valid extraction_status string literals (matches types/model.ts). */
+type ExtractionStatus = 'starting' | 'loading' | 'extracting' | 'saving' | 'complete' | 'failed' | 'error';
+
+/**
+ * Safely coerce a server-provided string into a ModelStatus enum value.
+ * Falls back to ModelStatus.ERROR for unrecognised strings so downstream
+ * code always receives a typed value — never an arbitrary string.
+ */
+function toModelStatus(raw: string): ModelStatus {
+  const lower = raw.toLowerCase();
+  switch (lower) {
+    case 'downloading': return ModelStatus.DOWNLOADING;
+    case 'loading':     return ModelStatus.LOADING;
+    case 'quantizing':  return ModelStatus.QUANTIZING;
+    case 'ready':       return ModelStatus.READY;
+    case 'error':       return ModelStatus.ERROR;
+    default:
+      console.warn(`[modelsStore] Unknown model status from server: "${raw}" — treating as ERROR`);
+      return ModelStatus.ERROR;
+  }
+}
+
 // Callback for subscribing to model progress (set by WebSocket context)
 let subscribeToModelCallback: ((modelId: string, channel: 'progress' | 'extraction') => void) | null = null;
 
@@ -128,9 +150,9 @@ export const useModelsStore = create<ModelsState>()(
           const newModel = await response.json();
           console.log('[ModelsStore] Download initiated, model ID:', newModel.id, 'status:', newModel.status);
 
-          // Ensure status is set properly as a string enum value
+          // Normalise server status string to typed ModelStatus enum value.
           if (newModel.status) {
-            newModel.status = newModel.status.toLowerCase();
+            newModel.status = toModelStatus(newModel.status);
           }
 
           // Proactively subscribe to progress updates BEFORE adding to store
@@ -154,7 +176,7 @@ export const useModelsStore = create<ModelsState>()(
               set((state) => ({
                 models: state.models.map((m) =>
                   m.id === updatedModel.id
-                    ? { ...m, ...updatedModel, status: updatedModel.status.toLowerCase() as any }
+                    ? { ...m, ...updatedModel, status: toModelStatus(updatedModel.status) }
                     : m
                 ),
               }));
@@ -248,7 +270,7 @@ export const useModelsStore = create<ModelsState>()(
                   ...model,
                   extraction_id: 'pending',
                   extraction_progress: 0,
-                  extraction_status: 'starting' as any,
+                  extraction_status: 'starting' as ExtractionStatus,
                   extraction_message: 'Starting extraction...',
                   extraction_started_at: Date.now(),
                 }
@@ -433,7 +455,7 @@ export const useModelsStore = create<ModelsState>()(
                     ...model,
                     extraction_id: result.new_extraction_id,
                     extraction_progress: 0,
-                    extraction_status: 'starting' as any,
+                    extraction_status: 'starting' as ExtractionStatus,
                     extraction_message: 'Retry extraction queued',
                     extraction_error_type: undefined,
                     extraction_suggested_retry_params: undefined,
@@ -492,7 +514,9 @@ export const useModelsStore = create<ModelsState>()(
                   ...model,
                   extraction_id: extractionId,
                   extraction_progress: progress,
-                  extraction_status: status as any,
+                  // Extraction status comes from a WebSocket event string, not
+                  // the ModelStatus enum — cast explicitly to the known union.
+                  extraction_status: status as unknown as ExtractionStatus,
                   extraction_message: message,
                 }
               : model
@@ -532,7 +556,7 @@ export const useModelsStore = create<ModelsState>()(
                   ...model,
                   extraction_id: extractionId,
                   extraction_progress: undefined,
-                  extraction_status: 'failed' as any,
+                  extraction_status: 'failed' as ExtractionStatus,
                   extraction_message: errorMessage,
                   extraction_error_type: errorType,
                   extraction_suggested_retry_params: suggestedRetryParams,

@@ -105,8 +105,16 @@ export const useSystemMonitorWebSocket = (gpuIds: number[] = []) => {
     };
   }, [on, off, setGPUMetrics, updateSystemMetrics]);
 
-  // Create a stable key from gpuIds to prevent unnecessary re-subscriptions
-  const gpuIdsKey = useMemo(() => gpuIds.sort().join(','), [gpuIds.join(',')]);
+  // Create a stable content-based key from gpuIds.
+  // - Spread into a new array before sorting to avoid mutating the prop.
+  // - Use numeric sort (a - b) to ensure [0, 1, 2] not ['0', '1', '2'] order.
+  // - The dep [gpuIds.join(',')] uses value-based string comparison (Object.is),
+  //   so the memo only re-runs when GPU count/IDs actually change.
+  const gpuIdsKey = useMemo(
+    () => [...gpuIds].sort((a, b) => a - b).join(','),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [gpuIds.join(',')]
+  );
 
   // Subscribe to system monitoring channels
   useEffect(() => {

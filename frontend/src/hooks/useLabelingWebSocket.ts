@@ -102,9 +102,14 @@ export const useLabelingWebSocket = (labelingJobIds: string[]) => {
     };
   }, [on, off, updateLabelingStatus]);
 
-  // Create a stable key from labelingJobIds to prevent unnecessary re-subscriptions
+  // Create a stable content-based key from labelingJobIds.
+  // - Spread into a new array before sorting to avoid mutating the prop.
+  // - The dep [labelingJobIds.join(',')] uses value-based string comparison
+  //   (Object.is), so the memo only re-runs when content actually changes,
+  //   not just when the parent re-creates the array reference.
   const labelingJobIdsKey = useMemo(
-    () => labelingJobIds.sort().join(','),
+    () => [...labelingJobIds].sort().join(','),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [labelingJobIds.join(',')]
   );
 

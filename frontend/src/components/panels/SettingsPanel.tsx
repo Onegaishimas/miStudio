@@ -110,7 +110,10 @@ function PinGate({ children }: { children: React.ReactNode }) {
         setPin('');
         inputRef.current?.focus();
       }
-    } catch {
+    } catch (err) {
+      // Log to console so the real failure reason (network, CORS, unexpected JSON)
+      // is visible in DevTools even though the user only sees the generic message.
+      console.error('[PinGate] PIN verification request failed:', err);
       setError('Failed to verify PIN');
     } finally {
       setChecking(false);
@@ -235,7 +238,10 @@ function PinManagementSection() {
       showToast(pinStatus?.configured ? 'PIN changed' : 'PIN set — settings are now protected');
       resetForm();
     } catch (err: any) {
-      setError(err?.message ?? 'Failed to set PIN');
+      // Prefer the backend's detail message (e.g. "Current PIN is incorrect")
+      // over the generic Axios/fetch error message string.
+      const detail = err?.response?.data?.detail ?? err?.message ?? 'Failed to set PIN';
+      setError(detail);
     } finally {
       setSaving(false);
     }

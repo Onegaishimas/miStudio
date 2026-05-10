@@ -744,8 +744,11 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
    */
   setStatusFilter: (status: TrainingStatus | 'all') => {
     set({ statusFilter: status });
-    // Refetch trainings with new filter
-    get().fetchTrainings(1);
+    // Defer the fetch to the next microtask so any batched synchronous set()
+    // calls in the same tick all complete before fetchTrainings() reads state.
+    // This prevents the filter value from being stale when multiple filters
+    // are updated in rapid succession.
+    Promise.resolve().then(() => get().fetchTrainings(1));
   },
 
   /**
@@ -755,8 +758,7 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
    */
   setModelFilter: (modelId: string | null) => {
     set({ modelFilter: modelId });
-    // Refetch trainings with new filter
-    get().fetchTrainings(1);
+    Promise.resolve().then(() => get().fetchTrainings(1));
   },
 
   /**
@@ -766,8 +768,7 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
    */
   setDatasetFilter: (datasetId: string | null) => {
     set({ datasetFilter: datasetId });
-    // Refetch trainings with new filter
-    get().fetchTrainings(1);
+    Promise.resolve().then(() => get().fetchTrainings(1));
   },
 
   /**
