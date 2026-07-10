@@ -33,6 +33,7 @@ jobs:
           rm -rf backups/
           rm -rf docs/
           rm -rf scripts/
+          rm -rf .understand-anything/
           echo "Removed excluded files"
 
       - name: Commit filtered changes (including workflow updates)

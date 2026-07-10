@@ -1,0 +1,116 @@
+# .understandignore — patterns for files/dirs to exclude from analysis
+# Syntax: same as .gitignore (globs, # comments, ! negation, trailing / for dirs)
+#
+# --- From .gitignore (uncomment to exclude) ---
+
+# manual/node_modules/
+# manual/build/
+# manual/.docusaurus/
+# 0xcc/transcripts/
+# 0xcc/session_state.json
+# 0xcc/research_context.json
+# 0xcc/checkpoints/
+# 0xcc/docs/Scratch.md
+# 0xcc/HANDOFF.md
+# *.py[cod]
+# *$py.class
+# *.so
+# .Python
+# develop-eggs/
+# downloads/
+# eggs/
+# .eggs/
+# lib/
+# lib64/
+# parts/
+# sdist/
+# var/
+# wheels/
+# pip-wheel-metadata/
+# share/python-wheels/
+# *.egg-info/
+# .installed.cfg
+# *.egg
+# MANIFEST
+# ENV/
+# env/
+# *.pt
+# *.pth
+# *.ckpt
+# *.safetensors
+# .ipynb_checkpoints
+# profile_default/
+# ipython_config.py
+# .python-version
+# .pytest_cache/
+# .coverage
+# htmlcov/
+# .mypy_cache/
+# .dmypy.json
+# dmypy.json
+# npm-debug.log*
+# yarn-debug.log*
+# yarn-error.log*
+# .pnp
+# .pnp.js
+# frontend/dist/
+# frontend/build/
+# .env
+# .env.local
+# .env.development.local
+# .env.test.local
+# .env.production.local
+# *.swp
+# *.swo
+# *~
+# .DS_Store
+# *.db
+# *.sqlite
+# *.sqlite3
+# logs/
+# npm-debug.log*
+# yarn-debug.log*
+# yarn-error.log*
+# /data/
+# /models/
+# /datasets/
+# /checkpoints/
+# /activations/
+# tmp/
+# temp/
+# *.tmp
+# /tmp_api/
+# .DS_Store
+# Thumbs.db
+# .dockerignore
+# backend/alembic/versions/*.pyc
+# dump.rdb
+# celerybeat-schedule
+# celerybeat.pid
+# huggingface_cache/
+# *.quantized
+# docs/_build/
+# site/
+# *.bak
+# *.backup
+# *~
+# !package-lock.json
+# !poetry.lock
+# !Pipfile.lock
+# **/tmp_api/
+
+# --- miStudio-specific exclusions ---
+backups/
+0xcc/
+.claude/
+backend/venv/
+backend/.coverage
+backend/celerybeat-schedule
+manual/
+*.sql.gz
+backend/poetry.lock
+# --- Test file patterns (uncomment to exclude) ---
+
+# *.test.*
+# *.spec.*
+# *.snap
