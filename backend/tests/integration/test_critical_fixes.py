@@ -34,6 +34,15 @@ from src.workers.model_tasks import delete_model_files
 class TestWebSocketEmitterIntegration:
     """Test shared WebSocket emitter across all resource types."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_pooled_client(self):
+        """Reset the module-level pooled httpx client so each test's patched
+        httpx.Client is instantiated fresh."""
+        import src.workers.websocket_emitter as we
+        we._http_client = None
+        yield
+        we._http_client = None
+
     @patch("src.workers.websocket_emitter.httpx.Client")
     def test_emit_dataset_progress_uses_httpx(self, mock_client_class):
         """Test that dataset progress emission uses httpx."""
@@ -41,7 +50,7 @@ class TestWebSocketEmitterIntegration:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_client.post.return_value = mock_response
-        mock_client_class.return_value.__enter__.return_value = mock_client
+        mock_client_class.return_value = mock_client
 
         dataset_id = str(uuid4())
         emit_dataset_progress(
@@ -69,7 +78,7 @@ class TestWebSocketEmitterIntegration:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_client.post.return_value = mock_response
-        mock_client_class.return_value.__enter__.return_value = mock_client
+        mock_client_class.return_value = mock_client
 
         model_id = f"m_{uuid4().hex[:8]}"
         emit_model_progress(
@@ -97,7 +106,7 @@ class TestWebSocketEmitterIntegration:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_client.post.return_value = mock_response
-        mock_client_class.return_value.__enter__.return_value = mock_client
+        mock_client_class.return_value = mock_client
 
         model_id = f"m_{uuid4().hex[:8]}"
         extraction_id = "ext_test_123"

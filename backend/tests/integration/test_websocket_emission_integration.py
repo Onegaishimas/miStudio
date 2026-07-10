@@ -30,6 +30,18 @@ from src.workers.websocket_emitter import (
 )
 
 
+import src.workers.websocket_emitter as websocket_emitter
+
+
+@pytest.fixture(autouse=True)
+def reset_pooled_client():
+    """Reset the module-level pooled httpx client so each test's patched
+    httpx.Client is used to build a fresh one."""
+    websocket_emitter._http_client = None
+    yield
+    websocket_emitter._http_client = None
+
+
 class TestTrainingProgressEmissionFlow:
     """Test training progress WebSocket emission flow."""
 
@@ -42,7 +54,7 @@ class TestTrainingProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         training_id = f"train_{uuid4().hex[:8]}"
@@ -93,7 +105,7 @@ class TestTrainingProgressEmissionFlow:
 
         # Verify emission succeeded
         assert result is True
-        mock_client.__enter__.return_value.post.assert_called_once()
+        mock_client.post.assert_called_once()
 
         # Verify database record exists
         with get_sync_db() as db:
@@ -123,7 +135,7 @@ class TestTrainingProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         training_id = f"train_{uuid4().hex[:8]}"
@@ -208,7 +220,7 @@ class TestTrainingProgressEmissionFlow:
         # Verify both emissions succeeded
         assert result1 is True
         assert result2 is True
-        assert mock_client.__enter__.return_value.post.call_count == 2
+        assert mock_client.post.call_count == 2
 
         # Verify final database state
         with get_sync_db() as db:
@@ -240,7 +252,7 @@ class TestTrainingProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         training_id = f"train_{uuid4().hex[:8]}"
@@ -329,7 +341,7 @@ class TestTrainingProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         training_id = f"train_{uuid4().hex[:8]}"
@@ -378,10 +390,10 @@ class TestTrainingProgressEmissionFlow:
 
         # Verify emission succeeded
         assert result is True
-        mock_client.__enter__.return_value.post.assert_called_once()
+        mock_client.post.assert_called_once()
 
         # Verify channel and event structure
-        call_args = mock_client.__enter__.return_value.post.call_args
+        call_args = mock_client.post.call_args
         payload = call_args[1]["json"]
         assert payload["channel"] == f"trainings/{training_id}/checkpoints"
         assert payload["event"] == "checkpoint_created"
@@ -415,7 +427,7 @@ class TestExtractionProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         model_id = f"m_{uuid4().hex[:8]}"
@@ -464,10 +476,10 @@ class TestExtractionProgressEmissionFlow:
 
         # Verify all emissions succeeded
         assert all([result1, result2, result3])
-        assert mock_client.__enter__.return_value.post.call_count == 3
+        assert mock_client.post.call_count == 3
 
         # Verify channel structure
-        for call_args in mock_client.__enter__.return_value.post.call_args_list:
+        for call_args in mock_client.post.call_args_list:
             payload = call_args[1]["json"]
             assert payload["channel"] == f"models/{model_id}/extraction"
             assert payload["event"] == "extraction:progress"  # Namespaced event
@@ -490,7 +502,7 @@ class TestExtractionProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         model_id = f"m_{uuid4().hex[:8]}"
@@ -521,10 +533,10 @@ class TestExtractionProgressEmissionFlow:
 
         # Verify emission succeeded
         assert result is True
-        mock_client.__enter__.return_value.post.assert_called_once()
+        mock_client.post.assert_called_once()
 
         # Verify failure payload structure
-        call_args = mock_client.__enter__.return_value.post.call_args
+        call_args = mock_client.post.call_args
         payload = call_args[1]["json"]
         assert payload["channel"] == f"models/{model_id}/extraction"
         assert payload["event"] == "extraction:failed"  # Namespaced event
@@ -553,7 +565,7 @@ class TestModelDownloadProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         model_id = f"m_{uuid4().hex[:8]}"
@@ -633,7 +645,7 @@ class TestModelDownloadProgressEmissionFlow:
 
         # Verify all emissions succeeded
         assert all([result1, result2, result3])
-        assert mock_client.__enter__.return_value.post.call_count == 3
+        assert mock_client.post.call_count == 3
 
         # Verify final database state
         with get_sync_db() as db:
@@ -661,7 +673,7 @@ class TestDatasetProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         dataset_id = uuid4()
@@ -748,7 +760,7 @@ class TestDatasetProgressEmissionFlow:
 
         # Verify all emissions succeeded
         assert all([result1, result2, result3, result4])
-        assert mock_client.__enter__.return_value.post.call_count == 4
+        assert mock_client.post.call_count == 4
 
         # Verify final database state
         with get_sync_db() as db:
@@ -772,7 +784,7 @@ class TestDatasetProgressEmissionFlow:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         dataset_id = uuid4()
@@ -824,7 +836,7 @@ class TestDatasetProgressEmissionFlow:
 
         # Verify all emissions succeeded
         assert all(results)
-        assert mock_client.__enter__.return_value.post.call_count == len(milestones)
+        assert mock_client.post.call_count == len(milestones)
 
         # Verify final database state
         with get_sync_db() as db:
@@ -850,7 +862,7 @@ class TestWebSocketEmissionErrorHandling:
         # Setup - WebSocket emission fails
         mock_settings.websocket_emit_url = "http://localhost:8000/api/internal/ws/emit"
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.side_effect = Exception("Connection failed")
+        mock_client.post.side_effect = Exception("Connection failed")
         mock_client_class.return_value = mock_client
 
         training_id = f"train_{uuid4().hex[:8]}"
@@ -935,7 +947,7 @@ class TestWebSocketEmissionErrorHandling:
         mock_response = Mock()
         mock_response.status_code = 500
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         model_id = f"m_{uuid4().hex[:8]}"
@@ -952,4 +964,4 @@ class TestWebSocketEmissionErrorHandling:
 
         # Verify emission failed gracefully
         assert result is False
-        mock_client.__enter__.return_value.post.assert_called_once()
+        mock_client.post.assert_called_once()

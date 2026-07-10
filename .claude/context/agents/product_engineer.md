@@ -49,6 +49,12 @@
 1. Add resource usage predictions based on job parameters
 2. Implement job queuing recommendations based on available resources
 
+### Celery/Monitor Review Findings (2026-07-10)
+See `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`.
+- Monitor page's "Active Operations" shows only ~3 of 10 job types (task_queue rows created only on failure; only labeling/pushes unioned in). Running trainings/extractions/steering invisible — contradicts the "unified operations dashboard" roadmap item.
+- "Failed Operations" misses failed labeling jobs, pushes, trainings, extractions.
+- Recommendation adopted: federate the endpoints over the real job tables (read-only) rather than dual-writing task_queue.
+
 ### Session Context
 **Working On:** User feedback collection for UI compression work
 **Last Completed:** UI compression and enhancement work (12 tasks, 5 files, 100% success rate)

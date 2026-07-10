@@ -135,11 +135,6 @@ celery_app.conf.update(
             "queue": "low_priority",
         },
 
-        # System monitoring operations: Background metrics collection
-        "src.workers.system_monitor_tasks.*": {
-            "queue": "low_priority",
-        },
-
         # Cleanup operations: Periodic maintenance tasks
         "src.workers.cleanup_stuck_extractions.*": {
             "queue": "low_priority",
@@ -151,6 +146,9 @@ celery_app.conf.update(
             "queue": "low_priority",
         },
         "src.workers.cleanup_stuck_enhanced_labeling.*": {
+            "queue": "low_priority",
+        },
+        "src.workers.cleanup_task_queue.*": {
             "queue": "low_priority",
         },
 
@@ -223,19 +221,10 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,  # Disable prefetching for fair distribution
 
     # Beat scheduler settings (for periodic tasks)
+    # NOTE: System metrics monitoring runs as an asyncio background task in
+    # src/services/background_monitor.py (not Celery) so it can't be blocked
+    # by long-running Celery tasks.
     beat_schedule={
-        # NOTE: System metrics monitoring has been moved to asyncio background task
-        # in src/services/background_monitor.py to avoid blocking by long-running Celery tasks.
-        # The Celery Beat task is disabled but kept here for reference.
-        #
-        # "monitor-system-metrics": {
-        #     "task": "workers.monitor_system_metrics",
-        #     "schedule": settings.system_monitor_interval_seconds,  # Run every 2 seconds (default)
-        #     "options": {
-        #         "queue": "low_priority",
-        #     },
-        # },
-
         # Cleanup stuck extraction jobs - runs every 10 minutes
         "cleanup-stuck-extractions": {
             "task": "cleanup_stuck_extractions",
@@ -265,6 +254,15 @@ celery_app.conf.update(
         "cleanup-stuck-enhanced-labeling": {
             "task": "cleanup_stuck_enhanced_labeling",
             "schedule": 300.0,  # Run every 5 minutes
+            "options": {
+                "queue": "low_priority",
+            },
+        },
+        # Cleanup old task_queue entries - runs hourly
+        # Deletes completed entries >7 days old and stale queued/running ghosts
+        "cleanup-task-queue": {
+            "task": "cleanup_task_queue",
+            "schedule": 3600.0,  # Run every hour
             "options": {
                 "queue": "low_priority",
             },
@@ -307,11 +305,11 @@ celery_app.autodiscover_tasks(
         "src.workers.training_tasks",
         "src.workers.extraction_tasks",
         "src.workers.labeling_tasks",
-        "src.workers.system_monitor_tasks",
         "src.workers.cleanup_stuck_extractions",
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
         "src.workers.cleanup_stuck_enhanced_labeling",
+        "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes
         "src.workers.sae_tasks",
         "src.workers.neuronpedia_tasks",

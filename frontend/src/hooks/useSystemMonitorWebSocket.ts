@@ -40,34 +40,33 @@ export const useSystemMonitorWebSocket = (gpuIds: number[] = []) => {
 
     console.log('[System Monitor WS] Setting up system metrics event handlers');
 
-    // Handler for 'metrics' events on all system channels
+    // Handler for 'metrics' events on all system channels.
+    // The backend tags each payload with metric_type; the field-sniffing
+    // branches below are a fallback for payloads from older backends.
     const handleMetrics = (data: any) => {
-      console.log('[System Monitor WS] Metrics event:', data);
+      const metricType: string | undefined = data.metric_type;
 
-      // Determine which type of metrics based on the channel or data structure
-      // GPU metrics will have gpu_id field
-      if (data.gpu_id !== undefined) {
-        console.log('[System Monitor WS] GPU metrics update:', data.gpu_id);
+      if (metricType === 'gpu' || data.gpu_id !== undefined) {
         setGPUMetrics(data.gpu_id, data);
-      }
-      // CPU metrics
-      else if (data.percent !== undefined && data.count !== undefined) {
-        console.log('[System Monitor WS] CPU metrics update');
+      } else if (
+        metricType === 'cpu' ||
+        (data.percent !== undefined && data.count !== undefined)
+      ) {
         updateSystemMetrics({
           cpu: { percent: data.percent, count: data.count },
         });
-      }
-      // Memory metrics (has both ram and swap)
-      else if (data.ram !== undefined && data.swap !== undefined) {
-        console.log('[System Monitor WS] Memory metrics update');
+      } else if (
+        metricType === 'memory' ||
+        (data.ram !== undefined && data.swap !== undefined)
+      ) {
         updateSystemMetrics({
           ram: data.ram,
           swap: data.swap,
         });
-      }
-      // Disk I/O metrics
-      else if (data.read_bytes !== undefined && data.write_bytes !== undefined) {
-        console.log('[System Monitor WS] Disk I/O metrics update');
+      } else if (
+        metricType === 'disk' ||
+        (data.read_bytes !== undefined && data.write_bytes !== undefined)
+      ) {
         updateSystemMetrics({
           disk_io: {
             read_bytes: data.read_bytes,
@@ -76,10 +75,10 @@ export const useSystemMonitorWebSocket = (gpuIds: number[] = []) => {
             write_mb: data.write_bytes / (1024 * 1024),
           },
         });
-      }
-      // Network I/O metrics
-      else if (data.sent_bytes !== undefined && data.recv_bytes !== undefined) {
-        console.log('[System Monitor WS] Network I/O metrics update');
+      } else if (
+        metricType === 'network' ||
+        (data.sent_bytes !== undefined && data.recv_bytes !== undefined)
+      ) {
         updateSystemMetrics({
           network_io: {
             sent_bytes: data.sent_bytes,
@@ -88,6 +87,8 @@ export const useSystemMonitorWebSocket = (gpuIds: number[] = []) => {
             recv_mb: data.recv_bytes / (1024 * 1024),
           },
         });
+      } else {
+        console.warn('[System Monitor WS] Unrecognized metrics payload:', data);
       }
     };
 

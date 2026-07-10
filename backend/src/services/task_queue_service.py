@@ -97,8 +97,8 @@ class TaskQueueService:
         entry.status = status
         if progress is not None:
             entry.progress = progress
-        if error_message:
-            entry.error_message = error_message
+        if error_message is not None:
+            entry.error_message = error_message or None
 
         # Update timestamps
         if status == "running" and not entry.started_at:
@@ -117,14 +117,16 @@ class TaskQueueService:
         db: AsyncSession,
         status: Optional[str] = None,
         entity_type: Optional[str] = None,
+        limit: int = 200,
     ) -> List[TaskQueue]:
         """
-        Get all task queue entries with optional filtering.
+        Get task queue entries with optional filtering.
 
         Args:
             db: Database session
             status: Optional status filter
             entity_type: Optional entity type filter
+            limit: Maximum number of entries to return (newest first)
 
         Returns:
             List of TaskQueue entries
@@ -140,7 +142,7 @@ class TaskQueueService:
         if filters:
             query = query.where(and_(*filters))
 
-        query = query.order_by(TaskQueue.created_at.desc())
+        query = query.order_by(TaskQueue.created_at.desc()).limit(limit)
 
         result = await db.execute(query)
         return result.scalars().all()
@@ -174,7 +176,7 @@ class TaskQueueService:
                 TaskQueue.status == "queued",
                 TaskQueue.status == "running"
             )
-        ).order_by(TaskQueue.created_at.desc())
+        ).order_by(TaskQueue.created_at.desc()).limit(200)
 
         result = await db.execute(query)
         return result.scalars().all()
@@ -284,6 +286,8 @@ class TaskQueueService:
         entry.status = "queued"
         entry.error_message = None
         entry.completed_at = None
+        entry.progress = 0.0
+        entry.started_at = None
 
         await db.commit()
         await db.refresh(entry)

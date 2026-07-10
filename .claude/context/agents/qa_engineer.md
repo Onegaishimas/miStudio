@@ -81,6 +81,14 @@
 6. Add visual regression testing: Percy or Chromatic for UI components
 7. Add accessibility testing: axe-core audit, WCAG 2.1 AA compliance
 
+### Celery/Monitor Review Findings (2026-07-10)
+See `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md` for full detail.
+1. **P0 — System-metrics WS emission 403s silently:** `BackgroundMonitor._emit_to_channel` omits `X-Internal-Token`; regression from the internal-token hardening. No integration test covers this path. Frontend fallback keys on connection (not data freshness) so Monitor page freezes.
+2. **P0 — task_queue retry ghosts:** successful retries leave rows `queued` forever (no success-path update); phantom cards in Active Operations.
+3. **P1 — Training pause/cancel race:** `update_training_progress` unconditionally writes `status=RUNNING`, can clobber a concurrent PAUSED/CANCELLED. One-line guarded-update fix.
+4. **P1 — Shared loading/error in taskQueueStore:** 5s and 30s pollers race on a single flag; same class of bug as the earlier steeringStore finding.
+5. `cleanup_completed_tasks` is dead code — never scheduled.
+
 ### Session Context
 **Current Review Scope:** Steering multi-prompt capability (reviewed 2026-01-02)
 **Quality Gates Status:**

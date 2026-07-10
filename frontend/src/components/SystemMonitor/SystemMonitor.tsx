@@ -5,7 +5,7 @@
  * Displays real-time metrics with auto-refresh.
  */
 
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Activity, Settings } from 'lucide-react';
 import { useSystemMonitorStore } from '../../stores/systemMonitorStore';
 import { useHistoricalData } from '../../hooks/useHistoricalData';
@@ -41,7 +41,6 @@ export function SystemMonitor() {
     errorType,
     isPolling,
     isConnected,
-    isWebSocketConnected,
     fetchGPUList,
     fetchAllGpuMetrics,
     setSelectedGPU,
@@ -60,7 +59,7 @@ export function SystemMonitor() {
   const {
     data: historicalData,
     addDataPoint,
-  } = useHistoricalData({ maxDataPoints: 3600 }); // 1h at 1s intervals
+  } = useHistoricalData({ maxDataPoints: 1800 }); // 1h at the 2s metric cadence
 
   // Get GPU IDs for WebSocket subscription
   const gpuIds = useMemo(() => {
@@ -89,33 +88,35 @@ export function SystemMonitor() {
     return undefined;
   }, [viewMode, gpuAvailable, fetchAllGpuMetrics, updateInterval]);
 
-  // Fallback polling: Only start if WebSocket is not connected
-  // WebSocket connection state managed by useSystemMonitorWebSocket hook
-  const hasStartedPolling = useRef(false);
-
+  // Polling fallback on WebSocket disconnect is handled by
+  // systemMonitorStore.setIsWebSocketConnected (single controller).
+  //
+  // Staleness watchdog: a connected socket does not guarantee metric events
+  // are flowing (e.g. backend emission failures). If no data has arrived for
+  // 10s while we believe the WebSocket is healthy, resume polling; the store
+  // stops it again on the next reconnect.
   useEffect(() => {
-    // Start polling if WebSocket is not connected and we haven't started polling yet
-    if (!isWebSocketConnected && !hasStartedPolling.current) {
-      console.log('[SystemMonitor] Starting polling fallback (WebSocket not connected)');
-      startPolling(updateInterval);
-      hasStartedPolling.current = true;
-    }
-    // Stop polling if WebSocket connects and we had started polling
-    else if (isWebSocketConnected && hasStartedPolling.current) {
-      console.log('[SystemMonitor] Stopping polling (WebSocket connected)');
-      stopPolling();
-      hasStartedPolling.current = false;
-    }
+    const STALE_MS = 10_000;
+    const watchdog = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      const { isPolling: polling, isWebSocketConnected: wsConnected, lastSuccessfulFetch } =
+        useSystemMonitorStore.getState();
+      const stale =
+        lastSuccessfulFetch === null || Date.now() - lastSuccessfulFetch > STALE_MS;
+      if (wsConnected && !polling && stale) {
+        console.warn(
+          '[SystemMonitor] WebSocket connected but metrics are stale, resuming polling fallback'
+        );
+        startPolling(updateInterval);
+      }
+    }, 5000);
 
     return () => {
-      // Clean up polling only on unmount, and only if we started it
-      if (hasStartedPolling.current) {
-        console.log('[SystemMonitor] Component unmounting, stopping polling');
-        stopPolling();
-        hasStartedPolling.current = false;
-      }
+      clearInterval(watchdog);
+      // Stop any polling this page started when navigating away
+      stopPolling();
     };
-  }, [isWebSocketConnected, updateInterval, startPolling, stopPolling]);
+  }, [updateInterval, startPolling, stopPolling]);
 
   // Update historical data when new metrics arrive
   useEffect(() => {

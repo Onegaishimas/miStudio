@@ -49,6 +49,7 @@ def extract_features_from_sae_task(
     logger.info(f"Starting feature extraction task for external SAE {sae_id}")
     logger.info(f"Config: {config}")
 
+    extraction_job = None
     with self.get_db() as db:
         try:
             from src.models.extraction_job import ExtractionJob, ExtractionStatus
@@ -138,6 +139,18 @@ def extract_features_from_sae_task(
                 f"Feature extraction task failed for SAE {sae_id}: {e}",
                 exc_info=True
             )
+            # Persist FAILED so the job doesn't sit in EXTRACTING until the
+            # stuck-extraction cleanup task catches it (up to 10 minutes later)
+            if extraction_job is not None:
+                try:
+                    from src.models.extraction_job import ExtractionStatus
+                    db.rollback()
+                    extraction_job.status = ExtractionStatus.FAILED.value
+                    extraction_job.error_message = str(e)
+                    db.commit()
+                except Exception as db_exc:
+                    logger.error(f"Failed to persist FAILED status for extraction: {db_exc}")
+                    db.rollback()
             # Emit failure progress
             try:
                 emit_sae_extraction_progress(

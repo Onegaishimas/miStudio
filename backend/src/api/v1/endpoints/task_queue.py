@@ -25,6 +25,241 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _serialize_task(task, entity_info, can_retry: bool = True) -> dict:
+    """Serialize a TaskQueue ORM row for API responses."""
+    return {
+        "id": task.id,
+        "task_id": task.task_id,
+        "task_type": task.task_type,
+        "entity_id": task.entity_id,
+        "entity_type": task.entity_type,
+        "status": task.status,
+        "progress": task.progress,
+        "error_message": task.error_message,
+        "retry_params": task.retry_params,
+        "retry_count": task.retry_count,
+        "can_retry": can_retry,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "entity_info": entity_info,
+    }
+
+
+def _federated_row(
+    *,
+    row_id: str,
+    task_type: str,
+    entity_id: str,
+    entity_type: str,
+    status: str,
+    progress,
+    name: str,
+    details: Optional[str] = None,
+    error_message: Optional[str] = None,
+    created_at=None,
+    started_at=None,
+    completed_at=None,
+    updated_at=None,
+) -> dict:
+    """Build a task-queue-shaped dict from another job table's row.
+
+    Federated rows are read-only views: they can't be retried or deleted
+    through the task-queue endpoints (can_retry=False signals the UI).
+    """
+    entity_info = {"name": name}
+    if details:
+        entity_info["details"] = details
+    return {
+        "id": row_id,
+        "task_id": row_id,
+        "task_type": task_type,
+        "entity_id": entity_id,
+        "entity_type": entity_type,
+        "status": status,
+        "progress": progress,
+        "error_message": error_message,
+        "retry_params": None,
+        "retry_count": 0,
+        "can_retry": False,
+        "created_at": created_at.isoformat() if created_at else None,
+        "started_at": started_at.isoformat() if started_at else None,
+        "completed_at": completed_at.isoformat() if completed_at else None,
+        "updated_at": updated_at.isoformat() if updated_at else None,
+        "entity_info": entity_info,
+    }
+
+
+async def _federated_trainings(db: AsyncSession, statuses: tuple, limit: int = 25) -> list:
+    """Fetch trainings in the given statuses as task-queue-shaped rows."""
+    from sqlalchemy import text, bindparam
+
+    rows = []
+    try:
+        result = await db.execute(
+            text("""
+                SELECT t.id, t.name, t.status, t.progress, t.current_step, t.total_steps,
+                       t.error_message, t.created_at, t.started_at, t.completed_at, t.updated_at
+                FROM trainings t
+                WHERE t.status IN :statuses
+                ORDER BY t.created_at DESC
+                LIMIT :limit
+            """).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": list(statuses), "limit": limit},
+        )
+        for row in result:
+            rows.append(_federated_row(
+                row_id=row.id,
+                task_type="training",
+                entity_id=row.id,
+                entity_type="training",
+                status="running" if row.status in ("running", "initializing") else (
+                    "failed" if row.status == "failed" else "queued"
+                ),
+                progress=row.progress,
+                name=row.name or row.id,
+                details=f"Step {row.current_step:,}/{row.total_steps:,}" if row.total_steps else None,
+                error_message=row.error_message,
+                created_at=row.created_at,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                updated_at=row.updated_at,
+            ))
+    except Exception:
+        logger.exception("Failed to query trainings for task federation")
+    return rows
+
+
+async def _federated_extractions(db: AsyncSession, statuses: tuple, limit: int = 25) -> list:
+    """Fetch extraction jobs in the given statuses as task-queue-shaped rows."""
+    from sqlalchemy import text, bindparam
+
+    rows = []
+    try:
+        result = await db.execute(
+            text("""
+                SELECT e.id, e.status, e.progress, e.layer_index, e.hook_type,
+                       e.features_extracted, e.total_features, e.error_message,
+                       e.created_at, e.completed_at, e.updated_at
+                FROM extraction_jobs e
+                WHERE e.status IN :statuses
+                ORDER BY e.created_at DESC
+                LIMIT :limit
+            """).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": list(statuses), "limit": limit},
+        )
+        for row in result:
+            layer_part = f"layer {row.layer_index}" if row.layer_index is not None else "features"
+            details = None
+            if row.total_features:
+                details = f"{row.features_extracted or 0}/{row.total_features} features"
+            rows.append(_federated_row(
+                row_id=row.id,
+                task_type="extraction",
+                entity_id=row.id,
+                entity_type="extraction",
+                status="running" if row.status == "extracting" else (
+                    "failed" if row.status == "failed" else "queued"
+                ),
+                progress=row.progress,
+                name=f"Extraction ({layer_part}{'/' + row.hook_type if row.hook_type else ''})",
+                details=details,
+                error_message=row.error_message,
+                created_at=row.created_at,
+                completed_at=row.completed_at,
+                updated_at=row.updated_at,
+            ))
+    except Exception:
+        logger.exception("Failed to query extraction jobs for task federation")
+    return rows
+
+
+async def _federated_labeling(db: AsyncSession, statuses: tuple, limit: int = 25) -> list:
+    """Fetch labeling jobs in the given statuses as task-queue-shaped rows."""
+    from sqlalchemy import text, bindparam
+
+    rows = []
+    try:
+        result = await db.execute(
+            text("""
+                SELECT lj.id, lj.extraction_job_id, lj.labeling_method,
+                       lj.openai_compatible_model, lj.openai_model, lj.local_model,
+                       lj.status, lj.progress, lj.features_labeled, lj.total_features,
+                       lj.error_message, lj.created_at, lj.updated_at
+                FROM labeling_jobs lj
+                WHERE lj.status IN :statuses
+                ORDER BY lj.created_at DESC
+                LIMIT :limit
+            """).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": list(statuses), "limit": limit},
+        )
+        for row in result:
+            model_name = row.openai_compatible_model or row.openai_model or row.local_model or 'unknown'
+            progress_pct = (row.features_labeled / row.total_features * 100) if row.total_features else 0
+            rows.append(_federated_row(
+                row_id=row.id,
+                task_type="labeling",
+                entity_id=row.extraction_job_id,
+                entity_type="labeling",
+                status="running" if row.status == "labeling" else (
+                    "failed" if row.status == "failed" else "queued"
+                ),
+                progress=progress_pct,
+                name=f"Labeling ({model_name})",
+                details=f"{row.features_labeled}/{row.total_features} features",
+                error_message=row.error_message,
+                created_at=row.created_at,
+                started_at=row.created_at,
+                updated_at=row.updated_at,
+            ))
+    except Exception:
+        logger.exception("Failed to query labeling jobs for task federation")
+    return rows
+
+
+async def _federated_pushes(db: AsyncSession, statuses: tuple, limit: int = 25) -> list:
+    """Fetch Neuronpedia push jobs in the given statuses as task-queue-shaped rows."""
+    from sqlalchemy import text, bindparam
+
+    rows = []
+    try:
+        result = await db.execute(
+            text("""
+                SELECT np.id, np.sae_id, np.status, np.progress,
+                       np.features_pushed, np.total_features, np.error_message,
+                       np.created_at, np.updated_at,
+                       es.name as sae_name
+                FROM neuronpedia_pushes np
+                LEFT JOIN external_saes es ON es.id = np.sae_id
+                WHERE np.status IN :statuses
+                ORDER BY np.created_at DESC
+                LIMIT :limit
+            """).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": list(statuses), "limit": limit},
+        )
+        for row in result:
+            rows.append(_federated_row(
+                row_id=row.id,
+                task_type="neuronpedia_push",
+                entity_id=row.sae_id,
+                entity_type="neuronpedia",
+                status="running" if row.status in ("pushing", "preparing") else (
+                    "failed" if row.status == "failed" else "queued"
+                ),
+                progress=float(row.progress) if row.progress else 0,
+                name="Push to Neuronpedia",
+                details=row.sae_name or row.sae_id,
+                error_message=row.error_message,
+                created_at=row.created_at,
+                started_at=row.created_at,
+                updated_at=row.updated_at,
+            ))
+    except Exception:
+        logger.exception("Failed to query neuronpedia pushes for task federation")
+    return rows
+
+
 @router.get("", response_model=TaskQueueListResponse)
 async def list_tasks(
     status: Optional[str] = None,
@@ -43,31 +278,12 @@ async def list_tasks(
     """
     tasks = await TaskQueueService.get_all_tasks(db, status=status, entity_type=entity_type)
 
-    # Enrich tasks with entity information
     enriched_tasks = []
     for task in tasks:
         entity_info = await TaskQueueService.get_entity_info(
             db, task.entity_id, task.entity_type
         )
-
-        task_dict = {
-            "id": task.id,
-            "task_id": task.task_id,
-            "task_type": task.task_type,
-            "entity_id": task.entity_id,
-            "entity_type": task.entity_type,
-            "status": task.status,
-            "progress": task.progress,
-            "error_message": task.error_message,
-            "retry_params": task.retry_params,
-            "retry_count": task.retry_count,
-            "created_at": task.created_at.isoformat() if task.created_at else None,
-            "started_at": task.started_at.isoformat() if task.started_at else None,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-            "entity_info": entity_info,
-        }
-        enriched_tasks.append(task_dict)
+        enriched_tasks.append(_serialize_task(task, entity_info))
 
     return {"data": enriched_tasks}
 
@@ -75,7 +291,12 @@ async def list_tasks(
 @router.get("/failed", response_model=TaskQueueListResponse)
 async def list_failed_tasks(db: AsyncSession = Depends(get_db)):
     """
-    List all failed task queue entries.
+    List all failed operations across job types.
+
+    task_queue entries (model/dataset downloads, tokenizations) are retryable
+    through this API. Failed trainings, extractions, labeling jobs, and
+    Neuronpedia pushes are federated in read-only (can_retry=False) — they are
+    managed from their own panels.
 
     Returns:
         List of failed tasks with entity information
@@ -87,25 +308,18 @@ async def list_failed_tasks(db: AsyncSession = Depends(get_db)):
         entity_info = await TaskQueueService.get_entity_info(
             db, task.entity_id, task.entity_type
         )
+        enriched_tasks.append(_serialize_task(task, entity_info, can_retry=True))
 
-        task_dict = {
-            "id": task.id,
-            "task_id": task.task_id,
-            "task_type": task.task_type,
-            "entity_id": task.entity_id,
-            "entity_type": task.entity_type,
-            "status": task.status,
-            "progress": task.progress,
-            "error_message": task.error_message,
-            "retry_params": task.retry_params,
-            "retry_count": task.retry_count,
-            "created_at": task.created_at.isoformat() if task.created_at else None,
-            "started_at": task.started_at.isoformat() if task.started_at else None,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-            "entity_info": entity_info,
-        }
-        enriched_tasks.append(task_dict)
+    enriched_tasks.extend(await _federated_trainings(db, ("failed",)))
+    enriched_tasks.extend(await _federated_extractions(db, ("failed",)))
+    enriched_tasks.extend(await _federated_labeling(db, ("failed",)))
+    enriched_tasks.extend(await _federated_pushes(db, ("failed",)))
+
+    # Newest failure first across all sources
+    enriched_tasks.sort(
+        key=lambda t: t.get("completed_at") or t.get("updated_at") or t.get("created_at") or "",
+        reverse=True,
+    )
 
     return {"data": enriched_tasks}
 
@@ -115,14 +329,13 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
     """
     List all active (queued or running) operations across all job types.
 
-    Queries task_queue table plus labeling_jobs and neuronpedia push jobs
-    to provide a unified view of all background operations.
+    Queries the task_queue table plus trainings, extraction jobs, labeling
+    jobs, and Neuronpedia push jobs to provide a unified view of all
+    background operations.
 
     Returns:
         List of active tasks with entity information
     """
-    from sqlalchemy import select, or_, text
-
     tasks = await TaskQueueService.get_active_tasks(db)
 
     enriched_tasks = []
@@ -130,103 +343,23 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
         entity_info = await TaskQueueService.get_entity_info(
             db, task.entity_id, task.entity_type
         )
+        enriched_tasks.append(_serialize_task(task, entity_info))
 
-        task_dict = {
-            "id": task.id,
-            "task_id": task.task_id,
-            "task_type": task.task_type,
-            "entity_id": task.entity_id,
-            "entity_type": task.entity_type,
-            "status": task.status,
-            "progress": task.progress,
-            "error_message": task.error_message,
-            "retry_params": task.retry_params,
-            "retry_count": task.retry_count,
-            "created_at": task.created_at.isoformat() if task.created_at else None,
-            "started_at": task.started_at.isoformat() if task.started_at else None,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-            "entity_info": entity_info,
-        }
-        enriched_tasks.append(task_dict)
+    enriched_tasks.extend(
+        await _federated_trainings(db, ("pending", "initializing", "running"))
+    )
+    enriched_tasks.extend(
+        await _federated_extractions(db, ("queued", "extracting"))
+    )
+    enriched_tasks.extend(
+        await _federated_labeling(db, ("queued", "labeling"))
+    )
+    enriched_tasks.extend(
+        await _federated_pushes(db, ("queued", "pushing", "preparing"))
+    )
 
-    # Also include active labeling jobs
-    try:
-        labeling_result = await db.execute(
-            text("""
-                SELECT lj.id, lj.extraction_job_id, lj.labeling_method,
-                       lj.openai_compatible_model, lj.openai_model, lj.local_model,
-                       lj.status, lj.progress, lj.features_labeled, lj.total_features,
-                       lj.created_at, lj.updated_at
-                FROM labeling_jobs lj
-                WHERE lj.status IN ('queued', 'labeling')
-                ORDER BY lj.created_at DESC
-            """)
-        )
-        for row in labeling_result:
-            model_name = row.openai_compatible_model or row.openai_model or row.local_model or 'unknown'
-            progress_pct = (row.features_labeled / row.total_features * 100) if row.total_features > 0 else 0
-            enriched_tasks.append({
-                "id": row.id,
-                "task_id": row.id,
-                "task_type": "labeling",
-                "entity_id": row.extraction_job_id,
-                "entity_type": "labeling",
-                "status": "running" if row.status == "labeling" else "queued",
-                "progress": progress_pct,
-                "error_message": None,
-                "retry_params": None,
-                "retry_count": 0,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-                "started_at": row.created_at.isoformat() if row.created_at else None,
-                "completed_at": None,
-                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "entity_info": {
-                    "name": f"Labeling ({model_name})",
-                    "details": f"{row.features_labeled}/{row.total_features} features",
-                },
-            })
-    except Exception as e:
-        logger.exception("Failed to query labeling jobs")
-
-    # Also include active Neuronpedia push jobs
-    try:
-        push_result = await db.execute(
-            text("""
-                SELECT np.id, np.sae_id, np.status, np.progress,
-                       np.features_pushed, np.total_features,
-                       np.created_at, np.updated_at,
-                       es.name as sae_name
-                FROM neuronpedia_pushes np
-                LEFT JOIN external_saes es ON es.id = np.sae_id
-                WHERE np.status IN ('queued', 'pushing', 'preparing')
-                ORDER BY np.created_at DESC
-            """)
-        )
-        for row in push_result:
-            progress_pct = float(row.progress) if row.progress else 0
-            enriched_tasks.append({
-                "id": row.id,
-                "task_id": row.id,
-                "task_type": "neuronpedia_push",
-                "entity_id": row.sae_id,
-                "entity_type": "neuronpedia",
-                "status": "running" if row.status in ("pushing", "preparing") else "queued",
-                "progress": progress_pct,
-                "error_message": None,
-                "retry_params": None,
-                "retry_count": 0,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-                "started_at": row.created_at.isoformat() if row.created_at else None,
-                "completed_at": None,
-                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "entity_info": {
-                    "name": f"Push to Neuronpedia",
-                    "details": row.sae_name or row.sae_id,
-                },
-            })
-    except Exception as e:
-        logger.exception("Failed to query neuronpedia pushes")
+    # Newest first across all sources
+    enriched_tasks.sort(key=lambda t: t.get("created_at") or "", reverse=True)
 
     return {"data": enriched_tasks}
 

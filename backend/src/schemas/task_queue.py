@@ -41,6 +41,10 @@ class TaskQueueData(BaseModel):
     error_message: Optional[str]
     retry_params: Optional[Dict[str, Any]]
     retry_count: int
+    can_retry: bool = Field(
+        True,
+        description="False for rows federated from other job tables (read-only in this API)",
+    )
     created_at: Optional[str]
     started_at: Optional[str]
     completed_at: Optional[str]

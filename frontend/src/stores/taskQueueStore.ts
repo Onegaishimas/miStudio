@@ -3,6 +3,10 @@
  *
  * Zustand store for managing task queue state.
  * Provides visibility and control over background operations.
+ *
+ * Loading/error state is tracked per list (active vs failed) because the two
+ * Monitor sections poll on independent intervals — a shared flag makes the
+ * pollers race and shows one section's errors in the other.
  */
 
 import { create } from 'zustand';
@@ -14,8 +18,12 @@ interface TaskQueueState {
   tasks: TaskQueueEntry[];
   failedTasks: TaskQueueEntry[];
   activeTasks: TaskQueueEntry[];
-  loading: boolean;
-  error: string | null;
+  loading: boolean; // fetchTasks / retry / delete operations
+  activeLoading: boolean;
+  failedLoading: boolean;
+  error: string | null; // retry / delete / fetchTasks errors
+  activeError: string | null;
+  failedError: string | null;
 
   // Actions
   fetchTasks: (status?: string, entityType?: string) => Promise<void>;
@@ -32,7 +40,11 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
   failedTasks: [],
   activeTasks: [],
   loading: false,
+  activeLoading: false,
+  failedLoading: false,
   error: null,
+  activeError: null,
+  failedError: null,
 
   // Fetch all tasks with optional filtering
   fetchTasks: async (status?: string, entityType?: string) => {
@@ -52,14 +64,14 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
   // Fetch failed tasks
   fetchFailedTasks: async () => {
     try {
-      set({ loading: true, error: null });
+      set({ failedLoading: true, failedError: null });
       const response = await taskQueueApi.getFailedTasks();
-      set({ failedTasks: response.data, loading: false });
+      set({ failedTasks: response.data, failedLoading: false });
     } catch (error) {
       console.error('[TaskQueueStore] Failed to fetch failed tasks:', error);
       set({
-        error: error instanceof Error ? error.message : 'Failed to fetch failed tasks',
-        loading: false,
+        failedError: error instanceof Error ? error.message : 'Failed to fetch failed tasks',
+        failedLoading: false,
       });
     }
   },
@@ -67,14 +79,14 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
   // Fetch active tasks
   fetchActiveTasks: async () => {
     try {
-      set({ loading: true, error: null });
+      set({ activeLoading: true, activeError: null });
       const response = await taskQueueApi.getActiveTasks();
-      set({ activeTasks: response.data, loading: false });
+      set({ activeTasks: response.data, activeLoading: false });
     } catch (error) {
       console.error('[TaskQueueStore] Failed to fetch active tasks:', error);
       set({
-        error: error instanceof Error ? error.message : 'Failed to fetch active tasks',
-        loading: false,
+        activeError: error instanceof Error ? error.message : 'Failed to fetch active tasks',
+        activeLoading: false,
       });
     }
   },
@@ -130,8 +142,8 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
     }
   },
 
-  // Clear error
+  // Clear errors
   clearError: () => {
-    set({ error: null });
+    set({ error: null, activeError: null, failedError: null });
   },
 }));

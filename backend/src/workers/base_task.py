@@ -15,6 +15,54 @@ from ..core.database import get_sync_db
 logger = logging.getLogger(__name__)
 
 
+def mark_task_queue_entries_completed(
+    db: Session,
+    entity_id: str,
+    entity_type: str,
+    task_type: str,
+) -> int:
+    """
+    Mark any queued/running task_queue rows for an entity as completed.
+
+    Called from task success paths so that retried operations don't leave
+    permanent "queued" ghost entries in the Active Operations view.
+
+    Args:
+        db: Sync database session
+        entity_id: Entity ID (model_id, dataset_id, etc.)
+        entity_type: Entity type (model, dataset, training)
+        task_type: Task type (download, tokenization, etc.)
+
+    Returns:
+        Number of entries marked completed
+    """
+    from datetime import datetime, timezone
+    from ..models.task_queue import TaskQueue
+
+    try:
+        entries = (
+            db.query(TaskQueue)
+            .filter_by(entity_id=entity_id, entity_type=entity_type, task_type=task_type)
+            .filter(TaskQueue.status.in_(["queued", "running"]))
+            .all()
+        )
+        for entry in entries:
+            entry.status = "completed"
+            entry.progress = 100.0
+            entry.completed_at = datetime.now(timezone.utc)
+        if entries:
+            db.commit()
+            logger.info(
+                f"Marked {len(entries)} task_queue entries completed for "
+                f"{entity_type} {entity_id} ({task_type})"
+            )
+        return len(entries)
+    except Exception as e:
+        logger.warning(f"Failed to mark task_queue entries completed for {entity_id}: {e}")
+        db.rollback()
+        return 0
+
+
 class DatabaseTask(Task):
     """
     Base class for Celery tasks that need database access.

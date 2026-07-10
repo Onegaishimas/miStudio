@@ -284,6 +284,10 @@ def download_dataset_task(
                 db.commit()
                 db.refresh(dataset_obj)
 
+                # Close out any task_queue rows from a prior failed attempt (retry success)
+                from .base_task import mark_task_queue_entries_completed
+                mark_task_queue_entries_completed(db, dataset_id, "dataset", "download")
+
                 # Only emit "completed" event after successful database commit
                 emit_dataset_progress(
                     dataset_id,
@@ -1089,6 +1093,10 @@ def tokenize_dataset_task(
 
                 db.commit()
                 db.refresh(tokenization_obj)
+
+                # Close out any task_queue rows from a prior failed attempt (retry success)
+                from .base_task import mark_task_queue_entries_completed
+                mark_task_queue_entries_completed(db, dataset_id, "dataset", "tokenization")
 
                 # Emit detailed progress: complete
                 elapsed = time.time() - start_time

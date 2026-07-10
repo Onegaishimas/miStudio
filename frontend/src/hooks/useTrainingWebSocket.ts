@@ -82,7 +82,8 @@ export const useTrainingWebSocket = (trainingIds: string[]) => {
     updateTrainingStatus(data.training_id, {
       status: TrainingStatus.COMPLETED,
       progress: 100.0,
-      completed_at: new Date().toISOString(),
+      // Prefer the server timestamp; fall back to client clock for old backends
+      completed_at: data.completed_at || new Date().toISOString(),
     });
   }, [updateTrainingStatus]);
 

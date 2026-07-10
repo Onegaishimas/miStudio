@@ -9,39 +9,40 @@ import { useEffect } from 'react';
 import { Clock, RefreshCw } from 'lucide-react';
 import { useTaskQueueStore } from '../../stores/taskQueueStore';
 
-export function ActiveOperationsSection() {
-  const { activeTasks, loading, error, fetchActiveTasks } = useTaskQueueStore();
+const TASK_TYPE_LABELS: Record<string, string> = {
+  download: 'Download',
+  training: 'Training',
+  extraction: 'Extraction',
+  tokenization: 'Tokenization',
+  labeling: 'Labeling',
+  neuronpedia_push: 'Neuronpedia Push',
+};
 
-  // Fetch active tasks on mount and every 5 seconds
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  model: 'Model',
+  dataset: 'Dataset',
+  training: 'Training',
+  extraction: 'Extraction',
+  labeling: 'Labeling',
+  neuronpedia: 'Neuronpedia',
+};
+
+export function ActiveOperationsSection() {
+  const { activeTasks, activeLoading, activeError, fetchActiveTasks } = useTaskQueueStore();
+
+  // Fetch active tasks on mount and every 5 seconds (paused while tab hidden)
   useEffect(() => {
     fetchActiveTasks();
-    const interval = setInterval(fetchActiveTasks, 5000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchActiveTasks();
+      }
+    }, 5000);
     return () => clearInterval(interval);
   }, [fetchActiveTasks]);
 
-  const getTaskTypeLabel = (type: string): string => {
-    const labels: Record<string, string> = {
-      download: 'Download',
-      training: 'Training',
-      extraction: 'Extraction',
-      tokenization: 'Tokenization',
-      labeling: 'Labeling',
-      neuronpedia_push: 'Neuronpedia Push',
-    };
-    return labels[type] || type;
-  };
-
-  const getEntityTypeLabel = (type: string): string => {
-    const labels: Record<string, string> = {
-      model: 'Model',
-      dataset: 'Dataset',
-      training: 'Training',
-      extraction: 'Extraction',
-      labeling: 'Labeling',
-      neuronpedia: 'Neuronpedia',
-    };
-    return labels[type] || type;
-  };
+  const getTaskTypeLabel = (type: string): string => TASK_TYPE_LABELS[type] || type;
+  const getEntityTypeLabel = (type: string): string => ENTITY_TYPE_LABELS[type] || type;
 
   const getStatusBadge = (status: string) => {
     if (status === 'running') {
@@ -59,7 +60,7 @@ export function ActiveOperationsSection() {
     );
   };
 
-  if (activeTasks.length === 0 && !loading) {
+  if (activeTasks.length === 0 && !activeLoading) {
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -83,17 +84,17 @@ export function ActiveOperationsSection() {
         </div>
         <button
           onClick={() => fetchActiveTasks()}
-          disabled={loading}
+          disabled={activeLoading}
           className="text-slate-400 hover:text-slate-300 transition-colors disabled:opacity-50"
           title="Refresh"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${activeLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
-      {error && (
+      {activeError && (
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-          {error}
+          {activeError}
         </div>
       )}
 
@@ -122,8 +123,15 @@ export function ActiveOperationsSection() {
                     {task.entity_info.repo_id}
                   </div>
                 )}
+                {task.entity_info?.details && (
+                  <div className="text-xs text-slate-500 truncate mt-0.5">
+                    {task.entity_info.details}
+                  </div>
+                )}
                 <div className="text-xs text-slate-500 mt-1">
-                  Started: {new Date(task.started_at || task.created_at || '').toLocaleString()}
+                  {task.started_at
+                    ? `Started: ${new Date(task.started_at).toLocaleString()}`
+                    : `Created: ${new Date(task.created_at || '').toLocaleString()}`}
                 </div>
                 {task.retry_count > 0 && (
                   <div className="text-xs text-amber-400 mt-1">

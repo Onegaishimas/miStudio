@@ -416,9 +416,11 @@ start_steering_worker() {
 
     echo -n "Starting Celery steering worker..."
 
-    # Start steering worker with dedicated queue and AGGRESSIVE recycling
-    # --max-tasks-per-child=1: Recycle worker after EVERY task to free GPU memory
-    # This prevents orphaned GPU memory from accumulating across tasks
+    # Start steering worker with dedicated queue.
+    # NOTE: --max-tasks-per-child is IGNORED by --pool=solo (no child processes
+    # to recycle). GPU memory cleanup is instead handled by the `finally` blocks
+    # in steering_tasks.py, which unload models/SAEs, clear hooks, and empty the
+    # CUDA cache after every task. The flag is kept in case the pool changes.
     # CUDA_VISIBLE_DEVICES=0: Restrict to first GPU only
     CUDA_VISIBLE_DEVICES=0 nohup celery -A src.core.celery_app worker \
         -Q steering \

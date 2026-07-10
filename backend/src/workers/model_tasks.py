@@ -111,20 +111,32 @@ class DownloadProgressMonitor:
         self.model_id = model_id
         self.estimated_size_bytes = int(estimated_size_gb * 1024 * 1024 * 1024)
         self.initial_size = 0
-        self.running = False
+        self._stop_event = threading.Event()
+        self._stop_event.set()  # Not running until start()
         self.thread = None
+
+    @property
+    def running(self) -> bool:
+        return not self._stop_event.is_set()
+
+    @running.setter
+    def running(self, value: bool):
+        if value:
+            self._stop_event.clear()
+        else:
+            self._stop_event.set()
 
     def start(self):
         """Start monitoring in background thread."""
         self.initial_size = get_directory_size(self.cache_dir)
-        self.running = True
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.thread.start()
         logger.info(f"[ProgressMonitor] Started for {self.model_id}, initial size: {self.initial_size / (1024**2):.2f} MB")
 
     def stop(self):
         """Stop monitoring."""
-        self.running = False
+        self._stop_event.set()
         if self.thread:
             self.thread.join(timeout=2.0)
         logger.info(f"[ProgressMonitor] Stopped for {self.model_id}")
@@ -134,13 +146,18 @@ class DownloadProgressMonitor:
         last_progress = 0
         check_interval = 3.0  # Check every 3 seconds
 
-        while self.running:
+        while not self._stop_event.is_set():
             try:
                 current_size = get_directory_size(self.cache_dir)
                 downloaded_bytes = current_size - self.initial_size
 
                 # Calculate progress (capped at 90% since we don't know exact size)
                 progress = min(90, (downloaded_bytes / self.estimated_size_bytes) * 100)
+
+                # Re-check stop AFTER the (potentially slow) directory walk so a
+                # stale "downloading" update can't land after the task marks READY
+                if self._stop_event.is_set():
+                    break
 
                 # Only send update if progress increased by at least 1%
                 if progress >= last_progress + 1:
@@ -171,11 +188,12 @@ class DownloadProgressMonitor:
                         f"({downloaded_mb:.1f} MB downloaded)"
                     )
 
-                time.sleep(check_interval)
+                # Interruptible sleep: wakes immediately when stop() is called
+                self._stop_event.wait(check_interval)
 
             except Exception as e:
                 logger.error(f"[ProgressMonitor] Error: {e}")
-                time.sleep(check_interval)
+                self._stop_event.wait(check_interval)
 
 
 def send_progress_update(model_id: str, progress: float, status: str, message: str):
@@ -389,6 +407,11 @@ def download_and_load_model(
                 db.commit()
 
         logger.info(f"Model {model_id} successfully loaded and ready")
+
+        # Close out any task_queue rows from a prior failed attempt (retry success)
+        from .base_task import mark_task_queue_entries_completed
+        with self.get_db() as db:
+            mark_task_queue_entries_completed(db, model_id, "model", "download")
 
         # Send final progress
         send_progress_update(

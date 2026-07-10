@@ -3,6 +3,10 @@
  *
  * Displays failed background operations with retry/delete controls.
  * Part of the System Monitor for manual operation management.
+ *
+ * Rows with can_retry=false are federated from other job tables (trainings,
+ * extractions, labeling, pushes) — they are read-only here and managed from
+ * their own panels.
  */
 
 import { useEffect, useState } from 'react';
@@ -11,15 +15,39 @@ import { useTaskQueueStore } from '../../stores/taskQueueStore';
 import { TaskQueueEntry } from '../../types/taskQueue';
 import { RetryConfirmDialog } from './RetryConfirmDialog';
 
+const TASK_TYPE_LABELS: Record<string, string> = {
+  download: 'Download',
+  training: 'Training',
+  extraction: 'Extraction',
+  tokenization: 'Tokenization',
+  labeling: 'Labeling',
+  neuronpedia_push: 'Neuronpedia Push',
+};
+
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  model: 'Model',
+  dataset: 'Dataset',
+  training: 'Training',
+  extraction: 'Extraction',
+  labeling: 'Labeling',
+  neuronpedia: 'Neuronpedia',
+};
+
 export function FailedOperationsSection() {
-  const { failedTasks, loading, error, fetchFailedTasks, deleteTask } = useTaskQueueStore();
+  const { failedTasks, failedLoading, failedError, fetchFailedTasks, deleteTask } =
+    useTaskQueueStore();
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [retryingTask, setRetryingTask] = useState<TaskQueueEntry | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
-  // Fetch failed tasks on mount and every 30 seconds
+  // Fetch failed tasks on mount and every 30 seconds (paused while tab hidden)
   useEffect(() => {
     fetchFailedTasks();
-    const interval = setInterval(fetchFailedTasks, 30000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchFailedTasks();
+      }
+    }, 30000);
     return () => clearInterval(interval);
   }, [fetchFailedTasks]);
 
@@ -40,39 +68,23 @@ export function FailedOperationsSection() {
   };
 
   const handleDeleteClick = async (taskId: string) => {
-    if (!confirm('Are you sure you want to remove this failed operation from the list?')) {
+    // Two-click inline confirmation (no browser confirm())
+    if (confirmingDeleteId !== taskId) {
+      setConfirmingDeleteId(taskId);
       return;
     }
-
+    setConfirmingDeleteId(null);
     try {
       await deleteTask(taskId);
     } catch (error) {
       console.error('Failed to delete task:', error);
-      alert('Failed to delete task. Please try again.');
     }
   };
 
-  const getTaskTypeLabel = (type: string): string => {
-    const labels: Record<string, string> = {
-      download: 'Download',
-      training: 'Training',
-      extraction: 'Extraction',
-      tokenization: 'Tokenization',
-    };
-    return labels[type] || type;
-  };
+  const getTaskTypeLabel = (type: string): string => TASK_TYPE_LABELS[type] || type;
+  const getEntityTypeLabel = (type: string): string => ENTITY_TYPE_LABELS[type] || type;
 
-  const getEntityTypeLabel = (type: string): string => {
-    const labels: Record<string, string> = {
-      model: 'Model',
-      dataset: 'Dataset',
-      training: 'Training',
-      extraction: 'Extraction',
-    };
-    return labels[type] || type;
-  };
-
-  if (failedTasks.length === 0 && !loading) {
+  if (failedTasks.length === 0 && !failedLoading) {
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -97,23 +109,24 @@ export function FailedOperationsSection() {
           </div>
           <button
             onClick={() => fetchFailedTasks()}
-            disabled={loading}
+            disabled={failedLoading}
             className="text-slate-400 hover:text-slate-300 transition-colors disabled:opacity-50"
             title="Refresh"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${failedLoading ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
-        {error && (
+        {failedError && (
           <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-            {error}
+            {failedError}
           </div>
         )}
 
         <div className="space-y-3">
           {failedTasks.map((task) => {
             const isExpanded = expandedTasks.has(task.id);
+            const canManage = task.can_retry !== false;
             return (
               <div
                 key={task.id}
@@ -139,8 +152,13 @@ export function FailedOperationsSection() {
                           {task.entity_info.repo_id}
                         </div>
                       )}
+                      {task.entity_info?.details && (
+                        <div className="text-xs text-slate-500 truncate mt-0.5">
+                          {task.entity_info.details}
+                        </div>
+                      )}
                       <div className="text-xs text-slate-500 mt-1">
-                        Failed: {new Date(task.updated_at || task.created_at || '').toLocaleString()}
+                        Failed: {new Date(task.completed_at || task.updated_at || task.created_at || '').toLocaleString()}
                       </div>
                       {task.retry_count > 0 && (
                         <div className="text-xs text-amber-400 mt-1">
@@ -151,21 +169,45 @@ export function FailedOperationsSection() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleRetryClick(task)}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 rounded text-xs font-medium text-white transition-colors flex items-center gap-1.5"
-                        title="Retry operation"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        Retry
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(task.id)}
-                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                        title="Remove from list"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canManage ? (
+                        <>
+                          <button
+                            onClick={() => handleRetryClick(task)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 rounded text-xs font-medium text-white transition-colors flex items-center gap-1.5"
+                            title="Retry operation"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Retry
+                          </button>
+                          <button
+                            onClick={() => handleDeleteClick(task.id)}
+                            onBlur={() => setConfirmingDeleteId(null)}
+                            className={`px-2 py-1.5 rounded text-xs transition-colors ${
+                              confirmingDeleteId === task.id
+                                ? 'bg-red-600 hover:bg-red-700 text-white font-medium'
+                                : 'text-slate-400 hover:text-red-400 hover:bg-red-500/10'
+                            }`}
+                            title={
+                              confirmingDeleteId === task.id
+                                ? 'Click again to confirm removal'
+                                : 'Remove from list'
+                            }
+                          >
+                            {confirmingDeleteId === task.id ? (
+                              'Confirm?'
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        </>
+                      ) : (
+                        <span
+                          className="text-xs text-slate-500 italic"
+                          title="This operation is managed from its own panel"
+                        >
+                          Manage in its panel
+                        </span>
+                      )}
                       <button
                         onClick={() => toggleExpanded(task.id)}
                         className="p-1.5 text-slate-400 hover:text-slate-300 transition-colors"

@@ -3,12 +3,15 @@ Celery tasks for steering operations.
 
 These tasks run in a dedicated GPU worker process, providing:
 - Process isolation (crashes don't affect API)
-- Proper timeout handling via SIGKILL
-- Worker recycling to prevent memory leaks
+- Full GPU state reset in `finally` blocks after every task
 
-Timeout behavior:
-- soft_time_limit: SIGTERM sent, SoftTimeLimitExceeded raised
-- time_limit: SIGKILL sent, process terminated, GPU memory released by kernel
+Timeout behavior (CAVEAT — solo pool):
+- soft_time_limit/time_limit are declared but the solo pool does NOT enforce
+  them the way prefork does (there is no child process to SIGKILL). The
+  effective timeout guard is the generation watchdog inside steering_service.
+- Similarly, --max-tasks-per-child is ignored by the solo pool; memory cleanup
+  relies on the `finally` blocks below (unload models, clear hooks,
+  torch.cuda.empty_cache), not worker recycling.
 
 Worker configuration (via celery.sh):
     celery -A src.core.celery_app worker \

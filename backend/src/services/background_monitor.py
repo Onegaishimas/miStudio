@@ -106,6 +106,7 @@ class BackgroundMonitor:
                         gpu_metrics = gpu_service.get_gpu_metrics(gpu_id)
                         metrics_data = gpu_metrics.to_dict()
                         metrics_data["timestamp"] = timestamp
+                        metrics_data["metric_type"] = "gpu"
 
                         if await self._emit_to_channel(
                             channel=f"system/gpu/{gpu_id}",
@@ -131,6 +132,7 @@ class BackgroundMonitor:
             cpu_data = {
                 **system_dict["cpu"],
                 "timestamp": timestamp,
+                "metric_type": "cpu",
             }
             if await self._emit_to_channel("system/cpu", "system:metrics", cpu_data):
                 metrics_emitted.append("cpu")
@@ -140,6 +142,7 @@ class BackgroundMonitor:
                 "ram": system_dict["ram"],
                 "swap": system_dict["swap"],
                 "timestamp": timestamp,
+                "metric_type": "memory",
             }
             if await self._emit_to_channel("system/memory", "system:metrics", memory_data):
                 metrics_emitted.append("memory")
@@ -148,6 +151,7 @@ class BackgroundMonitor:
             disk_data = {
                 **system_dict["disk_io"],
                 "timestamp": timestamp,
+                "metric_type": "disk",
             }
             if await self._emit_to_channel("system/disk", "system:metrics", disk_data):
                 metrics_emitted.append("disk")
@@ -156,6 +160,7 @@ class BackgroundMonitor:
             network_data = {
                 **system_dict["network_io"],
                 "timestamp": timestamp,
+                "metric_type": "network",
             }
             if await self._emit_to_channel("system/network", "system:metrics", network_data):
                 metrics_emitted.append("network")
@@ -183,9 +188,15 @@ class BackgroundMonitor:
                     "channel": channel,
                     "event": event,
                     "data": data,
-                }
+                },
+                headers={"X-Internal-Token": settings.internal_api_secret},
             )
-            return response.status_code == 200
+            if response.status_code != 200:
+                logger.error(
+                    f"Failed to emit to {channel}: HTTP {response.status_code}"
+                )
+                return False
+            return True
         except Exception as e:
             logger.error(f"Failed to emit to {channel}: {e}")
             return False

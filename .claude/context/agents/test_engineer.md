@@ -64,6 +64,14 @@
 - [x] Performance monitoring active (system monitor dashboard)
 - [x] Test environment stable (recent tests passing)
 
+### Celery/Monitor Review Findings (2026-07-10)
+See `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`.
+Highest-risk untested paths identified:
+1. BackgroundMonitor → `/api/internal/ws/emit` (403 regression went unnoticed — needs integration test asserting 200 with token wiring)
+2. task_queue lifecycle fail → retry → success (would have caught the retry-ghost bug)
+3. Training pause-during-log-interval race (simulate status write between loop check and progress write)
+4. Frontend staleness fallback (WS connected but silent → polling resumes; fake-timer test)
+
 ### Session Context
 **Current Testing Focus:** Progress tracking & resource monitoring architecture
 **Test Development Status:** Planning test expansion for WebSocket reliability and progress calculations

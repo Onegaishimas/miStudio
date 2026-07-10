@@ -17,6 +17,18 @@ from src.workers.websocket_emitter import (
 )
 
 
+import src.workers.websocket_emitter as websocket_emitter
+
+
+@pytest.fixture(autouse=True)
+def reset_pooled_client():
+    """Reset the module-level pooled httpx client so each test's patched
+    httpx.Client is used to build a fresh one."""
+    websocket_emitter._http_client = None
+    yield
+    websocket_emitter._http_client = None
+
+
 class TestEmitProgress:
     """Test the core emit_progress function."""
 
@@ -29,7 +41,7 @@ class TestEmitProgress:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         # Execute
@@ -41,7 +53,7 @@ class TestEmitProgress:
 
         # Assert
         assert result is True
-        mock_client.__enter__.return_value.post.assert_called_once_with(
+        mock_client.post.assert_called_once_with(
             "http://localhost:8000/api/internal/ws/emit",
             json={
                 "channel": "test/channel",
@@ -61,7 +73,7 @@ class TestEmitProgress:
         mock_response = Mock()
         mock_response.status_code = 500
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         # Execute
@@ -81,7 +93,7 @@ class TestEmitProgress:
         # Setup
         mock_settings.websocket_emit_url = "http://localhost:8000/api/internal/ws/emit"
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.side_effect = httpx.TimeoutException("Timeout")
+        mock_client.post.side_effect = httpx.TimeoutException("Timeout")
         mock_client_class.return_value = mock_client
 
         # Execute
@@ -101,7 +113,7 @@ class TestEmitProgress:
         # Setup
         mock_settings.websocket_emit_url = "http://localhost:8000/api/internal/ws/emit"
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.side_effect = Exception("Connection error")
+        mock_client.post.side_effect = Exception("Connection error")
         mock_client_class.return_value = mock_client
 
         # Execute
@@ -123,7 +135,7 @@ class TestEmitProgress:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         # Execute
@@ -136,8 +148,8 @@ class TestEmitProgress:
 
         # Assert
         assert result is True
-        mock_client.__enter__.return_value.post.assert_called_once()
-        call_args = mock_client.__enter__.return_value.post.call_args
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
         assert call_args[1]["timeout"] == 5.0
 
 
@@ -336,7 +348,7 @@ class TestIntegration:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         dataset_id = "test-dataset"
@@ -365,7 +377,7 @@ class TestIntegration:
 
         # Assert
         assert all([result1, result2, result3])
-        assert mock_client.__enter__.return_value.post.call_count == 3
+        assert mock_client.post.call_count == 3
 
     @patch("src.workers.websocket_emitter.httpx.Client")
     @patch("src.workers.websocket_emitter.settings")
@@ -376,7 +388,7 @@ class TestIntegration:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_client = MagicMock()
-        mock_client.__enter__.return_value.post.return_value = mock_response
+        mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         model_id = "m_test-model"
@@ -412,4 +424,4 @@ class TestIntegration:
 
         # Assert
         assert all([result1, result2, result3, result4])
-        assert mock_client.__enter__.return_value.post.call_count == 4
+        assert mock_client.post.call_count == 4

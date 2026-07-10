@@ -68,6 +68,14 @@
 3. Reduce system monitor polling frequency or migrate to WebSocket push (P1)
 4. Add database connection pooling optimization for high concurrency (P3)
 
+### Celery/Monitor Review Findings (2026-07-10)
+See `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`.
+1. **task_queue has no lifecycle owner:** created only in failure handlers (3 task types), mutated by retry endpoint, never updated on success, never cleaned. Decide: first-class job ledger (create at dispatch, update every transition, scheduled cleanup) vs. failure-retry ledger + read-only federation over real job tables for Active/Failed Operations. Federation recommended (no dual-write).
+2. **In-process HTTP loopback:** BackgroundMonitor runs inside FastAPI yet POSTs to its own `/api/internal/ws/emit` (and forgot the auth token → P0 outage). Should call `ws_manager.emit_event()` directly.
+3. **Emitter connection churn:** `emit_progress` opens a new httpx.Client per event from GPU hot paths; needs module-level pooled client + retry policy for terminal events.
+4. **Steering worker config contradiction:** solo pool ignores `--max-tasks-per-child=1`; script comments still claim per-task recycling; `time_limit` SIGKILL semantics under solo unverified.
+5. Payload-shape sniffing in `useSystemMonitorWebSocket` should carry explicit `metric_type`/channel.
+
 ### Session Context
 **Current Design Focus:** UI compression patterns and design system evolution
 **Last Completed:** UI compression work (2025-11-06) - exemplary systematic approach

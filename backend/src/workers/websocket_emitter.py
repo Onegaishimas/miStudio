@@ -34,6 +34,18 @@ from ..core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Module-level pooled client: emissions happen on hot paths (training loop,
+# dataset batches), so avoid opening a new TCP connection per event.
+# httpx.Client is thread-safe.
+_http_client: Optional[httpx.Client] = None
+
+
+def _get_http_client() -> httpx.Client:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.Client(timeout=5.0)
+    return _http_client
+
 
 def emit_progress(
     channel: str,
@@ -90,29 +102,28 @@ def emit_progress(
     max_attempts = 1 + retries
     for attempt in range(max_attempts):
         try:
-            # Send HTTP POST request to internal emission endpoint
-            with httpx.Client() as client:
-                response = client.post(
-                    api_url,
-                    json=payload,
-                    headers={"X-Internal-Token": settings.internal_api_secret},
-                    timeout=timeout,
-                )
+            # Send HTTP POST request to internal emission endpoint (pooled client)
+            response = _get_http_client().post(
+                api_url,
+                json=payload,
+                headers={"X-Internal-Token": settings.internal_api_secret},
+                timeout=timeout,
+            )
 
-                # Log result
-                if response.status_code == 200:
-                    if attempt > 0:
-                        logger.info(f"WebSocket emit: {event} to {channel} - Success on retry {attempt}")
-                    else:
-                        logger.debug(f"WebSocket emit: {event} to {channel} - Success")
-                    return True
+            # Log result
+            if response.status_code == 200:
+                if attempt > 0:
+                    logger.info(f"WebSocket emit: {event} to {channel} - Success on retry {attempt}")
                 else:
-                    logger.warning(
-                        f"WebSocket emit: {event} to {channel} - "
-                        f"Failed with status {response.status_code}"
-                    )
-                    # Don't retry on non-timeout failures
-                    return False
+                    logger.debug(f"WebSocket emit: {event} to {channel} - Success")
+                return True
+            else:
+                logger.warning(
+                    f"WebSocket emit: {event} to {channel} - "
+                    f"Failed with status {response.status_code}"
+                )
+                # Don't retry on non-timeout failures
+                return False
 
         except httpx.TimeoutException:
             if attempt < max_attempts - 1:
@@ -530,6 +541,7 @@ def emit_training_progress(
     training_id: str,
     event: str,
     data: Dict[str, Any],
+    retries: int = 0,
 ) -> bool:
     """
     Emit progress update for a training operation.
@@ -563,7 +575,7 @@ def emit_training_progress(
         True
     """
     channel = f"trainings/{training_id}/progress"
-    return emit_progress(channel, event, data)
+    return emit_progress(channel, event, data, retries=retries)
 
 
 def emit_checkpoint_created(

@@ -81,7 +81,15 @@ class TrainingTask(DatabaseTask):
                 training.current_l0_sparsity = l0_sparsity
                 training.current_dead_neurons = dead_neurons
                 training.current_learning_rate = learning_rate
-                training.status = TrainingStatus.RUNNING.value
+                # Guarded status write: a concurrent PAUSED/CANCELLED set by the
+                # API must not be clobbered back to RUNNING by a progress update
+                if training.status not in (
+                    TrainingStatus.PAUSED.value,
+                    TrainingStatus.CANCELLED.value,
+                    TrainingStatus.FAILED.value,
+                    TrainingStatus.COMPLETED.value,
+                ):
+                    training.status = TrainingStatus.RUNNING.value
                 db.commit()
 
     def log_metric(
@@ -1076,16 +1084,21 @@ def train_sae_task(
                         logger.info(f"    Sparsity warmup:     L1 alpha will ramp from 0 to {l1_alpha_val} over {sparsity_warmup_steps} steps")
             logger.info("=" * 70)
 
+        # Pause/cancel checks hit the database, so throttle them: a per-step
+        # query adds up to total_steps round-trips on the GPU hot path.
+        status_check_interval = min(25, max(1, log_interval))
+
         for step in range(start_step, total_steps):
-            # Check for pause/stop signals
-            with self.get_db() as db:
-                training = db.query(Training).filter_by(id=training_id).first()
-                if training.status == TrainingStatus.PAUSED.value:
-                    logger.info(f"Training paused at step {step}")
-                    return {"status": "paused", "step": step}
-                elif training.status == TrainingStatus.CANCELLED.value:
-                    logger.info(f"Training cancelled at step {step}")
-                    return {"status": "cancelled", "step": step}
+            # Check for pause/stop signals (throttled)
+            if step % status_check_interval == 0:
+                with self.get_db() as db:
+                    training = db.query(Training).filter_by(id=training_id).first()
+                    if training.status == TrainingStatus.PAUSED.value:
+                        logger.info(f"Training paused at step {step}")
+                        return {"status": "paused", "step": step}
+                    elif training.status == TrainingStatus.CANCELLED.value:
+                        logger.info(f"Training cancelled at step {step}")
+                        return {"status": "cancelled", "step": step}
 
             try:
                 # ==================================================================
@@ -1762,12 +1775,13 @@ def train_sae_task(
             torch.cuda.empty_cache()
         logger.info("GPU memory cleanup completed")
 
+        from datetime import datetime, UTC
+        completed_at = datetime.now(UTC)
         with self.get_db() as db:
             training = db.query(Training).filter_by(id=training_id).first()
             training.status = TrainingStatus.COMPLETED.value
             training.progress = 100.0
-            from datetime import datetime, UTC
-            training.completed_at = datetime.now(UTC)
+            training.completed_at = completed_at
             db.commit()
 
         # Emit training:completed WebSocket event
@@ -1779,7 +1793,9 @@ def train_sae_task(
                 "training_id": training_id,
                 "status": "completed",
                 "final_loss": avg_loss,
-            }
+                "completed_at": completed_at.isoformat(),
+            },
+            retries=2,  # Terminal event: frontend stays "running" if this is lost
         )
         if not _emit_ok:
             logger.warning(f"[Training {training_id}] WebSocket emit for 'training:completed' failed — frontend may not update")
@@ -1835,7 +1851,8 @@ def train_sae_task(
             data={
                 "training_id": training_id,
                 "error_message": str(e),
-            }
+            },
+            retries=2,  # Terminal event: frontend stays "running" if this is lost
         )
         if not _emit_ok:
             logger.warning(f"[Training {training_id}] WebSocket emit for 'training:failed' failed — frontend may not update")

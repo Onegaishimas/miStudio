@@ -155,8 +155,9 @@ async def emit_websocket_event(
     event = request.get("event")
     data = request.get("data")
 
-    if not all([channel, event, data]):
-        return {"error": "Missing required fields"}, 400
+    # data may legitimately be an empty dict; only reject if absent
+    if not channel or not event or data is None:
+        raise HTTPException(status_code=400, detail="Missing required fields")
 
     await ws_manager.emit_event(channel=channel, event=event, data=data)
 

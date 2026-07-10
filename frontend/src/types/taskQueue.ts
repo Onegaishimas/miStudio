@@ -24,6 +24,8 @@ export enum TaskType {
   TRAINING = 'training',
   EXTRACTION = 'extraction',
   TOKENIZATION = 'tokenization',
+  LABELING = 'labeling',
+  NEURONPEDIA_PUSH = 'neuronpedia_push',
 }
 
 /**
@@ -34,18 +36,21 @@ export enum EntityType {
   DATASET = 'dataset',
   TRAINING = 'training',
   EXTRACTION = 'extraction',
+  LABELING = 'labeling',
+  NEURONPEDIA = 'neuronpedia',
 }
 
 /**
  * Entity information associated with a task
  */
 export interface EntityInfo {
-  id: string;
+  id?: string;
   name: string;
   repo_id?: string;
   hf_repo_id?: string;
-  status: string;
-  type: string;
+  details?: string;
+  status?: string;
+  type?: string;
 }
 
 /**
@@ -62,6 +67,9 @@ export interface TaskQueueEntry {
   error_message: string | null;
   retry_params: Record<string, any> | null;
   retry_count: number;
+  /** False for rows federated from other job tables (trainings, extractions,
+   *  labeling, pushes) — those are read-only in the task-queue API. */
+  can_retry: boolean;
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
