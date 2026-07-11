@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "2c10cec7bd50fc47fd52d7aaed2b70450931a5b6",
-  "generatedAt": "2026-07-10T08:30:15.784Z",
+  "gitCommitHash": "cbeed95d3b68c1d6670bd64f9d8fdad6efb06baf",
+  "generatedAt": "2026-07-11T11:06:16.326Z",
   "files": {
     ".env.example": {
       "filePath": ".env.example",
@@ -85,12 +85,12 @@
     },
     ".github/workflows/sync-to-clean.yml": {
       "filePath": ".github/workflows/sync-to-clean.yml",
-      "contentHash": "51eccaaa5e56d811fc62d08f79de0686ec1cb8651074801351b9b37899159644",
+      "contentHash": "33d2fe573e80d836f1a11a3fa5c239533152ffde8545fbba22c4e316f953f5bb",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 70,
+      "totalLines": 71,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/.understandignore": {
@@ -105,27 +105,27 @@
     },
     ".understand-anything/fingerprints.json": {
       "filePath": ".understand-anything/fingerprints.json",
-      "contentHash": "a346eb90593101ed34a0dc9de64d262c07a9d72e2c6729ef0a184af5aa57788a",
+      "contentHash": "54b04d311ba746765df328e94fa9e7da9e973f3fece27917ca58d943713a674b",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 44890,
+      "totalLines": 45929,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/knowledge-graph.json": {
       "filePath": ".understand-anything/knowledge-graph.json",
-      "contentHash": "8c52d02826a2f6d7a28f7ca1780fcbf6e0b174afb82e433cd55d9a3606075eb3",
+      "contentHash": "c0e668b833b74a493f76a6b95570f1fb2c9de8e8196d95a17a48661c15aad374",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 35889,
+      "totalLines": 40081,
       "hasStructuralAnalysis": true
     },
     ".understand-anything/meta.json": {
       "filePath": ".understand-anything/meta.json",
-      "contentHash": "14f8390b5f0e03fd1b9cd6b9c9ea340a65118bffde8b31564ad7e10e62d6d44f",
+      "contentHash": "d97f3fd67407682f09f0cf6f6a8b62f2c9422ceecab63e9e798aac2cb3527ed7",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -2966,6 +2966,54 @@
       "totalLines": 194,
       "hasStructuralAnalysis": true
     },
+    "backend/alembic/versions/cd6c46abac48_merge_app_settings_and_enhanced_.py": {
+      "filePath": "backend/alembic/versions/cd6c46abac48_merge_app_settings_and_enhanced_.py",
+      "contentHash": "28a0359de64fecf5fb44ebc2ea2f66dbaa0029fe36ce62afe4850739faf0b62c",
+      "functions": [
+        {
+          "name": "upgrade",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "downgrade",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "typing",
+          "specifiers": [
+            "Sequence",
+            "Union"
+          ]
+        },
+        {
+          "source": "alembic",
+          "specifiers": [
+            "op"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "sa"
+          ]
+        }
+      ],
+      "exports": [
+        "upgrade",
+        "downgrade"
+      ],
+      "totalLines": 27,
+      "hasStructuralAnalysis": true
+    },
     "backend/alembic/versions/cf2dc8a57416_add_negative_examples_config_to_.py": {
       "filePath": "backend/alembic/versions/cf2dc8a57416_add_negative_examples_config_to_.py",
       "contentHash": "370940a50986f5d043cac2c5f7ce9aa18b3afe85bd1a6adb6b6e5969ea23fc34",
@@ -3266,6 +3314,47 @@
       "totalLines": 72,
       "hasStructuralAnalysis": true
     },
+    "backend/alembic/versions/e1a2b3c4d5e6_add_celery_task_id_to_models.py": {
+      "filePath": "backend/alembic/versions/e1a2b3c4d5e6_add_celery_task_id_to_models.py",
+      "contentHash": "027990a1cf2fa545d90b6b4d2d35e86d2c29e36210f80e86a7e6abbb91f6942d",
+      "functions": [
+        {
+          "name": "upgrade",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "downgrade",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "alembic",
+          "specifiers": [
+            "op"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "sa"
+          ]
+        }
+      ],
+      "exports": [
+        "upgrade",
+        "downgrade"
+      ],
+      "totalLines": 29,
+      "hasStructuralAnalysis": true
+    },
     "backend/alembic/versions/e1f2g3h4i5j6_fix_external_saes_fk_types.py": {
       "filePath": "backend/alembic/versions/e1f2g3h4i5j6_fix_external_saes_fk_types.py",
       "contentHash": "de2f4f243567259ed11d27f0666a8a7f30be4bcb5d1e863f44603b2cc2a6f30f",
@@ -3442,6 +3531,47 @@
         "downgrade"
       ],
       "totalLines": 65,
+      "hasStructuralAnalysis": true
+    },
+    "backend/alembic/versions/f2b3c4d5e6f7_uq_training_metrics_tid_step_layer.py": {
+      "filePath": "backend/alembic/versions/f2b3c4d5e6f7_uq_training_metrics_tid_step_layer.py",
+      "contentHash": "d5ea963047da514315bb755d76187ac5b3e3fe84594e47b023ccbaa0f835e024",
+      "functions": [
+        {
+          "name": "upgrade",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "downgrade",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "alembic",
+          "specifiers": [
+            "op"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "sa"
+          ]
+        }
+      ],
+      "exports": [
+        "upgrade",
+        "downgrade"
+      ],
+      "totalLines": 49,
       "hasStructuralAnalysis": true
     },
     "backend/alembic/versions/f2g3h4i5j6k7_add_dataset_ids_array_to_trainings.py": {
@@ -5986,7 +6116,7 @@
     },
     "backend/src/api/v1/endpoints/datasets.py": {
       "filePath": "backend/src/api/v1/endpoints/datasets.py",
-      "contentHash": "c5384c25f92af45aa367e4178b58281f51248db0e4c2995b2a73ad48f9414efc",
+      "contentHash": "d729a0fbddcd363aae7773907ddc8051619ea2524d5d80b74f0c5c14f173a89a",
       "functions": [
         {
           "name": "get_redis_client",
@@ -6063,7 +6193,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 66
+          "lineCount": 64
         },
         {
           "name": "tokenize_dataset",
@@ -6294,12 +6424,12 @@
         "delete_dataset_tokenization",
         "cancel_dataset_tokenization"
       ],
-      "totalLines": 1422,
+      "totalLines": 1420,
       "hasStructuralAnalysis": true
     },
     "backend/src/api/v1/endpoints/enhanced_labeling.py": {
       "filePath": "backend/src/api/v1/endpoints/enhanced_labeling.py",
-      "contentHash": "93bf6b5ec15b49444593de0894d9aef7f85b2a5d4ba731547c98d477baebbd14",
+      "contentHash": "3b72a28b2f1a4516fe4b51b01e55297e109783a21a8e303f5371806871f4553a",
       "functions": [
         {
           "name": "start_enhanced_labeling",
@@ -6309,7 +6439,7 @@
           ],
           "returnType": "EnhancedLabelingJobResponse",
           "exported": true,
-          "lineCount": 120
+          "lineCount": 125
         },
         {
           "name": "get_latest_enhanced_labeling_job",
@@ -6394,7 +6524,7 @@
         "start_enhanced_labeling",
         "get_latest_enhanced_labeling_job"
       ],
-      "totalLines": 188,
+      "totalLines": 193,
       "hasStructuralAnalysis": true
     },
     "backend/src/api/v1/endpoints/extraction_templates.py": {
@@ -6574,7 +6704,7 @@
     },
     "backend/src/api/v1/endpoints/features.py": {
       "filePath": "backend/src/api/v1/endpoints/features.py",
-      "contentHash": "143a2aafc936fb91afbf5c62b71f8f4ab0d358339d261431838132fa52faad8a",
+      "contentHash": "9bba86042afad9adbf857780b002e7067a83e50830e795a1c5c8d225386f6302",
       "functions": [
         {
           "name": "list_extractions",
@@ -6808,7 +6938,8 @@
           "source": "typing",
           "specifiers": [
             "List",
-            "Optional"
+            "Optional",
+            "Literal"
           ]
         },
         {
@@ -7340,7 +7471,7 @@
     },
     "backend/src/api/v1/endpoints/models.py": {
       "filePath": "backend/src/api/v1/endpoints/models.py",
-      "contentHash": "d24348f2cec7425b4a41e996279598548d255f385467b5da7b6a2dcdfa1070c3",
+      "contentHash": "aa36a6e3049041a79a32020ece628eb63feb67ffdc70b22b668c28c01cdb0d07",
       "functions": [
         {
           "name": "download_model",
@@ -7349,7 +7480,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 51
+          "lineCount": 56
         },
         {
           "name": "redownload_model",
@@ -7359,7 +7490,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 111
+          "lineCount": 116
         },
         {
           "name": "list_models",
@@ -7420,7 +7551,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 37
+          "lineCount": 41
         },
         {
           "name": "estimate_extraction_resources",
@@ -7477,7 +7608,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 96
+          "lineCount": 97
         },
         {
           "name": "retry_extraction",
@@ -7634,12 +7765,12 @@
         "delete_extractions",
         "get_task_status"
       ],
-      "totalLines": 1279,
+      "totalLines": 1294,
       "hasStructuralAnalysis": true
     },
     "backend/src/api/v1/endpoints/neuronpedia.py": {
       "filePath": "backend/src/api/v1/endpoints/neuronpedia.py",
-      "contentHash": "eeb8a3e0b86fe8828400a4d4a7555fdb5348bab72e88aa551bc067e92f697a33",
+      "contentHash": "02976a91772d8bf13bdf12051e0fa4d0f7ddd4cd0c87ae8fc1ee32b5ce7658d7",
       "functions": [
         {
           "name": "start_export",
@@ -7731,7 +7862,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 95
+          "lineCount": 98
         },
         {
           "name": "get_push_status",
@@ -7872,7 +8003,7 @@
         "list_active_push_jobs",
         "get_local_neuronpedia_status"
       ],
-      "totalLines": 587,
+      "totalLines": 590,
       "hasStructuralAnalysis": true
     },
     "backend/src/api/v1/endpoints/prompt_templates.py": {
@@ -9562,7 +9693,7 @@
     },
     "backend/src/api/v1/endpoints/trainings.py": {
       "filePath": "backend/src/api/v1/endpoints/trainings.py",
-      "contentHash": "94c27fe4484ff3d0e55a6f8cfcbc3b1111fb4be5c6583c2a9fa4f835fe2e6159",
+      "contentHash": "f78114a4965497cd34c4382aea836f796a54fd40dab15a688db6cb764261c826",
       "functions": [
         {
           "name": "create_training",
@@ -9571,7 +9702,7 @@
             "db"
           ],
           "exported": true,
-          "lineCount": 36
+          "lineCount": 39
         },
         {
           "name": "list_trainings",
@@ -9749,7 +9880,7 @@
         "list_checkpoints",
         "get_best_checkpoint"
       ],
-      "totalLines": 388,
+      "totalLines": 391,
       "hasStructuralAnalysis": true
     },
     "backend/src/api/v1/endpoints/version.py": {
@@ -11512,8 +11643,30 @@
     },
     "backend/src/ml/sparse_autoencoder.py": {
       "filePath": "backend/src/ml/sparse_autoencoder.py",
-      "contentHash": "ad8d39f58b754b0b0f8c4cd7295b5457b29dd87122566bc7905c63d839f4d6f5",
+      "contentHash": "bc32feec5e44427f917deb58911723aabf08e4442e05c0f8cc327d2dee1fa0aa",
       "functions": [
+        {
+          "name": "normalize_activations",
+          "params": [
+            "x",
+            "mode",
+            "dim"
+          ],
+          "returnType": "Tuple[torch.Tensor, torch.Tensor]",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "denormalize_activations",
+          "params": [
+            "x",
+            "norm_coeff",
+            "mode"
+          ],
+          "returnType": "torch.Tensor",
+          "exported": true,
+          "lineCount": 7
+        },
         {
           "name": "project_decoder_gradients",
           "params": [
@@ -11552,7 +11705,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 264
+          "lineCount": 241
         },
         {
           "name": "SkipAutoencoder",
@@ -11596,7 +11749,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 214
+          "lineCount": 199
         },
         {
           "name": "StraightThroughL0",
@@ -11652,7 +11805,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 364
+          "lineCount": 351
         }
       ],
       "imports": [
@@ -11696,6 +11849,8 @@
         }
       ],
       "exports": [
+        "normalize_activations",
+        "denormalize_activations",
         "SparseAutoencoder",
         "SkipAutoencoder",
         "Transcoder",
@@ -11707,7 +11862,7 @@
         "project_decoder_gradients",
         "create_sae"
       ],
-      "totalLines": 1485,
+      "totalLines": 1475,
       "hasStructuralAnalysis": true
     },
     "backend/src/ml/transformers_compat.py": {
@@ -11757,7 +11912,7 @@
     },
     "backend/src/models/__init__.py": {
       "filePath": "backend/src/models/__init__.py",
-      "contentHash": "4072906d64bd96968fb645c75ea35d8727346cb2420e9586bd19d582f2e3e3cc",
+      "contentHash": "c2bb9e099ad25e6160bce3069fb44682ed562bba8d4e3e34643ae27000fb9587",
       "functions": [],
       "classes": [],
       "imports": [
@@ -11885,6 +12040,13 @@
           ]
         },
         {
+          "source": ".neuronpedia_push",
+          "specifiers": [
+            "NeuronpediaPushJob",
+            "NeuronpediaPushStatus"
+          ]
+        },
+        {
           "source": ".feature_dashboard",
           "specifiers": [
             "FeatureDashboardData"
@@ -11912,7 +12074,7 @@
         }
       ],
       "exports": [],
-      "totalLines": 71,
+      "totalLines": 74,
       "hasStructuralAnalysis": true
     },
     "backend/src/models/activation_extraction.py": {
@@ -13108,7 +13270,7 @@
     },
     "backend/src/models/model.py": {
       "filePath": "backend/src/models/model.py",
-      "contentHash": "7b9e3dc75e57bb15d9faac8ac856e279f181e93775d6802b289e2089b34050db",
+      "contentHash": "d33cb08bcbdcefc058033b04e8e30f802af4d9a7c99158a84441e3b8921a178a",
       "functions": [],
       "classes": [
         {
@@ -13132,7 +13294,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 44
+          "lineCount": 47
         }
       ],
       "imports": [
@@ -13192,7 +13354,7 @@
         "QuantizationFormat",
         "Model"
       ],
-      "totalLines": 80,
+      "totalLines": 83,
       "hasStructuralAnalysis": true
     },
     "backend/src/models/neuronpedia_export.py": {
@@ -13288,6 +13450,66 @@
         "NeuronpediaExportJob"
       ],
       "totalLines": 123,
+      "hasStructuralAnalysis": true
+    },
+    "backend/src/models/neuronpedia_push.py": {
+      "filePath": "backend/src/models/neuronpedia_push.py",
+      "contentHash": "e89aab0de5242be100d26584f7bc6d03c866409a555ccbc305fe2e349a530b87",
+      "functions": [],
+      "classes": [
+        {
+          "name": "NeuronpediaPushStatus",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "NeuronpediaPushJob",
+          "methods": [
+            "__repr__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 40
+        }
+      ],
+      "imports": [
+        {
+          "source": "enum",
+          "specifiers": [
+            "Enum"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "Column",
+            "String",
+            "Integer",
+            "Float",
+            "DateTime",
+            "Text"
+          ]
+        },
+        {
+          "source": "sqlalchemy.sql",
+          "specifiers": [
+            "func"
+          ]
+        },
+        {
+          "source": "..core.database",
+          "specifiers": [
+            "Base"
+          ]
+        }
+      ],
+      "exports": [
+        "NeuronpediaPushStatus",
+        "NeuronpediaPushJob"
+      ],
+      "totalLines": 72,
       "hasStructuralAnalysis": true
     },
     "backend/src/models/prompt_template.py": {
@@ -13490,7 +13712,7 @@
     },
     "backend/src/models/training_metric.py": {
       "filePath": "backend/src/models/training_metric.py",
-      "contentHash": "58b7b9f976e00d1cf264815351ecc0a401f20ed067f37c248f3eb59ed921e6b7",
+      "contentHash": "6f9522d4d0dd81f7f10d585ca9810fea03d9376c1eba966546d4772e41144129",
       "functions": [],
       "classes": [
         {
@@ -13500,7 +13722,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 57
+          "lineCount": 68
         }
       ],
       "imports": [
@@ -13519,7 +13741,8 @@
             "BigInteger",
             "Float",
             "DateTime",
-            "ForeignKey"
+            "ForeignKey",
+            "UniqueConstraint"
           ]
         },
         {
@@ -13544,7 +13767,7 @@
       "exports": [
         "TrainingMetric"
       ],
-      "totalLines": 73,
+      "totalLines": 87,
       "hasStructuralAnalysis": true
     },
     "backend/src/models/training_template.py": {
@@ -13956,7 +14179,7 @@
     },
     "backend/src/schemas/dataset.py": {
       "filePath": "backend/src/schemas/dataset.py",
-      "contentHash": "0382cbdfcfcca5fbceae128cdee79ceec1ce83d6c0f68289ce3e46bbf7797fc7",
+      "contentHash": "8894072c8e9f7424820c3108055c583c331f69061753a442fed859ec71cac497",
       "functions": [],
       "classes": [
         {
@@ -20127,7 +20350,7 @@
     },
     "backend/src/services/model_service.py": {
       "filePath": "backend/src/services/model_service.py",
-      "contentHash": "2ae68c47b3341af245eaa6559d3d5091963e5b61dee93d387d15a35919f26e2b",
+      "contentHash": "3dedd9c4257056b8f7448ce82f3e2f23a6e87ad91afe2d88ebca255ff945c09b",
       "functions": [],
       "classes": [
         {
@@ -20147,7 +20370,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 392
+          "lineCount": 407
         }
       ],
       "imports": [
@@ -20217,7 +20440,7 @@
       "exports": [
         "ModelService"
       ],
-      "totalLines": 416,
+      "totalLines": 431,
       "hasStructuralAnalysis": true
     },
     "backend/src/services/neuronpedia_export_service.py": {
@@ -21066,7 +21289,7 @@
     },
     "backend/src/services/sae_manager_service.py": {
       "filePath": "backend/src/services/sae_manager_service.py",
-      "contentHash": "f92211c0398efeb495ba4b4131eb26d1f8888df3c6255daf9a857b15b50b53a7",
+      "contentHash": "93349229cfb90fee556a6404e7654d85b42275d72fc1c779d2584fd1a25bf8df",
       "functions": [],
       "classes": [
         {
@@ -21088,7 +21311,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 756
+          "lineCount": 763
         }
       ],
       "imports": [
@@ -21203,7 +21426,7 @@
       "exports": [
         "SAEManagerService"
       ],
-      "totalLines": 794,
+      "totalLines": 801,
       "hasStructuralAnalysis": true
     },
     "backend/src/services/specific_labeling_prompt.py": {
@@ -22221,7 +22444,7 @@
     },
     "backend/src/services/tokenization_service.py": {
       "filePath": "backend/src/services/tokenization_service.py",
-      "contentHash": "2f06c42d9f06b71ad6d29e9d287923ce7600bfaea5e66b4b2f9449d669b12e77",
+      "contentHash": "6e8fff6be72b7ffdcb0fc8d2d1f400aa295718551ae12ef9bb32f17ea63cfbb9",
       "functions": [],
       "classes": [
         {
@@ -22250,7 +22473,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 840
+          "lineCount": 839
         }
       ],
       "imports": [
@@ -22328,12 +22551,12 @@
         "_TokenizationMapper",
         "TokenizationService"
       ],
-      "totalLines": 1035,
+      "totalLines": 1034,
       "hasStructuralAnalysis": true
     },
     "backend/src/services/training_service.py": {
       "filePath": "backend/src/services/training_service.py",
-      "contentHash": "b241c65b8591fae186482e3322b954005f2e786d6859df4a63a140231b8c333a",
+      "contentHash": "5c2bd8b3224d552edd7b9a50f9e78ff0742ef26bac517dc33b7887b6bb04b4e1",
       "functions": [
         {
           "name": "_emit_training_event_sync",
@@ -22367,7 +22590,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 677
+          "lineCount": 705
         }
       ],
       "imports": [
@@ -22446,7 +22669,7 @@
         "_emit_training_event_sync",
         "TrainingService"
       ],
-      "totalLines": 709,
+      "totalLines": 737,
       "hasStructuralAnalysis": true
     },
     "backend/src/services/training_template_service.py": {
@@ -24050,7 +24273,7 @@
     },
     "backend/src/workers/dataset_tasks.py": {
       "filePath": "backend/src/workers/dataset_tasks.py",
-      "contentHash": "726a7c8bd77477bfbdf0b71c5ecac14f562bc99a841e3f40059a8d74539f60da",
+      "contentHash": "337f6139d3cff9eeb97a36ceeee6271d3765b6de800fb3a9a65cd2c3941dd70e",
       "functions": [
         {
           "name": "cleanup_child_processes",
@@ -24078,7 +24301,7 @@
             "config"
           ],
           "exported": true,
-          "lineCount": 322
+          "lineCount": 319
         },
         {
           "name": "tokenize_dataset_task",
@@ -24265,12 +24488,12 @@
         "cancel_dataset_download",
         "delete_dataset_files"
       ],
-      "totalLines": 1531,
+      "totalLines": 1528,
       "hasStructuralAnalysis": true
     },
     "backend/src/workers/enhanced_labeling_tasks.py": {
       "filePath": "backend/src/workers/enhanced_labeling_tasks.py",
-      "contentHash": "960ef1e98e989a7b6b6d6056e6f5e98217b4b01a94fda4f06a6154f1b1d36cea",
+      "contentHash": "7d221e803519a5249cbc6fa897b8d8c4ccdc73975b6426f91794e92daec3dadd",
       "functions": [
         {
           "name": "_ensure_model_loaded",
@@ -24289,7 +24512,7 @@
           ],
           "returnType": "Dict[str, Any]",
           "exported": true,
-          "lineCount": 194
+          "lineCount": 208
         }
       ],
       "classes": [],
@@ -24337,7 +24560,7 @@
         "_ensure_model_loaded",
         "enhanced_label_feature_task"
       ],
-      "totalLines": 230,
+      "totalLines": 244,
       "hasStructuralAnalysis": true
     },
     "backend/src/workers/extraction_tasks.py": {
@@ -24822,7 +25045,7 @@
     },
     "backend/src/workers/neuronpedia_push_tasks.py": {
       "filePath": "backend/src/workers/neuronpedia_push_tasks.py",
-      "contentHash": "33d70678611fe44966e7b8243a70f45802530ba8c312626757cdec425d9bab58",
+      "contentHash": "bc478830f199188e359e95c55a1ae7e1ed4ad809d2adfa7ce7c408546ccbbc29",
       "functions": [
         {
           "name": "push_to_neuronpedia_local_task",
@@ -24838,7 +25061,7 @@
           ],
           "returnType": "dict",
           "exported": true,
-          "lineCount": 217
+          "lineCount": 220
         }
       ],
       "classes": [
@@ -24947,7 +25170,7 @@
         "PushProgress",
         "push_to_neuronpedia_local_task"
       ],
-      "totalLines": 295,
+      "totalLines": 298,
       "hasStructuralAnalysis": true
     },
     "backend/src/workers/neuronpedia_tasks.py": {
@@ -26625,7 +26848,7 @@
     },
     "backend/tests/conftest.py": {
       "filePath": "backend/tests/conftest.py",
-      "contentHash": "f302ca7b0d3c35c2b4540bb8fcf8f6a0fa7995991e568ec0c34e6af258733cd5",
+      "contentHash": "afaf66c44f1cafe37aabb81b398cd2f0f35ec5f8e74bbcc22b7e44e752a28193",
       "functions": [
         {
           "name": "event_loop",
@@ -26638,7 +26861,7 @@
           "name": "async_engine",
           "params": [],
           "exported": true,
-          "lineCount": 53
+          "lineCount": 60
         },
         {
           "name": "async_session",
@@ -26787,7 +27010,7 @@
         "sample_model_data",
         "sample_training_data"
       ],
-      "totalLines": 275,
+      "totalLines": 282,
       "hasStructuralAnalysis": true
     },
     "backend/tests/integration/test_critical_fixes.py": {
@@ -28885,6 +29108,103 @@
       "totalLines": 620,
       "hasStructuralAnalysis": true
     },
+    "backend/tests/unit/test_deferred_remediations.py": {
+      "filePath": "backend/tests/unit/test_deferred_remediations.py",
+      "contentHash": "bb0d47450ee0136fcda71c22ce7da72facd6a77f18d313ad4ae335e89c0160c2",
+      "functions": [
+        {
+          "name": "_make_training",
+          "params": [
+            "session"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "test_training_metric_unique_constraint",
+          "params": [
+            "async_session"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "test_training_metric_null_layer_is_distinct",
+          "params": [
+            "async_session"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "test_neuronpedia_push_job_maps_table",
+          "params": [
+            "async_session"
+          ],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "test_model_has_celery_task_id_column",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "pytest",
+          "specifiers": [
+            "pytest"
+          ]
+        },
+        {
+          "source": "sqlalchemy.exc",
+          "specifiers": [
+            "IntegrityError"
+          ]
+        },
+        {
+          "source": "src.models.training",
+          "specifiers": [
+            "Training",
+            "TrainingStatus"
+          ]
+        },
+        {
+          "source": "src.models.training_metric",
+          "specifiers": [
+            "TrainingMetric"
+          ]
+        },
+        {
+          "source": "src.models.model",
+          "specifiers": [
+            "Model",
+            "ModelStatus",
+            "QuantizationFormat"
+          ]
+        },
+        {
+          "source": "src.models.neuronpedia_push",
+          "specifiers": [
+            "NeuronpediaPushJob",
+            "NeuronpediaPushStatus"
+          ]
+        }
+      ],
+      "exports": [
+        "_make_training",
+        "test_training_metric_unique_constraint",
+        "test_training_metric_null_layer_is_distinct",
+        "test_neuronpedia_push_job_maps_table",
+        "test_model_has_celery_task_id_column"
+      ],
+      "totalLines": 98,
+      "hasStructuralAnalysis": true
+    },
     "backend/tests/unit/test_dual_label_parsing.py": {
       "filePath": "backend/tests/unit/test_dual_label_parsing.py",
       "contentHash": "e5b2760ed54f2d6c1c0b6d6ae71650dad7f8d09fa06e8599d219c384f2d0d327",
@@ -28925,7 +29245,7 @@
     },
     "backend/tests/unit/test_enhanced_labeling_service.py": {
       "filePath": "backend/tests/unit/test_enhanced_labeling_service.py",
-      "contentHash": "0f7559b351a7301b9da952c1714c61b8834598366356ee583f55bb0e28bec4b0",
+      "contentHash": "d6adb14496747577f6fc094d8c6f6efa425da20e0406930aeb3dc92a517144c8",
       "functions": [
         {
           "name": "service",
@@ -29025,7 +29345,7 @@
           ],
           "properties": [],
           "exported": true,
-          "lineCount": 80
+          "lineCount": 88
         }
       ],
       "imports": [
@@ -29068,7 +29388,7 @@
         "TestCallLlm",
         "TestRun"
       ],
-      "totalLines": 247,
+      "totalLines": 255,
       "hasStructuralAnalysis": true
     },
     "backend/tests/unit/test_error_classification.py": {
@@ -33231,12 +33551,12 @@
     },
     "CLAUDE.md": {
       "filePath": "CLAUDE.md",
-      "contentHash": "da25084166f76ee09a447f276297df7c9d042cbe3b25837d79a0f1cd78cab25a",
+      "contentHash": "bacb051ced58bdcd6a95688e5d2675c447cedae8d946bd318d466f5eb9ff2a05",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 869,
+      "totalLines": 873,
       "hasStructuralAnalysis": true
     },
     "CODE_OF_CONDUCT.md": {
@@ -44039,14 +44359,16 @@
     },
     "frontend/src/stores/steeringStore.ts": {
       "filePath": "frontend/src/stores/steeringStore.ts",
-      "contentHash": "2ae86a965e3837e9572774f122ed4d9f0d60850bbc3a717088f57aab43a6a68c",
+      "contentHash": "0aed01e7ce87c8fe85d9db129e798513a2db661e210dc0916bdb85c6465f3ecc",
       "functions": [
         {
           "name": "cleanupBatchResolver",
-          "params": [],
+          "params": [
+            "reason"
+          ],
           "returnType": "void",
           "exported": false,
-          "lineCount": 6
+          "lineCount": 10
         },
         {
           "name": "createBatchResolver",
@@ -44057,14 +44379,16 @@
           ],
           "returnType": "Promise<SteeringComparisonResponse>",
           "exported": false,
-          "lineCount": 27
+          "lineCount": 28
         },
         {
           "name": "cleanupSweepResolver",
-          "params": [],
+          "params": [
+            "reason"
+          ],
           "returnType": "void",
           "exported": false,
-          "lineCount": 6
+          "lineCount": 10
         },
         {
           "name": "createSweepResolver",
@@ -44075,14 +44399,16 @@
           ],
           "returnType": "Promise<StrengthSweepResponse>",
           "exported": false,
-          "lineCount": 27
+          "lineCount": 28
         },
         {
           "name": "cleanupCombinedResolver",
-          "params": [],
+          "params": [
+            "reason"
+          ],
           "returnType": "void",
           "exported": false,
-          "lineCount": 6
+          "lineCount": 10
         },
         {
           "name": "createCombinedResolver",
@@ -44093,7 +44419,7 @@
           ],
           "returnType": "Promise<CombinedSteeringResponse>",
           "exported": false,
-          "lineCount": 27
+          "lineCount": 28
         },
         {
           "name": "selectCanGenerate",
@@ -44201,7 +44527,7 @@
         "selectFeature",
         "selectAvailableColors"
       ],
-      "totalLines": 1676,
+      "totalLines": 1694,
       "hasStructuralAnalysis": true
     },
     "frontend/src/stores/systemMonitorStore.ts": {
@@ -45636,7 +45962,7 @@
     },
     "scripts/k8s-helpers.sh": {
       "filePath": "scripts/k8s-helpers.sh",
-      "contentHash": "07406d7f791e1a964a0ba34113370cb50d69019fee0f9b13dba618396b398b3d",
+      "contentHash": "8026e80ac922013e6cecf6e8231d2ae5005e4339925f4ca5e0d9aa3dab1608ff",
       "functions": [
         {
           "name": "k8s",
@@ -45666,7 +45992,7 @@
           "name": "k8s_migrate",
           "params": [],
           "exported": false,
-          "lineCount": 4
+          "lineCount": 6
         },
         {
           "name": "k8s_apply",
@@ -45798,7 +46124,7 @@
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 273,
+      "totalLines": 275,
       "hasStructuralAnalysis": true
     },
     "scripts/restore-db.sh": {
