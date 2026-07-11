@@ -7,18 +7,25 @@ const config: Config = {
   tagline: 'MechInterp Studio — End-to-End Mechanistic Interpretability Platform',
   favicon: 'img/favicon.svg',
 
-  // GitHub Pages deployment
-  url: 'https://onegaishimas.github.io',
+  // GitHub Pages deployment — published from the public hitsainet mirror via
+  // .github/workflows/deploy-manual.yml (actions/deploy-pages), not `yarn deploy`.
+  url: 'https://hitsainet.github.io',
   baseUrl: '/miStudio/',
 
   // GitHub Pages config
-  organizationName: 'Onegaishimas',
+  organizationName: 'hitsainet',
   projectName: 'miStudio',
-  deploymentBranch: 'gh-pages',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
-  onBrokenMarkdownLinks: 'warn',
+
+  markdown: {
+    mermaid: true,
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
+  themes: ['@docusaurus/theme-mermaid'],
 
   i18n: {
     defaultLocale: 'en',
@@ -32,7 +39,7 @@ const config: Config = {
         docs: {
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/Onegaishimas/miStudio/tree/main/manual/',
+          editUrl: 'https://github.com/hitsainet/miStudio/tree/main/manual/',
         },
         blog: false,
         theme: {
@@ -52,8 +59,11 @@ const config: Config = {
           position: 'left',
           label: 'Manual',
         },
+        {to: '/getting-started/quickstart-tutorial', label: 'Quickstart', position: 'left'},
+        {to: '/concepts/architecture', label: 'Concepts', position: 'left'},
+        {to: '/reference/api/overview', label: 'Reference', position: 'left'},
         {
-          href: 'https://github.com/Onegaishimas/miStudio',
+          href: 'https://github.com/hitsainet/miStudio',
           label: 'GitHub',
           position: 'right',
         },
@@ -65,15 +75,24 @@ const config: Config = {
         {
           title: 'Manual',
           items: [
-            {label: 'Getting Started', to: '/getting-started/introduction'},
+            {label: 'Quickstart Tutorial', to: '/getting-started/quickstart-tutorial'},
             {label: 'Core Workflow', to: '/core-workflow/researcher-journey'},
+            {label: 'Interpretability Primer', to: '/concepts/interpretability-primer'},
             {label: 'Troubleshooting', to: '/troubleshooting'},
+          ],
+        },
+        {
+          title: 'Reference',
+          items: [
+            {label: 'REST API', to: '/reference/api/overview'},
+            {label: 'WebSocket Channels', to: '/reference/websocket-channels'},
+            {label: 'Data Model', to: '/reference/data-model'},
           ],
         },
         {
           title: 'Resources',
           items: [
-            {label: 'GitHub', href: 'https://github.com/Onegaishimas/miStudio'},
+            {label: 'GitHub', href: 'https://github.com/hitsainet/miStudio'},
             {label: 'Neuronpedia', href: 'https://neuronpedia.org'},
           ],
         },
