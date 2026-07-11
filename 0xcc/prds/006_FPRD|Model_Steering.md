@@ -1,10 +1,14 @@
 # Feature PRD: Model Steering
 
 **Document ID:** 006_FPRD|Model_Steering
-**Version:** 2.0 (Celery Async Steering & Combined Mode)
-**Last Updated:** 2026-03-21
+**Version:** 2.1 (doc refresh — async endpoints, data model, params)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
+
+> **Reference sections corrected 2026-07-11** — the Architecture Notes (Celery
+> async) are accurate; §5 (endpoints), §6 (data model), and §8 (param ranges) had
+> drifted. See the **Doc-Refresh Corrections** appendix at the end.
 
 ---
 
@@ -315,6 +319,35 @@ class SteeringResult:
 - No architecture whitelist — any transformer model works via `layer_discovery.py`
 - `discover_transformer_structure()` provides hook points dynamically
 - Supports LFM2, Mamba, and other non-standard architectures
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. Supersedes §5, §6, §8.
+
+### API endpoints (real, prefix `/api/v1/steering`)
+Async (what the frontend uses): `POST /async/compare` · `POST /async/sweep` ·
+`POST /async/combined` · `GET /async/result/{task_id}` · `DELETE /async/task/{task_id}`.
+Sync: `POST /compare` · `POST /sweep`. Mode: `GET /mode` · `POST /enter-mode` ·
+`POST /exit-mode`. Ops: `GET /status` · `POST /reset` · `POST /cleanup`.
+Experiments (persisted): `GET/POST /experiments` · `GET/DELETE /experiments/{id}` ·
+`POST /experiments/delete`.
+*(No `/generate` or `/calibrate` endpoints.)*
+
+### Data model (real)
+- **`prompt_templates`** — PK `id UUID`; `name`, `description`, **`prompts`**
+  (JSONB *array* — multi-prompt), `is_favorite`, `tags` (JSONB), timestamps.
+  *(Not `content`/`variables`/`template_type`/`usage_count`.)*
+- **`steering_experiments`** — a **persisted** table backing the `/experiments`
+  CRUD (the §6.2 "transient SteeringResult" framing is obsolete).
+
+### Parameter ranges (real)
+`strength` ∈ **[-300, +300]** (Neuronpedia-compatible raw coefficients, not ±10);
+`max_new_tokens` ∈ [1, 2048]; `temperature` ∈ [0, 2]; `top_p` ∈ [0, 1].
+
+### WebSocket channel (real)
+`steering/{task_id}`.
 
 ---
 

@@ -1,10 +1,15 @@
 # Feature PRD: Dataset Management
 
 **Document ID:** 001_FPRD|Dataset_Management
-**Version:** 1.0 (MVP Complete)
-**Last Updated:** 2025-12-05
+**Version:** 1.1 (per-model tokenization — doc refresh)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
+
+> **Reference sections corrected 2026-07-11** — see the **Doc-Refresh
+> Corrections** appendix at the end for the authoritative data model, endpoints,
+> and WebSocket channels. The §5/§6/§7 bodies below predate the per-model
+> multi-tokenization redesign.
 
 ---
 
@@ -235,6 +240,45 @@ CREATE TABLE dataset_tokenizations (
 1. **Large datasets**: Streaming mode not fully implemented for 100GB+ datasets
 2. **Resume**: Download resume requires HuggingFace Hub support
 3. **Export**: Statistics export to JSON not yet implemented
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. Supersedes §5/§6/§7 above.
+
+### Data model (real)
+- **`datasets`** — PK `id UUID`; columns: `name`, `source`, `hf_repo_id`,
+  `status` (enum `dataset_status_enum`: `downloading|processing|ready|error`),
+  `progress`, `error_message`, `raw_path`, `num_samples`, `size_bytes`,
+  `metadata` (JSONB, attr `extra_metadata`), `tokenization_filter_enabled`,
+  `tokenization_filter_mode`, `tokenization_junk_ratio_threshold`,
+  `created_at`, `updated_at`.
+- **`dataset_tokenizations`** — PK `id String` (`tok_{dataset}_{model}_{maxlen}`);
+  FKs `dataset_id`, `model_id`; columns: `max_length`, `tokenized_path`,
+  `tokenizer_repo_id`, `vocab_size`, `num_tokens`, `avg_seq_length`,
+  `status` (enum: `queued|processing|ready|error`), `progress`, `error_message`,
+  `celery_task_id`, `remove_all_punctuation`, `custom_filter_chars`,
+  `created_at`, `updated_at`, `completed_at`. Unique `(dataset_id, model_id, max_length)`.
+  *A dataset has many tokenizations — one per model+max_length.*
+
+### API endpoints (real, prefix `/api/v1/datasets`)
+`POST ""` · `GET ""` · `GET /{id}` · `GET /{id}/task-status` · `PATCH /{id}` ·
+`DELETE /{id}` · `POST /download` · `POST /{id}/tokenize` ·
+`DELETE /{id}/tokenization` (clear) · `DELETE /{id}/cancel` · `GET /{id}/samples` ·
+`POST /tokenize-preview` · `GET /{id}/tokenizations` ·
+`GET /{id}/tokenizations/{model_id}` · `DELETE /{id}/tokenizations/{tok_id}` ·
+`POST /{id}/tokenizations/{tok_id}/cancel`.
+
+### WebSocket channels (real)
+- `datasets/{id}/progress` — events `dataset:progress` / `dataset:completed` / `dataset:error`
+- `datasets/{id}/tokenization/{tok_id}` — events `tokenization:progress` / `tokenization:status`
+
+### Key files (corrections)
+Frontend real files: `DatasetsPanel.tsx`, `DatasetCard.tsx`, `DownloadForm.tsx`,
+`DatasetDetailModal.tsx`, `TokenizationsList.tsx`, `TokenizationPreview.tsx`,
+`datasetsStore.ts`, `useDatasetProgress.ts` + `useTokenizationWebSocket.ts`.
+*(The doc's `TokenizationStatsModal.tsx` and `useDatasetWebSocket.ts` do not exist.)*
 
 ---
 

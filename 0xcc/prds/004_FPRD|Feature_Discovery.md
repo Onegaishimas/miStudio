@@ -1,10 +1,14 @@
 # Feature PRD: Feature Discovery
 
 **Document ID:** 004_FPRD|Feature_Discovery
-**Version:** 1.4 (Enhanced Per-Feature Labeling, Star Colors & Context-Aware Templates)
-**Last Updated:** 2026-04-26
+**Version:** 1.5 (doc refresh — endpoints & data model)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
+
+> **Reference sections corrected 2026-07-11** — §2.11–2.13 and §7 (WebSocket) are
+> accurate; but §5 (endpoints) and §6.1/§6.2 (Feature/FeatureActivation data
+> model) had drifted. See the **Doc-Refresh Corrections** appendix at the end.
 
 ---
 
@@ -465,6 +469,51 @@ CREATE TABLE extraction_jobs (
 - [x] Settings-driven enhanced labeling: method (OpenAI vs OpenAI-Compatible), model, Fetch Models button (Apr 2026)
 - [ ] Enhanced labeling: edge-tier analysis and open-question generation
 - [ ] Enhanced labeling: confidence threshold to auto-accept vs. flag for review
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. Supersedes §5 and §6.1/§6.2.
+
+### Data model (real)
+- **`features`** — PK `id String` (`feat_{training}_{neuron}` / `feat_sae_{sae}_{neuron}`);
+  FKs `training_id` (nullable), `external_sae_id` (nullable), `extraction_job_id`,
+  `labeling_job_id`; `neuron_index`; `name`, `category`, `description`,
+  `label_source` (enum `label_source_enum`: `auto|user|llm|local_llm|openai|enhanced_llm`);
+  **top-level indexed stats** `activation_frequency`, `interpretability_score`,
+  `max_activation`, `mean_activation` (NOT nested in a `statistics` JSONB);
+  `is_favorite`, `star_color` (`yellow|purple|aqua|null`), `notes`,
+  `example_tokens_summary` (JSONB), `nlp_analysis` (JSONB), `nlp_processed_at`,
+  timestamps + `labeled_at`.
+- **`feature_activations`** — composite PK `(id BigInteger, feature_id)` (range-
+  partitioned by feature_id); `sample_index`, `max_activation`, `tokens` (JSONB),
+  `activations` (JSONB), `prefix_tokens`/`prime_token`/`suffix_tokens`,
+  `prime_activation_index`, `created_at`. *(Not `activation_value`/`token`/
+  `context_before`/`context_after`.)*
+- **`enhanced_labeling_jobs`** — as documented in §6.4 (accurate).
+
+### API endpoints (real)
+Feature/analysis routes (router mounted **without prefix** — absolute paths):
+`GET /extractions` · `DELETE /extractions/{id}` · `GET /trainings/{tid}/features` ·
+`GET /extractions/{eid}/features` · `GET/PATCH /features/{id}` ·
+`POST /features/{id}/favorite` · `POST /features/{id}/star`
+(`?star_color=yellow|purple|aqua`) · `GET /features/{id}/examples` ·
+`GET /features/{id}/token-analysis` · `GET /features/{id}/logit-lens` ·
+`GET /features/{id}/correlations` · `GET /features/{id}/ablation` ·
+`POST /features/{id}/analyze-nlp` · `GET /features/{id}/nlp-analysis` ·
+`POST /extractions/{id}/analyze-nlp` · `.../cancel-nlp` · `.../reset-nlp`.
+Enhanced labeling: `POST /features/{id}/label/enhanced` ·
+`GET /features/{id}/label/enhanced/latest`.
+Bulk labeling lives in a **separate `labeling` router**. Extraction is *started*
+via Feature 002's `POST /models/{id}/extract-activations` and Feature 005's
+`POST /saes/{id}/extract-features` (see Extraction Architecture note below).
+
+### Extraction architecture (cross-feature)
+Two distinct pipelines share the word "extraction":
+`ActivationExtraction` (model→raw activations, Feature 002, `/models/*`) →
+`ExtractionJob` (SAE→features, Feature 004/005, `/saes/*`). Different tables,
+tasks, and status enums.
 
 ---
 

@@ -1,10 +1,15 @@
 # Feature PRD: Multi-GPU Scalability
 
 **Document ID:** 009_FPRD|Multi_GPU_Scalability
-**Version:** 1.1
-**Last Updated:** 2026-05-09
-**Status:** Partially Complete — Phases 1 & 2 implemented; Phase 3 (DDP training) planned
+**Version:** 1.2 (doc refresh — accuracy corrections)
+**Last Updated:** 2026-07-11
+**Status:** Partially Complete — Phase 1 (monitoring) + Phase 2 (extraction GPU routing) done; Phase 3 (DDP) + training GPU selection planned
 **Priority:** P2
+
+> **Corrections 2026-07-11** — FR-1.3 overstated: **training GPU selection is NOT
+> implemented** (only *extraction* has `gpu_id` routing). §5 (endpoints), §6 (data
+> model), and §8 (config) describe **planned/design-intent** schema that does not
+> exist yet. See the **Doc-Refresh Corrections** appendix at the end.
 
 ---
 
@@ -283,6 +288,33 @@ per_gpu_batch_size = base_batch_size
 | Training speedup (4 GPUs) | 3.2x |
 | Memory efficiency | >90% |
 | GPU utilization (distributed) | >80% |
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Verified against the code — separating what's *built* from what's *planned*.
+
+### Actually implemented ✅
+- **Phase 1 monitoring:** `GPUMonitorService` (`get_all_gpu_info()`,
+  `get_all_gpu_metrics()`, `get_device_count()`, `is_available()`,
+  `get_gpu_metrics(gpu_id)`); per-GPU WS channels `system/gpu/{id}`; the
+  aggregated-vs-per-GPU `viewMode` toggle.
+- **Extraction GPU routing:** `gpu_id` on the extraction schema/task with per-GPU
+  memory cleanup + index validation.
+- **GPU watchdog:** `workers/gpu_watchdog_task.py`, scheduled in Celery Beat.
+- **Real GPU routes** (under `/api/v1/system`): `/gpu-list`, `/gpu-metrics`,
+  `/gpu-metrics/all`, `/gpu-info`, `/gpu-processes` (not `/system/gpus[/{id}]`).
+
+### NOT implemented (doc previously implied current) ❌
+- **Training GPU selection (FR-1.3):** no `gpu_id`/`gpu_ids` anywhere in the
+  training schema/service/task — training runs on the default CUDA device.
+- **Data model §6:** `trainings.gpu_ids`/`distributed` columns and the
+  `gpu_metrics` table **do not exist** — GPU metrics are ephemeral (WebSocket
+  only, never persisted). This is Phase-3 design intent.
+- **Config §8:** `multi_gpu_enabled` / `default_gpu_selection` /
+  `monitor_view_default` settings **do not exist**.
+- Steering is hard-pinned to `CUDA_VISIBLE_DEVICES=0` (single-GPU assumption).
 
 ---
 

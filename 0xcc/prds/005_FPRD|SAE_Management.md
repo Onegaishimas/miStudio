@@ -1,10 +1,14 @@
 # Feature PRD: SAE Management
 
 **Document ID:** 005_FPRD|SAE_Management
-**Version:** 1.2 (Multi-Select Downloads & HF Upload Improvements)
-**Last Updated:** 2026-03-21
+**Version:** 1.3 (doc refresh — data model, endpoints)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
+
+> **Reference sections corrected 2026-07-11** — §8 (Gemma Scope) is accurate; §5
+> (endpoints) and §6 (ExternalSAE data model) had drifted. See the **Doc-Refresh
+> Corrections** appendix at the end.
 
 ---
 
@@ -243,6 +247,44 @@ google/gemma-scope-2b-pt-res/
 - [x] layer_XX directory structure for uploads (Feb 2026)
 - [x] Training info display on SAE tiles (Feb 2026)
 - [x] Dynamic layer discovery — no architecture whitelist (Feb 2026)
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. Supersedes §5 and §6.
+
+### Data model (real — `external_saes`)
+PK `id String` (`sae_{uuid}`); `name`, `description`,
+`source` (enum: `huggingface|local|trained`),
+`status` (enum: `pending|downloading|converting|ready|error|deleted`),
+`hf_repo_id`, `hf_filepath`, `hf_revision`, `training_id` (FK, nullable),
+`model_name`, `model_id` (FK), `layer`, `hook_type`, `n_features`, `d_model`,
+`architecture`, `format` (enum `SAEFormat`, e.g. `community_standard`),
+`local_path`, `file_size_bytes`, `progress`, `error_message`,
+`sae_metadata` (JSONB), timestamps + `downloaded_at`.
+*(Not `hook_name`/`d_in`/`d_sae`/`repo_id`/`metadata`.)*
+
+### API endpoints (real, prefix `/api/v1/saes`)
+`GET ""` · `GET /{id}` · `POST /hf/preview` · `POST /download` · `POST /upload` ·
+`GET /training/{tid}/available` · `POST /import/training` · `POST /import/file` ·
+`DELETE /{id}` · `POST /delete` (batch) · `GET /{id}/features` ·
+`POST /{id}/extract-features` · `GET /{id}/extraction-status` ·
+`POST /{id}/cancel-extraction` · `POST /batch-extract-features`.
+*(No `/download-hf`, `/{id}/convert`, or `/{id}/config` — conversion is inline
+during download/import via `services/sae_converter.py`.)*
+
+### Delete semantics (2026-07)
+`DELETE /{id}?delete_files=true` (default) is now a **hard delete** — cascades to
+features extracted from the SAE (FK `ON DELETE CASCADE`). `delete_files=false`
+keeps files and does a reversible soft delete (`status=deleted`).
+
+### WebSocket channels (real)
+`sae/{id}/download`, `sae/{id}/upload`, `sae/{id}/extraction`.
+
+### Key files
+`sae_converter.py` is under **`services/`** (not `ml/`); `community_format.py` is
+under `ml/`.
 
 ---
 

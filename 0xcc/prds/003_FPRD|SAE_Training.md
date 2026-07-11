@@ -1,10 +1,14 @@
 # Feature PRD: SAE Training
 
 **Document ID:** 003_FPRD|SAE_Training
-**Version:** 2.0 (6 Paper-Grounded Training Frameworks)
-**Last Updated:** 2026-03-21
+**Version:** 2.1 (doc refresh — data model, endpoints)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
+
+> **Reference sections corrected 2026-07-11** — §3 (the 6 frameworks) is accurate;
+> §6 (data model) and §6-endpoints had drifted. See the **Doc-Refresh
+> Corrections** appendix at the end (incl. the new `training_metrics` unique constraint).
 
 ---
 
@@ -348,6 +352,44 @@ CREATE TABLE training_templates (
 - [x] Template save/load
 - [x] Template import/export
 - [x] Hyperparameters modal
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. §3 (frameworks) stays.
+
+### Data model (real)
+- **`trainings`** — PK `id String` (`train_{uuid}`); FK `model_id`; `dataset_id`
+  + `dataset_ids` (JSONB), `extraction_id` + `extraction_ids` (JSONB);
+  `status` (`pending|initializing|running|paused|completed|failed|cancelled`),
+  `progress`, `current_step`, `total_steps`, `hyperparameters` (JSONB),
+  `current_loss`/`current_l0_sparsity`/`current_dead_neurons`/`current_learning_rate`,
+  `error_message`, `error_traceback`, `celery_task_id`, `checkpoint_dir`,
+  `logs_path`, timestamps + `started_at`/`completed_at`.
+- **`training_metrics`** — PK `id BigInteger`; FK `training_id`; `step`,
+  `timestamp`, `layer_idx` (NULL = aggregated); `loss`, `loss_reconstructed`,
+  `loss_zero`, `l0_sparsity`, `l1_sparsity`, `dead_neurons`, `fvu`,
+  `learning_rate`, `grad_norm`, `gpu_memory_used_mb`, `samples_per_second`.
+  **UNIQUE `(training_id, step, layer_idx)`** (added 2026-07 — prevents duplicate
+  metric rows under multi-hook/resume).
+
+### API endpoints (real, prefix `/api/v1/trainings`)
+`POST ""` · `GET ""` · `GET /{id}` · `PATCH /{id}` · `DELETE /{id}` ·
+`POST /{id}/control` (`{action: pause|resume|stop}`) · `GET /{id}/metrics` ·
+`GET /{id}/checkpoints` · `GET /{id}/checkpoints/best`.
+*(No `/{id}/stop` — use `/control`. No `/{id}/retry` endpoint — "retry" re-POSTs a
+new training with the copied config from the frontend.)*
+Hook types: `residual | mlp | attention` (not `mlp_out`/`attn_out`).
+
+### WebSocket channels (real)
+`trainings/{id}/progress` (`training:progress|completed|failed|status_changed`),
+`trainings/{id}/checkpoints` (`checkpoint:created`), `trainings/{id}/deletion`.
+
+### Key files
+All 6 SAE architectures live in **`ml/sparse_autoencoder.py`** (there is no
+`jumprelu_sae.py`). The start-training modal is inside `TrainingPanel.tsx`
+(no separate `StartTrainingModal.tsx`).
 
 ---
 

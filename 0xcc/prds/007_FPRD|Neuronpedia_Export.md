@@ -1,10 +1,14 @@
 # Feature PRD: Neuronpedia Export & Push
 
 **Document ID:** 007_FPRD|Neuronpedia_Export
-**Version:** 2.0 (Export + Local Push)
-**Last Updated:** 2026-03-21
+**Version:** 2.1 (doc refresh — push endpoints + ORM model)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P1 (Important Feature)
+
+> **Reference sections corrected 2026-07-11** — the export half (§5/§6.1) and the
+> logit-lens algorithm (§9) are accurate; the **push** half was under-documented.
+> See the **Doc-Refresh Corrections** appendix at the end.
 
 ---
 
@@ -318,6 +322,32 @@ def compute_logit_lens(sae, model, feature_idx, k=20):
 - [x] Cancel in-progress export
 - [x] WebSocket progress updates
 - [x] Validate export format compatibility
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. Export half (§5/§6.1/§9) stays.
+
+### Push data model (real — `neuronpedia_pushes`)
+Now wrapped by the **`NeuronpediaPushJob` ORM model** (`models/neuronpedia_push.py`,
+added 2026-07 — previously raw-SQL only). PK `id String` (`push_{sae}_{ts}`);
+`sae_id`, `status` (`queued|preparing|pushing|completed|failed`), `progress`,
+`features_pushed`, `total_features`, `error_message`, timestamps.
+
+### API endpoints — full surface (prefix `/api/v1/neuronpedia`)
+Export: `POST /export` · `GET /export/{id}` · `GET /export/{id}/download` ·
+`POST /export/{id}/cancel` · `DELETE /export/{id}` · `GET /exports`.
+Push + dashboard: `POST /push-local` · `GET /push-local/{id}` ·
+`GET /push-local` (list) · `POST /compute-dashboard-data` · `GET /local-status`.
+
+### WebSocket channels (real)
+Export: `neuronpedia/{job_id}/export`. Push: `neuronpedia/push/{push_job_id}`.
+
+### Key files
+The export task is in **`workers/neuronpedia_tasks.py`** (there is no
+`export_tasks.py`). Push: `services/neuronpedia_local_service.py` +
+`workers/neuronpedia_push_tasks.py`.
 
 ---
 

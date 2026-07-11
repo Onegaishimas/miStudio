@@ -1,8 +1,8 @@
 # Feature PRD: System Monitoring
 
 **Document ID:** 008_FPRD|System_Monitoring
-**Version:** 1.0 (MVP Complete)
-**Last Updated:** 2025-12-05
+**Version:** 1.1 (BackgroundMonitor architecture — doc refresh)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P1 (Important Feature)
 
@@ -69,16 +69,17 @@ A comprehensive system monitoring dashboard with real-time GPU, CPU, memory, dis
 ## 3. Monitoring Architecture
 
 ### 3.1 Data Collection
+
+**Note (2026-07):** monitoring runs via `BackgroundMonitor` — an **asyncio task
+inside the FastAPI process** (`services/background_monitor.py`), started in the
+app lifespan. The earlier Celery-Beat `system_monitor_tasks.py` collector was
+dead code and has been **deleted**. `BackgroundMonitor` emits directly through
+the internal WebSocket endpoint (with the `X-Internal-Token` header).
+
 ```
-Celery Beat (every 2s)
+FastAPI app lifespan → BackgroundMonitor (asyncio, every ~2s)
        │
        ▼
-┌──────────────────┐
-│ collect_system_  │
-│ metrics task     │
-└────────┬─────────┘
-         │
-         ▼
 ┌──────────────────┐     ┌──────────────────┐
 │  GPU Metrics     │     │  System Metrics  │
 │  (pynvml)        │     │  (psutil)        │
@@ -86,14 +87,12 @@ Celery Beat (every 2s)
          │                        │
          └────────────┬───────────┘
                       ▼
-         ┌──────────────────┐
-         │  WebSocket Emit  │
-         │  (per channel)   │
-         └────────┬─────────┘
-                  │
-    ┌─────────────┼─────────────┐
-    ▼             ▼             ▼
-system/gpu/0  system/cpu  system/memory
+         POST /api/internal/ws/emit  (X-Internal-Token)
+                      │
+    ┌─────────────┬───┴─────────┬─────────────┐
+    ▼             ▼             ▼             ▼
+system/gpu/{id} system/cpu  system/memory  system/disk, system/network
+     (event: system:metrics, payload includes metric_type)
 ```
 
 ### 3.2 Fallback Pattern
@@ -147,31 +146,53 @@ system/gpu/0  system/cpu  system/memory
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/system/metrics` | GET | Current system metrics |
-| `/api/v1/system/history` | GET | Historical metrics (1 hour) |
-| `/api/v1/system/gpu` | GET | GPU-specific metrics |
+| `/api/v1/system/metrics` | GET | Current combined system metrics |
+| `/api/v1/system/all` | GET | All monitoring data (GPU + system) in one call |
+| `/api/v1/system/gpu-list` | GET | Enumerate available GPUs |
+| `/api/v1/system/gpu-metrics` | GET | Metrics for the selected GPU |
+| `/api/v1/system/gpu-metrics/all` | GET | Per-GPU metrics (all devices) |
+| `/api/v1/system/gpu-info` | GET | GPU device info |
+| `/api/v1/system/gpu-processes` | GET | Processes using the GPU |
+| `/api/v1/system/disk-usage` | GET | Disk usage per mount |
+| `/api/v1/system/disk-rates` | GET | Disk I/O rates |
+| `/api/v1/system/network-rates` | GET | Network I/O rates |
+| `/api/v1/system/resource-estimate` | POST | Estimate resource needs |
+| `/api/v1/system/health` | GET | Service health |
+| `/api/v1/system/restart` | POST | Restart services (admin) |
+
+*(There is no `/system/history` endpoint — the 1-hour history is a frontend
+rolling buffer, not a backend query. The multi-GPU routes here are shared with
+Feature 009.)*
 
 ---
 
 ## 6. WebSocket Channels
 
-| Channel | Events | Payload | Interval |
-|---------|--------|---------|----------|
-| `system/gpu/{id}` | `metrics` | `{utilization, memory_used, memory_total, temperature, power}` | 2s |
-| `system/cpu` | `metrics` | `{utilization, per_core: [...]}` | 2s |
-| `system/memory` | `metrics` | `{ram_used, ram_total, swap_used, swap_total}` | 2s |
-| `system/disk` | `metrics` | `{read_rate, write_rate}` | 2s |
-| `system/network` | `metrics` | `{upload_rate, download_rate}` | 2s |
+All system channels emit the **`system:metrics`** event (namespaced). Payloads
+carry a `metric_type` field (`gpu` / `cpu` / `memory` / `disk` / `network`).
+
+| Channel | Event | Payload | Interval |
+|---------|-------|---------|----------|
+| `system/gpu/{id}` | `system:metrics` | `{utilization, memory, temperature, power, metric_type:"gpu", timestamp}` | ~2s |
+| `system/cpu` | `system:metrics` | `{percent, count, metric_type:"cpu", timestamp}` | ~2s |
+| `system/memory` | `system:metrics` | `{ram, swap, metric_type:"memory", timestamp}` | ~2s |
+| `system/disk` | `system:metrics` | `{read_bytes, write_bytes, metric_type:"disk", timestamp}` | ~2s |
+| `system/network` | `system:metrics` | `{sent_bytes, recv_bytes, metric_type:"network", timestamp}` | ~2s |
+
+Frontend falls back to HTTP polling when the socket disconnects **or when no
+`system:metrics` event arrives for ~10s while connected** (data-staleness watchdog).
 
 ---
 
 ## 7. Key Files
 
 ### Backend
-- `backend/src/services/system_monitor_service.py` - Metrics collection
-- `backend/src/workers/system_monitor_tasks.py` - Celery Beat task
-- `backend/src/workers/websocket_emitter.py` - WebSocket emission
+- `backend/src/services/background_monitor.py` - **Asyncio collector loop (current)** — emits every ~2s
+- `backend/src/services/system_monitor_service.py` - CPU/RAM/disk/net collection (psutil)
+- `backend/src/services/gpu_monitor_service.py` - Per-GPU collection (pynvml)
+- `backend/src/workers/websocket_emitter.py` - WebSocket emission helpers
 - `backend/src/api/v1/endpoints/system.py` - API routes
+- *(removed: `workers/system_monitor_tasks.py` — the dead Celery-Beat collector)*
 
 ### Frontend
 - `frontend/src/components/SystemMonitor/SystemMonitor.tsx` - Main dashboard

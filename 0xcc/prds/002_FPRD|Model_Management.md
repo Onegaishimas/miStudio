@@ -1,10 +1,14 @@
 # Feature PRD: Model Management
 
 **Document ID:** 002_FPRD|Model_Management
-**Version:** 1.1 (Dynamic Discovery & LFM2 Support)
-**Last Updated:** 2026-03-21
+**Version:** 1.2 (doc refresh — data model, endpoints, cancel-revoke)
+**Last Updated:** 2026-07-11
 **Status:** Implemented
 **Priority:** P0 (Core Feature)
+
+> **Reference sections corrected 2026-07-11** — see the **Doc-Refresh
+> Corrections** appendix at the end for the authoritative data model, endpoints,
+> and channels (incl. the new `models.celery_task_id` column).
 
 ---
 
@@ -204,6 +208,41 @@ CREATE TABLE models (
 - [x] LFM2 (Liquid Foundation Model) architecture support (Jan 2026)
 - [x] Dynamic layer discovery — any transformer works without code changes (Feb 2026)
 - [x] trust_remote_code checkbox for custom model architectures (Jan 2026)
+
+---
+
+## Doc-Refresh Corrections (2026-07-11)
+
+Authoritative reference, verified against the code. Supersedes §5 and §6.
+
+### Data model (real — `models`)
+PK `id String(255)` (`m_{uuid}`); `name`, `repo_id`,
+`architecture` (family string) + `architecture_config` (JSONB, the dims),
+`params_count`, `quantization` (enum `QuantizationFormat`: `FP32|FP16|Q8|Q4|Q2`),
+`status` (enum `ModelStatus`: `downloading|loading|quantizing|ready|error`),
+`progress`, `error_message`, `file_path`, `quantized_path`,
+`memory_required_bytes`, `disk_size_bytes`, **`celery_task_id`** (added
+2026-07 — lets model download-cancel revoke the running task), `created_at`,
+`updated_at`.
+
+### API endpoints (real, prefix `/api/v1/models`)
+`POST /download` · `POST /{id}/redownload` · `GET ""` · `GET /local-cache/list` ·
+`GET /{id}` · `GET /{id}/architecture` · `PATCH /{id}` · `DELETE /{id}` (409 if a
+training references it) · `DELETE /{id}/cancel` · `GET /tasks/{task_id}`.
+**Extraction API also routed here** (Feature 002/004 boundary):
+`POST /{id}/estimate-extraction` · `POST /{id}/extract-activations` ·
+`GET /{id}/extractions[/active]` · `POST /{id}/extractions/{eid}/cancel` ·
+`.../retry` · `DELETE /{id}/extractions`.
+*(No `POST /models/preview` — model preview is a frontend-only HF fetch.)*
+
+### WebSocket channels (real)
+`models/{id}/progress` (events `model:progress|completed|error`) and
+`models/{id}/extraction`.
+
+### Extraction architecture note
+`/models/{id}/extract-activations` runs the **model→raw-activation** capture
+(`ActivationExtraction` model, `model_tasks.extract_activations`) — distinct from
+the SAE→feature `ExtractionJob` pipeline (Feature 004/005). Same word, two stages.
 
 ---
 
