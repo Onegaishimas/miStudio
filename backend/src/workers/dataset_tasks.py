@@ -126,10 +126,7 @@ def download_dataset_task(
 
     # Debug: Log token presence in celery task
     token_provided = bool(access_token and access_token.strip())
-    logger.info(f"[Dataset Task] Starting download: repo={repo_id}, token_provided={token_provided}, "
-                f"token_length={len(access_token) if access_token else 0}")
-    print(f"[Dataset Task] Starting download: repo={repo_id}, token_provided={token_provided}, "
-          f"token_length={len(access_token) if access_token else 0}")
+    logger.info(f"[Dataset Task] Starting download: repo={repo_id}, token_provided={token_provided}")
 
     try:
         dataset_uuid = UUID(dataset_id)

@@ -374,11 +374,9 @@ async def download_dataset(
     Raises:
         HTTPException: If dataset already exists or download fails
     """
-    # Debug: Log token presence (using print for visibility)
+    # Log token presence only (never the token or its length — secret-adjacent)
     token_provided = bool(request.access_token and request.access_token.strip())
-    token_length = len(request.access_token) if request.access_token else 0
-    print(f"[DATASET DOWNLOAD API] repo={request.repo_id}, token_provided={token_provided}, token_length={token_length}")
-    logger.info(f"[Dataset Download] repo={request.repo_id}, token_provided={token_provided}, token_length={token_length}")
+    logger.debug(f"[Dataset Download] repo={request.repo_id}, token_provided={token_provided}")
 
     # Check if dataset already exists
     existing = await DatasetService.get_dataset_by_repo_id(db, request.repo_id)
@@ -1414,7 +1412,7 @@ async def cancel_dataset_tokenization(
 
     return {
         "dataset_id": str(dataset_id),
-        "model_id": model_id,
+        "model_id": tokenization.model_id,
         "tokenization_id": tokenization.id,
         "status": "cancelled",
         "message": "Tokenization cancelled successfully"

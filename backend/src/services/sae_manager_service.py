@@ -716,11 +716,18 @@ class SAEManagerService:
                 except Exception as e:
                     logger.warning(f"Error deleting SAE files: {e}")
 
-        # Soft delete by setting status
-        sae.status = SAEStatus.DELETED.value
+        if delete_files:
+            # Hard delete: the files are gone, so keeping the row would orphan
+            # any Features extracted from this SAE (they reference a live row
+            # whose files no longer exist). The features.external_sae_id FK is
+            # ON DELETE CASCADE, so this cleans up derived features + activations.
+            await db.delete(sae)
+        else:
+            # Metadata-only removal that preserves files → reversible soft delete.
+            sae.status = SAEStatus.DELETED.value
         await db.commit()
 
-        logger.info(f"Deleted SAE {sae_id}")
+        logger.info(f"Deleted SAE {sae_id} (hard={delete_files})")
 
         return True
 

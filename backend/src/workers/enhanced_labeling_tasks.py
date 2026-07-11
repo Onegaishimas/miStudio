@@ -214,16 +214,30 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
             }
 
         except Exception as exc:
+            # Distinguish a retryable failure (Celery will autoretry via
+            # autoretry_for) from a terminal one. Only mark the job FAILED and
+            # notify the client once retries are exhausted — otherwise the
+            # feature flips to a "failed" state that a subsequent retry silently
+            # overturns, showing the user a non-final failure.
+            retryable = isinstance(exc, (ConnectionError, TimeoutError, OSError))
+            retries_left = self.max_retries - self.request.retries
+            will_retry = retryable and retries_left > 0
+
             logger.error(
-                "Enhanced labeling task failed for job %s: %s", job_id, exc, exc_info=True
+                "Enhanced labeling task failed for job %s (attempt %s/%s, will_retry=%s): %s",
+                job_id, self.request.retries + 1, self.max_retries + 1, will_retry, exc,
+                exc_info=True,
             )
-            try:
-                job.status = EnhancedLabelingStatus.FAILED.value
-                job.phase = None
-                job.error_message = str(exc)
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-            except Exception:
-                pass
-            emit_enhanced_labeling_failed(job_id, str(exc))
+
+            if not will_retry:
+                try:
+                    job.status = EnhancedLabelingStatus.FAILED.value
+                    job.phase = None
+                    job.error_message = str(exc)
+                    job.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+                except Exception:
+                    pass
+                emit_enhanced_labeling_failed(job_id, str(exc))
+
             raise

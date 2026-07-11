@@ -53,12 +53,40 @@ class TrainingService:
         # Convert hyperparameters to dict
         hyperparameters_dict = training_data.hyperparameters.model_dump()
 
-        # Create training record
-        # dataset_id is kept for backward compat (first dataset in list)
-        primary_dataset_id = training_data.dataset_ids[0] if training_data.dataset_ids else ""
-        # extraction_ids takes precedence; extraction_id kept for backward compat (FK)
-        extraction_ids = training_data.extraction_ids or ([training_data.extraction_id] if training_data.extraction_id else None)
+        # Resolve the effective extraction list up-front (extraction_ids takes
+        # precedence; extraction_id kept for backward compat)
+        extraction_ids = training_data.extraction_ids or (
+            [training_data.extraction_id] if training_data.extraction_id else None
+        )
         primary_extraction_id = extraction_ids[0] if extraction_ids else training_data.extraction_id
+        primary_dataset_id = training_data.dataset_ids[0] if training_data.dataset_ids else ""
+
+        # --- Existence validation (fail fast at API time, not mid-training) ---
+        # A missing model/extraction otherwise produces a queued job that dies
+        # in the Celery worker instead of a clean 400 to the caller.
+        from ..models.model import Model
+        from ..models.activation_extraction import ActivationExtraction
+
+        model = (
+            await db.execute(select(Model).where(Model.id == training_data.model_id))
+        ).scalar_one_or_none()
+        if not model:
+            raise ValueError(f"Model not found: {training_data.model_id}")
+
+        if extraction_ids:
+            for ext_id in extraction_ids:
+                exists = (
+                    await db.execute(
+                        select(ActivationExtraction.id).where(ActivationExtraction.id == ext_id)
+                    )
+                ).scalar_one_or_none()
+                if not exists:
+                    raise ValueError(f"Activation extraction not found: {ext_id}")
+
+        if "total_steps" not in hyperparameters_dict:
+            raise ValueError("hyperparameters.total_steps is required")
+
+        # Create training record
         db_training = Training(
             id=training_id,
             model_id=training_data.model_id,

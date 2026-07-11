@@ -150,15 +150,17 @@ async def redownload_model(
     new_quantization = request.quantization.value
 
     try:
-        # Delete existing model files
+        from ....core.config import settings
+
+        # Delete existing model files (resolve Docker-style /data/ paths for native mode)
         if model.file_path:
-            file_path = Path(model.file_path)
+            file_path = settings.resolve_data_path(model.file_path)
             if file_path.exists():
                 logger.info(f"Deleting existing model files: {file_path}")
                 shutil.rmtree(file_path)
 
         if model.quantized_path:
-            quantized_path = Path(model.quantized_path)
+            quantized_path = settings.resolve_data_path(model.quantized_path)
             if quantized_path.exists():
                 logger.info(f"Deleting existing quantized files: {quantized_path}")
                 shutil.rmtree(quantized_path)
@@ -431,9 +433,13 @@ async def delete_model(
         db: Database session
 
     Raises:
-        HTTPException: If model not found
+        HTTPException: 404 if model not found; 409 if it is in use by a training
     """
-    result = await ModelService.delete_model(db, model_id)
+    try:
+        result = await ModelService.delete_model(db, model_id)
+    except ValueError as e:
+        # Model is referenced by a training (ON DELETE RESTRICT) → 409 Conflict
+        raise HTTPException(status_code=409, detail=str(e))
 
     if not result:
         raise HTTPException(
@@ -965,7 +971,6 @@ async def cancel_extraction(
 
     # Get extraction from database
     with get_sync_db() as sync_db:
-        from ....models.extraction import ActivationExtraction
         extraction = sync_db.query(ActivationExtraction).filter(
             ActivationExtraction.id == extraction_id,
             ActivationExtraction.model_id == model_id
@@ -978,7 +983,6 @@ async def cancel_extraction(
             )
 
         # Check if extraction is in a cancellable state
-        from ....models.extraction import ExtractionStatus
         if extraction.status not in [
             ExtractionStatus.QUEUED,
             ExtractionStatus.LOADING,
@@ -1008,6 +1012,9 @@ async def cancel_extraction(
         extraction.error_message = "Extraction cancelled by user"
         sync_db.commit()
 
+        # Capture progress before the session closes (avoid detached-instance access)
+        extraction_progress = extraction.progress
+
         logger.info(f"Cancelled extraction {extraction_id} for model {model_id}")
 
     # Emit WebSocket event
@@ -1016,7 +1023,7 @@ async def cancel_extraction(
         emit_extraction_progress(
             model_id=model_id,
             extraction_id=extraction_id,
-            progress=extraction.progress,
+            progress=extraction_progress,
             status="cancelled",
             message="Extraction cancelled by user"
         )
@@ -1072,7 +1079,7 @@ async def retry_extraction(
 
     # Get original extraction from database
     with get_sync_db() as sync_db:
-        from ....models.extraction import ActivationExtraction
+        from ....models.activation_extraction import ActivationExtraction
         original_extraction = sync_db.query(ActivationExtraction).filter(
             ActivationExtraction.id == extraction_id,
             ActivationExtraction.model_id == model_id

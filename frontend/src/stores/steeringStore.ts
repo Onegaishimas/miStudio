@@ -54,12 +54,17 @@ let pendingBatchResolver: BatchResolver | null = null;
 
 /**
  * Cleanup the pending batch resolver safely.
- * Clears the timeout and nulls the resolver.
+ * Clears the timeout, rejects the outgoing promise (so a superseded operation
+ * fails cleanly instead of hanging forever), and nulls the resolver.
  */
-function cleanupBatchResolver(): void {
+function cleanupBatchResolver(reason?: string): void {
   if (pendingBatchResolver) {
     clearTimeout(pendingBatchResolver.timeoutId);
+    const outgoing = pendingBatchResolver;
     pendingBatchResolver = null;
+    if (reason) {
+      outgoing.reject(new Error(reason));
+    }
   }
 }
 
@@ -72,8 +77,9 @@ function createBatchResolver(
   timeoutMs: number,
   onTimeout: () => void
 ): Promise<SteeringComparisonResponse> {
-  // Clean up any existing resolver first
-  cleanupBatchResolver();
+  // Clean up any existing resolver first, rejecting its promise so the
+  // superseded operation doesn't hang indefinitely.
+  cleanupBatchResolver('Superseded by a newer comparison request');
 
   return new Promise<SteeringComparisonResponse>((resolve, reject) => {
     const timeoutId = setTimeout(() => {
@@ -109,11 +115,16 @@ let pendingSweepResolver: SweepResolver | null = null;
 
 /**
  * Cleanup the pending sweep resolver safely.
+ * Rejects the outgoing promise if a reason is given (superseded request).
  */
-function cleanupSweepResolver(): void {
+function cleanupSweepResolver(reason?: string): void {
   if (pendingSweepResolver) {
     clearTimeout(pendingSweepResolver.timeoutId);
+    const outgoing = pendingSweepResolver;
     pendingSweepResolver = null;
+    if (reason) {
+      outgoing.reject(new Error(reason));
+    }
   }
 }
 
@@ -126,8 +137,9 @@ function createSweepResolver(
   timeoutMs: number,
   onTimeout: () => void
 ): Promise<StrengthSweepResponse> {
-  // Clean up any existing resolver first
-  cleanupSweepResolver();
+  // Clean up any existing resolver first, rejecting its promise so the
+  // superseded operation doesn't hang indefinitely.
+  cleanupSweepResolver('Superseded by a newer sweep request');
 
   return new Promise<StrengthSweepResponse>((resolve, reject) => {
     const timeoutId = setTimeout(() => {
@@ -162,11 +174,16 @@ let pendingCombinedResolver: CombinedResolver | null = null;
 
 /**
  * Cleanup the pending combined resolver safely.
+ * Rejects the outgoing promise if a reason is given (superseded request).
  */
-function cleanupCombinedResolver(): void {
+function cleanupCombinedResolver(reason?: string): void {
   if (pendingCombinedResolver) {
     clearTimeout(pendingCombinedResolver.timeoutId);
+    const outgoing = pendingCombinedResolver;
     pendingCombinedResolver = null;
+    if (reason) {
+      outgoing.reject(new Error(reason));
+    }
   }
 }
 
@@ -179,8 +196,9 @@ function createCombinedResolver(
   timeoutMs: number,
   onTimeout: () => void
 ): Promise<CombinedSteeringResponse> {
-  // Clean up any existing resolver first
-  cleanupCombinedResolver();
+  // Clean up any existing resolver first, rejecting its promise so the
+  // superseded operation doesn't hang indefinitely.
+  cleanupCombinedResolver('Superseded by a newer combined generation request');
 
   return new Promise<CombinedSteeringResponse>((resolve, reject) => {
     const timeoutId = setTimeout(() => {

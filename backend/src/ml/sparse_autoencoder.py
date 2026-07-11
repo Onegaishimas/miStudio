@@ -26,6 +26,47 @@ import torch.nn.functional as F
 from torch.autograd import Function
 
 
+def normalize_activations(
+    x: torch.Tensor, mode: str, dim: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Shared activation normalization for all SAE architectures.
+
+    Modes:
+      - 'constant_norm_rescale': scale so ‖x‖ = sqrt(dim)  (SAELens standard)
+      - 'anthropic_rescale':     scale so E[‖x‖²] = dim     (Templeton et al. 2024)
+      - 'none':                  no-op (coeff = ones)
+
+    Uses ``x[..., :1]`` for the 'none' coefficient so it works for both
+    [batch, dim] and [batch, seq, dim] inputs.
+
+    Returns (x_normalized, norm_coeff) where norm_coeff feeds ``denormalize_activations``.
+    """
+    if mode == 'constant_norm_rescale':
+        x_norm = torch.clamp(x.norm(dim=-1, keepdim=True), min=1e-6)
+        norm_coeff = math.sqrt(dim) / x_norm
+        return x * norm_coeff, norm_coeff
+    elif mode == 'anthropic_rescale':
+        x_sq_norm = torch.clamp((x ** 2).sum(dim=-1, keepdim=True), min=1e-6)
+        norm_coeff = torch.sqrt(
+            torch.tensor(dim, dtype=x.dtype, device=x.device) / x_sq_norm
+        )
+        return x * norm_coeff, norm_coeff
+    elif mode == 'none':
+        return x, torch.ones_like(x[..., :1])
+    else:
+        raise ValueError(f"Unknown normalization method: {mode}")
+
+
+def denormalize_activations(
+    x: torch.Tensor, norm_coeff: torch.Tensor, mode: str
+) -> torch.Tensor:
+    """Inverse of ``normalize_activations`` (identity for mode='none')."""
+    if mode in ('constant_norm_rescale', 'anthropic_rescale'):
+        return x / norm_coeff
+    return x
+
+
 class SparseAutoencoder(nn.Module):
     """
     Standard Sparse Autoencoder for learning interpretable features.
@@ -114,27 +155,7 @@ class SparseAutoencoder(nn.Module):
             x_normalized: Normalized activations
             norm_coeff: Normalization coefficients for denormalization
         """
-        if self.normalize_activations == 'constant_norm_rescale':
-            # SAELens standard: scale so ||x|| = sqrt(hidden_dim)
-            import math
-            x_norm = x.norm(dim=-1, keepdim=True)
-            x_norm = torch.clamp(x_norm, min=1e-6)
-            norm_coeff = math.sqrt(self.hidden_dim) / x_norm
-            x_normalized = x * norm_coeff
-            return x_normalized, norm_coeff
-        elif self.normalize_activations == 'anthropic_rescale':
-            # Anthropic (Templeton et al. 2024): scale so E[||x||²] = d_model
-            # Equivalent to: x * sqrt(d_model / ||x||²)
-            import math
-            x_sq_norm = (x ** 2).sum(dim=-1, keepdim=True)
-            x_sq_norm = torch.clamp(x_sq_norm, min=1e-6)
-            norm_coeff = torch.sqrt(torch.tensor(self.hidden_dim, dtype=x.dtype, device=x.device) / x_sq_norm)
-            x_normalized = x * norm_coeff
-            return x_normalized, norm_coeff
-        elif self.normalize_activations == 'none':
-            return x, torch.ones_like(x[:, :1])
-        else:
-            raise ValueError(f"Unknown normalization method: {self.normalize_activations}")
+        return normalize_activations(x, self.normalize_activations, self.hidden_dim)
 
     def denormalize(self, x: torch.Tensor, norm_coeff: torch.Tensor) -> torch.Tensor:
         """
@@ -147,10 +168,7 @@ class SparseAutoencoder(nn.Module):
         Returns:
             x_denormalized: Original scale activations
         """
-        if self.normalize_activations in ('constant_norm_rescale', 'anthropic_rescale'):
-            return x / norm_coeff
-        else:
-            return x
+        return denormalize_activations(x, norm_coeff, self.normalize_activations)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -607,26 +625,11 @@ class TopKSAE(nn.Module):
 
     def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Normalize activations."""
-        if self.normalize_activations == 'constant_norm_rescale':
-            x_norm = x.norm(dim=-1, keepdim=True)
-            x_norm = torch.clamp(x_norm, min=1e-6)
-            norm_coeff = math.sqrt(self.hidden_dim) / x_norm
-            return x * norm_coeff, norm_coeff
-        elif self.normalize_activations == 'anthropic_rescale':
-            x_sq_norm = (x ** 2).sum(dim=-1, keepdim=True)
-            x_sq_norm = torch.clamp(x_sq_norm, min=1e-6)
-            norm_coeff = torch.sqrt(torch.tensor(self.hidden_dim, dtype=x.dtype, device=x.device) / x_sq_norm)
-            return x * norm_coeff, norm_coeff
-        elif self.normalize_activations == 'none':
-            return x, torch.ones_like(x[:, :1])
-        else:
-            raise ValueError(f"Unknown normalization method: {self.normalize_activations}")
+        return normalize_activations(x, self.normalize_activations, self.hidden_dim)
 
     def denormalize(self, x: torch.Tensor, norm_coeff: torch.Tensor) -> torch.Tensor:
         """Denormalize activations."""
-        if self.normalize_activations in ('constant_norm_rescale', 'anthropic_rescale'):
-            return x / norm_coeff
-        return x
+        return denormalize_activations(x, norm_coeff, self.normalize_activations)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -971,9 +974,13 @@ class JumpReLUSAE(nn.Module):
     Args:
         d_model: Input/output dimension (model hidden size)
         d_sae: SAE latent dimension (number of features)
-        sparsity_coeff: L0 sparsity penalty coefficient (λ). Applied to L0 fraction
-            (active features / d_sae), normalized to [0, 1]. Default 0.4 gives
-            loss_l0 ≈ 0.02 at 5% target L0. Typical range: 0.1 to 1.0.
+        sparsity_coeff: L0 sparsity penalty coefficient (λ). Applied to the
+            COUNT of active features per sample (Σᵢ H(zᵢ - θᵢ), summed over
+            features and averaged over the batch), per the Gemma Scope paper
+            formulation L = ‖x - x̂‖² + λ · Σᵢ H(zᵢ - θᵢ). NOT the L0 fraction.
+            Paper-scale default 1e-3 (Gemma Scope uses 6e-4). At L0=50 active
+            features this gives loss_l0 = 1e-3 × 50 = 0.05. Typical range:
+            1e-4 to 5e-3. (Do NOT confuse with the L1 `l1_alpha` scale.)
         initial_threshold: Initial JumpReLU threshold value (default: 0.5, should match
             pre-activation magnitude with constant_norm_rescale normalization)
         bandwidth: KDE bandwidth for STE gradient estimation (default: 0.01)
@@ -1081,28 +1088,11 @@ class JumpReLUSAE(nn.Module):
 
         This allows hyperparameter transfer across layers and sites.
         """
-        if self.normalize_activations == 'constant_norm_rescale':
-            x_norm = x.norm(dim=-1, keepdim=True)
-            x_norm = torch.clamp(x_norm, min=1e-6)
-            norm_coeff = math.sqrt(self.d_model) / x_norm
-            x_normalized = x * norm_coeff
-            return x_normalized, norm_coeff
-        elif self.normalize_activations == 'anthropic_rescale':
-            x_sq_norm = (x ** 2).sum(dim=-1, keepdim=True)
-            x_sq_norm = torch.clamp(x_sq_norm, min=1e-6)
-            norm_coeff = torch.sqrt(torch.tensor(self.d_model, dtype=x.dtype, device=x.device) / x_sq_norm)
-            x_normalized = x * norm_coeff
-            return x_normalized, norm_coeff
-        elif self.normalize_activations == 'none':
-            return x, torch.ones_like(x[..., :1])
-        else:
-            raise ValueError(f"Unknown normalization method: {self.normalize_activations}")
+        return normalize_activations(x, self.normalize_activations, self.d_model)
 
     def denormalize(self, x: torch.Tensor, norm_coeff: torch.Tensor) -> torch.Tensor:
         """Denormalize activations."""
-        if self.normalize_activations in ('constant_norm_rescale', 'anthropic_rescale'):
-            return x / norm_coeff
-        return x
+        return denormalize_activations(x, norm_coeff, self.normalize_activations)
 
     def calibrate_thresholds(self, x: torch.Tensor, target_l0: float = 0.05) -> torch.Tensor:
         """

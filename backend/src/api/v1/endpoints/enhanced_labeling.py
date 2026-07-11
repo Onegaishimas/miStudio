@@ -54,13 +54,18 @@ async def start_enhanced_labeling(
     If a job is already queued or running for this feature, returns it
     (HTTP 200) rather than creating a duplicate.
     """
-    # Verify feature exists
-    result = await db.execute(select(Feature).where(Feature.id == feature_id))
+    # Verify feature exists and lock its row for the duration of this transaction.
+    # The row lock serialises concurrent start requests for the same feature so
+    # two rapid clicks can't both pass the duplicate-active check and create two
+    # jobs (the check + insert below is otherwise a race).
+    result = await db.execute(
+        select(Feature).where(Feature.id == feature_id).with_for_update()
+    )
     feature = result.scalar_one_or_none()
     if not feature:
         raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
 
-    # Check for an already-active job
+    # Check for an already-active job (now serialised by the feature-row lock)
     active_result = await db.execute(
         select(EnhancedLabelingJob)
         .where(

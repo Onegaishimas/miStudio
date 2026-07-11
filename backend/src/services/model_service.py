@@ -352,6 +352,21 @@ class ModelService:
         if not db_model:
             return None
 
+        # Guard: a model referenced by a training uses ON DELETE RESTRICT, which
+        # would raise a raw IntegrityError (→ 500). Pre-check and raise a clean
+        # ValueError (→ 409 at the endpoint) naming the blocking trainings.
+        from ..models.training import Training
+        blocking = (
+            await db.execute(
+                select(Training.id).where(Training.model_id == model_id).limit(5)
+            )
+        ).scalars().all()
+        if blocking:
+            raise ValueError(
+                f"Model {model_id} is in use by {len(blocking)} training(s) "
+                f"(e.g. {', '.join(blocking)}). Delete those trainings first."
+            )
+
         # Capture file paths before deletion
         file_path = db_model.file_path
         quantized_path = db_model.quantized_path

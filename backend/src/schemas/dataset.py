@@ -39,7 +39,7 @@ class DatasetUpdate(BaseModel):
     """Schema for updating an existing dataset."""
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    status: Optional[str] = Field(None, pattern="^(downloading|ingesting|processing|ready|error)$")
+    status: Optional[str] = Field(None, pattern="^(downloading|processing|ready|error)$")
     progress: Optional[float] = Field(None, ge=0, le=100)
     error_message: Optional[str] = None
     raw_path: Optional[str] = Field(None, max_length=512)

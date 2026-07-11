@@ -5,7 +5,7 @@ Provides REST API for feature extraction, search, and management.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -439,7 +439,7 @@ async def toggle_favorite(
 )
 async def set_star_color(
     feature_id: str,
-    star_color: Optional[str] = Query(None, description="Star color: 'yellow', 'purple', 'aqua', or null to unstar"),
+    star_color: Optional[Literal["yellow", "purple", "aqua"]] = Query(None, description="Star color: 'yellow', 'purple', 'aqua', or null to unstar"),
     db: AsyncSession = Depends(get_db)
 ):
     """

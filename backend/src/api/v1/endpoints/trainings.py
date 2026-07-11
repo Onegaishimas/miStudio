@@ -63,6 +63,9 @@ async def create_training(
         db_training = await TrainingService.get_training(db, db_training.id)
 
         return db_training
+    except ValueError as e:
+        # Validation failures (missing model/extraction, bad config) → 400
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Failed to create training")
         raise HTTPException(
@@ -268,7 +271,7 @@ async def control_training(
         logger.exception(f"Failed to {action} training {training_id}")
         raise HTTPException(
             status_code=500,
-            detail="Failed to {action} training"
+            detail=f"Failed to {action} training"
         )
 
 
