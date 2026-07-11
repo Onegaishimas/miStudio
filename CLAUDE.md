@@ -3,10 +3,14 @@ yes
 
 ## Current Status
 - **Phase:** Active Development & Maintenance
-- **Last Session:** 2026-05-09
-- **Current Task:** Security hardening — Settings PIN protection
+- **Last Session:** 2026-07-11
+- **Current Task:** None — feature-by-feature review remediation complete & deployed
 - **Active Work:** None — stable, all services running
 - **Completed:**
+  - Feature-by-feature review (001–009) + synthesis in `0xcc/reviews/` ✅
+  - Remediated all review findings: P0 (broken extraction imports), P1/P2/P3, + 3 deferred schema items ✅
+  - Alembic multi-head merge (cd6c46abac48) + celery_task_id + training_metrics unique constraint + NeuronpediaPushJob ORM model ✅
+  - Fixed pre-existing test flakiness (conftest enum isolation + parallel-mock test) ✅
   - Enhanced per-feature two-pass LLM labeling ✅
   - OpenAI API integration (enhanced + bulk labeling) ✅
   - OpenAI SDK standardization in EnhancedLabelingService ✅
