@@ -30,17 +30,45 @@
 
 ---
 
-## ⏸ Deferred — blocked on the multi-head Alembic state
+## ✅ Implemented (follow-up pass — the previously-deferred schema items)
 
-The migration chain currently has **two pre-existing heads** (`f3a7b1c2d4e5`, `t7u8v9w0x1y2`) — confirmed via `alembic heads`. Adding new migrations onto this without first a **merge migration** would create a third head and break `alembic upgrade head` in CI/deploy. The following remediations require schema changes and are therefore deferred to a dedicated *"merge alembic heads + schema"* task so they don't destabilize deployment:
+The multi-head Alembic state (`f3a7b1c2d4e5`, `t7u8v9w0x1y2`) was resolved with a
+**merge migration** (`cd6c46abac48`), collapsing to a single head. On that base, the three
+deferred items landed:
 
-| ID | Severity | What it needs | Note |
-|----|----------|---------------|------|
-| **002-F3** | P2 | `celery_task_id` column on `models` | The `cancel_download` task already accepts+revokes a `task_id`; only the storage column + endpoint wiring is missing. Model download-cancel still cleans files but doesn't revoke the running task until this lands. |
-| **003-F2** | P2 | `UNIQUE(training_id, step, layer_idx)` on `training_metrics` | Prevents silent metric-row duplication under multi-hook/resume. Needs a de-dup data migration first (existing dupes would violate the new constraint). |
-| **007-F1** | P2 | `NeuronpediaPushJob` ORM model for the raw-SQL `neuronpedia_pushes` table | Table exists (raw SQL); wrapping it in an ORM model is schema-tracked work best done with the merge. |
+| ID | Severity | Fix | Migration / file |
+|----|----------|-----|------------------|
+| **007-F1** | P2 | `NeuronpediaPushJob` ORM model wraps the existing `neuronpedia_pushes` table; raw-SQL INSERT/UPDATE in the endpoint + push task converted to ORM | `models/neuronpedia_push.py` (new, no migration — table already existed) |
+| **002-F3** | P2 | `models.celery_task_id` column added; download + redownload persist the task id at dispatch; `cancel_model_download` now passes it to `cancel_download(task_id=…)` which revokes the running task | migration `e1a2b3c4d5e6`; `models/model.py`, `api/v1/endpoints/models.py` |
+| **003-F2** | P2 | `UNIQUE(training_id, step, layer_idx)` on `training_metrics` with a defensive de-dup (keep max(id) per group) in the migration | migration `f2b3c4d5e6f7`; `models/training_metric.py` |
 
-**Recommended follow-up task:** (1) `alembic merge -m "merge heads" f3a7b1c2d4e5 t7u8v9w0x1y2`; (2) then the three migrations above; (3) wire `celery_task_id` through model download + cancel.
+Also: `scripts/k8s-helpers.sh` `k8s_migrate` switched to `alembic upgrade heads` (matching
+`docker-entrypoint.sh`, tolerant of transient multi-head states).
+
+**Verification:** single head after merge; upgrade + full downgrade + re-upgrade all clean;
+ORM models map to live tables (no schema-validator warnings); focused tests
+(`tests/unit/test_deferred_remediations.py`) cover the metric unique constraint (dup →
+IntegrityError, NULL-layer rows distinct), the push-model round-trip, and the `celery_task_id`
+column; full backend suite green.
+
+**Note on the earlier "blocked" framing:** investigation showed production was never actually
+broken — `docker-entrypoint.sh` already runs `alembic upgrade heads` (plural). The merge was
+still the right move to give future migrations a clean linear base and fix the singular
+`k8s_migrate` helper. 007-F1 needed no migration at all (the table pre-existed).
+
+---
+
+## ✅ Test-infrastructure fixes (pre-existing flakiness)
+
+Two pre-existing test problems surfaced while verifying the above and were fixed:
+
+| Issue | Fix | File |
+|-------|-----|------|
+| **conftest enum-isolation race** — `CREATE TYPE` hit `pg_type_typname_nsp_index` duplicate-key under interleaving, and `DROP TYPE ... CASCADE` in teardown dropped tables that `drop_all` then couldn't find ("enhanced_labeling_jobs does not exist"). Also `label_source_enum` was **missing `enhanced_llm`** (latent — any Feature with that label source would fail). | `async_engine` fixture now: drops leftovers (tables → enums) at setup, creates enums then tables, drops WITHOUT CASCADE (tables first, enums second) at teardown, and includes `enhanced_llm`. | `tests/conftest.py` |
+| **flaky `test_failed_pass1_example_still_completes`** — used a positional `side_effect` list, but pass-1 runs examples in parallel (ThreadPoolExecutor), so consumption order was non-deterministic → intermittent `StopIteration`. | Rewrote the mock as a content-aware `side_effect` function that routes by prompt (which prime token / synthesis) instead of call order. | `tests/unit/test_enhanced_labeling_service.py` |
+
+These were latent (order/timing-dependent) and are why single-file and some subset runs failed
+before. Full-suite green now holds deterministically.
 
 ---
 
