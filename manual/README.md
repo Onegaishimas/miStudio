@@ -1,41 +1,37 @@
-# Website
+# miStudio Manual
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+The miStudio user manual — a [Docusaurus 3](https://docusaurus.io/) site published at
+**<https://hitsainet.github.io/miStudio/>**.
 
-## Installation
+## Editing content
 
-```bash
-yarn
-```
+All pages live under `docs/` as Markdown. Screenshots go in `static/img/` (JPG,
+`snake_case` names matching the existing files). The sidebar is defined in
+`sidebars.ts`; site config in `docusaurus.config.ts`.
 
-## Local Development
+## Local development
 
-```bash
-yarn start
-```
-
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-## Build
+Requires Node.js ≥ 20.
 
 ```bash
-yarn build
+npm install
+npm run start     # dev server with live reload at http://localhost:3000/miStudio/
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
-
-## Deployment
-
-Using SSH:
+## Build (also the link check)
 
 ```bash
-USE_SSH=true yarn deploy
+npm run build
 ```
 
-Not using SSH:
+`onBrokenLinks: 'throw'` means a green build guarantees no broken internal links or
+anchors. Always build before pushing.
 
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
+## Deployment (automatic — do not run `npm run deploy`)
 
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+Pushing to `main` with changes under `manual/**` triggers the pipeline:
+
+1. The sync workflow mirrors this repo to the public `hitsainet/miStudio` repo.
+2. `.github/workflows/deploy-manual.yml` in the mirror builds the site and deploys it
+   to GitHub Pages.
+3. The live site updates within a few minutes.

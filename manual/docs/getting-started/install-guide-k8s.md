@@ -10,6 +10,10 @@ description: "Executable Claude Code installation guide for Kubernetes deploymen
 Read the entire **Before We Begin** section first and collect the user's answers. Then follow each section in order. Every check must pass (or be acknowledged) before moving to the next section.
 :::
 
+:::tip Human readers
+This guide is formatted for an AI coding agent to execute interactively — paste it into Claude Code (or a similar agent) and it will run the install for you, asking the questions below along the way. Prefer to install by hand? Start with the [Installation overview](/getting-started/installation) instead.
+:::
+
 ## Before We Begin
 
 Present each question to the user and record their answers. Use the recorded answers throughout all subsequent steps.
