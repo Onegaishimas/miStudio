@@ -1,6 +1,22 @@
 # miStudio Manual — Docusaurus Integration Guide
 
-This directory contains a complete Docusaurus 3.x static documentation site for the miStudio user manual. Follow these instructions to integrate it into the miStudio application repository.
+> **⚠️ Historical document.** The manual is now published to **GitHub Pages** at
+> <https://hitsainet.github.io/miStudio/> — the nginx `/manual/` embedding described
+> below was the original integration plan and is kept for reference only.
+>
+> **How publishing actually works today:**
+> 1. Edit files under `manual/docs/` and push to `main`.
+> 2. The sync workflow mirrors the repo to the public `hitsainet/miStudio` mirror.
+> 3. `.github/workflows/deploy-manual.yml` (in the mirror) runs on any `manual/**`
+>    change: `npm ci` → `npm run build` → `actions/deploy-pages`.
+> 4. The site updates at hitsainet.github.io/miStudio a few minutes later.
+>
+> **Verify locally before pushing:** `cd manual && npm run build` — broken links
+> fail the build (`onBrokenLinks: 'throw'`), so a green build is the link check.
+> Config values quoted below (e.g. `mistudio.hitsai.local`, `baseUrl: '/manual/'`)
+> are **stale**; `docusaurus.config.ts` is the source of truth.
+
+This directory contains a complete Docusaurus 3.x static documentation site for the miStudio user manual. The sections below describe the original (now unused) nginx integration.
 
 ---
 
