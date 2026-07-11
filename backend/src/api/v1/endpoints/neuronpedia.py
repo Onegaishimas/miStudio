@@ -427,13 +427,16 @@ async def push_to_local_neuronpedia(
 
     try:
         # Insert a tracking row so Active Operations monitor can see this job
-        from sqlalchemy import text
-        await db.execute(
-            text("""
-                INSERT INTO neuronpedia_pushes (id, sae_id, status, progress, features_pushed, total_features, created_at, updated_at)
-                VALUES (:id, :sae_id, 'queued', 0, 0, :total_features, now(), now())
-            """),
-            {"id": push_job_id, "sae_id": sae_id, "total_features": sae.n_features or 0},
+        from ....models.neuronpedia_push import NeuronpediaPushJob, NeuronpediaPushStatus
+        db.add(
+            NeuronpediaPushJob(
+                id=push_job_id,
+                sae_id=sae_id,
+                status=NeuronpediaPushStatus.QUEUED.value,
+                progress=0,
+                features_pushed=0,
+                total_features=sae.n_features or 0,
+            )
         )
         await db.commit()
 

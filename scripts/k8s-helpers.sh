@@ -36,7 +36,9 @@ k8s_schema_fix() {
 # Run database migrations
 k8s_migrate() {
   echo "=== Running Database Migrations ==="
-  k8s "kubectl exec -n $K8S_NS deployment/mistudio-backend -c backend -- python -m alembic upgrade head"
+  # Use 'heads' (plural) to match docker-entrypoint.sh and tolerate any
+  # transient multi-head state without erroring.
+  k8s "kubectl exec -n $K8S_NS deployment/mistudio-backend -c backend -- python -m alembic upgrade heads"
 }
 
 # Manifest location on k8s host

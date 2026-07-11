@@ -22,6 +22,7 @@ from .feature_activation import FeatureActivation
 from .feature_analysis_cache import FeatureAnalysisCache, AnalysisType
 from .external_sae import ExternalSAE, SAESource, SAEStatus, SAEFormat
 from .neuronpedia_export import NeuronpediaExportJob, ExportStatus
+from .neuronpedia_push import NeuronpediaPushJob, NeuronpediaPushStatus
 from .feature_dashboard import FeatureDashboardData
 from .steering_experiment import SteeringExperiment
 from .app_setting import AppSetting
@@ -61,6 +62,8 @@ __all__ = [
     "SAEFormat",
     "NeuronpediaExportJob",
     "ExportStatus",
+    "NeuronpediaPushJob",
+    "NeuronpediaPushStatus",
     "FeatureDashboardData",
     "SteeringExperiment",
     "AppSetting",

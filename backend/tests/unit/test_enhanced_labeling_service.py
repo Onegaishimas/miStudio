@@ -232,12 +232,20 @@ class TestRun:
         synthesis_resp = _make_llm_response(
             '{"name":"n","category":"c","description":"d.","confidence":"low","reasoning":"r."}'
         )
-        # First pass-1 call always errors, second succeeds
-        service._client.post.side_effect = [
-            Exception("fail"), Exception("fail"), Exception("fail"),  # exhausted retries ex 0
-            _make_llm_response("ex 1 summary"),  # ex 1 succeeds
-            synthesis_resp,
-        ]
+
+        # Pass-1 runs examples in parallel (ThreadPoolExecutor), so a positional
+        # side_effect list is order-dependent and flaky. Route by prompt content
+        # instead: example 'token0' always errors (exhausts its retries → fallback),
+        # 'token1' succeeds, and the pass-2 synthesis prompt returns the JSON.
+        def _route(*args, **kwargs):
+            prompt = kwargs["messages"][0]["content"]
+            if "unifying concept" in prompt or "Return ONLY this JSON" in prompt:
+                return synthesis_resp
+            if "[token0]" in prompt:
+                raise Exception("fail")
+            return _make_llm_response("ex 1 summary")
+
+        service._client.post.side_effect = _route
         with patch("time.sleep"):
             result = service.run(rows, max_examples=2)
         # Job still completes; failed example gets fallback text

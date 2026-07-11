@@ -6,7 +6,10 @@ This module defines the SQLAlchemy model for time-series training metrics.
 
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, BigInteger, Float, DateTime, ForeignKey
+from sqlalchemy import (
+    Column, String, Integer, BigInteger, Float, DateTime, ForeignKey,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
@@ -64,6 +67,17 @@ class TrainingMetric(Base):
 
     # Relationship
     training = relationship("Training", back_populates="metrics")
+
+    __table_args__ = (
+        # One metric row per (training, step, layer). layer_idx is NULL for
+        # aggregated rows; Postgres treats NULLs as distinct, so an aggregated
+        # row and per-layer rows can coexist at the same step. Prevents silent
+        # duplicate accumulation under multi-hook training / resume.
+        UniqueConstraint(
+            "training_id", "step", "layer_idx",
+            name="uq_training_metrics_tid_step_layer",
+        ),
+    )
 
     def __repr__(self) -> str:
         return (

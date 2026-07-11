@@ -57,36 +57,43 @@ async def async_engine():
         poolclass=NullPool,  # Disable connection pooling for tests
     )
 
-    # Create PostgreSQL enum types before creating tables
-    # These are required by models that use create_type=False
+    # PostgreSQL enum types required by models that use create_type=False.
+    # These are NOT created by Base.metadata.create_all (create_type=False), so
+    # the fixture must manage their lifecycle explicitly. Values must match the
+    # model definitions exactly (label_source_enum includes 'enhanced_llm').
     enum_definitions = [
         ("export_status", ["pending", "computing", "packaging", "completed", "failed", "cancelled"]),
-        ("label_source_enum", ["auto", "user", "llm", "local_llm", "openai"]),
+        ("label_source_enum", ["auto", "user", "llm", "local_llm", "openai", "enhanced_llm"]),
         ("analysis_type_enum", ["logit_lens", "correlations", "ablation", "nlp_analysis"]),
         ("extraction_status_enum", ["queued", "loading", "extracting", "saving", "completed", "failed", "cancelled"]),
     ]
 
+    async def _drop_enums(conn):
+        # Drop WITHOUT CASCADE: tables are dropped separately by drop_all, and a
+        # CASCADE here would drop dependent tables out from under drop_all,
+        # causing "table does not exist" on the subsequent drop_all/create_all.
+        for enum_name, _ in enum_definitions:
+            await conn.execute(text(f"DROP TYPE IF EXISTS {enum_name};"))
+
     async with engine.begin() as conn:
-        # Create enum types (IF NOT EXISTS to handle reruns)
+        # Start from a clean slate: drop any leftovers from a previous test whose
+        # teardown was interrupted. Tables first (they depend on the enums), then
+        # the enums. This prevents the pg_type unique-index race on CREATE TYPE.
+        await conn.run_sync(Base.metadata.drop_all)
+        await _drop_enums(conn)
+
+        # Create enum types, then tables.
         for enum_name, values in enum_definitions:
             values_str = ", ".join(f"'{v}'" for v in values)
-            await conn.execute(text(
-                f"DO $$ BEGIN "
-                f"CREATE TYPE {enum_name} AS ENUM ({values_str}); "
-                f"EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
-            ))
-
-        # Create all tables
+            await conn.execute(text(f"CREATE TYPE {enum_name} AS ENUM ({values_str});"))
         await conn.run_sync(Base.metadata.create_all)
 
     yield engine
 
-    # Drop all tables and enum types after test
+    # Teardown: tables first (depend on enums), then enums (no CASCADE).
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-        # Drop enum types
-        for enum_name, _ in enum_definitions:
-            await conn.execute(text(f"DROP TYPE IF EXISTS {enum_name} CASCADE;"))
+        await _drop_enums(conn)
 
     await engine.dispose()
 

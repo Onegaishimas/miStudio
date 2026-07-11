@@ -71,6 +71,9 @@ class Model(Base):
     memory_required_bytes = Column(BigInteger, nullable=True)
     disk_size_bytes = Column(BigInteger, nullable=True)
 
+    # Celery task tracking (used to revoke an in-flight download on cancel)
+    celery_task_id = Column(String(255), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

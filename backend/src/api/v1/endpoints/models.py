@@ -76,13 +76,18 @@ async def download_model(
         model = await ModelService.initiate_model_download(db, request)
 
         # Queue download job with Celery
-        download_and_load_model.delay(
+        task = download_and_load_model.delay(
             model_id=model.id,
             repo_id=request.repo_id,
             quantization=request.quantization.value,
             access_token=request.access_token,
             trust_remote_code=request.trust_remote_code
         )
+
+        # Persist the task id so a cancel can revoke the running download
+        model.celery_task_id = task.id
+        await db.commit()
+        await db.refresh(model)
 
         return model
 
@@ -173,17 +178,20 @@ async def redownload_model(
         model.quantization = request.quantization
         model.progress = 0.0
         model.error_message = None
-        await db.commit()
-        await db.refresh(model)
 
         # Queue download job with Celery
-        download_and_load_model.delay(
+        task = download_and_load_model.delay(
             model_id=model.id,
             repo_id=model.repo_id,
             quantization=new_quantization,
             access_token=request.access_token,
             trust_remote_code=request.trust_remote_code
         )
+
+        # Persist the task id so a cancel can revoke the running download
+        model.celery_task_id = task.id
+        await db.commit()
+        await db.refresh(model)
 
         logger.info(
             f"Initiated re-download for model {model_id}: "
@@ -683,10 +691,10 @@ async def cancel_model_download(
         )
 
     try:
-        # Call cancel_download task (runs synchronously for immediate response)
-        # Note: We don't have task_id stored, so we can't revoke the specific task
-        # Instead, the cancel task will clean up files and update database
-        result = cancel_download(model_id=model_id)
+        # Call cancel_download task (runs synchronously for immediate response).
+        # Pass the stored Celery task id so the running download is actually
+        # revoked (not just cleaned up after it finishes).
+        result = cancel_download(model_id=model_id, task_id=model.celery_task_id)
 
         if "error" in result:
             raise HTTPException(

@@ -112,17 +112,20 @@ def push_to_neuronpedia_local_task(
         )
 
         async def _update_db(status: str, prog: float, features: int = 0, error: str = None):
-            """Update neuronpedia_pushes row using its own session to avoid concurrent access."""
-            from sqlalchemy import text as sa_text
+            """Update the NeuronpediaPushJob row using its own session to avoid concurrent access."""
+            from sqlalchemy import update as sa_update
+            from src.models.neuronpedia_push import NeuronpediaPushJob
             try:
                 async with AsyncSessionLocal() as session:
                     await session.execute(
-                        sa_text("""
-                            UPDATE neuronpedia_pushes
-                            SET status=:status, progress=:progress, features_pushed=:features, error_message=:error, updated_at=now()
-                            WHERE id=:id
-                        """),
-                        {"status": status, "progress": prog, "features": features, "error": error, "id": push_job_id},
+                        sa_update(NeuronpediaPushJob)
+                        .where(NeuronpediaPushJob.id == push_job_id)
+                        .values(
+                            status=status,
+                            progress=prog,
+                            features_pushed=features,
+                            error_message=error,
+                        )
                     )
                     await session.commit()
             except Exception as db_err:
