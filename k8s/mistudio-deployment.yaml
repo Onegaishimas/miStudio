@@ -364,9 +364,9 @@ spec:
   ports:
     - port: 8765
 ---
-# MCP ingress — LAN host ONLY by design. Do not add the public (.net /
-# Cloudflare) host without deciding to expose the MCP endpoint to the
-# internet; bearer auth applies either way.
+# MCP ingress. Dedicated hosts mcp-mistudio.hitsai.{local,net} resolve on the
+# LAN only (hosts file / local DNS) unless you publish the .net name in public
+# DNS/Cloudflare yourself. Bearer auth applies either way.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -382,10 +382,34 @@ metadata:
 spec:
   ingressClassName: public
   rules:
+    # Path-based route on the shared miStudio host (kept for compatibility)
     - host: k8s-mistudio.hitsai.local
       http:
         paths:
           - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-mcp
+                port:
+                  number: 8765
+    # Dedicated MCP hosts — full path space (/mcp for protocol, /health for checks).
+    # LAN-resolved via /etc/hosts or local DNS; the .net name is NOT published in
+    # public DNS/Cloudflare by default. Bearer auth enforced on every request.
+    - host: mcp-mistudio.hitsai.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-mcp
+                port:
+                  number: 8765
+    - host: mcp-mistudio.hitsai.net
+      http:
+        paths:
+          - path: /
             pathType: Prefix
             backend:
               service:

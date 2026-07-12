@@ -22,7 +22,12 @@ echo "MCP_AUTH_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose --profile mcp up -d
 ```
 
-**Kubernetes:** add `mcp-auth-token` to the `mistudio-secrets` Secret and apply the `mistudio-mcp` Deployment/Service/Ingress included in `k8s/mistudio-deployment.yaml`. The shipped Ingress routes `path /mcp` on the **LAN host only** (e.g. `http://k8s-mistudio.hitsai.local/mcp`), with streaming-friendly nginx annotations (`proxy-buffering off`, 3600s read timeout). The public/Cloudflare host is deliberately excluded — add it only if you intend to expose the MCP endpoint to the internet. No Ingress at all? `kubectl port-forward svc/mistudio-mcp 8765:8765` works too.
+**Kubernetes:** add `mcp-auth-token` to the `mistudio-secrets` Secret and apply the `mistudio-mcp` Deployment/Service/Ingress included in `k8s/mistudio-deployment.yaml`. The shipped Ingress (streaming-friendly nginx annotations: `proxy-buffering off`, 3600s read timeout) serves three routes:
+
+- `http://mcp-mistudio.hitsai.local/mcp` and `http://mcp-mistudio.hitsai.net/mcp` — dedicated MCP hosts with full path space (`/health` works too). These resolve **only where you make them resolve** (hosts file or local DNS pointing at the ingress IP); the `.net` name is not published in public DNS unless you do so yourself.
+- `http://k8s-mistudio.hitsai.local/mcp` — path route on the shared miStudio host, kept for compatibility.
+
+Point a client machine at the ingress with a hosts-file entry, e.g. `192.168.244.61  mcp-mistudio.hitsai.local mcp-mistudio.hitsai.net`. No Ingress at all? `kubectl port-forward svc/mistudio-mcp 8765:8765` works too.
 
 **Verify:** `curl http://<host>:8765/health` returns the enabled tool categories.
 
@@ -39,8 +44,8 @@ The server binds `0.0.0.0:8765` so agents on other LAN machines can connect (bea
 claude mcp add --transport http mistudio http://<host>:8765/mcp \
   --header "Authorization: Bearer $MCP_AUTH_TOKEN"
 
-# Kubernetes (via the shipped ingress):
-claude mcp add --transport http mistudio http://k8s-mistudio.hitsai.local/mcp \
+# Kubernetes (via the shipped ingress, dedicated host):
+claude mcp add --transport http mistudio http://mcp-mistudio.hitsai.local/mcp \
   --header "Authorization: Bearer $MCP_AUTH_TOKEN"
 ```
 
