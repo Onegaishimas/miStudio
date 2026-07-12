@@ -14,7 +14,7 @@ from src.core.deps import get_db
 from src.services.extraction_service import ExtractionService
 from src.models.feature import Feature
 from src.workers.extraction_tasks import delete_extraction_task
-from src.services.feature_service import FeatureService
+from src.services.feature_service import FeatureService, ProtectedLabelError
 from src.services.analysis_service import AnalysisService
 from src.schemas.extraction import (
     ExtractionConfigRequest,
@@ -385,7 +385,17 @@ async def update_feature(
     """
     feature_service = FeatureService(db)
 
-    updated_feature = await feature_service.update_feature(feature_id, updates)
+    try:
+        updated_feature = await feature_service.update_feature(feature_id, updates)
+    except ProtectedLabelError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PROTECTED_LABEL",
+                "message": "Feature has a protected (aqua) enhanced label.",
+                "hint": "Pass override_protected=true to modify it.",
+            },
+        )
 
     if not updated_feature:
         raise HTTPException(

@@ -63,7 +63,7 @@ async def async_engine():
     # model definitions exactly (label_source_enum includes 'enhanced_llm').
     enum_definitions = [
         ("export_status", ["pending", "computing", "packaging", "completed", "failed", "cancelled"]),
-        ("label_source_enum", ["auto", "user", "llm", "local_llm", "openai", "enhanced_llm"]),
+        ("label_source_enum", ["auto", "user", "llm", "local_llm", "openai", "enhanced_llm", "mcp_agent"]),
         ("analysis_type_enum", ["logit_lens", "correlations", "ablation", "nlp_analysis"]),
         ("extraction_status_enum", ["queued", "loading", "extracting", "saving", "completed", "failed", "cancelled"]),
     ]

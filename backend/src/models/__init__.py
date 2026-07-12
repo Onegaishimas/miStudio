@@ -27,6 +27,14 @@ from .feature_dashboard import FeatureDashboardData
 from .steering_experiment import SteeringExperiment
 from .app_setting import AppSetting
 from .enhanced_labeling_job import EnhancedLabelingJob, EnhancedLabelingStatus, EnhancedLabelingPhase
+from .feature_grouping import (
+    FeatureGroupingRun,
+    FeatureTokenIndex,
+    FeatureGroup,
+    FeatureGroupMember,
+    GroupingRunStatus,
+)
+from .agent_approval import AgentApprovalRequest, ApprovalStatus
 
 __all__ = [
     "Dataset",
@@ -70,4 +78,11 @@ __all__ = [
     "EnhancedLabelingJob",
     "EnhancedLabelingStatus",
     "EnhancedLabelingPhase",
+    "FeatureGroupingRun",
+    "FeatureTokenIndex",
+    "FeatureGroup",
+    "FeatureGroupMember",
+    "GroupingRunStatus",
+    "AgentApprovalRequest",
+    "ApprovalStatus",
 ]

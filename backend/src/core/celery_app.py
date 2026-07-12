@@ -130,6 +130,11 @@ celery_app.conf.update(
             "queue": "low_priority",
         },
 
+        # Cross-feature grouping precompute (Feature 010): CPU-only
+        "src.workers.feature_grouping_tasks.*": {
+            "queue": "low_priority",
+        },
+
         # Maintenance operations: Background tasks
         "src.workers.maintenance_tasks.*": {
             "queue": "low_priority",
@@ -315,6 +320,7 @@ celery_app.autodiscover_tasks(
         "src.workers.neuronpedia_tasks",
         "src.workers.neuronpedia_push_tasks",  # Push to local Neuronpedia
         "src.workers.nlp_analysis_tasks",
+        "src.workers.feature_grouping_tasks",  # Cross-feature grouping precompute (Feature 010)
         "src.workers.steering_tasks",  # Steering operations in dedicated GPU worker
         "src.workers.enhanced_labeling_tasks",  # Enhanced per-feature two-pass labeling
     ],

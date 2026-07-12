@@ -34,6 +34,18 @@ from src.utils.token_filters import analyze_feature_tokens
 logger = logging.getLogger(__name__)
 
 
+class ProtectedLabelError(Exception):
+    """Raised when editing identity fields of an aqua-starred (protected) feature
+    without override_protected=true (Feature 010, BR-4.3)."""
+
+    def __init__(self, feature_id: str):
+        self.feature_id = feature_id
+        super().__init__(
+            f"Feature {feature_id} has a protected (aqua) enhanced label; "
+            "pass override_protected=true to modify it"
+        )
+
+
 class FeatureService:
     """
     Service for feature CRUD operations and search.
@@ -604,6 +616,20 @@ class FeatureService:
         if not feature:
             return None
 
+        # Feature 010: aqua star marks a protected (completed enhanced) label.
+        # Editing its identity fields requires an explicit override; notes and
+        # star changes remain allowed.
+        protected_edit = any(
+            value is not None and value != getattr(feature, field)
+            for field, value in (
+                ("name", updates.name),
+                ("category", updates.category),
+                ("description", updates.description),
+            )
+        )
+        if feature.star_color == "aqua" and protected_edit and not updates.override_protected:
+            raise ProtectedLabelError(feature_id)
+
         # Track if name changed to update label_source
         name_changed = False
 
@@ -613,14 +639,21 @@ class FeatureService:
                 name_changed = True
             feature.name = updates.name
 
+        if updates.category is not None:
+            feature.category = updates.category
+
         if updates.description is not None:
             feature.description = updates.description
 
         if updates.notes is not None:
             feature.notes = updates.notes
 
-        # Set label_source='user' if name was changed
-        if name_changed:
+        # Provenance: explicit label_source (user | mcp_agent) wins; otherwise
+        # a name change implies a manual user edit.
+        if updates.label_source is not None:
+            feature.label_source = updates.label_source
+            feature.labeled_at = datetime.now(timezone.utc)
+        elif name_changed:
             feature.label_source = LabelSource.USER.value
 
         # Update timestamp

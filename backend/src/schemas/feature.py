@@ -235,9 +235,19 @@ class FeatureUpdateRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: Optional[str] = Field(default=None, max_length=500)
+    category: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = Field(default=None)
     notes: Optional[str] = Field(default=None)
     star_color: Optional[str] = Field(default=None, description="Star color: 'yellow', 'purple', 'aqua', or null to unstar")
+    # Feature 010: agent provenance + protected-label override.
+    # Only 'user' and 'mcp_agent' may be set by callers; other values are service-set.
+    label_source: Optional[Literal["user", "mcp_agent"]] = Field(
+        default=None, description="Provenance of this edit (user | mcp_agent)"
+    )
+    override_protected: bool = Field(
+        default=False,
+        description="Required to edit name/category/description of an aqua-starred (protected) feature",
+    )
 
 
 class LogitLensResponse(BaseModel):
