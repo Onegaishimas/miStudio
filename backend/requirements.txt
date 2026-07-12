@@ -198,3 +198,6 @@ scikit-learn>=1.3.0
 
 # MCP server for agentic access (Feature 010)
 mcp>=1.9.0
+
+# Debug tooling: stack-dump a wedged process (py-spy dump --pid <pid>)
+py-spy>=0.3.14

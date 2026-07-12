@@ -148,6 +148,30 @@ spec:
           image: hitsai/mistudio-backend:latest
           ports:
             - containerPort: 8000
+          # Liveness catches event-loop freezes (2026-07 incident: a blocking
+          # call wedged asyncio for 37 min with the pod "Running") — restart
+          # within ~60s instead of an indefinite outage. startupProbe covers
+          # migrations at boot so liveness can stay tight.
+          startupProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 30   # up to 5 min for migrations/model warmup
+          livenessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4    # ~60s of unresponsiveness → restart
+          readinessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           env:
             - name: SERVICE_TYPE
               value: api

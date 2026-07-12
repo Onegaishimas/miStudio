@@ -33,6 +33,60 @@ from celery.exceptions import SoftTimeLimitExceeded
 from ..core.celery_app import celery_app
 from .websocket_emitter import emit_steering_progress
 
+logger_selfexit = logging.getLogger(__name__ + ".selfexit")
+
+# ---------------------------------------------------------------------------
+# Worker self-exit after each GENERATION task.
+#
+# The steering worker runs with --pool=solo, and Celery's
+# --max-tasks-per-child is silently ignored by the solo pool — so the worker
+# was surviving its task and holding the loaded model (~5 GB VRAM)
+# indefinitely. The design intent is one fresh worker per task
+# (_ensure_steering_worker_running kills+respawns), so after a generation
+# task's result has been stored we trigger a warm shutdown.
+#
+# task_postrun fires after the result is stored; the short delay lets Celery
+# finish the message lifecycle before SIGTERM lands. cleanup tasks are
+# excluded — /steering/cleanup expects the worker to stay alive to answer.
+# ---------------------------------------------------------------------------
+_SELF_EXIT_TASKS = {"steering.compare", "steering.sweep", "steering.combined"}
+
+
+def _pidfile_is_ours() -> bool:
+    import os
+    try:
+        from ..core.config import settings
+        pid_file = settings.run_dir / "mistudio-celery-steering.pid"
+        return pid_file.exists() and int(pid_file.read_text().strip()) == os.getpid()
+    except Exception:
+        return False
+
+
+def _schedule_self_exit(delay_seconds: float = 2.0) -> None:
+    import os
+    import signal
+    import threading
+    import time
+
+    def _terminate():
+        time.sleep(delay_seconds)
+        logger_selfexit.info(
+            "Steering task finished — warm-shutdown of solo worker (pid %s) to free GPU",
+            os.getpid(),
+        )
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_terminate, daemon=True, name="steering-self-exit").start()
+
+
+from celery.signals import task_postrun
+
+
+@task_postrun.connect
+def _steering_task_postrun(sender=None, **kwargs):
+    if sender is not None and sender.name in _SELF_EXIT_TASKS and _pidfile_is_ours():
+        _schedule_self_exit()
+
 logger = logging.getLogger(__name__)
 
 

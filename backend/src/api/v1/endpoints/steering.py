@@ -210,9 +210,12 @@ async def cleanup_steering_gpu():
     # Submit cleanup task to steering queue
     result = cleanup_task.delay()
 
-    # Wait briefly for result (cleanup is fast)
+    # Wait briefly for result (cleanup is fast). result.get() is a blocking
+    # Celery wait — it froze the event loop once (2026-07); keep it in a thread.
     try:
-        cleanup_result = result.get(timeout=30)
+        cleanup_result = await asyncio.wait_for(
+            asyncio.to_thread(result.get, timeout=30), timeout=35
+        )
         return {
             "message": "GPU memory released",
             "task_id": result.id,
@@ -237,6 +240,23 @@ async def cleanup_steering_gpu():
 # Use configurable run_dir for PID files and logs (works across native/docker/k8s)
 PID_FILE = str(settings.run_dir / "mistudio-celery-steering.pid")
 STEERING_LOG = str(settings.run_dir / "celery-steering.log")
+
+# Ceiling on sync result-backend reads executed via asyncio.to_thread —
+# protects the event loop from wedged Redis connections (2026-07 freeze).
+RESULT_BACKEND_TIMEOUT_SECONDS = 10
+
+
+def _read_celery_result(task_id: str):
+    """Sync AsyncResult read. Must ONLY be called via asyncio.to_thread."""
+    from ....core.celery_app import celery_app
+
+    result = celery_app.AsyncResult(task_id)
+    state = result.state
+    info = result.info
+    succeeded = result.successful()
+    failed = result.failed()
+    raw = result.result if (succeeded or failed) else None
+    return state, info, succeeded, failed, raw
 
 
 def _get_gpu_memory_mb() -> Optional[int]:
@@ -303,7 +323,7 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
     import signal
 
     # ALWAYS kill existing worker to ensure fresh state
-    is_active, existing_pid = _is_steering_worker_running()
+    is_active, existing_pid = await asyncio.to_thread(_is_steering_worker_running)
     if is_active and existing_pid:
         logger.info(f"Killing existing steering worker PID {existing_pid} for fresh start")
         try:
@@ -315,7 +335,10 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
 
         # Also kill by pattern to catch orphans
         try:
-            subprocess.run(["pkill", "-9", "-f", "steering@"], timeout=5, capture_output=True)
+            await asyncio.to_thread(
+                subprocess.run, ["pkill", "-9", "-f", "steering@"],
+                timeout=5, capture_output=True,
+            )
         except Exception:
             pass
 
@@ -365,7 +388,7 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
         # Wait for worker to initialize
         for i in range(10):  # Try for 10 seconds
             await asyncio.sleep(1)
-            is_running, pid = _is_steering_worker_running()
+            is_running, pid = await asyncio.to_thread(_is_steering_worker_running)
             if is_running:
                 logger.info(f"Auto-started steering worker PID {pid}")
                 return True, pid
@@ -385,8 +408,8 @@ async def get_steering_mode_status():
 
     Returns whether steering mode is active (worker running) and GPU memory usage.
     """
-    is_active, pid = _is_steering_worker_running()
-    gpu_memory = _get_gpu_memory_mb()
+    is_active, pid = await asyncio.to_thread(_is_steering_worker_running)
+    gpu_memory = await asyncio.to_thread(_get_gpu_memory_mb)
 
     return {
         "active": is_active,
@@ -410,7 +433,7 @@ async def enter_steering_mode():
     import os
 
     # Check if already in steering mode
-    is_active, existing_pid = _is_steering_worker_running()
+    is_active, existing_pid = await asyncio.to_thread(_is_steering_worker_running)
     if is_active:
         return {
             "success": True,
@@ -464,7 +487,7 @@ async def enter_steering_mode():
         # Wait for worker to initialize and create PID file
         for i in range(10):  # Try for 10 seconds
             await asyncio.sleep(1)
-            is_running, pid = _is_steering_worker_running()
+            is_running, pid = await asyncio.to_thread(_is_steering_worker_running)
             if is_running:
                 result["success"] = True
                 result["message"] = f"Entered steering mode (worker PID: {pid})"
@@ -499,7 +522,7 @@ async def exit_steering_mode():
     import signal
 
     # Check if already out of steering mode
-    is_active, existing_pid = _is_steering_worker_running()
+    is_active, existing_pid = await asyncio.to_thread(_is_steering_worker_running)
     if not is_active:
         return {
             "success": True,
@@ -513,7 +536,7 @@ async def exit_steering_mode():
         "success": False,
         "message": "",
         "killed_pid": None,
-        "gpu_memory_before": _get_gpu_memory_mb(),
+        "gpu_memory_before": await asyncio.to_thread(_get_gpu_memory_mb),
         "gpu_memory_after": None,
         "gpu_memory_freed_mb": 0,
         "already_inactive": False,
@@ -537,9 +560,9 @@ async def exit_steering_mode():
 
     # Also kill by pattern to catch any orphans
     try:
-        subprocess.run(
-            ["pkill", "-9", "-f", "steering@"],
-            timeout=5, capture_output=True
+        await asyncio.to_thread(
+            subprocess.run, ["pkill", "-9", "-f", "steering@"],
+            timeout=5, capture_output=True,
         )
         killed = True
     except Exception:
@@ -556,7 +579,7 @@ async def exit_steering_mode():
     await asyncio.sleep(3)
 
     # Get GPU memory after
-    result["gpu_memory_after"] = _get_gpu_memory_mb()
+    result["gpu_memory_after"] = await asyncio.to_thread(_get_gpu_memory_mb)
 
     # Calculate memory freed
     if result["gpu_memory_before"] and result["gpu_memory_after"]:
@@ -564,7 +587,7 @@ async def exit_steering_mode():
         result["gpu_memory_freed_mb"] = freed
 
     # Verify we're out of steering mode
-    is_still_active, _ = _is_steering_worker_running()
+    is_still_active, _ = await asyncio.to_thread(_is_steering_worker_running)
     if not is_still_active:
         result["success"] = True
         freed_msg = f" - Freed {result['gpu_memory_freed_mb']}MB" if result["gpu_memory_freed_mb"] > 0 else ""
@@ -929,9 +952,24 @@ async def get_steering_task_result(task_id: str):
     - revoked: Task was cancelled
     """
     from datetime import datetime
-    from ....core.celery_app import celery_app
 
-    result = celery_app.AsyncResult(task_id)
+    # AsyncResult does sync Redis I/O (and can enter unbounded kombu retry
+    # loops on a bad connection) — never run it on the event loop. A wedged
+    # result-backend read now returns 503 instead of freezing the whole API.
+    try:
+        state, info, succeeded, failed, raw_result = await asyncio.wait_for(
+            asyncio.to_thread(_read_celery_result, task_id),
+            timeout=RESULT_BACKEND_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "RESULT_BACKEND_TIMEOUT",
+                "message": f"Result backend did not respond within {RESULT_BACKEND_TIMEOUT_SECONDS}s",
+                "hint": "Retry shortly; check Redis health if this persists",
+            },
+        )
 
     # Map Celery state to our status
     status_map = {
@@ -944,7 +982,7 @@ async def get_steering_task_result(task_id: str):
         "RETRY": "pending",
     }
 
-    status = status_map.get(result.state, "pending")
+    status = status_map.get(state, "pending")
 
     # Build status object
     task_status = SteeringTaskStatus(
@@ -955,27 +993,27 @@ async def get_steering_task_result(task_id: str):
     )
 
     # Get additional info from result.info if available
-    if result.info:
-        if isinstance(result.info, dict):
-            task_status.percent = result.info.get("percent", 0)
-            task_status.message = result.info.get("message", "")
-        elif isinstance(result.info, Exception):
-            task_status.error = str(result.info)
-            task_status.message = str(result.info)
+    if info:
+        if isinstance(info, dict):
+            task_status.percent = info.get("percent", 0)
+            task_status.message = info.get("message", "")
+        elif isinstance(info, Exception):
+            task_status.error = str(info)
+            task_status.message = str(info)
             task_status.percent = -1
 
     # Handle success
     task_result = None
-    if result.successful():
+    if succeeded:
         task_status.percent = 100
         task_status.message = "Complete"
         task_status.completed_at = datetime.utcnow()
-        task_result = result.result
+        task_result = raw_result
 
     # Handle failure
-    if result.failed():
+    if failed:
         task_status.percent = -1
-        task_status.error = str(result.result) if result.result else "Unknown error"
+        task_status.error = str(raw_result) if raw_result else "Unknown error"
         task_status.message = f"Failed: {task_status.error}"
         task_status.completed_at = datetime.utcnow()
 
@@ -999,31 +1037,46 @@ async def cancel_steering_task(task_id: str):
     """
     from ....core.celery_app import celery_app
 
-    result = celery_app.AsyncResult(task_id)
+    try:
+        state, _, _, _, _ = await asyncio.wait_for(
+            asyncio.to_thread(_read_celery_result, task_id),
+            timeout=RESULT_BACKEND_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "RESULT_BACKEND_TIMEOUT",
+                "message": f"Result backend did not respond within {RESULT_BACKEND_TIMEOUT_SECONDS}s",
+                "hint": "Retry shortly; check Redis health if this persists",
+            },
+        )
 
-    if result.state == "SUCCESS":
+    if state == "SUCCESS":
         return SteeringCancelResponse(
             task_id=task_id,
             status="already_complete",
             message="Task already completed successfully",
         )
 
-    if result.state == "FAILURE":
+    if state == "FAILURE":
         return SteeringCancelResponse(
             task_id=task_id,
             status="already_complete",
             message="Task already failed",
         )
 
-    if result.state == "REVOKED":
+    if state == "REVOKED":
         return SteeringCancelResponse(
             task_id=task_id,
             status="already_cancelled",
             message="Task was already cancelled",
         )
 
-    # Revoke the task (terminate if running)
-    celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")
+    # Revoke the task (terminate if running); broker I/O off the loop too
+    await asyncio.to_thread(
+        celery_app.control.revoke, task_id, terminate=True, signal="SIGKILL"
+    )
 
     return SteeringCancelResponse(
         task_id=task_id,
