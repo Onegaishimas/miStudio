@@ -1,8 +1,8 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 2.4 (Enhanced Labeling, Security Hardening & Production Deployment)
+**Version:** 2.6 (MCP Server & Cross-Feature Grouping architecture)
 **Created:** 2025-10-05
-**Updated:** 2026-04-26
+**Updated:** 2026-07-12
 **Status:** Active
 **Document Type:** Project-Level Architecture Decision Record
 
@@ -2954,12 +2954,43 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-26: MCP Server Architecture & Cross-Feature Grouping
+
+**Date:** 2026-07-12
+
+**Context:** BRD-MIS-MCP-001 requires agentic AI clients (Claude Code, Codex, any MCP client) to operate miStudio's post-extraction workflow — feature analysis, cross-feature grouping, steering validation, and label write-back — without custom HTTP scripting. The REST API is complete but organized around single resources: there is no cross-feature query primitive ("all features whose top activating token is X, grouped by context similarity"), and no component of the stack has ever required request authentication. Feature status: **Planned** (document chain 010 authored 2026-07-12; implementation not started).
+
+**Decision:**
+1. **Separate MCP server process**, not an in-backend mount: a new `mcp-server` container reusing the `hitsai/mistudio-backend` image with command `python -m src.mcp_server`. Code lives in `backend/src/mcp_server/` (`server.py`, `client.py`, `config.py`, `tools/` — one module per tool category).
+2. **Official `mcp` Python SDK** (FastMCP server class), **streamable-HTTP transport on port 8765** as primary (long-lived containerized service, reconnecting agents), stdio as a dev fallback. Avoid the third-party `fastmcp` 2.x package.
+3. **REST-only backend access (BR-1.3):** every tool calls `http://backend:8000/api/v1/...` via an httpx client wrapper — never the DB or service layer directly — so provenance, validation, and job-queue behavior are identical to UI-initiated actions.
+4. **First authenticated surface:** static bearer token (`MCP_AUTH_TOKEN`) checked with `hmac.compare_digest`, following the `internal_api_secret` / `X-Internal-Token` precedent from `main.py`. Server refuses to start with an empty token unless `MCP_ALLOW_ANONYMOUS=true` (stdio/localhost dev only). Port is **LAN-reachable by default** (product decision — agents may run on other LAN hosts); risk documented, firewalling is the operator's control.
+5. **Tool-category gating:** `MCP_TOOL_CATEGORIES` env (comma list of `read, groups, steering, labeling, experiments, jobs, admin`); disabled categories are not registered at startup. Default excludes `admin` (destructive deletes).
+6. **Cross-feature grouping is a first-class REST capability, not an MCP-layer feature (BR-2.5):** new router `feature_groups.py` + precompute Celery job on the `low_priority` queue building a token→feature inverted index and TF-IDF/cosine context subgroups; persisted in four new tables (`feature_grouping_runs`, `feature_token_index`, `feature_groups`, `feature_group_members`) — **not** `FeatureAnalysisCache`, which is per-feature. The frontend Feature Groups view and the MCP tools consume the same endpoints (one source of truth, BR-8.6).
+7. **Agent provenance:** add `mcp_agent` to `label_source_enum` (additive `ALTER TYPE`); `PATCH /features/{id}` accepts `label_source` only from a `user|mcp_agent` whitelist. Aqua-starred features return 409 on label edits unless `override_protected=true`.
+8. **Steering guardrails:** `MCP_STEERING_MAX_CONCURRENT` (default 2) and `MCP_STEERING_MAX_NEW_TOKENS` (default 512) enforced in the tool layer, plus an **operator-approval mode** (`MCP_STEERING_APPROVAL=true`): agent steering calls create durable rows in a new `agent_approval_requests` table; operators approve/deny via `/api/v1/mcp/approvals` + a Steering-panel surface; on approval the backend submits the stored steering payload itself.
+
+**Implementation details:**
+- Async-job translation (BR-1.5): start-tools return `{task_id}`; a `get_task_status` tool wraps `task_queue` + resource status endpoints; the MCP layer never consumes WebSockets
+- Grouping algorithm uses only installed deps (sklearn TF-IDF + cosine + threshold connected components; spaCy-free): token normalization strips BPE markers (`▁`, `Ġ`, `##`), NFKC, lowercase; cohesion = mean pairwise cosine within group
+- Extractions are immutable after completion ⇒ the grouping index never goes stale; labels/stars are joined live at query time; recompute only on `force=true` or params change
+- Deployment: compose service under profile `mcp` (disable = omit profile); k8s `mistudio-mcp` Deployment + ClusterIP Service, no Ingress shipped
+- WS channels: `extractions/{id}/feature-groups` (`feature_groups:progress|completed|failed`), `mcp/approvals`
+
+**Tradeoffs:**
+- Separate process isolates agent load and makes disable trivial, at the cost of one more container and HTTP hop (acceptable: tools are I/O-bound wrappers)
+- LAN-default exposure trades a larger attack surface for BRD Assumption 4 (agents on other machines) — mitigated by mandatory bearer token and documentation
+- TF-IDF context similarity is weaker than embeddings but requires no new heavy deps; embedding upgrade is a clean drop-in later (pgvector already present via the Neuronpedia Postgres)
+- The approval-mode table/UI adds scope, but a durable server-side queue is the only design that survives agent disconnects and keeps one source of truth
+
+---
+
 ## Document Control
 
-**Version:** 2.5
+**Version:** 2.6
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-05-09
+**Last Updated:** 2026-07-12
 **Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
@@ -2983,6 +3014,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.3 | 2026-03-21 | IDL-15 through IDL-17: Sidebar navigation, schema validation tooling, Neuronpedia local push |
 | 2.4 | 2026-04-26 | IDL-18 through IDL-24: Enhanced labeling two-pass, OpenAI SDK standardization, encrypted settings, context-aware labeling template, path injection hardening, supply-chain security (CodeQL/Scout/SLSA), feature notes markdown rendering |
 | 2.5 | 2026-05-09 | IDL-25: Settings panel PIN protection (PBKDF2-SHA256 gate, env-var bypass recovery) |
+| 2.6 | 2026-07-12 | IDL-26: MCP Server architecture & cross-feature grouping (separate container, official `mcp` SDK, streamable HTTP, bearer-token auth, tool-category gating, grouping REST endpoints + 4 new tables, `mcp_agent` provenance, steering approval mode) — Planned, from BRD-MIS-MCP-001 |
 
 ---
 

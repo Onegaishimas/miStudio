@@ -1,8 +1,8 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.1 (Settings PIN Protection)
-**Last Updated:** 2026-05-09
+**Version:** 3.2 (MCP Server & Cross-Feature Grouping — planned)
+**Last Updated:** 2026-07-12
 **Status:** Active
 
 ---
@@ -73,6 +73,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 8 | System Monitoring | GPU/CPU/Memory/Disk/Network monitoring | Complete |
 | 9 | Settings & Configuration | Encrypted API keys, endpoints, labeling defaults | Complete |
 | 10 | Multi-GPU Scalability | Per-GPU monitoring, job routing, aggregated/per-GPU views | Partially Complete (DDP training planned) |
+| 11 | MCP Server & Feature Groups | MCP tools for agentic analysis/steering + cross-feature grouping (API/UI) | Planned |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -446,6 +447,26 @@ The highest-quality labeling path. Two-pass strategy:
 
 ---
 
+### 3.11 MCP Server & Cross-Feature Grouping (Planned)
+
+**Purpose:** Make miStudio agent-native — expose the post-extraction workflow (analyze → group → steer → relabel) to MCP-capable AI clients (Claude Code, Codex, etc.), and add a first-class cross-feature grouping capability usable from both agents and the frontend. Derived from `0xcc/brds/miStudio-MCP-Server-BRD.md` (BRD-MIS-MCP-001).
+
+**Capabilities:**
+- MCP server (official `mcp` Python SDK, streamable-HTTP transport on port 8765 + stdio dev mode) shipped as a separate `mcp-server` container reusing the backend image; talks to the backend exclusively via `/api/v1`
+- ~24 MCP tools across gated categories (`read`, `groups`, `steering`, `labeling`, `experiments`, `jobs`, `admin`) — async 202 jobs translated to start-tool + status-polling tools
+- Bearer-token auth (`MCP_AUTH_TOKEN`, LAN-reachable by default); category exposure via `MCP_TOOL_CATEGORIES`; destructive tools off by default
+- **Cross-feature grouping (new REST capability):** precompute job builds a token→feature inverted index + context-similarity subgroups (TF-IDF/cosine over prime-token contexts); endpoints for groups, by-token search, and seed-feature related lookup
+- **Feature Groups frontend view:** browse groups by top activating token, filter by label/category/star, jump to feature detail, hand selected members to Steering
+- Steering guardrails: concurrency cap, max_new_tokens ceiling, and an operator-approval mode (durable approval queue surfaced in the UI)
+- Agent label write-back with `mcp_agent` provenance and aqua-star protection (409 unless `override_protected=true`)
+
+**Key Files (planned):**
+- Backend: `src/mcp_server/` package, `feature_grouping_service.py`, `feature_grouping_tasks.py`, `api/v1/endpoints/feature_groups.py`
+- Frontend: `FeatureGroupsPanel.tsx`, `featureGroupsStore.ts`, `useFeatureGroupsWebSocket.ts`
+- Docs: `010_FPRD|MCP_Server.md` → FTDD → FTID → FTASKS
+
+---
+
 ## 4. Technology Stack
 
 ### 4.1 Backend
@@ -602,7 +623,8 @@ sudo bash -c 'echo "127.0.0.1 mistudio.hitsai.local" >> /etc/hosts'
 |----------|------|-------------|
 | Architecture Decision Record | `0xcc/adrs/000_PADR\|miStudio.md` | Technical decisions |
 | Developer Guide | `0xcc/docs/Developer_Guide.md` | Implementation details |
-| Feature PRDs | `0xcc/prds/001-009_FPRD\|*.md` | Individual feature specs |
+| Feature PRDs | `0xcc/prds/001-010_FPRD\|*.md` | Individual feature specs |
+| Business Requirements | `0xcc/brds/*.md` | Business-level enhancement requests (feeds FPRDs) |
 | Technical Design Docs | `0xcc/tdds/*.md` | Design specifications |
 | Implementation Docs | `0xcc/tids/*.md` | Implementation guidance |
 | Task Lists | `0xcc/tasks/*.md` | Development tracking |
@@ -647,8 +669,9 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 2.1 | 2025-12-16 | Post-MVP: NLP analysis, Ollama integration, infrastructure improvements |
 | 3.0 | 2026-04-26 | Enhanced labeling, OpenAI API integration, context-aware labeling template, Settings Panel, security hardening, v0.5.0 public release, K8s production deployment, CI/CD pipeline |
 | 3.1 | 2026-05-09 | Settings panel PIN protection (PBKDF2-SHA256 gate + env-var bypass); multi-GPU doc corrections (Phases 1 & 2 retrospectively marked complete) |
+| 3.2 | 2026-07-12 | Added Feature 11: MCP Server & Cross-Feature Grouping (Planned, from BRD-MIS-MCP-001) — §3.11, document chain 010_FPRD/FTDD/FTID/FTASKS |
 
 ---
 
-*Generated: 2026-05-09*
+*Generated: 2026-07-12*
 *MechInterp Studio — v0.5.0 Production Release*

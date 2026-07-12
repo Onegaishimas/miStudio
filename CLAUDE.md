@@ -3,10 +3,12 @@ yes
 
 ## Current Status
 - **Phase:** Active Development & Maintenance
-- **Last Session:** 2026-07-11
-- **Current Task:** None — feature-by-feature review remediation complete & deployed
-- **Active Work:** None — stable, all services running
+- **Last Session:** 2026-07-12
+- **Current Task:** Feature 010 (MCP Server & Cross-Feature Grouping) — document chain complete, implementation NOT started
+- **Active Work:** Next step = implement via `0xcc/tasks/010_FTASKS|MCP_Server.md` (55 tasks, 9 phases)
 - **Completed:**
+  - Feature 010 doc chain (2026-07-12): BRD-MIS-MCP-001 → PPRD v3.2 (row 11, §3.11), PADR v2.6 (IDL-26), 010_FPRD/FTDD/FTID/FTASKS ✅
+  - Docusaurus manual overhaul (2026-07-11): 19→34 pages (Concepts, Quickstart, API/WS/data-model Reference, FAQ, landing page) — live ✅
   - Feature-by-feature review (001–009) + synthesis in `0xcc/reviews/` ✅
   - Remediated all review findings: P0 (broken extraction imports), P1/P2/P3, + 3 deferred schema items ✅
   - Alembic multi-head merge (cd6c46abac48) + celery_task_id + training_metrics unique constraint + NeuronpediaPushJob ORM model ✅
