@@ -7,6 +7,7 @@ import { ExtractionsPanel } from './components/panels/ExtractionsPanel';
 import { LabelingPanel } from './components/panels/LabelingPanel';
 import { SAEsPanel } from './components/panels/SAEsPanel';
 import { SteeringPanel } from './components/panels/SteeringPanel';
+import { FeatureGroupsPanel } from './components/panels/FeatureGroupsPanel';
 import { SystemMonitor } from './components/SystemMonitor/SystemMonitor';
 import { SettingsPanel } from './components/panels/SettingsPanel';
 import { Sidebar } from './components/layout/Sidebar';
@@ -16,7 +17,7 @@ import { useGlobalDatasetProgress } from './hooks/useDatasetProgress';
 import { setDatasetSubscriptionCallback } from './stores/datasetsStore';
 import { useUIStore } from './stores/uiStore';
 
-type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
+type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'feature-groups' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
 
 function AppContent() {
   const ws = useWebSocketContext();
@@ -25,7 +26,7 @@ function AppContent() {
   // Restore active panel from localStorage, default to 'datasets'
   const [activePanel, setActivePanel] = useState<ActivePanel>(() => {
     const saved = localStorage.getItem('activePanel');
-    const validPanels = ['models', 'datasets', 'training', 'extractions', 'labeling', 'templates', 'saes', 'steering', 'system', 'settings'];
+    const validPanels = ['models', 'datasets', 'training', 'extractions', 'labeling', 'feature-groups', 'templates', 'saes', 'steering', 'system', 'settings'];
     return validPanels.includes(saved || '') ? (saved as ActivePanel) : 'datasets';
   });
 
@@ -82,6 +83,7 @@ function AppContent() {
         {activePanel === 'training' && <TrainingPanel />}
         {activePanel === 'extractions' && <ExtractionsPanel />}
         {activePanel === 'labeling' && <LabelingPanel />}
+        {activePanel === 'feature-groups' && <FeatureGroupsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'templates' && <TemplatesPanel />}
         {activePanel === 'saes' && <SAEsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'steering' && <SteeringPanel />}

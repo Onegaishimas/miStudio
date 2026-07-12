@@ -294,6 +294,77 @@ spec:
     - port: 8000
 
 # -------------------------
+# MCP SERVER (Feature 010 — agentic access, opt-in)
+# Disable: kubectl -n mistudio scale deploy/mistudio-mcp --replicas=0
+# No Ingress shipped — ClusterIP only; expose deliberately (port-forward or
+# your own Ingress + TLS). Requires mcp-auth-token in mistudio-secrets.
+# -------------------------
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mistudio-mcp
+  namespace: mistudio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mistudio-mcp
+  template:
+    metadata:
+      labels:
+        app: mistudio-mcp
+    spec:
+      containers:
+        - name: mcp-server
+          image: hitsai/mistudio-backend:latest
+          command: ["python", "-m", "src.mcp_server"]
+          ports:
+            - containerPort: 8765
+          env:
+            - name: MISTUDIO_API_URL
+              value: http://mistudio-backend:8000
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: mcp-auth-token
+            - name: MCP_TOOL_CATEGORIES
+              value: "read,groups,steering,labeling,experiments,jobs"
+            - name: MCP_STEERING_APPROVAL
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8765
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8765
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mistudio-mcp
+  namespace: mistudio
+spec:
+  type: ClusterIP
+  selector:
+    app: mistudio-mcp
+  ports:
+    - port: 8765
+
+# -------------------------
 # FRONTEND
 # -------------------------
 ---

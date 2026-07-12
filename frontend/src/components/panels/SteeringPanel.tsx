@@ -22,6 +22,7 @@ import { useSAEsStore } from '../../stores/saesStore';
 import { usePromptTemplatesStore } from '../../stores/promptTemplatesStore';
 import { SAEStatus } from '../../types/sae';
 import { FeatureSelector } from '../steering/FeatureSelector';
+import { ApprovalsBanner } from '../steering/ApprovalsBanner';
 import { GenerationConfig } from '../steering/GenerationConfig';
 import { ComparisonPreview } from '../steering/ComparisonPreview';
 import { ComparisonResults } from '../steering/ComparisonResults';
@@ -322,6 +323,9 @@ export function SteeringPanel() {
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+          {/* Pending MCP-agent approval requests (Feature 010) */}
+          <ApprovalsBanner />
+
           {/* Header */}
           <div className="flex items-start justify-between">
             <div>

@@ -137,6 +137,38 @@ services:
     networks:
       - mistudio-network
 
+  # MCP server for agentic access (Feature 010). Opt-in via profile:
+  #   docker compose --profile mcp up -d
+  # Disable = omit the profile. MCP_AUTH_TOKEN is REQUIRED — the port is
+  # LAN-reachable by default; firewall 8765 if agents are local-only.
+  mcp-server:
+    image: hitsai/mistudio-backend:latest
+    container_name: mistudio-mcp
+    profiles: ["mcp"]
+    command: python -m src.mcp_server
+    environment:
+      MISTUDIO_API_URL: http://backend:8000
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in .env to enable the MCP server}
+      MCP_TOOL_CATEGORIES: ${MCP_TOOL_CATEGORIES:-read,groups,steering,labeling,experiments,jobs}
+      MCP_STEERING_APPROVAL: ${MCP_STEERING_APPROVAL:-false}
+      MCP_STEERING_MAX_CONCURRENT: ${MCP_STEERING_MAX_CONCURRENT:-2}
+      MCP_STEERING_MAX_NEW_TOKENS: ${MCP_STEERING_MAX_NEW_TOKENS:-512}
+      MCP_PORT: "8765"
+    ports:
+      - "8765:8765"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - mistudio-network
+
   celery-worker:
     image: hitsai/mistudio-backend:latest
     container_name: mistudio-celery-worker
