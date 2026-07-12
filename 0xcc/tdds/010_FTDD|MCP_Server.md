@@ -1,9 +1,9 @@
 # Technical Design Document: MCP Server & Cross-Feature Grouping
 
 **Document ID:** 010_FTDD|MCP_Server
-**Version:** 1.0
+**Version:** 1.1 (implemented 2026-07-12)
 **Last Updated:** 2026-07-12
-**Status:** Planned
+**Status:** Implemented
 **Related PRD:** [010_FPRD|MCP_Server](../prds/010_FPRD|MCP_Server.md)
 
 ---

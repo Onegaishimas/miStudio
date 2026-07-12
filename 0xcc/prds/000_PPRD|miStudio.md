@@ -1,7 +1,7 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.2 (MCP Server & Cross-Feature Grouping — planned)
+**Version:** 3.3 (MCP Server & Cross-Feature Grouping — implemented)
 **Last Updated:** 2026-07-12
 **Status:** Active
 
@@ -73,7 +73,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 8 | System Monitoring | GPU/CPU/Memory/Disk/Network monitoring | Complete |
 | 9 | Settings & Configuration | Encrypted API keys, endpoints, labeling defaults | Complete |
 | 10 | Multi-GPU Scalability | Per-GPU monitoring, job routing, aggregated/per-GPU views | Partially Complete (DDP training planned) |
-| 11 | MCP Server & Feature Groups | MCP tools for agentic analysis/steering + cross-feature grouping (API/UI) | Planned |
+| 11 | MCP Server & Feature Groups | MCP tools for agentic analysis/steering + cross-feature grouping (API/UI) | Complete |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -447,7 +447,7 @@ The highest-quality labeling path. Two-pass strategy:
 
 ---
 
-### 3.11 MCP Server & Cross-Feature Grouping (Planned)
+### 3.11 MCP Server & Cross-Feature Grouping (Complete)
 
 **Purpose:** Make miStudio agent-native — expose the post-extraction workflow (analyze → group → steer → relabel) to MCP-capable AI clients (Claude Code, Codex, etc.), and add a first-class cross-feature grouping capability usable from both agents and the frontend. Derived from `0xcc/brds/miStudio-MCP-Server-BRD.md` (BRD-MIS-MCP-001).
 
@@ -460,7 +460,7 @@ The highest-quality labeling path. Two-pass strategy:
 - Steering guardrails: concurrency cap, max_new_tokens ceiling, and an operator-approval mode (durable approval queue surfaced in the UI)
 - Agent label write-back with `mcp_agent` provenance and aqua-star protection (409 unless `override_protected=true`)
 
-**Key Files (planned):**
+**Key Files:**
 - Backend: `src/mcp_server/` package, `feature_grouping_service.py`, `feature_grouping_tasks.py`, `api/v1/endpoints/feature_groups.py`
 - Frontend: `FeatureGroupsPanel.tsx`, `featureGroupsStore.ts`, `useFeatureGroupsWebSocket.ts`
 - Docs: `010_FPRD|MCP_Server.md` → FTDD → FTID → FTASKS
@@ -670,6 +670,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 3.0 | 2026-04-26 | Enhanced labeling, OpenAI API integration, context-aware labeling template, Settings Panel, security hardening, v0.5.0 public release, K8s production deployment, CI/CD pipeline |
 | 3.1 | 2026-05-09 | Settings panel PIN protection (PBKDF2-SHA256 gate + env-var bypass); multi-GPU doc corrections (Phases 1 & 2 retrospectively marked complete) |
 | 3.2 | 2026-07-12 | Added Feature 11: MCP Server & Cross-Feature Grouping (Planned, from BRD-MIS-MCP-001) — §3.11, document chain 010_FPRD/FTDD/FTID/FTASKS |
+| 3.3 | 2026-07-12 | Feature 11 implemented: MCP server (33 tools, bearer auth, approval mode), cross-feature grouping (index + REST + Feature Groups UI), mcp_agent provenance, deployment (compose profile + k8s) |
 
 ---
 

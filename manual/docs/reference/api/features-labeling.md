@@ -24,7 +24,7 @@ These routers are mounted **without a prefix** — paths sit directly under `/ap
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `PATCH` | `/features/{id}` | Edit name, category, description, notes |
+| `PATCH` | `/features/{id}` | Edit name, category, description, notes. Accepts `label_source` (`user`\|`mcp_agent`) for provenance and `override_protected`; editing an aqua-starred feature's identity fields without the override returns **409 `PROTECTED_LABEL`** |
 | `POST` | `/features/{id}/favorite` | Toggle favorite |
 | `POST` | `/features/{id}/star` | Set star color — `?star_color=yellow\|purple\|aqua` (aqua marks completed enhanced labels and is protected from bulk overwrite) |
 | `GET` | `/features/{id}/examples` | Top activating examples with per-token activations |
@@ -42,6 +42,31 @@ These routers are mounted **without a prefix** — paths sit directly under `/ap
 | `POST` | `/features/{id}/analyze-nlp` | Analyze a single feature |
 | `GET` | `/features/{id}/nlp-analysis` | Retrieve stored analysis |
 | `POST` | `/analysis/cleanup` | Clean up orphaned analysis artifacts |
+
+## Cross-feature grouping (Feature Groups)
+
+Powers the [Feature Groups view](/core-workflow/feature-groups) and the [MCP server's](/advanced/mcp-server) `groups` tools.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/extractions/{id}/feature-groups/compute` | Start the grouping precompute job (202). Idempotent per params; `?force=true` recomputes. 409 while already computing |
+| `GET` | `/extractions/{id}/feature-groups/status` | Index state: `none\|pending\|computing\|completed\|failed` + counts |
+| `GET` | `/extractions/{id}/feature-groups` | Paginated groups; params `token` (exact normalized), `search`, `min_group_size`, `sort_by=size\|cohesion\|token` |
+| `GET` | `/extractions/{id}/feature-groups/{group_id}` | Group members with labels/stars joined live; filters `category`, `has_label`, `star_color`, `is_favorite` |
+| `GET` | `/extractions/{id}/features/by-token` | Features by top token — `match=exact\|normalized\|prefix`. 409 `NO_INDEX` until computed |
+| `GET` | `/features/{id}/related` | Related features via shared tokens + context overlap + cached correlations, with `link_types` per result |
+
+## Agent approvals — prefix `/mcp/approvals`
+
+Backs the MCP operator-approval mode; the Steering panel's approvals banner uses these.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `` | Create a pending approval request (called by the MCP server) |
+| `GET` | `` | List requests (`?status=pending`) |
+| `GET` | `/{id}` | Request detail incl. stored steering payload |
+| `POST` | `/{id}/approve` | Approve — the backend submits the stored steering task and records its `steering_task_id` |
+| `POST` | `/{id}/deny` | Deny with optional reason |
 
 ## Bulk labeling
 

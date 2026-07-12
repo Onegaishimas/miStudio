@@ -1,9 +1,9 @@
 # Feature PRD: MCP Server & Cross-Feature Grouping
 
 **Document ID:** 010_FPRD|MCP_Server
-**Version:** 1.0
+**Version:** 1.1 (implemented 2026-07-12)
 **Last Updated:** 2026-07-12
-**Status:** Planned
+**Status:** Implemented
 **Priority:** P1 (Important Feature)
 **Source BRD:** [BRD-MIS-MCP-001](../brds/miStudio-MCP-Server-BRD.md)
 
@@ -45,71 +45,71 @@ From BRD §6 (IDs preserved):
 ### 3.1 MCP Server Foundation (BRD §7.1)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-1.1 | MCP server exposing backend capabilities as MCP tools; streamable-HTTP transport (port 8765) + stdio dev mode | BR-1.1 | Planned |
-| FR-1.2 | Deployable in Docker Compose (profile `mcp`) and K8s; independently disableable | BR-1.2 | Planned |
-| FR-1.3 | Backend access exclusively via `/api/v1` REST (httpx client) — never DB/service bypass | BR-1.3 | Planned |
-| FR-1.4 | Self-documenting tool schemas: typed params, documented ranges (strength [-300,+300], max_new_tokens [1,2048]) enforced and surfaced | BR-1.4 | Planned |
-| FR-1.5 | Async 202 pattern translated: start-tool returns task/job ID; `get_task_status` supports polling; structured backend error detail passed through | BR-1.5 | Planned |
+| FR-1.1 | MCP server exposing backend capabilities as MCP tools; streamable-HTTP transport (port 8765) + stdio dev mode | BR-1.1 | Implemented |
+| FR-1.2 | Deployable in Docker Compose (profile `mcp`) and K8s; independently disableable | BR-1.2 | Implemented |
+| FR-1.3 | Backend access exclusively via `/api/v1` REST (httpx client) — never DB/service bypass | BR-1.3 | Implemented |
+| FR-1.4 | Self-documenting tool schemas: typed params, documented ranges (strength [-300,+300], max_new_tokens [1,2048]) enforced and surfaced | BR-1.4 | Implemented |
+| FR-1.5 | Async 202 pattern translated: start-tool returns task/job ID; `get_task_status` supports polling; structured backend error detail passed through | BR-1.5 | Implemented |
 
 ### 3.2 Feature Query & Cross-Feature Grouping (BRD §7.2)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-2.1 | Tools to list extractions/trainings, list/filter features (label presence, category, star/favorite, activation stats), fetch feature detail | BR-2.1 | Planned |
-| FR-2.2 | Tools for per-feature analysis: examples with per-token activations, token statistics, logit-lens, correlations, ablation, NLP analysis | BR-2.2 | Planned |
-| FR-2.3 | Cross-feature grouping: groups sharing the same normalized top activating token, refined by context similarity (TF-IDF/cosine over ±5-token windows) | BR-2.3 | Planned |
-| FR-2.4 | Query by token (exact/normalized/prefix match) and by seed feature (related via shared tokens/context/correlations) | BR-2.4 | Planned |
-| FR-2.5 | Grouping implemented as first-class REST endpoints under `/api/v1` (see §5); consumed by both MCP tools and frontend; documented in API reference + Swagger | BR-2.5, BR-2.5a | Planned |
-| FR-2.6 | Server-side execution with compact results; precompute runs as a standard background job (Celery `low_priority`, task_queue record, WebSocket progress), results persisted for reuse | BR-2.5b | Planned |
-| FR-2.7 | Group results include per member: feature ID, neuron index, label/category, top token(s), context snippet, activation stats; plus group-level cohesion | BR-2.6 | Planned |
-| FR-2.8 | All list results pageable (`limit ≤ 100` + offset) and bounded for agent context windows | BR-2.7 | Planned |
+| FR-2.1 | Tools to list extractions/trainings, list/filter features (label presence, category, star/favorite, activation stats), fetch feature detail | BR-2.1 | Implemented |
+| FR-2.2 | Tools for per-feature analysis: examples with per-token activations, token statistics, logit-lens, correlations, ablation, NLP analysis | BR-2.2 | Implemented |
+| FR-2.3 | Cross-feature grouping: groups sharing the same normalized top activating token, refined by context similarity (TF-IDF/cosine over ±5-token windows) | BR-2.3 | Implemented |
+| FR-2.4 | Query by token (exact/normalized/prefix match) and by seed feature (related via shared tokens/context/correlations) | BR-2.4 | Implemented |
+| FR-2.5 | Grouping implemented as first-class REST endpoints under `/api/v1` (see §5); consumed by both MCP tools and frontend; documented in API reference + Swagger | BR-2.5, BR-2.5a | Implemented |
+| FR-2.6 | Server-side execution with compact results; precompute runs as a standard background job (Celery `low_priority`, task_queue record, WebSocket progress), results persisted for reuse | BR-2.5b | Implemented |
+| FR-2.7 | Group results include per member: feature ID, neuron index, label/category, top token(s), context snippet, activation stats; plus group-level cohesion | BR-2.6 | Implemented |
+| FR-2.8 | All list results pageable (`limit ≤ 100` + offset) and bounded for agent context windows | BR-2.7 | Implemented |
 
 ### 3.3 Steering & Guardrails (BRD §7.3)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-3.1 | Tools wrapping async compare/sweep/combined, result polling, task cancellation | BR-3.1 | Planned |
-| FR-3.2 | Steering-mode tools (status/enter/exit/health) with GPU-load implications documented in tool descriptions | BR-3.2 | Planned |
-| FR-3.3 | Saved-experiment CRUD tools | BR-3.3 | Planned |
-| FR-3.4 | Guardrails: `MCP_STEERING_MAX_CONCURRENT` (default 2), `MCP_STEERING_MAX_NEW_TOKENS` (default 512) | BR-3.4 | Planned |
-| FR-3.5 | **Operator-approval mode** (`MCP_STEERING_APPROVAL=true`): agent steering calls create durable approval requests; operator approves/denies in UI; backend submits the stored payload on approval; agent polls request status | BR-3.4, US-6 | Planned |
+| FR-3.1 | Tools wrapping async compare/sweep/combined, result polling, task cancellation | BR-3.1 | Implemented |
+| FR-3.2 | Steering-mode tools (status/enter/exit/health) with GPU-load implications documented in tool descriptions | BR-3.2 | Implemented |
+| FR-3.3 | Saved-experiment CRUD tools | BR-3.3 | Implemented |
+| FR-3.4 | Guardrails: `MCP_STEERING_MAX_CONCURRENT` (default 2), `MCP_STEERING_MAX_NEW_TOKENS` (default 512) | BR-3.4 | Implemented |
+| FR-3.5 | **Operator-approval mode** (`MCP_STEERING_APPROVAL=true`): agent steering calls create durable approval requests; operator approves/denies in UI; backend submits the stored payload on approval; agent polls request status | BR-3.4, US-6 | Implemented |
 
 ### 3.4 Labeling & Write-Back (BRD §7.4)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-4.1 | Tool to update feature name, category, description, notes | BR-4.1 | Planned |
-| FR-4.2 | Tools to trigger enhanced labeling + fetch latest result; (category-gated) bulk labeling start/monitor | BR-4.2 | Planned |
-| FR-4.3 | Agent writes carry `label_source='mcp_agent'` (new enum value); aqua-starred features return 409 on label edits unless `override_protected=true` (tool default false) | BR-4.3 | Planned |
-| FR-4.4 | Documented evidence convention: `[MCP <date>] evidence: experiment <id> — <summary>` appended to notes | BR-4.4 | Planned |
+| FR-4.1 | Tool to update feature name, category, description, notes | BR-4.1 | Implemented |
+| FR-4.2 | Tools to trigger enhanced labeling + fetch latest result; (category-gated) bulk labeling start/monitor | BR-4.2 | Implemented |
+| FR-4.3 | Agent writes carry `label_source='mcp_agent'` (new enum value); aqua-starred features return 409 on label edits unless `override_protected=true` (tool default false) | BR-4.3 | Implemented |
+| FR-4.4 | Documented evidence convention: `[MCP <date>] evidence: experiment <id> — <summary>` appended to notes | BR-4.4 | Implemented |
 
 ### 3.5 Security & Safety (BRD §7.5)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-5.1 | Bearer-token auth (`MCP_AUTH_TOKEN`, `hmac.compare_digest`); refuses startup with empty token unless `MCP_ALLOW_ANONYMOUS=true`; port LAN-reachable by default (documented risk + firewall guidance) | BR-5.1 | Planned |
-| FR-5.2 | Category gating via `MCP_TOOL_CATEGORIES` (`read, groups, steering, labeling, experiments, jobs, admin`); default excludes `admin` | BR-5.2 | Planned |
-| FR-5.3 | Destructive tools (`admin` category) opt-in, marked destructive in tool metadata | BR-5.3 | Planned |
-| FR-5.4 | Structured audit log per tool call (tool, args digest, backend status, duration) | BR-5.4 | Planned |
+| FR-5.1 | Bearer-token auth (`MCP_AUTH_TOKEN`, `hmac.compare_digest`); refuses startup with empty token unless `MCP_ALLOW_ANONYMOUS=true`; port LAN-reachable by default (documented risk + firewall guidance) | BR-5.1 | Implemented |
+| FR-5.2 | Category gating via `MCP_TOOL_CATEGORIES` (`read, groups, steering, labeling, experiments, jobs, admin`); default excludes `admin` | BR-5.2 | Implemented |
+| FR-5.3 | Destructive tools (`admin` category) opt-in, marked destructive in tool metadata | BR-5.3 | Implemented |
+| FR-5.4 | Structured audit log per tool call (tool, args digest, backend status, duration) | BR-5.4 | Implemented |
 
 ### 3.6 Performance & Reliability (BRD §7.6)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-6.1 | Feature queries < 2 s; grouping queries < 10 s over ~50k features (warm ≤ 2 s, precomputed index) | BR-6.1 | Planned |
-| FR-6.2 | Graceful degradation: labeling 503 / steering circuit-breaker states surfaced verbatim with the reset path | BR-6.2 | Planned |
-| FR-6.3 | Long-running tasks trackable across agent reconnects (durable task_queue/DB records) | BR-6.3 | Planned |
+| FR-6.1 | Feature queries < 2 s; grouping queries < 10 s over ~50k features (warm ≤ 2 s, precomputed index) | BR-6.1 | Implemented |
+| FR-6.2 | Graceful degradation: labeling 503 / steering circuit-breaker states surfaced verbatim with the reset path | BR-6.2 | Implemented |
+| FR-6.3 | Long-running tasks trackable across agent reconnects (durable task_queue/DB records) | BR-6.3 | Implemented |
 
 ### 3.7 Documentation (BRD §7.7)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-8.1 | Manual gains an "MCP Server" section: install/enable, client configs (Claude Code + generic), full tool catalog, worked analyze→group→steer→relabel example | BR-7.1 | Planned |
-| FR-8.2 | API reference documents the grouping + approvals endpoints; Core Workflow documents the Feature Groups view | BR-7.2 | Planned |
+| FR-8.1 | Manual gains an "MCP Server" section: install/enable, client configs (Claude Code + generic), full tool catalog, worked analyze→group→steer→relabel example | BR-7.1 | Implemented |
+| FR-8.2 | API reference documents the grouping + approvals endpoints; Core Workflow documents the Feature Groups view | BR-7.2 | Implemented |
 
 ### 3.8 Frontend Feature Groups View (BRD §7.8)
 | Requirement | Description | BRD | Status |
 |-------------|-------------|-----|--------|
-| FR-7.1 | Feature Groups view consuming the grouping endpoints; groups by top activating token with context subgroups | BR-8.1 | Planned |
-| FR-7.2 | Same query dimensions as the API: token search, seed-feature related lookup, filters (label presence, category, star/favorite) | BR-8.2 | Planned |
-| FR-7.3 | Group rows show shared token(s) + cohesion; member rows show ID/index, label, context snippet; member click → feature detail | BR-8.3 | Planned |
-| FR-7.4 | "Steer selected" hand-off pre-populates the Steering panel with selected members | BR-8.4 | Planned |
-| FR-7.5 | Precompute job surfaced with standard start/progress/completion UI (WebSocket + polling fallback) | BR-8.5 | Planned |
-| FR-7.6 | UI and MCP consume the same records/queries — no agent-only or UI-only results | BR-8.6 | Planned |
+| FR-7.1 | Feature Groups view consuming the grouping endpoints; groups by top activating token with context subgroups | BR-8.1 | Implemented |
+| FR-7.2 | Same query dimensions as the API: token search, seed-feature related lookup, filters (label presence, category, star/favorite) | BR-8.2 | Implemented |
+| FR-7.3 | Group rows show shared token(s) + cohesion; member rows show ID/index, label, context snippet; member click → feature detail | BR-8.3 | Implemented |
+| FR-7.4 | "Steer selected" hand-off pre-populates the Steering panel with selected members | BR-8.4 | Implemented |
+| FR-7.5 | Precompute job surfaced with standard start/progress/completion UI (WebSocket + polling fallback) | BR-8.5 | Implemented |
+| FR-7.6 | UI and MCP consume the same records/queries — no agent-only or UI-only results | BR-8.6 | Implemented |
 
 ---
 

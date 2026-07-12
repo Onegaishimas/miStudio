@@ -2958,7 +2958,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 **Date:** 2026-07-12
 
-**Context:** BRD-MIS-MCP-001 requires agentic AI clients (Claude Code, Codex, any MCP client) to operate miStudio's post-extraction workflow — feature analysis, cross-feature grouping, steering validation, and label write-back — without custom HTTP scripting. The REST API is complete but organized around single resources: there is no cross-feature query primitive ("all features whose top activating token is X, grouped by context similarity"), and no component of the stack has ever required request authentication. Feature status: **Planned** (document chain 010 authored 2026-07-12; implementation not started).
+**Context:** BRD-MIS-MCP-001 requires agentic AI clients (Claude Code, Codex, any MCP client) to operate miStudio's post-extraction workflow — feature analysis, cross-feature grouping, steering validation, and label write-back — without custom HTTP scripting. The REST API is complete but organized around single resources: there is no cross-feature query primitive ("all features whose top activating token is X, grouped by context similarity"), and no component of the stack has ever required request authentication. Feature status: **Implemented** (document chain authored and implementation completed 2026-07-12).
 
 **Decision:**
 1. **Separate MCP server process**, not an in-backend mount: a new `mcp-server` container reusing the `hitsai/mistudio-backend` image with command `python -m src.mcp_server`. Code lives in `backend/src/mcp_server/` (`server.py`, `client.py`, `config.py`, `tools/` — one module per tool category).
