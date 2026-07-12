@@ -55,6 +55,7 @@ const sidebars: SidebarsConfig = {
         'advanced/exporting',
         'advanced/multi-dataset',
         'advanced/mcp-server',
+        'advanced/mcp-agent-instructions',
         'advanced/settings-reference',
       ],
     },

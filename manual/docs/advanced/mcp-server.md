@@ -41,6 +41,10 @@ claude mcp add --transport http mistudio http://<host>:8765/mcp \
 
 **Any MCP client:** streamable-HTTP transport, URL `http://<host>:8765/mcp`, header `Authorization: Bearer <token>`. A stdio mode exists for local development: `python -m src.mcp_server --stdio` (inside the backend container/venv).
 
+:::tip Give your agent the operating manual
+After connecting, paste the [**MCP Agent Instructions**](/advanced/mcp-agent-instructions) into the agent's context (or tell it to fetch that page). It covers the tool catalog semantics, the analyze→group→steer→relabel recipes, guardrail reactions, and the evidence-notes convention — agents perform dramatically better with it.
+:::
+
 ## Configuration
 
 | Env variable | Default | Purpose |
