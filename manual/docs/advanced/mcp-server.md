@@ -22,7 +22,7 @@ echo "MCP_AUTH_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose --profile mcp up -d
 ```
 
-**Kubernetes:** add `mcp-auth-token` to the `mistudio-secrets` Secret and apply the `mistudio-mcp` Deployment/Service included in `k8s/mistudio-deployment.yaml`. The Service is ClusterIP-only — no Ingress is shipped; expose it deliberately (e.g. `kubectl port-forward svc/mistudio-mcp 8765:8765`).
+**Kubernetes:** add `mcp-auth-token` to the `mistudio-secrets` Secret and apply the `mistudio-mcp` Deployment/Service/Ingress included in `k8s/mistudio-deployment.yaml`. The shipped Ingress routes `path /mcp` on the **LAN host only** (e.g. `http://k8s-mistudio.hitsai.local/mcp`), with streaming-friendly nginx annotations (`proxy-buffering off`, 3600s read timeout). The public/Cloudflare host is deliberately excluded — add it only if you intend to expose the MCP endpoint to the internet. No Ingress at all? `kubectl port-forward svc/mistudio-mcp 8765:8765` works too.
 
 **Verify:** `curl http://<host>:8765/health` returns the enabled tool categories.
 
@@ -35,7 +35,12 @@ The server binds `0.0.0.0:8765` so agents on other LAN machines can connect (bea
 **Claude Code:**
 
 ```bash
+# Docker Compose (direct port):
 claude mcp add --transport http mistudio http://<host>:8765/mcp \
+  --header "Authorization: Bearer $MCP_AUTH_TOKEN"
+
+# Kubernetes (via the shipped ingress):
+claude mcp add --transport http mistudio http://k8s-mistudio.hitsai.local/mcp \
   --header "Authorization: Bearer $MCP_AUTH_TOKEN"
 ```
 

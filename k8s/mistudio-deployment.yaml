@@ -363,6 +363,35 @@ spec:
     app: mistudio-mcp
   ports:
     - port: 8765
+---
+# MCP ingress — LAN host ONLY by design. Do not add the public (.net /
+# Cloudflare) host without deciding to expose the MCP endpoint to the
+# internet; bearer auth applies either way.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mistudio-mcp-ingress
+  namespace: mistudio
+  annotations:
+    # MCP streamable HTTP: long-lived responses + SSE streams
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: public
+  rules:
+    - host: k8s-mistudio.hitsai.local
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-mcp
+                port:
+                  number: 8765
 
 # -------------------------
 # FRONTEND
