@@ -182,3 +182,50 @@ class TestBearerMiddleware:
             return await app_client.get("/health")
 
         assert anyio.run(call).status_code == 200
+
+
+class TestSteeringSlotRelease:
+    """Regression: in-flight slots must release on the backend's real terminal
+    states (nested status.status of success/failure/revoked), not the
+    non-existent flat 'completed' — the old check leaked slots until the
+    concurrency guardrail locked out all steering (2026-07-14)."""
+
+    def _run_tool(self, mcp, name, args):
+        import anyio
+
+        async def call():
+            return await mcp.call_tool(name, args)
+
+        return anyio.run(call)
+
+    def test_terminal_poll_releases_slot(self):
+        from unittest.mock import AsyncMock, patch
+        from src.mcp_server import tools
+        from src.mcp_server.tools import steering as steering_tools
+        from src.mcp_server.server import build_server
+
+        mcp, client = build_server(make_settings(tool_categories="steering"))
+        steering_tools._inflight.clear()
+        steering_tools._inflight.add("task-x")
+        with patch.object(
+            client, "get",
+            AsyncMock(return_value={"task_id": "task-x", "status": {"status": "success"}, "result": {}}),
+        ):
+            self._run_tool(mcp, "get_steering_result", {"task_id": "task-x"})
+        assert "task-x" not in steering_tools._inflight
+
+    def test_non_terminal_poll_keeps_slot(self):
+        from unittest.mock import AsyncMock, patch
+        from src.mcp_server.tools import steering as steering_tools
+        from src.mcp_server.server import build_server
+
+        mcp, client = build_server(make_settings(tool_categories="steering"))
+        steering_tools._inflight.clear()
+        steering_tools._inflight.add("task-y")
+        with patch.object(
+            client, "get",
+            AsyncMock(return_value={"task_id": "task-y", "status": {"status": "started"}, "result": None}),
+        ):
+            self._run_tool(mcp, "get_steering_result", {"task_id": "task-y"})
+        assert "task-y" in steering_tools._inflight
+        steering_tools._inflight.clear()

@@ -162,7 +162,11 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         """Poll an async steering task. Returns status and, when completed, the
         generated outputs and metrics."""
         result = await client.get(f"/steering/async/result/{task_id}")
-        if result.get("status") in ("completed", "failed", "cancelled"):
+        # status is nested and terminal states are success/failure/revoked
+        # (matching the backend's status_map) — releasing on the wrong key
+        # leaked concurrency slots until the guardrail wedged (2026-07-14).
+        state = (result.get("status") or {}).get("status") if isinstance(result.get("status"), dict) else result.get("status")
+        if state in ("success", "failure", "revoked"):
             _inflight.discard(task_id)
         return result
 
