@@ -127,3 +127,32 @@ export function cleanToken(token: string): string {
   }
   return token;
 }
+
+/**
+ * Clean tokenizer artifacts out of an arbitrary display string.
+ *
+ * Handles the leading sub-word markers across tokenizer families —
+ * 'Ġ' (GPT-2 BPE), '▁' (SentencePiece), and '##' (WordPiece continuations) —
+ * turning marker-boundaried text into ordinary spaced words. Safe on plain
+ * strings (returns them unchanged).
+ *
+ * Examples:
+ * - "Ġhave Ġmore Ġnews letters" → "have more news letters"
+ * - "▁fear"                     → "fear"
+ * - "Ġprefix *Ġfear* Ġsuffix"   → "prefix *fear* suffix"  (keeps emphasis markers)
+ */
+export function cleanDisplayText(text: string | null | undefined): string {
+  if (!text) {
+    return '';
+  }
+  return text
+    .replace(/Ġ/g, ' ') // GPT-2 word boundary → space
+    .replace(/▁/g, ' ') // SentencePiece word boundary → space
+    .replace(/##/g, '') // WordPiece continuation marker
+    .replace(/\s+/g, ' ') // collapse the spaces the markers introduced
+    // An opening '*emphasis' whose token carried a marker becomes '* word' —
+    // drop that inner space. Only opening markers (start-of-string or after a
+    // space) match, so the space after a closing '*' is preserved.
+    .replace(/(^|\s)\* /g, '$1*')
+    .trim();
+}

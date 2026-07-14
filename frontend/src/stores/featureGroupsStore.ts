@@ -60,6 +60,7 @@ interface FeatureGroupsState {
   fetchRelated: (featureId: string) => Promise<void>;
   clearRelated: () => void;
   toggleSelect: (featureId: string, neuronIndex: number) => void;
+  setSelected: (members: Array<{ feature_id: string; neuron_index: number }>, selected: boolean) => void;
   clearSelection: () => void;
 
   handleProgressEvent: (progress: number, stage: string) => void;
@@ -216,6 +217,17 @@ export const useFeatureGroupsStore = create<FeatureGroupsState>((set, get) => ({
       const selection = new Map(state.selection);
       if (selection.has(featureId)) selection.delete(featureId);
       else selection.set(featureId, neuronIndex);
+      return { selection };
+    });
+  },
+
+  setSelected: (members, selected) => {
+    set((state) => {
+      const selection = new Map(state.selection);
+      for (const m of members) {
+        if (selected) selection.set(m.feature_id, m.neuron_index);
+        else selection.delete(m.feature_id);
+      }
       return { selection };
     });
   },

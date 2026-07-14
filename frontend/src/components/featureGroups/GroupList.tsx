@@ -4,6 +4,7 @@
 
 import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { useFeatureGroupsStore } from '../../stores/featureGroupsStore';
+import { cleanDisplayText } from '../../utils/tokenDisplay';
 import { GroupMembersTable } from './GroupMembersTable';
 
 interface GroupListProps {
@@ -88,7 +89,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
                   <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
                 )}
                 <span className="font-mono text-emerald-400 text-sm">
-                  "{group.display_token}"
+                  "{cleanDisplayText(group.display_token)}"
                 </span>
                 <span className="text-xs text-slate-500">
                   {group.member_count} members · cohesion {group.cohesion.toFixed(2)}

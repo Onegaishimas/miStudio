@@ -3,8 +3,10 @@
  * click-through to feature detail, related-features lookup.
  */
 
+import { useEffect, useRef } from 'react';
 import { Link2, Star } from 'lucide-react';
 import { useFeatureGroupsStore } from '../../stores/featureGroupsStore';
+import { cleanDisplayText } from '../../utils/tokenDisplay';
 import type { FeatureGroupMember } from '../../types/featureGroups';
 
 interface GroupMembersTableProps {
@@ -18,7 +20,20 @@ const STAR_COLORS: Record<string, string> = {
 };
 
 export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
-  const { groupDetail, selection, toggleSelect, fetchRelated } = useFeatureGroupsStore();
+  const { groupDetail, selection, toggleSelect, setSelected, fetchRelated } =
+    useFeatureGroupsStore();
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  const selectedCount = groupDetail
+    ? groupDetail.members.filter((m) => selection.has(m.feature_id)).length
+    : 0;
+  const allSelected = groupDetail ? selectedCount === groupDetail.members.length : false;
+  const someSelected = selectedCount > 0 && !allSelected;
+
+  // Native indeterminate state can only be set imperatively.
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
+  }, [someSelected]);
 
   if (!groupDetail) {
     return <div className="text-xs text-slate-500 py-3 pl-8">Loading members…</div>;
@@ -29,7 +44,17 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-xs text-slate-500 text-left">
-            <th className="w-8"></th>
+            <th className="w-8">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => setSelected(groupDetail.members, !allSelected)}
+                className="accent-emerald-500"
+                aria-label={allSelected ? 'Deselect all members' : 'Select all members'}
+                title={allSelected ? 'Select none' : 'Select all'}
+              />
+            </th>
             <th className="py-1 pr-3 w-16">#</th>
             <th className="py-1 pr-3">Label</th>
             <th className="py-1 pr-3 hidden lg:table-cell">Context</th>
@@ -71,8 +96,8 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                 </button>
               </td>
               <td className="py-1.5 pr-3 hidden lg:table-cell">
-                <span className="text-xs text-slate-500 font-mono">
-                  {member.context_snippet}
+                <span className="text-xs text-slate-500">
+                  {cleanDisplayText(member.context_snippet)}
                 </span>
               </td>
               <td className="py-1.5 pr-3 text-right text-xs text-slate-400">
