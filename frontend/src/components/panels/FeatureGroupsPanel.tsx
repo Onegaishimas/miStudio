@@ -90,58 +90,61 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Boxes className="w-5 h-5 text-emerald-400" />
-          <h1 className="text-lg font-semibold text-slate-100">Feature Groups</h1>
-        </div>
-        {selection.size > 0 && (
-          <button
-            onClick={() => void handleSteerSelected()}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-md"
-          >
-            <Sliders className="w-4 h-4" />
-            Steer selected ({selection.size})
-          </button>
-        )}
-      </div>
-
-      <p className="text-sm text-slate-500 mb-4">
-        Groups of features that fire on the same top activating token with similar surrounding
-        context — candidate concept clusters. Select members and hand them to Steering to
-        validate a group's hypothesized meaning.
-      </p>
-
-      <div className="mb-4">
-        <label className="text-xs text-slate-500 block mb-1">Extraction</label>
-        <select
-          value={extractionId ?? ''}
-          onChange={(e) => setExtraction(e.target.value || null)}
-          className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 w-full max-w-xl"
-        >
-          <option value="">Select a completed extraction…</option>
-          {completedExtractions.map((extraction) => (
-            <option key={extraction.id} value={extraction.id}>
-              {extraction.sae_name || extraction.id}
-              {extraction.model_name ? ` — ${extraction.model_name}` : ''}
-              {extraction.layer_index != null ? ` (L${extraction.layer_index})` : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {(handoffError || error) && (
-        <p className="text-xs text-red-400 mb-3">{handoffError || error}</p>
-      )}
-
-      {extractionId && (
-        <>
-          <ComputeIndexBanner />
-          {status?.status === 'completed' && (
-            <GroupList onOpenFeature={setDetailFeatureId} />
+    // Fill the viewport below the sticky app header (h-14) so the group list
+    // can scroll independently of the pinned heading matter.
+    <div className="h-[calc(100vh-3.5rem)] flex flex-col max-w-6xl mx-auto px-6 pt-6">
+      {/* ── Pinned header matter ── */}
+      <div className="shrink-0">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Boxes className="w-5 h-5 text-emerald-400" />
+            <h1 className="text-lg font-semibold text-slate-100">Feature Groups</h1>
+          </div>
+          {selection.size > 0 && (
+            <button
+              onClick={() => void handleSteerSelected()}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-md"
+            >
+              <Sliders className="w-4 h-4" />
+              Steer selected ({selection.size})
+            </button>
           )}
-        </>
+        </div>
+
+        <p className="text-sm text-slate-500 mb-4">
+          Groups of features that fire on the same top activating token with similar surrounding
+          context — candidate concept clusters. Select members and hand them to Steering to
+          validate a group's hypothesized meaning.
+        </p>
+
+        <div className="mb-4">
+          <label className="text-xs text-slate-500 block mb-1">Extraction</label>
+          <select
+            value={extractionId ?? ''}
+            onChange={(e) => setExtraction(e.target.value || null)}
+            className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 w-full max-w-xl"
+          >
+            <option value="">Select a completed extraction…</option>
+            {completedExtractions.map((extraction) => (
+              <option key={extraction.id} value={extraction.id}>
+                {extraction.sae_name || extraction.id}
+                {extraction.model_name ? ` — ${extraction.model_name}` : ''}
+                {extraction.layer_index != null ? ` (L${extraction.layer_index})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {(handoffError || error) && (
+          <p className="text-xs text-red-400 mb-3">{handoffError || error}</p>
+        )}
+
+        {extractionId && <ComputeIndexBanner />}
+      </div>
+
+      {/* ── Independently scrolling group list ── */}
+      {extractionId && status?.status === 'completed' && (
+        <GroupList onOpenFeature={setDetailFeatureId} />
       )}
       {!extractionId && completedExtractions.length === 0 && (
         <div className="text-sm text-slate-500 bg-slate-900 border border-slate-800 rounded-lg p-6 text-center">

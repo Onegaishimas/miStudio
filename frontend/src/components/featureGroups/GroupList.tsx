@@ -25,8 +25,8 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
   } = useFeatureGroupsStore();
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-3 mb-3">
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex flex-wrap items-center gap-3 mb-3 shrink-0">
         <div className="relative">
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
@@ -65,6 +65,8 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
         </span>
       </div>
 
+      {/* Only this region scrolls; the filter bar above stays pinned. */}
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-2">
       {isLoading && groups.length === 0 && (
         <p className="text-sm text-slate-500 py-6 text-center">Loading groups…</p>
       )}
@@ -127,6 +129,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
           </button>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }
