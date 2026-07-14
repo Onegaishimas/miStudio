@@ -16,6 +16,8 @@ The [Monitor page](/getting-started/dashboard) discovers all CUDA devices and st
 
 Under the hood, each GPU has its own WebSocket channel (`system/gpu/{id}` — see the [WebSocket reference](/reference/websocket-channels)), and the REST API exposes `gpu-list`, `gpu-metrics`, `gpu-info`, and `gpu-processes` endpoints for scripting.
 
+![Monitor page — live system resources alongside per-GPU utilization, memory, temperature, power, and device info](/img/miStudio_Monitor_Panel-Resources.jpg)
+
 ### Extraction GPU routing
 
 Activation extraction jobs accept a **`gpu_id`** — select which device runs the model forward passes. This lets you keep GPU 0 free for interactive steering while a long extraction saturates GPU 1. Each job validates the index against the discovered device list and cleans up its own device memory when finished.

@@ -10,6 +10,8 @@ A single SAE extraction can produce tens of thousands of features, and related c
 
 The same capability powers the [MCP server's](/advanced/mcp-server) grouping tools — the UI and agents query identical endpoints, so there is exactly one view of the data.
 
+![Feature Groups panel — grouped by top activating token, sorted by cohesion](/img/miStudio_FeatureGroups_Panel-Browse.jpg)
+
 ## Building the Index
 
 1. Open **Feature Groups** in the sidebar and pick a completed extraction
@@ -32,7 +34,9 @@ Each group row shows its shared token, member count, and a **cohesion** score (m
 
 Click any member to open the standard Feature Detail modal. The **link icon** finds features related to that member across the whole extraction — via shared tokens, context overlap, or correlation analysis.
 
-Search by token, filter by minimum group size, and sort by size/cohesion/token.
+![Expanded group showing member features, cleaned context snippets, and the select-all checkbox](/img/miStudio_FeatureGroups_Panel-ExpandedGroup.jpg)
+
+The checkbox in the header row selects or deselects every member at once; individual rows can be toggled too. Search by token, filter by minimum group size, and sort by size/cohesion/token.
 
 ## Validating a Group with Steering
 
