@@ -1,0 +1,212 @@
+# -------------------------
+# BACKEND + CELERY (GPU POD)
+# -------------------------
+# Image tag/digest managed by ArgoCD Image Updater (kustomize images transform
+# + .argocd-source-mistudio.yaml pin file); do not hand-edit tags here.
+# The single hitsai/mistudio-backend entry in kustomization.yaml rewrites all
+# three containers below (api / celery-worker / celery-beat) plus mistudio-mcp.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mistudio-backend
+  namespace: mistudio
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Required for GPU workloads - terminate old pod before starting new
+  selector:
+    matchLabels:
+      app: mistudio-backend
+  template:
+    metadata:
+      labels:
+        app: mistudio-backend
+    spec:
+      # nodeSelector: Pin to a specific node if your cluster requires it.
+      # Replace the hostname with your node's name, or remove this section
+      # for default scheduling.
+      # nodeSelector:
+      #   kubernetes.io/hostname: your-gpu-node-hostname
+
+      # hostAliases: Required if your cluster nodes cannot resolve the ingress
+      # hostname via DNS. Set the IP to your ingress controller's external IP
+      # and the hostname to match your ingress rule.
+      # hostAliases:
+      #   - ip: "YOUR_INGRESS_IP"
+      #     hostnames:
+      #       - "k8s-mistudio.your-domain.local"
+
+      # Migrations run automatically via docker-entrypoint.sh for SERVICE_TYPE=api
+      # The entrypoint handles: wait-for-db, alembic upgrade head, fail-on-error
+      containers:
+        - name: backend
+          image: hitsai/mistudio-backend:latest
+          ports:
+            - containerPort: 8000
+          # Liveness catches event-loop freezes (2026-07 incident: a blocking
+          # call wedged asyncio for 37 min with the pod "Running") — restart
+          # within ~60s instead of an indefinite outage. startupProbe covers
+          # migrations at boot so liveness can stay tight.
+          startupProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 30   # up to 5 min for migrations/model warmup
+          livenessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4    # ~60s of unresponsiveness → restart
+          readinessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: SERVICE_TYPE
+              value: api
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
+            - name: DATABASE_URL_SYNC
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://redis:6379/0
+            - name: CELERY_RESULT_BACKEND
+              value: redis://redis:6379/0
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
+            # Deployment portability env vars
+            - name: DATA_DIR
+              value: /data
+            - name: BACKEND_DIR
+              value: /app
+            - name: INTERNAL_API_URL
+              value: http://mistudio-backend:8000
+            - name: OLLAMA_URL
+              value: http://ollama-proxy:11434
+            # Neuronpedia local instance configuration (optional - remove if not using Neuronpedia)
+            # - name: NEURONPEDIA_LOCAL_DB_URL
+            #   value: postgresql://neuronpedia:YOUR_NEURONPEDIA_PASSWORD@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
+            # - name: NEURONPEDIA_LOCAL_URL
+            #   value: http://your-neuronpedia-host.local
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: mistudio-data
+              mountPath: /data
+
+        - name: celery-worker
+          image: hitsai/mistudio-backend:latest
+          env:
+            - name: SERVICE_TYPE
+              value: celery-worker
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
+            - name: DATABASE_URL_SYNC
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://redis:6379/0
+            - name: CELERY_RESULT_BACKEND
+              value: redis://redis:6379/0
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
+            # Deployment portability env vars
+            - name: DATA_DIR
+              value: /data
+            - name: BACKEND_DIR
+              value: /app
+            - name: INTERNAL_API_URL
+              value: http://mistudio-backend:8000
+            - name: OLLAMA_URL
+              value: http://ollama-proxy:11434
+            # Neuronpedia local instance configuration (optional - remove if not using Neuronpedia)
+            # - name: NEURONPEDIA_LOCAL_DB_URL
+            #   value: postgresql://neuronpedia:YOUR_NEURONPEDIA_PASSWORD@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
+            # - name: NEURONPEDIA_LOCAL_URL
+            #   value: http://your-neuronpedia-host.local
+          volumeMounts:
+            - name: mistudio-data
+              mountPath: /data
+
+        - name: celery-beat
+          image: hitsai/mistudio-backend:latest
+          env:
+            - name: SERVICE_TYPE
+              value: celery-beat
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
+            - name: DATABASE_URL_SYNC
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://redis:6379/0
+            - name: CELERY_RESULT_BACKEND
+              value: redis://redis:6379/0
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
+            # Deployment portability env vars
+            - name: DATA_DIR
+              value: /data
+            - name: BACKEND_DIR
+              value: /app
+            - name: INTERNAL_API_URL
+              value: http://mistudio-backend:8000
+            - name: OLLAMA_URL
+              value: http://ollama-proxy:11434
+          volumeMounts:
+            - name: mistudio-data
+              mountPath: /data
+      volumes:
+        - name: mistudio-data
+          hostPath:
+            path: /data/mistudio/data
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mistudio-backend
+  namespace: mistudio
+spec:
+  selector:
+    app: mistudio-backend
+  ports:
+    - port: 8000
