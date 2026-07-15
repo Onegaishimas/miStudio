@@ -107,6 +107,11 @@ comparison-results rendering paths already exist and are unchanged.
   - `CombinedSteeringRequest.selected_features`: `max_length=4 → 20`.
   - `SteeringComparisonRequest.selected_features`: `max_length=4 → 20`.
   - Remove/relax `validate_selected_features` unique-color check (drop the validator; colors are cosmetic).
+  - Widen `SelectedFeature.color` from the 4-value `Literal["teal","blue","purple","amber"]` to the full
+    20-name palette Literal (original 4 first, for continuity). **Discovered during implementation:** without
+    this, features 5–20 would 422 on the color field even after the max_length lift, since the UI assigns the
+    new palette names. Kept as a Literal (not `str`) so the accepted set stays documented and in lock-step
+    with the frontend `FeatureColor` union.
 - `backend/src/schemas/sae.py`: `SAEFeatureSummary` += `activation_frequency: float | None = None`.
 - `backend/src/api/v1/endpoints/saes.py` `browse_sae_features`: populate `activation_frequency=f.activation_frequency`.
 
