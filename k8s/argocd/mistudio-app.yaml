@@ -87,6 +87,14 @@ spec:
       # once adoption of the pre-existing resources is proven stable.
     syncOptions:
       - ServerSideApply=true
+      # Replace=true is needed for the FIRST sync only: the pre-existing pods
+      # carry secret-backed env vars as literal `value:`, but this base uses
+      # `valueFrom: secretKeyRef` (mistudio-secrets). A server-side-apply merge
+      # can't clear the old `value:` field, so it must replace the Deployment
+      # once to rebuild the env block. Values are identical (mistudio-secrets
+      # was seeded from the live pods), so the pods return unchanged. Safe to
+      # remove after the first successful sync.
+      - Replace=true
   ignoreDifferences:
     # Tolerate kubectl rollout restart / set env during incident response
     # without a self-heal fight over the restartedAt annotation.
