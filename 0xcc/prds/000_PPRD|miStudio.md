@@ -1,7 +1,7 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.3 (MCP Server & Cross-Feature Grouping — implemented)
+**Version:** 3.4 (Steering UX Enhancements — planned)
 **Last Updated:** 2026-07-12
 **Status:** Active
 
@@ -74,6 +74,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 9 | Settings & Configuration | Encrypted API keys, endpoints, labeling defaults | Complete |
 | 10 | Multi-GPU Scalability | Per-GPU monitoring, job routing, aggregated/per-GPU views | Partially Complete (DDP training planned) |
 | 11 | MCP Server & Feature Groups | MCP tools for agentic analysis/steering + cross-feature grouping (API/UI) | Complete |
+| 12 | Steering UX Enhancements | Blended/Compare toggle, up to 20 features, frequency-based auto-baseline strength, compact tiles | Planned |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -467,6 +468,26 @@ The highest-quality labeling path. Two-pass strategy:
 
 ---
 
+### 3.12 Steering UX Enhancements (Planned)
+
+**Purpose:** Bring empirically-validated steering capabilities (from this session's MCP experiments,
+experiment `c4a273f1`) into the Steering UI — blended multi-feature steering at scale, frequency-derived
+starting strengths, and a usable layout for many features.
+
+**Capabilities:**
+- **Blended vs Compare toggle** — Blended sums all selected features in one pass (`/steering/async/combined`); Compare steers each separately (`/steering/async/compare`)
+- **Up to 20 features** selectable (was 4) — backend already blends N features; 4 was a UI/schema limit
+- **Auto-baseline strength** from activation frequency: `S = clamp(2.9 − 2.6·freq, 1.0, 3.0)`, with a default-10 fallback and an auto/default badge; `max_activation` shown for context but not used (unit-norm decoder)
+- **Compact selected-feature tiles** (~half height) retaining every control, and a 20-entry color palette
+- Feature Groups → Steering hand-off preserves per-member stats so baselines auto-compute
+
+**Key Files (planned):**
+- Backend: `schemas/steering.py` (max_length 4→20, drop compare color validator), `schemas/sae.py` + `saes.py` (activation_frequency)
+- Frontend: `utils/steeringStrength.ts`, `types/steering.ts` (palette + fields), `SelectedFeatureCard.tsx`, `SteeringPanel.tsx`, `steeringStore.ts`, `featureGroupsStore.ts`
+- Docs: `011_FPRD|Steering_UX.md` → FTDD → FTID → FTASKS
+
+---
+
 ## 4. Technology Stack
 
 ### 4.1 Backend
@@ -671,6 +692,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 3.1 | 2026-05-09 | Settings panel PIN protection (PBKDF2-SHA256 gate + env-var bypass); multi-GPU doc corrections (Phases 1 & 2 retrospectively marked complete) |
 | 3.2 | 2026-07-12 | Added Feature 11: MCP Server & Cross-Feature Grouping (Planned, from BRD-MIS-MCP-001) — §3.11, document chain 010_FPRD/FTDD/FTID/FTASKS |
 | 3.3 | 2026-07-12 | Feature 11 implemented: MCP server (33 tools, bearer auth, approval mode), cross-feature grouping (index + REST + Feature Groups UI), mcp_agent provenance, deployment (compose profile + k8s) |
+| 3.4 | 2026-07-15 | Added Feature 12: Steering UX Enhancements (Planned) — §3.12, doc chain 011_FPRD/FTDD/FTID/FTASKS |
 
 ---
 
