@@ -1,7 +1,9 @@
 # Plan: Adopt miLLM-style CI/CD for miStudio (selective rebuilds + ArgoCD Image Updater)
 
-**Status:** IN EXECUTION (2026-07-15). User approved the recommended = matches-miLLM options. Manifests
-authored by 3 parallel agents, cross-consistency-verified, and reconciled against the live cluster.
+**Status:** ✅ COMPLETE & LIVE (2026-07-15). User approved the recommended = matches-miLLM options. Manifests
+authored by 3 parallel agents, cross-consistency-verified, reconciled against the live cluster, and cut over.
+ArgoCD Application `mistudio` is Synced+Healthy; Image Updater has pinned the current digests to
+`gitops/pilot`; the deployed backend runs the pinned digest. Operational runbook: `CICD-Runbook.md`.
 
 **Decisions locked (all "same as miLLM"):**
 1. ArgoCD manifest source = **the private source repo `Onegaishimas/miStudio`** @ `gitops/pilot`, path `k8s/base`
