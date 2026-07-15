@@ -234,6 +234,46 @@ function createCombinedResolver(
   });
 }
 
+/**
+ * Adapt a CombinedSteeringResponse into a single-variation
+ * SteeringComparisonResponse so the existing batch-results UI can render a
+ * blended output without special-casing. The one "steered" entry is the summed
+ * (blended) generation; unsteered is the baseline when present.
+ */
+function combinedToComparison(
+  c: CombinedSteeringResponse,
+): SteeringComparisonResponse {
+  const blendedLabel =
+    c.features_applied.length === 1
+      ? c.features_applied[0].label || `Feature ${c.features_applied[0].feature_idx}`
+      : `Blended (${c.features_applied.length} features)`;
+  return {
+    comparison_id: c.combined_id,
+    sae_id: c.sae_id,
+    model_id: c.model_id,
+    prompt: c.prompt,
+    unsteered: c.baseline_output != null
+      ? { text: c.baseline_output, metrics: c.baseline_metrics }
+      : null,
+    steered: [
+      {
+        text: c.combined_output,
+        // Synthetic feature_config representing the whole blend; carries the
+        // first feature's identity plus a descriptive label.
+        feature_config: {
+          ...(c.features_applied[0] as unknown as SelectedFeature),
+          label: blendedLabel,
+        },
+        metrics: c.combined_metrics,
+      },
+    ],
+    steered_multi: null,
+    metrics_summary: null,
+    total_time_ms: c.total_time_ms,
+    created_at: c.created_at,
+  };
+}
+
 interface SteeringState {
   // Selected SAE
   selectedSAE: SAE | null;
@@ -913,8 +953,12 @@ export const useSteeringStore = create<SteeringState>()(
           return;
         }
 
-        // If in combined mode with a pending resolver for this task, resolve it
-        if (isCombinedGenerating && pendingCombinedResolver && pendingCombinedResolver.taskId === taskId && isCombinedResult) {
+        // Resolve a pending combined resolver whenever this task produced a
+        // combined result. The pending resolver + matching taskId are the
+        // correct guard: this covers single-prompt Blended (isCombinedGenerating)
+        // AND batch Blended (where the batch loop, not isCombinedGenerating, owns
+        // the combined resolver per prompt).
+        if (pendingCombinedResolver && pendingCombinedResolver.taskId === taskId && isCombinedResult) {
           console.log(`[SteeringStore] Resolving combined promise for task ${taskId}`);
           const resolver = pendingCombinedResolver;
           cleanupCombinedResolver();
@@ -962,7 +1006,7 @@ export const useSteeringStore = create<SteeringState>()(
       // This handles comparison, sweep, and combined failures
       handleAsyncFailed: (error: string) => {
         console.log('[SteeringStore] Async failed:', error);
-        const { batchState, taskId, isSweeping, isCombinedGenerating } = get();
+        const { batchState, taskId, isSweeping } = get();
 
         // If in sweep mode with a pending resolver for this task, reject it
         if (isSweeping && pendingSweepResolver && pendingSweepResolver.taskId === taskId) {
@@ -973,8 +1017,9 @@ export const useSteeringStore = create<SteeringState>()(
           return;
         }
 
-        // If in combined mode with a pending resolver for this task, reject it
-        if (isCombinedGenerating && pendingCombinedResolver && pendingCombinedResolver.taskId === taskId) {
+        // Reject a pending combined resolver for this task (covers single-prompt
+        // Blended and batch Blended — see the matching resolve path).
+        if (pendingCombinedResolver && pendingCombinedResolver.taskId === taskId) {
           console.log(`[SteeringStore] Rejecting combined promise for task ${taskId}:`, error);
           const resolver = pendingCombinedResolver;
           cleanupCombinedResolver();
@@ -1001,9 +1046,11 @@ export const useSteeringStore = create<SteeringState>()(
         });
       },
 
-      // Generate batch comparison (iterates through all prompts)
+      // Generate batch comparison (iterates through all prompts).
+      // Honors combinedMode: Blended runs the summed (combined) generation per
+      // prompt; Compare runs the per-feature comparison per prompt.
       generateBatchComparison: async (includeUnsteered = true, computeMetrics = false) => {
-        const { selectedSAE, selectedFeatures, prompts, generationParams, advancedParams, isGenerating, batchState } = get();
+        const { selectedSAE, selectedFeatures, prompts, generationParams, advancedParams, isGenerating, batchState, combinedMode } = get();
 
         // Guard against double submission
         if (isGenerating || batchState?.isRunning) {
@@ -1082,44 +1129,73 @@ export const useSteeringStore = create<SteeringState>()(
           }));
 
           try {
-            const request: SteeringComparisonRequest = {
-              sae_id: selectedSAE.id,
-              prompt,
-              selected_features: selectedFeatures,
-              generation_params: generationParams,
-              include_unsteered: includeUnsteered,
-              compute_metrics: computeMetrics,
-            };
-
-            if (advancedParams) {
-              request.advanced_params = advancedParams;
-            }
-
-            // Submit async task to Celery worker
-            const taskResponse = await steeringApi.submitAsyncComparison(request);
-            console.log(`[SteeringStore] Batch prompt ${i + 1}: async task submitted:`, taskResponse.task_id);
-
-            // Store the task ID for this batch item - this triggers WebSocket subscription
-            set({ taskId: taskResponse.task_id });
-
-            // Brief delay to ensure React re-renders and WebSocket hook subscribes
-            // The hook watches taskId and subscribes when it changes
-            await new Promise(resolve => setTimeout(resolve, 50));
-
-            // Create a promise that will be resolved by WebSocket events
-            // handleAsyncCompleted/handleAsyncFailed will resolve/reject this
-            // Includes automatic timeout cleanup to prevent memory leaks
             const PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
-            console.log(`[SteeringStore] Batch prompt ${i + 1}: creating resolver for task ${taskResponse.task_id}`);
-            const response = await createBatchResolver(
-              taskResponse.task_id,
-              PROMPT_TIMEOUT_MS,
-              () => {
-                // Timeout callback - cancel the Celery task
-                console.log(`[SteeringStore] Batch prompt ${i + 1}: TIMEOUT for task ${taskResponse.task_id}`);
-                steeringApi.cancelTask(taskResponse.task_id).catch(() => {});
+            // Blended per-prompt (combinedMode) vs per-feature Compare per prompt.
+            let response: SteeringComparisonResponse;
+
+            if (combinedMode) {
+              const combinedRequest: CombinedSteeringRequest = {
+                sae_id: selectedSAE.id,
+                prompt,
+                selected_features: selectedFeatures,
+                generation_params: generationParams,
+                advanced_params: advancedParams ?? undefined,
+                include_baseline: includeUnsteered,
+                compute_metrics: computeMetrics,
+              };
+              const taskResponse = await steeringApi.submitAsyncCombined(combinedRequest);
+              console.log(`[SteeringStore] Batch prompt ${i + 1} (blended): task`, taskResponse.task_id);
+              set({ taskId: taskResponse.task_id });
+              await new Promise((resolve) => setTimeout(resolve, 50));
+              const combined = await createCombinedResolver(
+                taskResponse.task_id,
+                PROMPT_TIMEOUT_MS,
+                () => {
+                  console.log(`[SteeringStore] Batch prompt ${i + 1} (blended): TIMEOUT`);
+                  steeringApi.cancelTask(taskResponse.task_id).catch(() => {});
+                },
+              );
+              // Adapt to the comparison shape the batch UI renders.
+              response = combinedToComparison(combined);
+            } else {
+              const request: SteeringComparisonRequest = {
+                sae_id: selectedSAE.id,
+                prompt,
+                selected_features: selectedFeatures,
+                generation_params: generationParams,
+                include_unsteered: includeUnsteered,
+                compute_metrics: computeMetrics,
+              };
+
+              if (advancedParams) {
+                request.advanced_params = advancedParams;
               }
-            );
+
+              // Submit async task to Celery worker
+              const taskResponse = await steeringApi.submitAsyncComparison(request);
+              console.log(`[SteeringStore] Batch prompt ${i + 1}: async task submitted:`, taskResponse.task_id);
+
+              // Store the task ID for this batch item - this triggers WebSocket subscription
+              set({ taskId: taskResponse.task_id });
+
+              // Brief delay to ensure React re-renders and WebSocket hook subscribes
+              // The hook watches taskId and subscribes when it changes
+              await new Promise(resolve => setTimeout(resolve, 50));
+
+              // Create a promise that will be resolved by WebSocket events
+              // handleAsyncCompleted/handleAsyncFailed will resolve/reject this
+              // Includes automatic timeout cleanup to prevent memory leaks
+              console.log(`[SteeringStore] Batch prompt ${i + 1}: creating resolver for task ${taskResponse.task_id}`);
+              response = await createBatchResolver(
+                taskResponse.task_id,
+                PROMPT_TIMEOUT_MS,
+                () => {
+                  // Timeout callback - cancel the Celery task
+                  console.log(`[SteeringStore] Batch prompt ${i + 1}: TIMEOUT for task ${taskResponse.task_id}`);
+                  steeringApi.cancelTask(taskResponse.task_id).catch(() => {});
+                }
+              );
+            }
 
             console.log(`[SteeringStore] Batch prompt ${i + 1}: resolver returned, updating state`);
 
@@ -1139,8 +1215,10 @@ export const useSteeringStore = create<SteeringState>()(
             const errorMessage = error instanceof Error ? error.message : 'Failed to generate';
             console.log(`[SteeringStore] Batch prompt ${i + 1}: failed:`, errorMessage);
 
-            // Clean up the pending resolver properly (clears timeout)
+            // Clean up the pending resolver properly (clears timeout). Clear
+            // both — Blended uses the combined resolver, Compare the batch one.
             cleanupBatchResolver();
+            cleanupCombinedResolver();
 
             // Mark this prompt as failed but continue with others
             set((state) => ({
@@ -1158,9 +1236,10 @@ export const useSteeringStore = create<SteeringState>()(
           console.log(`[SteeringStore] Batch iteration ${i + 1} end, looping...`);
         }
 
-        // Batch complete - ensure resolver is cleaned up
+        // Batch complete - ensure resolvers are cleaned up (both kinds)
         console.log(`[SteeringStore] Batch loop finished, cleaning up`);
         cleanupBatchResolver();
+        cleanupCombinedResolver();
 
         set((state) => ({
           isGenerating: false,
@@ -1184,13 +1263,17 @@ export const useSteeringStore = create<SteeringState>()(
             : null,
         }));
 
-        // Reject the pending batch promise if any, with proper cleanup
+        // Reject the pending promise if any, with proper cleanup. In Compare
+        // batch this is the batch resolver; in Blended batch it's the combined
+        // resolver — reject whichever is outstanding so Stop Batch always frees
+        // the loop.
         if (pendingBatchResolver) {
           console.log('[SteeringStore] Rejecting batch promise due to abort');
           const resolver = pendingBatchResolver;
           cleanupBatchResolver();  // Clear timeout and null resolver before rejecting
           resolver.reject(new Error('Batch aborted by user'));
         }
+        cleanupCombinedResolver('Batch aborted by user');
 
         // Cancel the current Celery task if any
         if (taskId) {

@@ -183,12 +183,12 @@ export function SteeringPanel() {
   const handleGenerate = async () => {
     try {
       if (combinedMode && selectedFeatures.length >= 1 && !isBatchMode) {
-        // Blended: sum all selected features into one output (single prompt).
-        // With one feature this equals Compare, and the combined endpoint
-        // handles it fine — so honor the mode the user picked. The combined
-        // path is single-prompt only, so batch mode falls through below.
+        // Blended, single prompt: sum all features into one output. With one
+        // feature this equals Compare, and the combined endpoint handles it.
         await generateCombined(true, true);
       } else if (isBatchMode) {
+        // Batch (multiple prompts): the batch path honors combinedMode itself —
+        // Blended runs the summed generation per prompt, Compare runs per-feature.
         await generateBatchComparison(true, true);
       } else {
         await generateComparison(true, true);
