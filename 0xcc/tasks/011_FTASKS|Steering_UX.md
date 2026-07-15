@@ -115,11 +115,15 @@
 - [x] Store test (up to 20, auto-baseline, applyAutoBaseline); `steeringStrength.test.ts`; type-check + build green
 
 ### Task 5.3: Commit + push + k8s deploy
-- [ ] docs commit, then backend+frontend; CI green; `k8s_deploy`
+- [x] docs commit (53f2245), then backend+frontend (e959ce5); CI green (mirror build success); `k8s_deploy` ✅
 
 ### Task 5.4: E2E + closeout
-- [ ] Playwright: Groups → 6 members → compact tiles + auto baselines → Blended generation; screenshot to `0xcc/caps/`
-- [ ] Statuses Planned→Implemented; PPRD row 12 → Complete; CLAUDE.md log
+- [x] Playwright E2E (LAN host, headless): selected SAE, added 3 features → **Selected Features (3/20)**,
+      compact tiles with **default** badges (manual index-add has no freq), **Blended|Compare** toggle present,
+      **Auto** apply-to-all preset present. Screenshot → `0xcc/caps/miStudio_Steering_Panel-CompactTiles_20260715.png`.
+      (Note: the available SAE had no browsable features / no freq, so the auto-baseline number path is covered
+      by unit tests rather than E2E; the default-fallback path is E2E-verified.)
+- [x] Statuses Planned→Implemented; PPRD v3.5 row 12 → Complete; §3.12 updated; CLAUDE.md log
 
 **Files:** `backend/tests/**`, `frontend/src/stores/steeringStore.test.ts`, docs
 

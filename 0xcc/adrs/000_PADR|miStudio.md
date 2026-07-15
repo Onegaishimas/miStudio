@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 2.7 (Steering UX Enhancements)
+**Version:** 2.8 (Steering UX Enhancements)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -2989,12 +2989,12 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 **Date:** 2026-07-15
 
-**Context:** Hands-on steering experiments this session (MCP-driven, experiment `c4a273f1`) established, on the LFM2.5-1.2B L12 SAE, that (a) blending many SAE features in one generation pass works and is not capped in the backend, (b) a feature's optimal steering strength is predictable, and (c) the 4-feature UI limit and fixed default strength of 10 are the main friction. Feature status: **Planned** (doc chain 011 authored 2026-07-15).
+**Context:** Hands-on steering experiments this session (MCP-driven, experiment `c4a273f1`) established, on the LFM2.5-1.2B L12 SAE, that (a) blending many SAE features in one generation pass works and is not capped in the backend, (b) a feature's optimal steering strength is predictable, and (c) the 4-feature UI limit and fixed default strength of 10 are the main friction. Feature status: **✅ Implemented & deployed** 2026-07-15 (doc chain 011).
 
 **Decision:**
 1. **Auto-baseline strength is frequency-only:** `S = clamp(2.9 − 2.6·activation_frequency, 1.0, 3.0)`. Measured optima across freq 0.037–0.484 fit this line. **`max_activation` is deliberately excluded** from the number: the SAE's JumpReLU decoder columns are unit-norm, so the injected steering vector's magnitude equals the raw strength coefficient — a feature's activation ceiling does not change how hard steering hits. `max_activation` is stored and displayed for context only.
 2. **Blended vs Compare, not a new sequential mode:** the toggle maps to the two endpoints that already exist — Blended = `/steering/async/combined` (all features summed, one output), Compare = `/steering/async/compare` (each feature its own output). No true feature-after-feature sequential mode is added (not supported by the backend; explicit non-goal).
-3. **20-feature limit** raised from 4: the cap was a frontend constant plus a Pydantic `max_length=4` on both steering request schemas plus a compare-path unique-color validator (only 4 colors existed). The model/worker/hook layers already blend N features. Fix = bump both `max_length` to 20, drop the compare unique-color validator (colors become cosmetic), and expand the color palette to 20 literal-class entries.
+3. **20-feature limit** raised from 4: the cap was a frontend constant plus a Pydantic `max_length=4` on both steering request schemas plus a compare-path unique-color validator (only 4 colors existed). The model/worker/hook layers already blend N features. Fix = bump both `max_length` to 20, drop the compare unique-color validator (colors become cosmetic), and expand the color palette to 20 literal-class entries. **Discovered during implementation:** the backend `SelectedFeature.color` was itself a 4-value `Literal` — it too had to be widened to the 20-name palette, or features 5–20 would 422 on the color field even after the `max_length` lift.
 
 **Implementation:**
 - Frontend `computeBaselineStrength(freq)` util is the single source of truth; default-10 fallback when frequency is unavailable, with an auto/default provenance badge on the tile.
@@ -3010,7 +3010,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ## Document Control
 
-**Version:** 2.7
+**Version:** 2.8
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
 **Last Updated:** 2026-07-12
@@ -3039,6 +3039,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.5 | 2026-05-09 | IDL-25: Settings panel PIN protection (PBKDF2-SHA256 gate, env-var bypass recovery) |
 | 2.6 | 2026-07-12 | IDL-26: MCP Server architecture & cross-feature grouping (separate container, official `mcp` SDK, streamable HTTP, bearer-token auth, tool-category gating, grouping REST endpoints + 4 new tables, `mcp_agent` provenance, steering approval mode) — Planned, from BRD-MIS-MCP-001 |
 | 2.7 | 2026-07-15 | IDL-27: Steering UX — frequency-based auto-baseline strength (unit-norm-decoder rationale), Blended vs Compare toggle, 20-feature limit + palette — Planned |
+| 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
 
 ---
 

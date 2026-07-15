@@ -3,10 +3,12 @@ yes
 
 ## Current Status
 - **Phase:** Active Development & Maintenance
-- **Last Session:** 2026-07-12
-- **Current Task:** None — Feature 010 (MCP Server & Cross-Feature Grouping) fully implemented, tested, documented
+- **Last Session:** 2026-07-15
+- **Current Task:** None — Feature 011 (Steering UX Enhancements) fully implemented, tested, deployed, E2E-verified
 - **Active Work:** None
+- **Deferred (separate initiative, awaiting user sign-off):** CI/CD → miLLM-style selective rebuilds + ArgoCD Image Updater (plan at `0xcc/plans/CICD-ArgoCD-ImageUpdater-Migration.md`, open decisions in §5 — NOT started, do not interleave with feature work)
 - **Completed:**
+  - Feature 011 IMPLEMENTED & DEPLOYED (2026-07-15): Steering UX — Blended|Compare segmented toggle (combinedMode boolean; /combined vs /compare), up to 20 features (was 4; backend max_length 4→20 both paths + color Literal widened 4→20 + dropped compare unique-color validator), 20-color purge-safe palette, frequency auto-baseline `S=clamp(2.9−2.6·freq,1,3)` with default-10 fallback + auto/default badge (`computeBaselineStrength` util), applyAutoBaseline + "Auto" apply-to-all preset, compact SelectedFeatureCard tiles (p-3→p-2, one-line header, additional-strengths behind expander), SAEFeatureSummary.activation_frequency, Feature Groups selection-map widened to carry stats through the hand-off. Commits 53f2245 (docs+caps) + e959ce5 (impl). CI green, k8s-deployed, Playwright E2E-verified (3/20 header, toggle, default badges, Auto preset — `0xcc/caps/miStudio_Steering_Panel-CompactTiles_20260715.png`). Doc chain 011_FPRD/FTDD/FTID/FTASKS + PPRD v3.5 (row 12 ✅, §3.12) + PADR v2.8 (IDL-27) ✅
   - Feature 010 IMPLEMENTED (2026-07-12): grouping data layer (4 tables + mcp_agent enum), FeatureGroupingService (TF-IDF context subgroups), Celery job + WS channel, 6 REST endpoints + approvals API, aqua-star 409 guard, MCP server (backend/src/mcp_server/, 33 tools, streamable-HTTP :8765, bearer auth, category gating, approval mode), compose profile `mcp` + k8s mistudio-mcp, Feature Groups panel + ApprovalsBanner, manual pages (mcp-server, feature-groups, API/WS reference) ✅
   - Feature 010 doc chain (2026-07-12): BRD-MIS-MCP-001 → PPRD v3.3 (row 11, §3.11), PADR v2.6 (IDL-26), 010_FPRD/FTDD/FTID/FTASKS ✅
   - Docusaurus manual overhaul (2026-07-11): 19→34 pages (Concepts, Quickstart, API/WS/data-model Reference, FAQ, landing page) — live ✅
