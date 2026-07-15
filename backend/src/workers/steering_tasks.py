@@ -600,8 +600,13 @@ def cleanup_steering_gpu(self) -> Dict[str, Any]:
     bind=True,
     name="steering.combined",
     queue="steering",
-    soft_time_limit=120,  # Combined generation should be faster than comparison
-    time_limit=150,       # 2.5 min hard limit
+    # Must exceed the frontend COMBINED_TIMEOUT_MS (180s) so the worker isn't
+    # SIGKILL'd before the client gives up (the old 120/150 were inverted —
+    # backend died first). With the KV cache now kept for hook-compatible models
+    # a combined run is a few seconds even at 20 features; this budget only
+    # matters for a cold start + very long generation.
+    soft_time_limit=210,  # SIGTERM at 210s
+    time_limit=240,       # SIGKILL at 240s (4 min hard limit)
     max_retries=0,
     acks_late=True,
     reject_on_worker_lost=True,
