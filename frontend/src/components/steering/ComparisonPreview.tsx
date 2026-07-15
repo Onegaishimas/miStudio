@@ -9,6 +9,7 @@
 
 import { Plus } from 'lucide-react';
 import { SelectedFeature, FEATURE_COLORS } from '../../types/steering';
+import { MAX_SELECTED_FEATURES } from '../../stores/steeringStore';
 
 interface ComparisonPreviewProps {
   selectedFeatures: SelectedFeature[];
@@ -19,7 +20,7 @@ interface ComparisonPreviewProps {
 export function ComparisonPreview({
   selectedFeatures,
   onAddFeature,
-  maxFeatures = 4,
+  maxFeatures = MAX_SELECTED_FEATURES,
 }: ComparisonPreviewProps) {
   const canAddMore = selectedFeatures.length < maxFeatures;
 

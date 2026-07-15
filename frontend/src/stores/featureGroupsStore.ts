@@ -28,6 +28,13 @@ interface GroupFilters {
   sortBy: 'size' | 'cohesion' | 'token';
 }
 
+// A selected group member, carrying the stats the steering hand-off needs.
+export interface SelectedMember {
+  neuron_index: number;
+  max_activation: number | null;
+  activation_frequency: number | null;
+}
+
 interface FeatureGroupsState {
   extractionId: string | null;
   status: GroupingStatusResponse | null;
@@ -44,7 +51,9 @@ interface FeatureGroupsState {
   relatedFor: string | null;
   related: RelatedFeaturesResponse | null;
 
-  selection: Map<string, number>; // feature_id → neuron_index, for steering hand-off
+  // feature_id → selection info, for steering hand-off. Carries the stats the
+  // steering auto-baseline needs (Feature 011); they'd otherwise be lost here.
+  selection: Map<string, SelectedMember>;
 
   isLoading: boolean;
   error: string | null;
@@ -59,8 +68,11 @@ interface FeatureGroupsState {
   expandGroup: (groupId: string | null) => Promise<void>;
   fetchRelated: (featureId: string) => Promise<void>;
   clearRelated: () => void;
-  toggleSelect: (featureId: string, neuronIndex: number) => void;
-  setSelected: (members: Array<{ feature_id: string; neuron_index: number }>, selected: boolean) => void;
+  toggleSelect: (featureId: string, member: SelectedMember) => void;
+  setSelected: (
+    members: Array<{ feature_id: string } & SelectedMember>,
+    selected: boolean,
+  ) => void;
   clearSelection: () => void;
 
   handleProgressEvent: (progress: number, stage: string) => void;
@@ -84,7 +96,7 @@ export const useFeatureGroupsStore = create<FeatureGroupsState>((set, get) => ({
   groupDetail: null,
   relatedFor: null,
   related: null,
-  selection: new Map<string, number>(),
+  selection: new Map<string, SelectedMember>(),
   isLoading: false,
   error: null,
   isWebSocketConnected: false,
@@ -212,11 +224,11 @@ export const useFeatureGroupsStore = create<FeatureGroupsState>((set, get) => ({
 
   clearRelated: () => set({ relatedFor: null, related: null }),
 
-  toggleSelect: (featureId, neuronIndex) => {
+  toggleSelect: (featureId, member) => {
     set((state) => {
       const selection = new Map(state.selection);
       if (selection.has(featureId)) selection.delete(featureId);
-      else selection.set(featureId, neuronIndex);
+      else selection.set(featureId, member);
       return { selection };
     });
   },
@@ -225,8 +237,15 @@ export const useFeatureGroupsStore = create<FeatureGroupsState>((set, get) => ({
     set((state) => {
       const selection = new Map(state.selection);
       for (const m of members) {
-        if (selected) selection.set(m.feature_id, m.neuron_index);
-        else selection.delete(m.feature_id);
+        if (selected) {
+          selection.set(m.feature_id, {
+            neuron_index: m.neuron_index,
+            max_activation: m.max_activation,
+            activation_frequency: m.activation_frequency,
+          });
+        } else {
+          selection.delete(m.feature_id);
+        }
       }
       return { selection };
     });

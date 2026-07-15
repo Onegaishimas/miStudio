@@ -43,9 +43,17 @@ class SelectedFeature(BaseModel):
         description="Up to 3 additional strengths to test simultaneously"
     )
     label: Optional[str] = Field(None, description="Feature label for display")
-    color: Literal["teal", "blue", "purple", "amber"] = Field(
+    # Feature 011: the UI now supports up to 20 features, each drawn from a
+    # 20-name palette (the original 4 first, for continuity). Colors are purely
+    # cosmetic; uniqueness is not required. Kept as a Literal so the accepted
+    # set stays documented and in lock-step with the frontend FeatureColor union.
+    color: Literal[
+        "teal", "blue", "purple", "amber", "rose", "cyan", "lime", "orange",
+        "fuchsia", "sky", "emerald", "violet", "pink", "indigo", "yellow",
+        "red", "green", "sapphire", "magenta", "gold",
+    ] = Field(
         "teal",
-        description="Color for UI display (teal, blue, purple, amber)"
+        description="Color for UI display (cosmetic; one of the 20-name palette)"
     )
 
     @field_validator("strength")
@@ -110,12 +118,12 @@ class SteeringComparisonRequest(BaseModel):
     # Prompt
     prompt: str = Field(..., min_length=1, max_length=10000, description="Input prompt for generation")
 
-    # Selected features for steering (max 4)
+    # Selected features for steering (up to 20 — Feature 011)
     selected_features: List[SelectedFeature] = Field(
         ...,
         min_length=1,
-        max_length=4,
-        description="List of features to steer with (1-4)"
+        max_length=20,
+        description="List of features to steer with (1-20)"
     )
 
     # Generation parameters
@@ -132,14 +140,9 @@ class SteeringComparisonRequest(BaseModel):
     include_unsteered: bool = Field(True, description="Include unsteered baseline output")
     compute_metrics: bool = Field(True, description="Compute evaluation metrics")
 
-    @field_validator("selected_features")
-    @classmethod
-    def validate_selected_features(cls, v: List[SelectedFeature]) -> List[SelectedFeature]:
-        """Validate selected features have unique colors."""
-        colors = [f.color for f in v]
-        if len(colors) != len(set(colors)):
-            raise ValueError("Each selected feature must have a unique color")
-        return v
+    # NOTE (Feature 011): the former unique-color validator was removed. With up
+    # to 20 features and a cosmetic color palette, per-feature color uniqueness
+    # can no longer hold and is not required by the compare pipeline.
 
 
 class SteeringStrengthSweepRequest(BaseModel):
@@ -441,12 +444,12 @@ class CombinedSteeringRequest(BaseModel):
     # Prompt
     prompt: str = Field(..., min_length=1, max_length=10000, description="Input prompt for generation")
 
-    # Selected features for combined steering (all applied simultaneously)
+    # Selected features for combined steering (all applied simultaneously; up to 20 — Feature 011)
     selected_features: List[SelectedFeature] = Field(
         ...,
         min_length=1,
-        max_length=4,
-        description="List of features to apply together (1-4)"
+        max_length=20,
+        description="List of features to apply together (1-20)"
     )
 
     # Generation parameters

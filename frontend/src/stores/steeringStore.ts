@@ -35,9 +35,23 @@ import {
 import { SAE } from '../types/sae';
 import * as steeringApi from '../api/steering';
 import type { SteeringTaskResponse } from '../api/steering';
+import { computeBaselineStrength } from '../utils/steeringStrength';
 
-// Maximum number of features that can be selected
-const MAX_SELECTED_FEATURES = 4;
+// Maximum number of features that can be selected (Feature 011: raised 4 → 20)
+export const MAX_SELECTED_FEATURES = 20;
+
+// Steering dispatch (Feature 011): the store keeps the existing `combinedMode`
+// boolean (true = Blended, all features summed via /combined; false = Compare,
+// each feature its own output via /compare). The UI renders this as a two-way
+// Blended | Compare segmented toggle instead of the old checkbox.
+
+// Input to addFeature. `strength` is optional (Feature 011): when omitted, the
+// store auto-computes a baseline from `activation_frequency`. The stat fields
+// let the baseline calculation and the tile display use per-feature data.
+export type AddFeatureInput = Omit<
+  SelectedFeature,
+  'color' | 'instance_id' | 'strength' | 'strengthSource'
+> & { strength?: number };
 
 // Batch coordination state for async promise resolution
 // This coordinates between generateBatchComparison (creates promise) and
@@ -280,7 +294,7 @@ interface SteeringState {
   selectSAE: (sae: SAE | null) => void;
 
   // Actions - Feature Selection
-  addFeature: (feature: Omit<SelectedFeature, 'color' | 'instance_id'>) => boolean;
+  addFeature: (feature: AddFeatureInput) => boolean;
   removeFeature: (instanceId: string) => void;
   duplicateFeature: (instanceId: string) => boolean;
   updateFeatureStrength: (instanceId: string, strength: number) => void;
@@ -288,6 +302,7 @@ interface SteeringState {
   updateAdditionalStrength: (instanceId: string, strengthIndex: number, newStrength: number) => void;
   removeAdditionalStrength: (instanceId: string, strengthIndex: number) => void;
   applyStrengthPreset: (strength: number) => void;
+  applyAutoBaseline: () => void;
   clearFeatures: () => void;
   reorderFeatures: (fromIndex: number, toIndex: number) => void;
 
@@ -402,7 +417,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Add a feature to selection (returns false if max reached)
       // Note: Duplicates of the same feature_idx/layer are now allowed (each gets unique instance_id)
-      addFeature: (feature: Omit<SelectedFeature, 'color' | 'instance_id'>) => {
+      addFeature: (feature: AddFeatureInput) => {
         const { selectedFeatures } = get();
 
         // Check if max features reached
@@ -410,22 +425,40 @@ export const useSteeringStore = create<SteeringState>()(
           return false;
         }
 
-        // Find next available color
+        // Next color: first unused from the 20-order, wrapping when all are used.
         const usedColors = selectedFeatures.map((f) => f.color);
-        const nextColor = FEATURE_COLOR_ORDER.find((c) => !usedColors.includes(c)) || FEATURE_COLOR_ORDER[0];
+        const nextColor =
+          FEATURE_COLOR_ORDER.find((c) => !usedColors.includes(c)) ||
+          FEATURE_COLOR_ORDER[selectedFeatures.length % FEATURE_COLOR_ORDER.length];
 
         // Generate unique instance_id
         const instanceId = `${feature.feature_idx}-${feature.layer}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-        // Explicitly set all properties to ensure label and feature_id are preserved
+        // Feature 011: if the caller supplied an explicit strength, honor it
+        // (manual); otherwise auto-compute the baseline from activation frequency,
+        // falling back to the default when frequency is unavailable.
+        let strength: number;
+        let strengthSource: SelectedFeature['strengthSource'];
+        if (feature.strength != null) {
+          strength = feature.strength;
+          strengthSource = 'manual';
+        } else {
+          const baseline = computeBaselineStrength(feature.activation_frequency);
+          strength = baseline.value;
+          strengthSource = baseline.source;
+        }
+
         const newFeature: SelectedFeature = {
           instance_id: instanceId,
           feature_idx: feature.feature_idx,
           layer: feature.layer,
-          strength: feature.strength,
+          strength,
+          strengthSource,
           label: feature.label,
           color: nextColor,
           feature_id: feature.feature_id,
+          max_activation: feature.max_activation ?? null,
+          activation_frequency: feature.activation_frequency ?? null,
         };
 
         set({ selectedFeatures: [...selectedFeatures, newFeature] });
@@ -458,9 +491,11 @@ export const useSteeringStore = create<SteeringState>()(
           return false;
         }
 
-        // Find next available color
+        // Next color: first unused, wrapping when all 20 are taken.
         const usedColors = selectedFeatures.map((f) => f.color);
-        const nextColor = FEATURE_COLOR_ORDER.find((c) => !usedColors.includes(c)) || FEATURE_COLOR_ORDER[0];
+        const nextColor =
+          FEATURE_COLOR_ORDER.find((c) => !usedColors.includes(c)) ||
+          FEATURE_COLOR_ORDER[selectedFeatures.length % FEATURE_COLOR_ORDER.length];
 
         // Generate unique instance_id for the duplicate
         const newInstanceId = `${original.feature_idx}-${original.layer}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -476,10 +511,13 @@ export const useSteeringStore = create<SteeringState>()(
           feature_idx: original.feature_idx,
           layer: original.layer,
           strength: -original.strength, // Negate the strength
+          strengthSource: 'manual',
           additional_strengths: negatedAdditionalStrengths, // Copy and negate additional strengths
           label: original.label ? `${original.label} (copy)` : null,
           color: nextColor,
           feature_id: original.feature_id,
+          max_activation: original.max_activation ?? null,
+          activation_frequency: original.activation_frequency ?? null,
         };
 
         set({ selectedFeatures: [...selectedFeatures, duplicatedFeature] });
@@ -545,7 +583,19 @@ export const useSteeringStore = create<SteeringState>()(
           selectedFeatures: state.selectedFeatures.map((f) => ({
             ...f,
             strength,
+            strengthSource: 'manual' as const,
           })),
+        }));
+      },
+
+      // Feature 011: recompute each feature's baseline from its activation
+      // frequency (default fallback where frequency is unavailable).
+      applyAutoBaseline: () => {
+        set((state) => ({
+          selectedFeatures: state.selectedFeatures.map((f) => {
+            const baseline = computeBaselineStrength(f.activation_frequency);
+            return { ...f, strength: baseline.value, strengthSource: baseline.source };
+          }),
         }));
       },
 

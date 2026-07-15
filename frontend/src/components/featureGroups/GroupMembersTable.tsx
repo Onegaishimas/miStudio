@@ -49,7 +49,17 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                 ref={selectAllRef}
                 type="checkbox"
                 checked={allSelected}
-                onChange={() => setSelected(groupDetail.members, !allSelected)}
+                onChange={() =>
+                  setSelected(
+                    groupDetail.members.map((m) => ({
+                      feature_id: m.feature_id,
+                      neuron_index: m.neuron_index,
+                      max_activation: m.max_activation,
+                      activation_frequency: m.activation_frequency,
+                    })),
+                    !allSelected,
+                  )
+                }
                 className="accent-emerald-500"
                 aria-label={allSelected ? 'Deselect all members' : 'Select all members'}
                 title={allSelected ? 'Select none' : 'Select all'}
@@ -72,7 +82,13 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                 <input
                   type="checkbox"
                   checked={selection.has(member.feature_id)}
-                  onChange={() => toggleSelect(member.feature_id, member.neuron_index)}
+                  onChange={() =>
+                    toggleSelect(member.feature_id, {
+                      neuron_index: member.neuron_index,
+                      max_activation: member.max_activation,
+                      activation_frequency: member.activation_frequency,
+                    })
+                  }
                   className="accent-emerald-500"
                   aria-label={`Select feature ${member.neuron_index}`}
                 />

@@ -69,13 +69,16 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
       selectSAE(sae); // clears prior selection
       const layer = currentExtraction.layer_index ?? sae.layer ?? 0;
       let added = 0;
-      for (const [featureId, neuronIndex] of selection.entries()) {
+      for (const [featureId, member] of selection.entries()) {
+        // Omit strength so the store auto-computes the baseline from the
+        // member's activation frequency (Feature 011).
         const ok = addFeature({
-          feature_idx: neuronIndex,
+          feature_idx: member.neuron_index,
           layer,
-          strength: 10,
           label: null,
           feature_id: featureId,
+          max_activation: member.max_activation,
+          activation_frequency: member.activation_frequency,
         });
         if (!ok) break; // max features reached
         added += 1;

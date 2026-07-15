@@ -276,6 +276,7 @@ class SAEFeatureSummary(BaseModel):
     activation_count: Optional[int] = Field(None, description="Number of activations")
     mean_activation: Optional[float] = Field(None, description="Mean activation value")
     max_activation: Optional[float] = Field(None, description="Maximum activation value")
+    activation_frequency: Optional[float] = Field(None, description="Fraction of tokens where the feature is active (Feature 011: powers steering auto-baseline)")
     top_tokens: List[str] = Field(default_factory=list, description="Top activating tokens")
     neuronpedia_url: Optional[str] = Field(None, description="Neuronpedia link if available")
     feature_id: Optional[str] = Field(None, description="Database feature ID if extracted")

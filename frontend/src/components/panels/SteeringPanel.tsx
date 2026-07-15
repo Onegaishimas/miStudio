@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Play, Loader, AlertCircle, ChevronLeft, ChevronRight, Brain, StopCircle, History, ChevronDown, RotateCcw, Power, PowerOff, Combine } from 'lucide-react';
+import { Play, Loader, AlertCircle, ChevronLeft, ChevronRight, Brain, StopCircle, History, ChevronDown, RotateCcw, Power, PowerOff, Combine, Layers } from 'lucide-react';
 import { getTaskResult } from '../../api/steering';
 import { getSteeringModeStatus, enterSteeringMode, exitSteeringMode } from '../../api/steering';
 import { useSteeringStore, selectCanGenerate, selectCanGenerateBatch } from '../../stores/steeringStore';
@@ -540,24 +540,46 @@ export function SteeringPanel() {
                         </span>
                       )}
                     </div>
-                    {/* Combined Mode toggle - only show with 2+ features */}
+                    {/* Blended | Compare toggle (Feature 011) — only with 2+ features.
+                        Blended (combinedMode) sums all features into one output;
+                        Compare generates a separate output per feature. */}
                     {selectedFeatures.length >= 2 && !isBatchMode && (
-                      <label
-                        className={`flex items-center gap-2 text-sm cursor-pointer select-none ${
-                          combinedMode ? 'text-cyan-400' : 'text-slate-400 hover:text-slate-300'
-                        }`}
-                        title="Apply all features simultaneously in a single generation pass"
+                      <div
+                        className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800/60 p-0.5 text-sm select-none"
+                        role="group"
+                        aria-label="Steering mode"
                       >
-                        <input
-                          type="checkbox"
-                          checked={combinedMode}
-                          onChange={(e) => setCombinedMode(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-900"
+                        <button
+                          type="button"
+                          onClick={() => setCombinedMode(true)}
                           disabled={isGenerating || isCombinedGenerating}
-                        />
-                        <Combine className="w-4 h-4" />
-                        Combined Mode
-                      </label>
+                          aria-pressed={combinedMode}
+                          title="Sum all features into a single steered generation"
+                          className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            combinedMode
+                              ? 'bg-cyan-600 text-white'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <Combine className="w-3.5 h-3.5" />
+                          Blended
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCombinedMode(false)}
+                          disabled={isGenerating || isCombinedGenerating}
+                          aria-pressed={!combinedMode}
+                          title="Generate a separate output for each feature"
+                          className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            !combinedMode
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                          Compare
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2">

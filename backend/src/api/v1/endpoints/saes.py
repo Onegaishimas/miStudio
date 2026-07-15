@@ -447,6 +447,7 @@ async def browse_sae_features(
                     activation_count=None,  # Not stored directly
                     mean_activation=f.mean_activation,
                     max_activation=f.max_activation,
+                    activation_frequency=f.activation_frequency,  # Feature 011: steering auto-baseline
                     top_tokens=top_tokens,
                     neuronpedia_url=None,
                     feature_id=f.id

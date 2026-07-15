@@ -13,7 +13,7 @@
  */
 
 import { useState } from 'react';
-import { GripVertical, X, Hash, Layers, Plus } from 'lucide-react';
+import { GripVertical, X, Hash, Layers, Plus, ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { SelectedFeature, FEATURE_COLORS, getStrengthWarningLevel } from '../../types/steering';
 import { StrengthSlider } from './StrengthSlider';
 
@@ -64,6 +64,15 @@ export function SelectedFeatureCard({
 
   const additionalStrengths = feature.additional_strengths || [];
   const canAddMore = additionalStrengths.length < 3;
+
+  // Feature 011: additional strengths collapsed by default to keep the tile
+  // compact; auto-expanded when the feature already carries some.
+  const [showAdditional, setShowAdditional] = useState(additionalStrengths.length > 0);
+
+  // Feature 011: provenance badge — where this tile's strength came from.
+  const strengthSource = feature.strengthSource;
+  const freq = feature.activation_frequency;
+  const maxAct = feature.max_activation;
 
   const handleContextMenu = (event: React.MouseEvent) => {
     if (onContextMenu) {
@@ -131,127 +140,165 @@ export function SelectedFeatureCard({
 
   return (
     <div
-      className={`rounded-lg border-2 p-3 transition-all ${colorClasses.border} ${colorClasses.light} ${
+      className={`rounded-lg border-2 p-2 transition-all ${colorClasses.border} ${colorClasses.light} ${
         isDragging ? 'opacity-50 scale-95' : ''
       }`}
       onContextMenu={handleContextMenu}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          {/* Drag handle */}
-          {dragHandleProps && (
-            <div
-              {...dragHandleProps}
-              className="cursor-grab active:cursor-grabbing p-1 -m-1 rounded hover:bg-white/10"
-            >
-              <GripVertical className="w-4 h-4 text-slate-500" />
-            </div>
-          )}
-
-          {/* Feature identifier */}
-          <div className="flex items-center gap-3">
-            {/* Color dot */}
-            <div className={`w-3 h-3 rounded-full ${colorClasses.bg}`} />
-
-            {/* Feature index and layer */}
-            <div className="flex items-center gap-2 text-sm">
-              <span className={`flex items-center gap-1 ${colorClasses.text} font-medium`}>
-                <Hash className="w-3.5 h-3.5" />
-                {feature.feature_idx}
-              </span>
-              <span className="text-slate-500">•</span>
-              <span className="flex items-center gap-1 text-slate-400">
-                <Layers className="w-3.5 h-3.5" />
-                L{feature.layer}
-              </span>
-            </div>
+      {/* Header row: drag · id/layer · stats · remove — everything on one line */}
+      <div className="flex items-center gap-2 min-w-0">
+        {/* Drag handle */}
+        {dragHandleProps && (
+          <div
+            {...dragHandleProps}
+            className="cursor-grab active:cursor-grabbing p-0.5 -m-0.5 rounded hover:bg-white/10 shrink-0"
+          >
+            <GripVertical className="w-3.5 h-3.5 text-slate-500" />
           </div>
-        </div>
+        )}
+
+        {/* Color dot */}
+        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${colorClasses.bg}`} />
+
+        {/* Feature index and layer */}
+        <span className={`flex items-center gap-0.5 ${colorClasses.text} font-medium text-sm shrink-0`}>
+          <Hash className="w-3 h-3" />
+          {feature.feature_idx}
+        </span>
+        <span className="flex items-center gap-0.5 text-slate-500 text-xs shrink-0">
+          <Layers className="w-3 h-3" />
+          L{feature.layer}
+        </span>
+
+        {/* Provenance + stats badges (Feature 011) */}
+        {strengthSource === 'auto' && (
+          <span
+            className="flex items-center gap-0.5 text-[10px] font-medium text-emerald-400 bg-emerald-500/10 rounded px-1 py-0.5 shrink-0"
+            title={
+              freq != null
+                ? `Baseline auto-set from activation frequency ${freq.toFixed(3)}`
+                : 'Baseline auto-set'
+            }
+          >
+            <Sparkles className="w-2.5 h-2.5" />
+            auto
+          </span>
+        )}
+        {strengthSource === 'default' && (
+          <span
+            className="text-[10px] font-medium text-slate-500 bg-slate-700/40 rounded px-1 py-0.5 shrink-0"
+            title="No activation frequency available — using the default strength"
+          >
+            default
+          </span>
+        )}
+
+        {/* Compact stats, right-aligned before remove */}
+        <span className="ml-auto flex items-center gap-2 text-[10px] text-slate-500 shrink-0 font-mono">
+          {freq != null && <span title="Activation frequency">f {freq.toFixed(3)}</span>}
+          {maxAct != null && <span title="Max activation">m {maxAct.toFixed(2)}</span>}
+        </span>
 
         {/* Remove button */}
         <button
           onClick={onRemove}
-          className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-slate-200 transition-colors"
+          className="p-0.5 rounded hover:bg-white/10 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
           title="Remove feature"
         >
-          <X className="w-4 h-4" />
+          <X className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* Label if available */}
+      {/* Label if available — single line, truncated */}
       {feature.label && (
-        <p className="text-sm text-slate-300 mb-3 line-clamp-2">{feature.label}</p>
+        <p className="text-xs text-slate-400 mt-1 truncate" title={feature.label}>
+          {feature.label}
+        </p>
       )}
 
       {/* Primary Strength slider */}
-      <StrengthSlider
-        value={feature.strength}
-        onChange={onStrengthChange}
-        color={feature.color}
-        compact
-        disabled={disabled}
-      />
+      <div className="mt-1.5">
+        <StrengthSlider
+          value={feature.strength}
+          onChange={onStrengthChange}
+          color={feature.color}
+          compact
+          disabled={disabled}
+        />
+      </div>
 
-      {/* Additional Strengths Section */}
-      <div className="mt-3 pt-3 border-t border-slate-700/50">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-500">Additional Strengths</span>
-          {canAddMore && (
-            <button
-              onClick={handleAddStrength}
-              disabled={disabled}
-              className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={`Add strength: ${getNextStrengthInfo().formula} = ${getNextStrengthInfo().value}`}
-            >
-              <Plus className="w-3 h-3" />
-              Add
-            </button>
+      {/* Additional Strengths — collapsed behind an expander to save space */}
+      <div className="mt-1.5">
+        <button
+          onClick={() => setShowAdditional((v) => !v)}
+          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+          title="Test multiple strengths for this feature"
+        >
+          {showAdditional ? (
+            <ChevronDown className="w-3 h-3" />
+          ) : (
+            <ChevronRight className="w-3 h-3" />
           )}
-        </div>
+          Additional strengths
+          {additionalStrengths.length > 0 && (
+            <span className="text-slate-400">({additionalStrengths.length})</span>
+          )}
+        </button>
 
-        {additionalStrengths.length === 0 ? (
-          <p className="text-xs text-slate-600 italic">
-            Click "Add" to test multiple strengths
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {additionalStrengths.map((strength, index) => (
-              <div key={index} className="flex items-center gap-1">
-                {editingIndex === index ? (
-                  <input
-                    type="text"
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => handleStrengthInputBlur(index)}
-                    onKeyDown={(e) => handleStrengthInputKeyDown(e, index)}
-                    autoFocus
-                    className={`w-16 px-2 py-1 text-sm font-mono text-center rounded border transition-colors bg-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 ${getStrengthInputClasses(parseFloat(editValue) || null)}`}
-                    placeholder="—"
-                  />
-                ) : (
+        {showAdditional && (
+          <div className="mt-1.5 pl-4">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {additionalStrengths.map((strength, index) => (
+                <div key={index} className="flex items-center gap-0.5">
+                  {editingIndex === index ? (
+                    <input
+                      type="text"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => handleStrengthInputBlur(index)}
+                      onKeyDown={(e) => handleStrengthInputKeyDown(e, index)}
+                      autoFocus
+                      className={`w-14 px-1.5 py-0.5 text-xs font-mono text-center rounded border transition-colors bg-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 ${getStrengthInputClasses(parseFloat(editValue) || null)}`}
+                      placeholder="—"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setEditingIndex(index);
+                        setEditValue(strength.toString());
+                      }}
+                      disabled={disabled}
+                      className={`w-14 px-1.5 py-0.5 text-xs font-mono text-center rounded border transition-colors hover:brightness-110 disabled:cursor-not-allowed ${getStrengthInputClasses(strength)}`}
+                      title={`Click to edit strength ${index + 1}`}
+                    >
+                      {strength > 0 ? '+' : ''}{strength}
+                    </button>
+                  )}
                   <button
-                    onClick={() => {
-                      setEditingIndex(index);
-                      setEditValue(strength.toString());
-                    }}
+                    onClick={() => handleRemoveStrength(index)}
                     disabled={disabled}
-                    className={`w-16 px-2 py-1 text-sm font-mono text-center rounded border transition-colors hover:brightness-110 disabled:cursor-not-allowed ${getStrengthInputClasses(strength)}`}
-                    title={`Click to edit strength ${index + 1}`}
+                    className="p-0.5 text-slate-500 hover:text-red-400 transition-colors disabled:cursor-not-allowed"
+                    title="Remove this strength"
                   >
-                    {strength > 0 ? '+' : ''}{strength}
+                    <X className="w-2.5 h-2.5" />
                   </button>
-                )}
+                </div>
+              ))}
+              {canAddMore && (
                 <button
-                  onClick={() => handleRemoveStrength(index)}
+                  onClick={handleAddStrength}
                   disabled={disabled}
-                  className="p-0.5 text-slate-500 hover:text-red-400 transition-colors disabled:cursor-not-allowed"
-                  title="Remove this strength"
+                  className="flex items-center gap-0.5 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={`Add strength: ${getNextStrengthInfo().formula} = ${getNextStrengthInfo().value}`}
                 >
-                  <X className="w-3 h-3" />
+                  <Plus className="w-3 h-3" />
+                  Add
                 </button>
-              </div>
-            ))}
+              )}
+              {additionalStrengths.length === 0 && !canAddMore && (
+                <span className="text-xs text-slate-600 italic">Max reached</span>
+              )}
+            </div>
           </div>
         )}
       </div>

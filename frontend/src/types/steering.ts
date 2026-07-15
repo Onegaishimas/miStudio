@@ -13,14 +13,44 @@
  * - DELETE /api/v1/steering/experiments/:id - Delete experiment
  */
 
+import type { StrengthSource } from '../utils/steeringStrength';
+
 /**
  * Color options for selected features.
- * Max 4 features, each with unique color.
+ * Up to 20 features (Feature 011). Colors are cosmetic — the original 4
+ * (teal/blue/purple/amber) come first for continuity, then 16 more hues.
+ * Uniqueness is no longer required; the backend dropped its unique-color check.
  */
-export type FeatureColor = 'teal' | 'blue' | 'purple' | 'amber';
+export type FeatureColor =
+  | 'teal'
+  | 'blue'
+  | 'purple'
+  | 'amber'
+  | 'rose'
+  | 'cyan'
+  | 'lime'
+  | 'orange'
+  | 'fuchsia'
+  | 'sky'
+  | 'emerald'
+  | 'violet'
+  | 'pink'
+  | 'indigo'
+  | 'yellow'
+  | 'red'
+  | 'green'
+  | 'sapphire'
+  | 'magenta'
+  | 'gold';
 
 /**
  * CSS classes for feature colors.
+ *
+ * IMPORTANT: every class string here must be a full literal — Tailwind purges
+ * dynamically-built class names (`bg-${color}-500` would not survive the
+ * production build). The last four names map to distinct Tailwind hues under
+ * friendly aliases (sapphire→blue-600, magenta→pink-600, gold→amber-600) so all
+ * 20 entries remain visually distinguishable.
  */
 export const FEATURE_COLORS: Record<FeatureColor, {
   bg: string;
@@ -28,36 +58,35 @@ export const FEATURE_COLORS: Record<FeatureColor, {
   text: string;
   light: string;
 }> = {
-  teal: {
-    bg: 'bg-teal-500',
-    border: 'border-teal-500',
-    text: 'text-teal-400',
-    light: 'bg-teal-500/10',
-  },
-  blue: {
-    bg: 'bg-blue-500',
-    border: 'border-blue-500',
-    text: 'text-blue-400',
-    light: 'bg-blue-500/10',
-  },
-  purple: {
-    bg: 'bg-purple-500',
-    border: 'border-purple-500',
-    text: 'text-purple-400',
-    light: 'bg-purple-500/10',
-  },
-  amber: {
-    bg: 'bg-amber-500',
-    border: 'border-amber-500',
-    text: 'text-amber-400',
-    light: 'bg-amber-500/10',
-  },
+  teal: { bg: 'bg-teal-500', border: 'border-teal-500', text: 'text-teal-400', light: 'bg-teal-500/10' },
+  blue: { bg: 'bg-blue-500', border: 'border-blue-500', text: 'text-blue-400', light: 'bg-blue-500/10' },
+  purple: { bg: 'bg-purple-500', border: 'border-purple-500', text: 'text-purple-400', light: 'bg-purple-500/10' },
+  amber: { bg: 'bg-amber-500', border: 'border-amber-500', text: 'text-amber-400', light: 'bg-amber-500/10' },
+  rose: { bg: 'bg-rose-500', border: 'border-rose-500', text: 'text-rose-400', light: 'bg-rose-500/10' },
+  cyan: { bg: 'bg-cyan-500', border: 'border-cyan-500', text: 'text-cyan-400', light: 'bg-cyan-500/10' },
+  lime: { bg: 'bg-lime-500', border: 'border-lime-500', text: 'text-lime-400', light: 'bg-lime-500/10' },
+  orange: { bg: 'bg-orange-500', border: 'border-orange-500', text: 'text-orange-400', light: 'bg-orange-500/10' },
+  fuchsia: { bg: 'bg-fuchsia-500', border: 'border-fuchsia-500', text: 'text-fuchsia-400', light: 'bg-fuchsia-500/10' },
+  sky: { bg: 'bg-sky-500', border: 'border-sky-500', text: 'text-sky-400', light: 'bg-sky-500/10' },
+  emerald: { bg: 'bg-emerald-500', border: 'border-emerald-500', text: 'text-emerald-400', light: 'bg-emerald-500/10' },
+  violet: { bg: 'bg-violet-500', border: 'border-violet-500', text: 'text-violet-400', light: 'bg-violet-500/10' },
+  pink: { bg: 'bg-pink-500', border: 'border-pink-500', text: 'text-pink-400', light: 'bg-pink-500/10' },
+  indigo: { bg: 'bg-indigo-500', border: 'border-indigo-500', text: 'text-indigo-400', light: 'bg-indigo-500/10' },
+  yellow: { bg: 'bg-yellow-500', border: 'border-yellow-500', text: 'text-yellow-400', light: 'bg-yellow-500/10' },
+  red: { bg: 'bg-red-500', border: 'border-red-500', text: 'text-red-400', light: 'bg-red-500/10' },
+  green: { bg: 'bg-green-500', border: 'border-green-500', text: 'text-green-400', light: 'bg-green-500/10' },
+  sapphire: { bg: 'bg-blue-600', border: 'border-blue-600', text: 'text-blue-300', light: 'bg-blue-600/10' },
+  magenta: { bg: 'bg-pink-600', border: 'border-pink-600', text: 'text-pink-300', light: 'bg-pink-600/10' },
+  gold: { bg: 'bg-amber-600', border: 'border-amber-600', text: 'text-amber-300', light: 'bg-amber-600/10' },
 };
 
 /**
- * Available feature colors in order.
+ * Available feature colors in order. Assigned round-robin; may repeat past 20.
  */
-export const FEATURE_COLOR_ORDER: FeatureColor[] = ['teal', 'blue', 'purple', 'amber'];
+export const FEATURE_COLOR_ORDER: FeatureColor[] = [
+  'teal', 'blue', 'purple', 'amber', 'rose', 'cyan', 'lime', 'orange', 'fuchsia', 'sky',
+  'emerald', 'violet', 'pink', 'indigo', 'yellow', 'red', 'green', 'sapphire', 'magenta', 'gold',
+];
 
 /**
  * A feature selected for steering.
@@ -72,6 +101,10 @@ export interface SelectedFeature {
   label: string | null;
   color: FeatureColor;
   feature_id: string | null; // Database feature ID if extracted
+  // Feature 011: stats carried for the frequency-based auto-baseline + tile display
+  max_activation?: number | null;
+  activation_frequency?: number | null;
+  strengthSource?: StrengthSource; // 'auto' | 'default' | 'manual'
 }
 
 /**

@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useSteeringStore } from './steeringStore';
+import { useSteeringStore, MAX_SELECTED_FEATURES } from './steeringStore';
 import { DEFAULT_GENERATION_PARAMS } from '../types/steering';
 import type { SAE } from '../types/sae';
 import type { SteeringComparisonResponse, StrengthSweepResponse } from '../types/steering';
@@ -155,26 +155,76 @@ describe('steeringStore', () => {
       expect(colors).toEqual(['teal', 'blue', 'purple']); // FEATURE_COLOR_ORDER: teal, blue, purple, amber
     });
 
-    it('should enforce maximum of 4 features', () => {
+    it('should enforce the maximum feature limit (Feature 011: 20)', () => {
+      const { result } = renderHook(() => useSteeringStore());
+
+      // Fill up to the max
+      act(() => {
+        for (let i = 0; i < MAX_SELECTED_FEATURES; i++) {
+          result.current.addFeature({ feature_idx: 100 + i, layer: 6, strength: 1.0 });
+        }
+      });
+
+      expect(result.current.selectedFeatures).toHaveLength(MAX_SELECTED_FEATURES);
+      expect(MAX_SELECTED_FEATURES).toBe(20);
+
+      // One more past the limit - should be rejected
+      let added: boolean | undefined;
+      act(() => {
+        added = result.current.addFeature({ feature_idx: 999, layer: 6, strength: 1.0 });
+      });
+
+      expect(added).toBe(false);
+      expect(result.current.selectedFeatures).toHaveLength(MAX_SELECTED_FEATURES);
+      expect(result.current.selectedFeatures.find((f) => f.feature_idx === 999)).toBeUndefined();
+    });
+
+    it('auto-computes a baseline strength from frequency when none is passed (Feature 011)', () => {
       const { result } = renderHook(() => useSteeringStore());
 
       act(() => {
-        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1.5 });
-        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 1.0 });
-        result.current.addFeature({ feature_idx: 300, layer: 6, strength: 0.5 });
-        result.current.addFeature({ feature_idx: 400, layer: 6, strength: 2.0 });
+        // freq 0.037 → clamp(2.9 − 2.6·0.037, 1, 3) ≈ 2.8, source 'auto'
+        result.current.addFeature({
+          feature_idx: 10,
+          layer: 6,
+          activation_frequency: 0.037,
+        });
+        // no frequency → default 10, source 'default'
+        result.current.addFeature({ feature_idx: 11, layer: 6 });
+        // explicit strength → honored verbatim, source 'manual'
+        result.current.addFeature({ feature_idx: 12, layer: 6, strength: 42 });
       });
 
-      expect(result.current.selectedFeatures).toHaveLength(4);
+      const [auto, dflt, manual] = result.current.selectedFeatures;
+      expect(auto.strength).toBeCloseTo(2.8, 1);
+      expect(auto.strengthSource).toBe('auto');
+      expect(dflt.strength).toBe(10);
+      expect(dflt.strengthSource).toBe('default');
+      expect(manual.strength).toBe(42);
+      expect(manual.strengthSource).toBe('manual');
+    });
 
-      // Try to add a 5th feature - should be ignored
+    it('applyAutoBaseline recomputes every tile from its stored frequency (Feature 011)', () => {
+      const { result } = renderHook(() => useSteeringStore());
+
       act(() => {
-        result.current.addFeature({ feature_idx: 500, layer: 6, strength: 1.0 });
+        result.current.addFeature({ feature_idx: 20, layer: 6, strength: 100, activation_frequency: 0.484 });
+        result.current.addFeature({ feature_idx: 21, layer: 6, strength: 100 });
       });
 
-      expect(result.current.selectedFeatures).toHaveLength(4);
-      // Should not contain feature 500
-      expect(result.current.selectedFeatures.find((f) => f.feature_idx === 500)).toBeUndefined();
+      // Both start manual at 100
+      expect(result.current.selectedFeatures.every((f) => f.strength === 100)).toBe(true);
+
+      act(() => {
+        result.current.applyAutoBaseline();
+      });
+
+      const [withFreq, withoutFreq] = result.current.selectedFeatures;
+      // freq 0.484 → clamp(2.9 − 2.6·0.484, 1, 3) ≈ 1.6
+      expect(withFreq.strength).toBeCloseTo(1.6, 1);
+      expect(withFreq.strengthSource).toBe('auto');
+      expect(withoutFreq.strength).toBe(10);
+      expect(withoutFreq.strengthSource).toBe('default');
     });
 
     it('should allow same feature at different strengths with unique instance_id', () => {

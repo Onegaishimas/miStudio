@@ -213,12 +213,15 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
   };
 
   const handleSelectFeature = (feature: SAEFeatureSummary) => {
+    // Omit strength → the store auto-computes the baseline from activation
+    // frequency when available, else falls back to the default (Feature 011).
     const success = addFeature({
       feature_idx: feature.feature_idx,
       layer: feature.layer,
-      strength: 10, // Default strength (Neuronpedia-compatible raw coefficient)
       label: feature.label,
       feature_id: feature.feature_id,
+      max_activation: feature.max_activation,
+      activation_frequency: feature.activation_frequency ?? null,
     });
 
     if (!success) {
@@ -237,10 +240,11 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
     // Use selected SAE's layer as fallback
     const effectiveLayer = isNaN(layer) ? (saeLayer ?? 0) : layer;
 
+    // Manual index add has no stats → the store falls back to the default
+    // strength (Feature 011).
     const success = addFeature({
       feature_idx: featureIdx,
       layer: effectiveLayer,
-      strength: 10, // Default strength (Neuronpedia-compatible raw coefficient)
       label: null,
       feature_id: null, // Manual entry - no database ID
     });

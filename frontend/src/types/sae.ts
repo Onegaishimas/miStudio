@@ -295,6 +295,7 @@ export interface SAEFeatureSummary {
   activation_count?: number;
   mean_activation?: number;
   max_activation: number | null;
+  activation_frequency?: number | null; // Feature 011: powers steering auto-baseline
   top_tokens: string[];
   neuronpedia_url: string | null;
   feature_id: string | null;

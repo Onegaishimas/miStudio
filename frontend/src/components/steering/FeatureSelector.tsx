@@ -6,14 +6,14 @@
  * - List of selected features with strength sliders
  * - Feature browser toggle
  * - Clear all button
- * - Max 4 features indicator
+ * - Max features indicator (Feature 011: up to 20)
  * - Right-click context menu for viewing feature details
  */
 
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy } from 'lucide-react';
-import { useSteeringStore } from '../../stores/steeringStore';
+import { useSteeringStore, MAX_SELECTED_FEATURES } from '../../stores/steeringStore';
 import { useSAEsStore } from '../../stores/saesStore';
 import { SAEStatus } from '../../types/sae';
 import { SelectedFeature } from '../../types/steering';
@@ -61,6 +61,7 @@ export function FeatureSelector() {
     updateFeatureStrength,
     setAdditionalStrengths,
     applyStrengthPreset,
+    applyAutoBaseline,
     clearFeatures,
   } = useSteeringStore();
 
@@ -191,7 +192,7 @@ export function FeatureSelector() {
   };
 
   // Check if we can duplicate (under max limit)
-  const canDuplicate = selectedFeatures.length < 4;
+  const canDuplicate = selectedFeatures.length < MAX_SELECTED_FEATURES;
 
   // Close feature detail modal
   const handleCloseModal = () => {
@@ -205,14 +206,14 @@ export function FeatureSelector() {
     setShowBrowser(false);
   };
 
-  const canAddMore = selectedFeatures.length < 4;
+  const canAddMore = selectedFeatures.length < MAX_SELECTED_FEATURES;
 
   return (
     <div className="h-full flex flex-col bg-slate-950 border-r border-slate-800">
       {/* Header */}
       <div className="p-4 border-b border-slate-800">
         <h2 className="text-lg font-semibold text-slate-100 mb-1">Feature Steering</h2>
-        <p className="text-sm text-slate-400">Select up to 4 features to steer</p>
+        <p className="text-sm text-slate-400">Select up to {MAX_SELECTED_FEATURES} features to steer</p>
       </div>
 
       {/* SAE Selector */}
@@ -247,7 +248,7 @@ export function FeatureSelector() {
             {/* Feature count header */}
             <div className="p-4 pb-2 flex items-center justify-between">
               <h3 className="text-sm font-medium text-slate-300">
-                Selected Features ({selectedFeatures.length}/4)
+                Selected Features ({selectedFeatures.length}/{MAX_SELECTED_FEATURES})
               </h3>
               {selectedFeatures.length > 0 && (
                 <button
@@ -274,6 +275,15 @@ export function FeatureSelector() {
                       {preset.label}
                     </button>
                   ))}
+                  {/* Feature 011: recompute each tile's baseline from its stored
+                      activation frequency (falls back to default where absent). */}
+                  <button
+                    onClick={applyAutoBaseline}
+                    className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 rounded px-3 py-1 text-xs transition-colors"
+                    title="Set each feature's strength from its activation frequency"
+                  >
+                    Auto
+                  </button>
                 </div>
               </div>
             )}
@@ -329,7 +339,7 @@ export function FeatureSelector() {
                 </button>
               ) : (
                 <div className="text-center py-2 text-sm text-slate-500">
-                  Maximum 4 features selected
+                  Maximum {MAX_SELECTED_FEATURES} features selected
                 </div>
               )}
             </div>
@@ -368,7 +378,7 @@ export function FeatureSelector() {
             onClick={handleDuplicateFeature}
             disabled={!canDuplicate}
             className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={canDuplicate ? 'Create a copy with negated strength' : 'Maximum 4 features reached'}
+            title={canDuplicate ? 'Create a copy with negated strength' : `Maximum ${MAX_SELECTED_FEATURES} features reached`}
           >
             <Copy className="w-4 h-4" />
             Duplicate (Negated)
@@ -380,7 +390,7 @@ export function FeatureSelector() {
           )}
           {!canDuplicate && (
             <div className="px-4 py-1 text-xs text-amber-500 border-t border-slate-700 mt-1">
-              Max 4 features - remove one to duplicate
+              Max {MAX_SELECTED_FEATURES} features - remove one to duplicate
             </div>
           )}
           {!selectedSAE?.training_id && (
