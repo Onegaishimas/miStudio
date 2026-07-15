@@ -21,6 +21,7 @@ import type { SteeringComparisonResponse, StrengthSweepResponse } from '../types
 // Mock the API module
 vi.mock('../api/steering', () => ({
   submitAsyncComparison: vi.fn(),
+  submitAsyncCombined: vi.fn(),
   submitAsyncSweep: vi.fn(),
   cancelTask: vi.fn(),
   getExperiments: vi.fn(),
@@ -49,6 +50,8 @@ const initialState = {
   currentComparison: null,
   recentComparisons: [],
   batchState: null,
+  combinedMode: false,
+  isCombinedGenerating: false,
   isSweeping: false,
   sweepResults: null,
   experiments: [],
@@ -657,6 +660,74 @@ describe('steeringStore', () => {
 
       expect(result.current.batchState?.isRunning).toBe(false);
       expect(result.current.isGenerating).toBe(false);
+    });
+
+    it('runs Blended per-prompt in batch mode (combinedMode) and completes all', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.setPrompts(['Prompt 1', 'Prompt 2', 'Prompt 3']);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1.5 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 2.0 });
+        result.current.setCombinedMode(true); // Blended
+      });
+
+      let callCount = 0;
+      vi.mocked(steeringApi.submitAsyncCombined).mockImplementation(async () => {
+        callCount++;
+        return { task_id: `ctask-${callCount}`, status: 'pending' } as any;
+      });
+
+      const batchPromise = result.current.generateBatchComparison();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 150));
+      });
+
+      // Must use the COMBINED endpoint, not comparison
+      expect(steeringApi.submitAsyncCombined).toHaveBeenCalled();
+      expect(steeringApi.submitAsyncComparison).not.toHaveBeenCalled();
+      expect(result.current.batchState?.isRunning).toBe(true);
+      expect(result.current.batchState?.results).toHaveLength(3);
+
+      // Complete each prompt with a COMBINED result (has combined_id).
+      for (let i = 1; i <= 3; i++) {
+        const combined = {
+          combined_id: `cmb-${i}`,
+          sae_id: mockSAE.id,
+          model_id: 'm',
+          prompt: `Prompt ${i}`,
+          combined_output: `blended output ${i}`,
+          features_applied: [
+            { feature_idx: 100, layer: 6, strength: 1.5, label: null, color: 'teal' },
+            { feature_idx: 200, layer: 6, strength: 2.0, label: null, color: 'blue' },
+          ],
+          baseline_output: `baseline ${i}`,
+          combined_metrics: null,
+          baseline_metrics: null,
+          total_steering_strength: 3.5,
+          total_time_ms: 1000,
+          created_at: new Date().toISOString(),
+        };
+        act(() => {
+          result.current.handleAsyncCompleted(combined as any);
+        });
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 100));
+        });
+      }
+
+      await batchPromise;
+
+      expect(result.current.batchState?.isRunning).toBe(false);
+      expect(result.current.isGenerating).toBe(false);
+      // All three prompts completed, each carrying an adapted comparison result.
+      const statuses = result.current.batchState?.results.map((r) => r.status);
+      expect(statuses).toEqual(['completed', 'completed', 'completed']);
+      // The adapter produced a single "blended" steered variation per prompt.
+      const first = result.current.batchState?.results[0].comparison;
+      expect(first?.steered).toHaveLength(1);
+      expect(first?.steered[0].text).toBe('blended output 1');
     });
 
     it('should continue on individual prompt failure', async () => {
