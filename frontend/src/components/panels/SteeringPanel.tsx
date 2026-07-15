@@ -182,8 +182,11 @@ export function SteeringPanel() {
 
   const handleGenerate = async () => {
     try {
-      if (combinedMode && selectedFeatures.length >= 2) {
-        // Combined mode: apply all features together
+      if (combinedMode && selectedFeatures.length >= 1 && !isBatchMode) {
+        // Blended: sum all selected features into one output (single prompt).
+        // With one feature this equals Compare, and the combined endpoint
+        // handles it fine — so honor the mode the user picked. The combined
+        // path is single-prompt only, so batch mode falls through below.
         await generateCombined(true, true);
       } else if (isBatchMode) {
         await generateBatchComparison(true, true);
@@ -525,10 +528,10 @@ export function SteeringPanel() {
                         <span className="text-amber-400">
                           Select at least one feature from the sidebar
                         </span>
-                      ) : combinedMode ? (
+                      ) : combinedMode && !isBatchMode ? (
                         <span className="text-cyan-400">
                           <Combine className="w-3 h-3 inline-block mr-1 -mt-0.5" />
-                          {selectedFeatures.length} features combined
+                          {selectedFeatures.length} feature{selectedFeatures.length !== 1 ? 's' : ''} blended
                         </span>
                       ) : isBatchMode ? (
                         <span>
@@ -540,47 +543,57 @@ export function SteeringPanel() {
                         </span>
                       )}
                     </div>
-                    {/* Blended | Compare toggle (Feature 011) — only with 2+ features.
-                        Blended (combinedMode) sums all features into one output;
-                        Compare generates a separate output per feature. */}
-                    {selectedFeatures.length >= 2 && !isBatchMode && (
-                      <div
-                        className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800/60 p-0.5 text-sm select-none"
-                        role="group"
-                        aria-label="Steering mode"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setCombinedMode(true)}
-                          disabled={isGenerating || isCombinedGenerating}
-                          aria-pressed={combinedMode}
-                          title="Sum all features into a single steered generation"
-                          className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            combinedMode
-                              ? 'bg-cyan-600 text-white'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
+                    {/* Blended | Compare toggle (Feature 011). Always visible so
+                        the choice is never hidden; disabled (grayed) while steering
+                        is active or a generation is running, since switching the
+                        dispatch mid-run isn't safe. Stop steering to switch. */}
+                    {(() => {
+                      const toggleDisabled =
+                        !!steeringModeActive || isGenerating || isCombinedGenerating;
+                      return (
+                        <div
+                          className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800/60 p-0.5 text-sm select-none"
+                          role="group"
+                          aria-label="Steering mode"
+                          title={
+                            steeringModeActive
+                              ? 'Stop steering to switch between Blended and Compare'
+                              : undefined
+                          }
                         >
-                          <Combine className="w-3.5 h-3.5" />
-                          Blended
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCombinedMode(false)}
-                          disabled={isGenerating || isCombinedGenerating}
-                          aria-pressed={!combinedMode}
-                          title="Generate a separate output for each feature"
-                          className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            !combinedMode
-                              ? 'bg-emerald-600 text-white'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          <Layers className="w-3.5 h-3.5" />
-                          Compare
-                        </button>
-                      </div>
-                    )}
+                          <button
+                            type="button"
+                            onClick={() => setCombinedMode(true)}
+                            disabled={toggleDisabled}
+                            aria-pressed={combinedMode}
+                            title="Sum all features into a single steered generation"
+                            className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              combinedMode
+                                ? 'bg-cyan-600 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <Combine className="w-3.5 h-3.5" />
+                            Blended
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCombinedMode(false)}
+                            disabled={toggleDisabled}
+                            aria-pressed={!combinedMode}
+                            title="Generate a separate output for each feature"
+                            className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              !combinedMode
+                                ? 'bg-emerald-600 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            Compare
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Stop button for batch mode */}
