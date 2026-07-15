@@ -67,6 +67,15 @@ from ..schemas.steering import (
 logger = logging.getLogger(__name__)
 
 
+# Model architectures whose KV cache is incompatible with steering forward hooks
+# and must therefore generate with use_cache=False. Matched (substring) against
+# the model's `model_type` and `architectures`. Gemma-2 uses a hybrid
+# sliding-window cache that breaks under hooks; every other architecture keeps
+# the cache (verified token-identical on LFM2, ~10-15x faster). Extend this list
+# if another hybrid-cache model is found to need it.
+_CACHE_INCOMPATIBLE_MARKERS: tuple[str, ...] = ("gemma2", "gemma_2", "gemma-2")
+
+
 # =============================================================================
 # GPU CLEANUP ON ABNORMAL EXIT
 # =============================================================================
@@ -1097,6 +1106,26 @@ class SteeringService:
 
         return handles
 
+    def _needs_cache_disabled(self, model: PreTrainedModel) -> bool:
+        """
+        Whether this model's KV cache must be disabled when steering hooks are active.
+
+        Steering hooks add a constant vector to each token's residual stream
+        independently of other tokens, so a standard (growing) KV cache yields
+        output identical to an uncached forward. Only models with a hook-hostile
+        cache — Gemma-2's hybrid sliding-window cache is the known case — need the
+        cache turned off. Detected by model_type / architecture name so the list
+        stays architecture-agnostic and easy to extend.
+        """
+        config = getattr(model, "config", None)
+        if config is None:
+            # No config to reason about — be safe and disable.
+            return True
+        model_type = (getattr(config, "model_type", "") or "").lower()
+        arch_names = " ".join(getattr(config, "architectures", []) or []).lower()
+        haystack = f"{model_type} {arch_names}"
+        return any(marker in haystack for marker in _CACHE_INCOMPATIBLE_MARKERS)
+
     async def _generate_text(
         self,
         model: PreTrainedModel,
@@ -1152,11 +1181,21 @@ class SteeringService:
             "past_key_values": None,
         }
 
-        # Disable cache if requested (needed for Gemma-2 with forward hooks)
-        # Gemma-2's hybrid cache is incompatible with forward hooks
-        if disable_cache:
+        # Disable the KV cache ONLY for architectures whose cache is actually
+        # incompatible with forward hooks. Steering hooks add a fixed vector to
+        # every token's hidden state independently, so for a standard KV cache the
+        # cached (incremental) forward produces token-identical output to the
+        # uncached one — verified on LFM2 (match_ids=True, ~14x faster). The
+        # blanket disable was a Gemma-2 workaround: its hybrid sliding-window
+        # cache breaks under hooks. Keep it disabled only there; every other
+        # model keeps the cache and generates ~10-15x faster. See
+        # _needs_cache_disabled().
+        if disable_cache and self._needs_cache_disabled(model):
             gen_kwargs["use_cache"] = False
-            logger.debug("KV cache disabled for generation (forward hooks active)")
+            logger.debug(
+                "KV cache disabled for generation (hook-incompatible cache: "
+                f"{getattr(getattr(model, 'config', None), 'model_type', '?')})"
+            )
 
         if params.seed is not None:
             torch.manual_seed(params.seed)

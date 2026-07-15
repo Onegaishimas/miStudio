@@ -1347,8 +1347,12 @@ export const useSteeringStore = create<SteeringState>()(
 
           console.log(`[SteeringStore] Combined task submitted: ${taskResponse.task_id}`);
 
-          // Create resolver for WebSocket completion
-          const COMBINED_TIMEOUT_MS = 180000; // 3 minutes
+          // Create resolver for WebSocket completion.
+          // Kept below the backend combined task's hard limit (240s) so the
+          // worker never outlives the client. With the KV cache retained for
+          // hook-compatible models a combined run is seconds; this is headroom
+          // for a cold start + long generation at up to 20 features.
+          const COMBINED_TIMEOUT_MS = 230000; // ~3.8 min (backend SIGKILL at 240s)
           const result = await createCombinedResolver(
             taskResponse.task_id,
             COMBINED_TIMEOUT_MS,
