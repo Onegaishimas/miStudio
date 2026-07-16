@@ -42,7 +42,17 @@ def main() -> None:
         f"Starting miStudio MCP server on {settings.host}:{settings.port} "
         f"(backend: {settings.api_url})"
     )
-    uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
+    try:
+        uvicorn.run(app, host=settings.host, port=settings.port,
+                    log_level="info")
+    finally:
+        # 009 R3: close_backend_clients existed with no production caller —
+        # close the backend HTTP clients + gate once the server stops.
+        import asyncio
+
+        close = getattr(mcp, "close_backend_clients", None)
+        if close is not None:
+            asyncio.run(close())
 
 
 if __name__ == "__main__":
