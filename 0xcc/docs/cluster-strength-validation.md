@@ -1,7 +1,7 @@
 # Cluster Strength Model — Empirical Validation Runbook & Results
 
 **Feature:** 013 (Cluster Strength Budget Model) · **Gate:** BR-005 "grounded, not guessed"
-**Status:** ⬜ Not yet executed (runbook ready; execute before enabling cluster mode by default)
+**Status:** ✅ EXECUTED 2026-07-16 — gate PASSED after fitting γ=0 (see Results)
 
 The formula set (IDL-29 / 013_FTDD §2) predicts a total budget `B` and per-member strengths for any
 cluster. This protocol tests those predictions against live steering outcomes on real clusters and

@@ -9,7 +9,7 @@ SAE features, replacing guessed uniform strengths. Design (pressure-tested; see
     frequency    f_eff = Σ w_i f_i / Σ w_i      (over members with known f)
     dir. budget  B_dir = clamp(a − b·f_eff, m, M)   (the empirically-fit solo law at cluster level)
     gain         G     = ‖Σ σ_i w_i d_i‖₂       (exact resultant norm of the injected direction)
-    total budget B     = min( B_dir / max(G, G_FLOOR), Σ b*(f_i) )
+    total budget B     = min( B_dir / max(G, G_FLOOR)**γ, Σ b*(f_i) )   (fitted γ=0 ⇒ B=B_dir)
     strengths    s_i   = σ_i · B · w_i          (rounded to 0.1; residual → largest member)
 
 The hook injects v = Σ strength_i · d_i, so ‖v‖ = B·G; setting B = B_dir/G makes
@@ -44,6 +44,13 @@ DEFAULT_CONSTANTS: Dict[str, float] = {
     "m": 1.0,       # budget floor
     "M": 3.0,       # budget ceiling
     "cohesion_gate": 0.5,  # below this group cohesion → recommend solo baselines
+    # Gain exponent γ in B = B_dir / max(G, G_FLOOR)**γ. Empirical validation
+    # (2026-07-16, runbook 0xcc/docs/cluster-strength-validation.md, C1-C3 on
+    # sae_eb8374929894): the γ=1 magnitude compensation overdrives ~2× — member
+    # features saturate on Σ|s| regardless of decoder-direction cancellation,
+    # so the fitted default is γ=0 (B = B_dir). G is still measured, reported,
+    # and used for the cancellation flag; γ stays overridable per-SAE.
+    "gamma": 0.0,
 }
 
 # Cluster-level default when NO member has a known frequency: derived as the
@@ -158,7 +165,7 @@ def compute_allocation(
                 weights=[1.0],
                 strengths=[members[0].sign * SOLO_DEFAULT_STRENGTH],
                 flags=["default_budget", "solo"],
-                constants_used={k: (constants or DEFAULT_CONSTANTS).get(k, DEFAULT_CONSTANTS.get(k)) for k in ("a", "b", "m", "M", "cohesion_gate")},
+                constants_used={k: (constants or DEFAULT_CONSTANTS).get(k, DEFAULT_CONSTANTS.get(k)) for k in ("a", "b", "m", "M", "cohesion_gate", "gamma")},
                 approximate=decoder is None,
             )
 
@@ -261,7 +268,8 @@ def compute_allocation(
 
     # -- Step 5: total budget ---------------------------------------------------
     cap = sum(_solo_cap(m.activation_frequency, c) for m in members)
-    b = min(b_dir / max(g, G_FLOOR), cap)
+    gamma = c.get("gamma", DEFAULT_CONSTANTS["gamma"])
+    b = min(b_dir / (max(g, G_FLOOR) ** gamma) if gamma else b_dir, cap)
     if b == cap and n > 1:
         flags.append("cap_bound")
 
@@ -311,7 +319,7 @@ def compute_allocation(
         strengths=strengths,
         flags=flags,
         cancellation_pair=cancellation_pair,
-        constants_used={k: c[k] for k in ("a", "b", "m", "M", "cohesion_gate") if k in c},
+        constants_used={k: c[k] for k in ("a", "b", "m", "M", "cohesion_gate", "gamma") if k in c},
         approximate=approximate,
     )
 
