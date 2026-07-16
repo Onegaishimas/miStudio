@@ -69,13 +69,25 @@ def test_identical_members_budget_equals_b_dir():
     assert sum(r.strengths) == pytest.approx(r.B, abs=0.06)  # 0.1 grain tolerance
 
 
-def test_orthogonal_members_budget_scales_sqrt_n():
-    """Independent directions add in quadrature: G = 1/√N ⇒ B = B_dir·√N."""
+def test_orthogonal_members_budget_default_gamma0():
+    """Fitted default γ=0 (2026-07-16 validation): B = B_dir regardless of G —
+    members saturate on Σ|s| independent of decoder-direction cancellation."""
     n = 4
     ms = members(*[(i, 0.5, 0.1) for i in range(n)])
     dec = orthogonal_decoder(8)
     r = compute_allocation(ms, decoder=dec)
-    assert r.G == pytest.approx(1.0 / math.sqrt(n), abs=1e-3)
+    assert r.G == pytest.approx(1.0 / math.sqrt(n), abs=1e-3)  # still measured/reported
+    assert r.B == pytest.approx(2.9 - 2.6 * 0.1, rel=0.02)
+    assert r.constants_used.get("gamma") == 0.0
+
+
+def test_orthogonal_members_gamma1_override_scales_sqrt_n():
+    """Legacy γ=1 stays available per-SAE: G = 1/√N ⇒ B = B_dir·√N."""
+    n = 4
+    ms = members(*[(i, 0.5, 0.1) for i in range(n)])
+    dec = orthogonal_decoder(8)
+    c = dict(DEFAULT_CONSTANTS, gamma=1.0)
+    r = compute_allocation(ms, decoder=dec, constants=c)
     b_dir = 2.9 - 2.6 * 0.1
     expected = min(b_dir * math.sqrt(n), sum([2.9 - 2.6 * 0.1] * n))
     assert r.B == pytest.approx(expected, rel=0.02)
@@ -171,11 +183,11 @@ def test_cancellation_flag_same_sign_opposed_decoders():
 
 
 def test_orthogonal_many_stays_under_cap():
-    """√N growth stays below Σ solo caps for orthogonal members (N ≤ d_model)."""
+    """(γ=1 override) √N growth stays below Σ solo caps for orthogonal members."""
     n = 9
     ms = members(*[(i, 1.0, 0.0) for i in range(n)])  # b*(0)=2.9 each, B_dir=2.9
     dec = orthogonal_decoder(16)
-    r = compute_allocation(ms, decoder=dec)
+    r = compute_allocation(ms, decoder=dec, constants=dict(DEFAULT_CONSTANTS, gamma=1.0))
     assert r.B == pytest.approx(2.9 * 3, rel=0.02)  # B_dir·√9
     assert "cap_bound" not in r.flags
 
@@ -188,11 +200,15 @@ def test_budget_cap_binds_under_near_cancellation():
     dec[0, 0] = 1.0
     dec[0, 1] = -1.0
     ms = members((0, 0.8, 0.2), (1, 0.8, 0.2))
-    r = compute_allocation(ms, decoder=dec)
+    r = compute_allocation(ms, decoder=dec, constants=dict(DEFAULT_CONSTANTS, gamma=1.0))
     cap = 2 * (2.9 - 2.6 * 0.2)  # Σ b*(0.2) = 4.76
     assert r.B == pytest.approx(cap, abs=1e-2)
     assert "cap_bound" in r.flags
     assert "cancellation" in r.flags
+    # Default γ=0: no G explosion at all — B = B_dir, cap does not bind.
+    r0 = compute_allocation(ms, decoder=dec)
+    assert r0.B == pytest.approx(2.9 - 2.6 * 0.2, abs=1e-2)
+    assert "cap_bound" not in r0.flags
 
 
 def test_mixed_layer_refused():
@@ -305,11 +321,16 @@ def test_nonunit_decoder_flagged_and_raw_norms_used():
     dec = torch.zeros(d_model, nf)
     dec[0, 0] = 2.0  # non-unit
     ms = members((0, 0.9, 0.2))
-    r = compute_allocation(ms, decoder=dec)
-    # raw single column of norm 2 → G=2 → B = b(0.2)/2
+    r = compute_allocation(ms, decoder=dec, constants=dict(DEFAULT_CONSTANTS, gamma=1.0))
+    # raw single column of norm 2 → G=2 → (γ=1) B = b(0.2)/2
     assert "nonunit_decoder" in r.flags
     assert r.G == pytest.approx(2.0, abs=1e-3)
     assert r.B == pytest.approx((2.9 - 2.6 * 0.2) / 2.0, abs=0.01)
+    # Default γ=0: raw-norm G still measured + flagged, but B stays B_dir.
+    r0 = compute_allocation(ms, decoder=dec)
+    assert r0.G == pytest.approx(2.0, abs=1e-3)
+    assert "nonunit_decoder" in r0.flags
+    assert r0.B == pytest.approx(2.9 - 2.6 * 0.2, abs=0.01)
 
 
 # ── Rebalance reference implementation ──────────────────────────────────────
