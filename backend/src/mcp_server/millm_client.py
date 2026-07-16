@@ -45,6 +45,11 @@ class MiLLMClient:
             response = await self._http.request(
                 method, path, params=params, json=json_body
             )
+        except httpx.TimeoutException as e:
+            # 009 R3: a reachable-but-slow miLLM was reported 'unreachable',
+            # sending agents down a connectivity rabbit hole (and looping
+            # retries on heavy imports).
+            raise BackendError(0, f"miLLM request timed out: {e}")
         except httpx.HTTPError as e:
             raise BackendError(0, f"miLLM backend unreachable: {e}")
 
@@ -91,6 +96,8 @@ class MiLLMClient:
         cluster export IS the portable artifact (contract §2)."""
         try:
             response = await self._http.get(path)
+        except httpx.TimeoutException as e:
+            raise BackendError(0, f"miLLM request timed out: {e}")
         except httpx.HTTPError as e:
             raise BackendError(0, f"miLLM backend unreachable: {e}")
         try:

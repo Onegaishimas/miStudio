@@ -494,3 +494,117 @@ class TestRound2Fixes:
         mcp, _ = build_server(make_settings(tool_categories="read"))
         assert callable(getattr(mcp, "close_backend_clients", None))
         anyio.run(mcp.close_backend_clients)
+
+
+class TestRound3Fixes:
+    """009 R3 pins."""
+
+    def test_vendored_contracts_identical_across_repos(self):
+        """The cross-product pipe rests on both repos vendoring the SAME
+        frozen v1 schema — pin them to EACH OTHER, not just to their own
+        mirrors (009 R3: regenerating one side passed its own sync test
+        while silently drifting from the other)."""
+        from pathlib import Path
+
+        ours = Path(__file__).resolve().parents[3] / "backend" / "src"
+        mistudio_schema = None
+        for candidate in (
+            Path(__file__).resolve().parents[3] / "docs" / "schemas"
+            / "cluster-definition-v1.json",
+            Path(__file__).resolve().parents[2] / "docs" / "schemas"
+            / "cluster-definition-v1.json",
+        ):
+            if candidate.exists():
+                mistudio_schema = candidate
+                break
+        millm_schema = Path("/home/x-sean/app/miLLM/docs/schemas/"
+                            "cluster-definition-v1.json")
+        if mistudio_schema is None or not millm_schema.exists():
+            pytest.skip("both repos not present in this environment")
+        assert mistudio_schema.read_bytes() == millm_schema.read_bytes()
+
+    def test_public_reason_anchored_categories(self):
+        assert HealthGate.public_reason(
+            "HTTP 503 from http://millm-unhealthy.svc/api/health"
+        ) == "error response"  # hostname must not trip the unhealthy branch
+        assert HealthGate.public_reason(
+            "status 'unhealthy' from http://x/api/health") == "unhealthy"
+        assert HealthGate.public_reason("unknown product 'x'") \
+            == "unknown product"
+        assert HealthGate.public_reason(
+            "timed out after 3.0s (http://x/api/health)") == "timed out"
+
+    def test_request_non_envelope_4xx_raises(self):
+        """R3 mutation pin: >=400 handling in request() (not just raw_get)."""
+        def handler(request):
+            return httpx.Response(422, json={"detail": [{"loc": ["query"]}]})
+
+        with pytest.raises(BackendError) as exc:
+            anyio.run(make_client(handler).get, "/api/sensing/events")
+        assert exc.value.status_code == 422
+        assert isinstance(exc.value.detail, dict)
+
+    def test_timeout_labeled_as_timeout(self):
+        def handler(request):
+            raise httpx.ReadTimeout("boom")
+
+        with pytest.raises(BackendError, match="timed out"):
+            anyio.run(make_client(handler).get, "/api/health/detailed")
+
+    def test_gated_mid_ttl_outage_is_structured_and_invalidates(self):
+        """EC-9.3: an unreachable raised inside a fresh ok-window returns
+        the structured unavailable NOW and expires the stale entry."""
+        gate = HealthGate("http://millm:8000", ttl_s=60.0)
+        gate._cache["millm"] = (__import__("time").monotonic(), True, "ok")
+
+        @gated(gate, "millm")
+        async def tool():
+            raise BackendError(0, "miLLM backend unreachable: refused")
+
+        result = anyio.run(tool)
+        assert result["unavailable"] == "millm"
+        assert "millm" not in gate._cache  # invalidated
+
+    def test_gated_normal_errors_still_raise(self):
+        gate = HealthGate("http://millm:8000", ttl_s=60.0)
+        gate._cache["millm"] = (__import__("time").monotonic(), True, "ok")
+
+        @gated(gate, "millm")
+        async def tool():
+            raise BackendError(422, {"code": "VALIDATION_ERROR",
+                                     "message": "bad"})
+
+        with pytest.raises(BackendError):
+            anyio.run(tool)
+
+    def test_snapshot_background_refresh_lands(self):
+        gate = HealthGate("http://millm:8000", ttl_s=60.0)
+
+        async def get(url):
+            return httpx.Response(200, json={"status": "healthy"})
+
+        stub = MagicMock()
+        stub.get = get
+        gate._http = stub
+
+        async def run():
+            import asyncio
+
+            available, reason = gate.snapshot("millm")
+            assert available is None  # not probed yet
+            await asyncio.sleep(0.05)  # let the background refresh land
+            return gate.snapshot("millm")
+
+        available, reason = anyio.run(run)
+        assert available is True and reason == "ok"
+
+    def test_audit_wrapped_millm_tool_still_callable(self, monkeypatch):
+        """R3: the gated+audit+FastMCP triple-wrap path was never executed."""
+        from src.mcp_server.server import wrap_tool_with_audit
+
+        monkeypatch.setenv("MILLM_API_URL", "http://127.0.0.1:1")
+        mcp, _ = build_server(make_settings(tool_categories="millm_runtime"))
+        wrap_tool_with_audit(mcp)
+        tool = mcp._tool_manager._tools["millm_status"]  # noqa: SLF001
+        result = anyio.run(lambda: tool.run({}))
+        assert "unavailable" in str(result)

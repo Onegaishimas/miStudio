@@ -9,6 +9,7 @@ instead. `degraded` (any 2xx) is AVAILABLE — miLLM with no model loaded must
 still accept imports and report status.
 """
 
+import asyncio
 import time
 from typing import Callable, Optional
 
@@ -36,7 +37,13 @@ class HealthGate:
         self._http: Optional[httpx.AsyncClient] = None
         # Single-flight per product: concurrent tool calls at TTL expiry
         # must not stampede an already-struggling backend (009 R2).
-        self._locks: dict[str, "__import__('asyncio').Lock"] = {}
+        # NOTE single-loop object: locks, the lazy client, and background
+        # tasks bind to the first loop that uses them.
+        self._locks: dict[str, asyncio.Lock] = {}
+        # Strong refs to background refreshes (009 R3: create_task results
+        # were discarded — collectable under GC pressure, and exceptions
+        # were never retrieved). Also dedups task churn per product.
+        self._refreshing: dict[str, asyncio.Task] = {}
 
     def _client(self) -> httpx.AsyncClient:
         if self._http is None:
@@ -51,8 +58,6 @@ class HealthGate:
 
     async def check(self, product: str) -> tuple[bool, str]:
         """(available, reason). reason is agent-readable on refusal."""
-        import asyncio
-
         hit = self._cache.get(product)
         if hit is not None and time.monotonic() - hit[0] < self._ttl:
             return hit[1], hit[2]
@@ -77,9 +82,14 @@ class HealthGate:
 
         hit = self._cache.get(product)
         stale = hit is None or time.monotonic() - hit[0] >= self._ttl
-        if stale:
+        pending = self._refreshing.get(product)
+        if stale and (pending is None or pending.done()):
             try:
-                asyncio.get_running_loop().create_task(self.check(product))
+                task = asyncio.get_running_loop().create_task(
+                    self.check(product))
+                task.add_done_callback(
+                    lambda t: t.exception())  # retrieve, never warn
+                self._refreshing[product] = task
             except RuntimeError:
                 pass  # no loop (sync test context) — next check() will probe
         if hit is None:
@@ -99,12 +109,18 @@ class HealthGate:
         (009 R2 topology leak) and stay in logs + authenticated tools."""
         if reason in ("ok", "not probed yet"):
             return reason
-        if "not configured" in reason:
-            return "not configured"
-        if "unhealthy" in reason:
-            return "unhealthy"
+        # Anchored checks (009 R3: substring matching miscategorized an
+        # 'unhealthy' hostname inside an HTTP-status reason)
         if reason.startswith("HTTP "):
             return "error response"
+        if reason.startswith("status 'unhealthy'"):
+            return "unhealthy"
+        if reason.startswith("unknown product"):
+            return "unknown product"
+        if "not configured" in reason:
+            return "not configured"
+        if reason.startswith("timed out"):
+            return "timed out"
         return "unreachable"
 
     async def _probe(self, product: str) -> tuple[bool, str]:
@@ -119,6 +135,8 @@ class HealthGate:
         url = f"{base}{path}"
         try:
             response = await self._client().get(url)
+        except httpx.TimeoutException as e:
+            return False, f"timed out after {PROBE_TIMEOUT_S}s ({url})"
         except httpx.HTTPError as e:
             return False, f"{type(e).__name__}: {e} ({url})"
         # Strictly 2xx: a 3xx from an ingress fronting a dead backend must
@@ -144,12 +162,24 @@ def gated(gate: HealthGate, product: str) -> Callable:
     def wrap(fn: Callable) -> Callable:
         import functools
 
+        from .client import BackendError
+
         @functools.wraps(fn)
         async def inner(*args, **kwargs):
             ok, reason = await gate.check(product)
             if not ok:
                 return {"unavailable": product, "reason": reason}
-            return await fn(*args, **kwargs)
+            try:
+                return await fn(*args, **kwargs)
+            except BackendError as exc:
+                if exc.status_code == 0:
+                    # Mid-TTL outage (EC-9.3): the gate said ok seconds ago
+                    # but the call itself couldn't reach the backend — make
+                    # THIS call structured and expire the stale entry so
+                    # the next one probes.
+                    gate.invalidate(product)
+                    return {"unavailable": product, "reason": str(exc)}
+                raise
 
         return inner
 

@@ -28,9 +28,12 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
                                    limit: int = 50,
                                    since: Optional[str] = None) -> Any:
         """Co-activation events newest-first. Each row carries the span,
-        fired members with peak activations, score, human summary, AND the
+        fired members with peak activations, score, human summary, the
         ±K token context window (context_text/context_token_ids) when the
-        cluster captures context. `since` (ISO-8601 timestamp) time-bounds
+        cluster captures context, and ambient_fired_count — the
+        alone-vs-within signal (how many features across the WHOLE SAE
+        fired; null when full-width monitoring wasn't co-running — never
+        estimated). `since` (ISO-8601 timestamp) time-bounds
         polling so agents fetch only new events. MUST carry an explicit
         UTC offset (e.g. 2026-07-16T12:00:00Z) — naive timestamps are
         rejected because the server would silently assume UTC."""
