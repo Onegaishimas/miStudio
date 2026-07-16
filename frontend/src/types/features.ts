@@ -64,6 +64,7 @@ export interface ExtractionStatusResponse {
   dataset_name: string | null;
   sae_name: string | null;  // For external SAE sources
   layer_index: number | null;  // Layer index for multi-layer trainings
+  hook_type?: string | null;  // Hook type for multi-hook trainings (e.g., "residual", "mlp", "attention")
   status: ExtractionStatus;
   progress: number | null;
   features_extracted: number | null;
