@@ -1563,6 +1563,8 @@ describe('steeringStore', () => {
       expect(feats[0].pinned).toBe(true);
       expect(result.current.clusterBudget?.B).toBe(2.0);
       expect(result.current.intensity).toBe(1.5);
+      // Profiles are blended artifacts — loading one enters Blended mode
+      expect(result.current.combinedMode).toBe(true);
       // Label tier 1: the authored profile NAME titles blended results
       expect(result.current.clusterContext?.display_token).toBe('Fear response');
       expect(result.current.activeProfile).toEqual({ id: 'clp_1', name: 'Fear response' });
