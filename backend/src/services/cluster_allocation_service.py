@@ -46,12 +46,14 @@ DEFAULT_CONSTANTS: Dict[str, float] = {
     "cohesion_gate": 0.5,  # below this group cohesion → recommend solo baselines
 }
 
-# Cluster-level default when NO member has a known frequency: the clamp
-# midpoint. Deliberately NOT the solo path's DEFAULT_STRENGTH=10 — that is a
-# per-feature legacy fallback; a whole cluster of unknowns starts conservative.
-DEFAULT_B_DIR = 2.0
-# Per-member cap contribution when the member's frequency is unknown.
-DEFAULT_MEMBER_CAP = 2.0
+# Cluster-level default when NO member has a known frequency: derived as the
+# clamp midpoint of the RESOLVED constants (see _default_b_dir) so per-SAE
+# overrides move it. Deliberately NOT the solo path's DEFAULT_STRENGTH=10 —
+# that is a per-feature legacy fallback; a cluster of unknowns starts
+# conservative. Exception: N=1 with unknown frequency returns the solo default
+# (10.0) so the MCP path matches the UI's solo baseline exactly.
+DEFAULT_B_DIR = 2.0  # kept for external references/tests; runtime uses _default_b_dir
+SOLO_DEFAULT_STRENGTH = 10.0
 
 
 @dataclass
@@ -92,10 +94,30 @@ def resolve_constants(settings_json: Optional[str], sae_id: Optional[str]) -> Di
     return constants
 
 
+def _default_b_dir(c: Dict[str, float]) -> float:
+    """Default direction budget: the clamp midpoint of the RESOLVED constants.
+
+    Args:
+        c: Resolved constants (after per-SAE overrides).
+
+    Returns:
+        (m + M) / 2 — moves with per-SAE overrides, unlike a hardcoded value.
+    """
+    return (c["m"] + c["M"]) / 2.0
+
+
 def _solo_cap(f: Optional[float], c: Dict[str, float]) -> float:
-    """b*(f): the member's solo-optimal contribution to the budget cap."""
+    """b*(f): the member's solo-optimal contribution to the budget cap.
+
+    Args:
+        f: Activation frequency in [0, 1], or None/NaN/out-of-range.
+        c: Resolved constants.
+
+    Returns:
+        clamp(a − b·f, m, M); the constants midpoint when f is unusable.
+    """
     if f is None or not (0.0 <= f <= 1.0) or math.isnan(f):
-        return DEFAULT_MEMBER_CAP
+        return _default_b_dir(c)
     return max(c["m"], min(c["M"], c["a"] - c["b"] * f))
 
 
@@ -122,9 +144,27 @@ def compute_allocation(
     n = len(members)
     flags: List[str] = []
 
+    # N=1 with unknown frequency: return the SOLO default (10.0) so the MCP
+    # path matches the UI's Feature-011 baseline exactly (IDL-29 step 10). With
+    # a known frequency the general math below already reduces to the solo law.
+    if n == 1:
+        f0 = members[0].activation_frequency
+        if f0 is None or (isinstance(f0, float) and math.isnan(f0)) or not (0.0 <= f0 <= 1.0):
+            return AllocationResult(
+                B=SOLO_DEFAULT_STRENGTH,
+                B_dir=SOLO_DEFAULT_STRENGTH,
+                G=1.0,
+                f_eff=None,
+                weights=[1.0],
+                strengths=[members[0].sign * SOLO_DEFAULT_STRENGTH],
+                flags=["default_budget", "solo"],
+                constants_used={k: (constants or DEFAULT_CONSTANTS).get(k, DEFAULT_CONSTANTS.get(k)) for k in ("a", "b", "m", "M", "cohesion_gate")},
+                approximate=decoder is None,
+            )
+
     # -- Step 1: similarity-normalized weights -------------------------------
     valid_sims = [m.similarity for m in members
-                  if m.similarity is not None and not math.isnan(m.similarity) and m.similarity > 0]
+                  if m.similarity is not None and not math.isnan(m.similarity)]
     mean_sim = (sum(valid_sims) / len(valid_sims)) if valid_sims else 1.0
     s_tilde: List[float] = []
     for m in members:
@@ -148,16 +188,21 @@ def compute_allocation(
              and 0.0 <= m.activation_frequency <= 1.0]
     if known:
         wsum = sum(w for w, _ in known)
-        f_eff: Optional[float] = (sum(w * f for w, f in known) / wsum) if wsum > 0 else None
+        if wsum > 0:
+            f_eff: Optional[float] = sum(w * f for w, f in known) / wsum
+        else:
+            # Known frequencies exist but all on zero-weight members — use the
+            # plain mean rather than falsely claiming no frequencies were known.
+            f_eff = sum(f for _, f in known) / len(known)
     else:
         f_eff = None
 
     # -- Step 3: direction budget ---------------------------------------------
     if f_eff is None:
-        b_dir = DEFAULT_B_DIR
+        b_dir = _default_b_dir(c)  # clamp midpoint of the RESOLVED constants
         flags.append("default_budget")  # no frequencies known
     else:
-        b_dir = max(c["m"], min(c["M"], c["a"] - c["b"] * f_eff))
+        b_dir = _solo_cap(f_eff, c)
 
     # -- Step 4: gain (exact resultant norm, signed weights) -------------------
     approximate = False
@@ -172,23 +217,43 @@ def compute_allocation(
             raise ValueError(f"feature indices out of bounds for SAE with {d_sae} features: {bad}")
 
         with torch.no_grad():
+            # RAW columns, exactly as the steering hook injects them
+            # (steering_service hook: `decoder_weight[:, feat_idx]`, no
+            # normalization). The solo law was fit THROUGH the hook, so b(f) is
+            # the target *injected magnitude*; computing G on normalized
+            # directions would mispredict on any non-unit-norm decoder and
+            # silently reweight members by their column norms.
             cols = decoder[:, idxs].to(torch.float32)          # [d_model, n]
-            norms = torch.linalg.vector_norm(cols, dim=0)      # defensive: normalize
-            norms = torch.clamp(norms, min=1e-8)
-            unit = cols / norms
-            sw = torch.tensor([m.sign * w for m, w in zip(members, weights)], dtype=torch.float32)
-            resultant = unit @ sw                              # [d_model]
+            norms = torch.linalg.vector_norm(cols, dim=0)
+            # Transparency flag when decoder columns deviate from unit norm —
+            # the law is extrapolating there (validation protocol covers).
+            if bool(((norms - 1.0).abs() > 0.1).any()):
+                flags.append("nonunit_decoder")
+            sw = torch.tensor(
+                [m.sign * w for m, w in zip(members, weights)],
+                dtype=torch.float32,
+                device=cols.device,
+            )
+            resultant = cols @ sw                              # [d_model]
             g = float(torch.linalg.vector_norm(resultant))
 
-            # Cancellation check only when it can trip (positive-sign cluster,
-            # worse-than-orthogonal gain) — N² cosines on demand only.
-            if n > 1 and all(m.sign == 1 for m in members) and g < 1.0 / math.sqrt(n):
-                flags.append("cancellation")
-                cos = (unit.t() @ unit)                        # [n, n]
-                cos.fill_diagonal_(1.0)
-                flat = torch.argmin(cos)
-                i, j = int(flat) // n, int(flat) % n
-                cancellation_pair = (members[i].feature_idx, members[j].feature_idx)
+            # Cancellation check over the POSITIVE-sign subset (explicit
+            # suppressors are exempt from triggering it, but must not disable
+            # the check for everyone else — FTDD edge row).
+            pos = [k for k, m in enumerate(members) if m.sign == 1]
+            if len(pos) > 1:
+                pw = torch.tensor([weights[k] for k in pos], dtype=torch.float32, device=cols.device)
+                pcols = cols[:, pos]
+                pnorms = torch.clamp(torch.linalg.vector_norm(pcols, dim=0), min=1e-8)
+                punit = pcols / pnorms
+                g_pos = float(torch.linalg.vector_norm(punit @ (pw / pw.sum())))
+                if g_pos < 1.0 / math.sqrt(len(pos)):
+                    flags.append("cancellation")
+                    cos = punit.t() @ punit
+                    cos.fill_diagonal_(1.0)
+                    flat = torch.argmin(cos)
+                    i, j = int(flat) // len(pos), int(flat) % len(pos)
+                    cancellation_pair = (members[pos[i]].feature_idx, members[pos[j]].feature_idx)
     else:
         g = 1.0  # constant-budget conservative fallback (errs weak)
         approximate = True
@@ -204,14 +269,37 @@ def compute_allocation(
     if group_cohesion is not None and group_cohesion < c.get("cohesion_gate", 0.5):
         flags.append("low_cohesion")
 
-    # -- Step 6: allocation with rounding-residual fold ---------------------------
+    # -- Step 6: allocation with SAFE rounding-residual distribution --------------
+    # Distribute the residual one grain at a time across unzeroed members in
+    # weight order, never crossing zero (a fold that flips a boost member into
+    # a suppressor — or dumps the whole budget on one member — is worse than a
+    # small Σ|s| deviation; the previous single-member fold did exactly that at
+    # n≈20). Grain-limited cases keep their honest rounding and are flagged.
     raw = [m.sign * b * w for m, w in zip(members, weights)]
     strengths = [round(x / ROUND_GRAIN) * ROUND_GRAIN for x in raw]
-    # Fold the rounding residual into the largest-|weight| member so Σ|s| tracks B.
     residual = b - sum(abs(s) for s in strengths)
-    if abs(residual) >= ROUND_GRAIN / 2 and n > 0:
-        k = max(range(n), key=lambda i: weights[i])
-        strengths[k] = round((strengths[k] + members[k].sign * residual) / ROUND_GRAIN) * ROUND_GRAIN
+    order = sorted(range(n), key=lambda i: -weights[i])
+    guard = 0
+    while abs(residual) >= ROUND_GRAIN / 2 and guard < 10 * n:
+        adjusted = False
+        for k in order:
+            if residual > 0:
+                # grow |s_k| by one grain in its own sign direction
+                strengths[k] = round(strengths[k] + members[k].sign * ROUND_GRAIN, 1)
+                residual -= ROUND_GRAIN
+                adjusted = True
+            else:
+                # shrink |s_k| by one grain, but never past zero
+                if abs(strengths[k]) >= ROUND_GRAIN:
+                    strengths[k] = round(strengths[k] - members[k].sign * ROUND_GRAIN, 1)
+                    residual += ROUND_GRAIN
+                    adjusted = True
+            if abs(residual) < ROUND_GRAIN / 2:
+                break
+            guard += 1
+        if not adjusted:
+            flags.append("grain_limited")
+            break
     strengths = [round(s, 1) for s in strengths]
 
     return AllocationResult(

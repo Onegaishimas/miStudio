@@ -54,8 +54,8 @@ export interface ClusterBudget {
   G: number;
   flags: string[];
   approximate: boolean;
-  /** weight per feature_idx (allocation-time mapping) */
-  weightsByIdx: Record<number, number>;
+  /** weight per selection instance (order/duplicate-safe allocation mapping) */
+  weightsByInstance: Record<string, number>;
 }
 
 /**

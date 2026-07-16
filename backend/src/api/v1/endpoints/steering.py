@@ -1265,10 +1265,12 @@ async def compute_cluster_strength_allocation(
     """
     Compute a principled starting strength allocation for a cluster (Feature 013).
 
-    CPU-fast: loads only the SAE (cached) to read decoder directions — no model
-    load, no generation, no steering-mode requirement, no Celery. The formula is
-    the single server-side source of truth (IDL-29); the frontend only performs
-    budget-preserving rebalance on the returned values.
+    Loads only the SAE (through the shared steering cache — the same load any
+    steering prep performs; no LLM load, no generation, no steering-mode
+    requirement, no Celery). The formula is the single server-side source of
+    truth (IDL-29); the frontend only performs budget-preserving rebalance on
+    the returned values. Decoder columns are sliced in-place — no full-matrix
+    copies.
     """
     import torch
 
@@ -1279,6 +1281,17 @@ async def compute_cluster_strength_allocation(
         raise HTTPException(400, f"SAE is not ready: {sae.status}")
     if not sae.local_path:
         raise HTTPException(400, "SAE has no local path")
+
+    # Members must target the SAE's own layer — the decoder defines directions
+    # for exactly that layer; a mismatched request would return a "principled"
+    # allocation computed against the wrong residual space.
+    if sae.layer is not None:
+        wrong_layer = sorted({m.layer for m in request.members if m.layer != sae.layer})
+        if wrong_layer:
+            raise HTTPException(
+                400,
+                f"Members target layer(s) {wrong_layer} but SAE {request.sae_id} is layer {sae.layer}",
+            )
 
     # Bounds check against DB metadata up-front (also enforced against the real
     # decoder inside compute_allocation when it loads).
@@ -1307,7 +1320,10 @@ async def compute_cluster_strength_allocation(
             )
             dw = resolve_decoder_weight(loaded.model)
             if dw is not None:
-                decoder = dw.detach().to("cpu", torch.float32)
+                # Pass the tensor as-is: compute_allocation slices the N≤20
+                # member columns before any dtype/device work. Copying the full
+                # [d_model, d_sae] matrix to CPU here cost ~GBs per request.
+                decoder = dw.detach()
     except Exception as e:
         logger.warning(f"[ClusterAllocation] Decoder unavailable, using approximate G=1: {e}")
 

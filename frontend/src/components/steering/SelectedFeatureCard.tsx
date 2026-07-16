@@ -22,6 +22,8 @@ interface SelectedFeatureCardProps {
   onStrengthChange: (strength: number) => void;
   onAdditionalStrengthsChange: (strengths: number[]) => void;
   onRemove: () => void;
+  /** Unpin a pinned member so it rejoins budget rebalancing (Feature 013). */
+  onTogglePin?: () => void;
   onContextMenu?: (event: React.MouseEvent, feature: SelectedFeature) => void;
   isDragging?: boolean;
   dragHandleProps?: Record<string, any>;
@@ -51,6 +53,7 @@ export function SelectedFeatureCard({
   onStrengthChange,
   onAdditionalStrengthsChange,
   onRemove,
+  onTogglePin,
   onContextMenu,
   isDragging = false,
   dragHandleProps,
@@ -194,13 +197,16 @@ export function SelectedFeatureCard({
           </span>
         )}
         {feature.pinned && (
-          <span
-            className="flex items-center gap-0.5 text-[10px] font-medium text-amber-400 bg-amber-500/10 rounded px-1 py-0.5 shrink-0"
-            title="Pinned — excluded from budget rebalancing"
+          <button
+            type="button"
+            onClick={onTogglePin}
+            disabled={disabled || !onTogglePin}
+            className="flex items-center gap-0.5 text-[10px] font-medium text-amber-400 bg-amber-500/10 rounded px-1 py-0.5 shrink-0 hover:bg-amber-500/20 disabled:cursor-default disabled:hover:bg-amber-500/10"
+            title="Pinned — excluded from budget rebalancing. Click to unpin."
           >
             <Pin className="w-2.5 h-2.5" />
             pinned
-          </span>
+          </button>
         )}
         {strengthSource === 'default' && (
           <span

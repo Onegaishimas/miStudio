@@ -237,6 +237,81 @@ def test_rounding_residual_folded():
     assert sum(abs(s) for s in r.strengths) == pytest.approx(r.B, abs=0.06)
 
 
+# ── Iteration-1 review regressions ──────────────────────────────────────────
+
+def test_fold_never_flips_signs_n20():
+    """PROVEN bug: n=20, B≈3 → old single-member fold produced −0.8 on a boost
+    member and Σ|s| 53% over budget. The greedy distribution must never flip."""
+    n = 20
+    ms = members(*[(i, 1.0, 0.0) for i in range(n)])
+    dec = identical_decoder(24)
+    r = compute_allocation(ms, decoder=dec)
+    assert all(s >= 0 for s in r.strengths), r.strengths
+    assert sum(abs(s) for s in r.strengths) == pytest.approx(r.B, abs=0.1)
+
+
+def test_fold_no_single_member_budget_dump():
+    """n=20 with tiny per-member shares must not dump the budget on one member."""
+    n = 20
+    ms = members(*[(i, 1.0, 0.48) for i in range(n)])  # B_dir≈1.65
+    dec = identical_decoder(24)
+    r = compute_allocation(ms, decoder=dec)
+    assert max(abs(s) for s in r.strengths) <= 0.3  # ~B/n + a grain
+
+
+def test_cancellation_checked_on_positive_subset_with_suppressor_present():
+    """A deliberate suppressor must not disable the cancellation check for the
+    positive members (old code skipped the check when ANY sign was −1)."""
+    d_model, nf = 8, 4
+    dec = torch.zeros(d_model, nf)
+    dec[0, 0] = 1.0
+    dec[0, 1] = -1.0   # positive members 0,1 oppose each other
+    dec[1, 2] = 1.0    # suppressor on an orthogonal direction
+    ms = members((0, 0.8, 0.2), (1, 0.8, 0.2), (2, 0.8, 0.2, -1))
+    r = compute_allocation(ms, decoder=dec)
+    assert "cancellation" in r.flags
+    assert set(r.cancellation_pair) == {0, 1}
+
+
+def test_zero_and_missing_sims_impute_true_mean():
+    """Present zeros count toward the imputation mean (FTDD: mean of PRESENT sims)."""
+    ms = members((0, 0.0, 0.2), (1, 0.0, 0.2), (2, None, 0.2))
+    r = compute_allocation(ms, decoder=identical_decoder(4))
+    # mean(0,0)=0 → imputed 0 → all zero → uniform weights, NOT all-budget-to-unknown
+    assert r.weights == [pytest.approx(1 / 3, abs=1e-3)] * 3
+    assert "uniform_weights" in r.flags
+
+
+def test_n1_unknown_frequency_matches_solo_default():
+    """MCP/UI parity: a single feature with unknown frequency gets the solo 10."""
+    ms = members((3, 0.9, None))
+    r = compute_allocation(ms, decoder=identical_decoder(8))
+    assert r.B == 10.0
+    assert r.strengths == [10.0]
+    assert "solo" in r.flags
+
+
+def test_f_eff_falls_back_to_unweighted_mean_when_known_f_has_zero_weight():
+    ms = members((0, 0.0, 0.3), (1, 0.8, None))
+    r = compute_allocation(ms, decoder=identical_decoder(4))
+    # Known f lives only on the zero-weight member → unweighted mean fallback
+    assert r.f_eff == pytest.approx(0.3, abs=1e-3)
+    assert "default_budget" not in r.flags
+
+
+def test_nonunit_decoder_flagged_and_raw_norms_used():
+    """G must be computed on RAW columns (hook parity): a 2x-norm column doubles G."""
+    d_model, nf = 8, 4
+    dec = torch.zeros(d_model, nf)
+    dec[0, 0] = 2.0  # non-unit
+    ms = members((0, 0.9, 0.2))
+    r = compute_allocation(ms, decoder=dec)
+    # raw single column of norm 2 → G=2 → B = b(0.2)/2
+    assert "nonunit_decoder" in r.flags
+    assert r.G == pytest.approx(2.0, abs=1e-3)
+    assert r.B == pytest.approx((2.9 - 2.6 * 0.2) / 2.0, abs=0.01)
+
+
 # ── Rebalance reference implementation ──────────────────────────────────────
 
 def test_rebalance_preserves_budget():

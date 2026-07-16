@@ -80,7 +80,9 @@ async def test_400_on_mixed_layers():
         with pytest.raises(HTTPException) as e:
             await compute_cluster_strength_allocation(req, db=MagicMock())
         assert e.value.status_code == 400
-        assert "mixed-layer" in str(e.value.detail)
+        # The endpoint-level SAE-layer cross-check fires first (stronger:
+        # members must target the SAE's own layer, not merely agree).
+        assert "layer" in str(e.value.detail).lower()
 
 
 @pytest.mark.asyncio

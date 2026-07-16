@@ -67,6 +67,7 @@ export function FeatureSelector() {
     clusterContext,
     clusterBudget,
     rebalanceStrength,
+    togglePin,
   } = useSteeringStore();
 
   // Strength preset values
@@ -327,6 +328,7 @@ export function FeatureSelector() {
                     setAdditionalStrengths(feature.instance_id, strengths)
                   }
                   onRemove={() => removeFeature(feature.instance_id)}
+                  onTogglePin={() => togglePin(feature.instance_id)}
                   onContextMenu={handleSelectedFeatureContextMenu}
                 />
               ))}
