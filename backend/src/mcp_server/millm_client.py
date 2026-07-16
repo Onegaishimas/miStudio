@@ -93,19 +93,28 @@ class MiLLMClient:
             response = await self._http.get(path)
         except httpx.HTTPError as e:
             raise BackendError(0, f"miLLM backend unreachable: {e}")
+        try:
+            body = response.json()
+        except json.JSONDecodeError:
+            body = None
         if response.status_code >= 400:
             # Export failures still arrive as envelope JSON — surface the
             # structured {code, message, details} like every other path
             # (009 R1: agents got the envelope as an escaped string blob).
-            try:
-                body = response.json()
-            except json.JSONDecodeError:
-                body = None
             if isinstance(body, dict) and body.get("error"):
                 error = body["error"]
                 raise BackendError(response.status_code,
                                    {"code": error.get("code", "MILLM_ERROR"),
                                     "message": error.get("message", ""),
                                     "details": error.get("details")})
-            raise BackendError(response.status_code, response.text)
-        return response.json()
+            # Non-envelope JSON (e.g. FastAPI 422 detail) stays structured
+            # rather than re-stringified (009 R2).
+            raise BackendError(response.status_code,
+                               body if body is not None else response.text)
+        if body is None:
+            # 2xx non-JSON (misrouted ingress, splash page) must be a
+            # structured BackendError, not a bare JSONDecodeError (009 R2).
+            raise BackendError(
+                response.status_code,
+                f"export returned non-JSON content from {path}")
+        return body

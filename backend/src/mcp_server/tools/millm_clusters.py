@@ -60,6 +60,10 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
                                 "activate": bool(activate)}
         if revision:
             body["revision"] = revision
+        if on_conflict:
+            # Supported by miLLM's hub route since the 009 R2 contract
+            # amendment — silently dropping it ignored agents' dedupe guard.
+            body["on_conflict"] = on_conflict
         return await millm.post("/api/clusters/hub/import", json_body=body)
 
     @mcp.tool()

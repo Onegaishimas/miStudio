@@ -103,14 +103,6 @@ class TestMiLLMClient:
 
 
 class TestHealthGate:
-    def _gate_with(self, responder) -> HealthGate:
-        gate = HealthGate("http://millm:8000", ttl_s=10.0)
-
-        async def probe(product):
-            return await responder(product)
-
-        return gate
-
     @staticmethod
     def _stub_http(gate, responder):
         """Replace the gate's long-lived probe client (built in __init__)."""
@@ -387,11 +379,13 @@ class TestRound1Fixes:
 
     def test_health_route_reports_products(self, monkeypatch):
         monkeypatch.setenv("MILLM_API_URL", "http://127.0.0.1:1")
+        # keep the 'unit' test off the network (a live backend on :8000
+        # made the mistudio probe environment-dependent: 009 R2)
+        monkeypatch.setenv("MISTUDIO_API_URL", "http://127.0.0.1:1")
         mcp, _ = build_server(make_settings(tool_categories="read"))
 
         async def run():
             import httpx as _httpx
-            from starlette.applications import Starlette
 
             app = mcp.streamable_http_app()
             transport = _httpx.ASGITransport(app=app)
@@ -401,5 +395,102 @@ class TestRound1Fixes:
 
         response = anyio.run(run)
         body = response.json()
-        assert body["products"]["millm"]["available"] is False
+        # snapshot semantics (009 R2): /health never blocks — the first hit
+        # may report null (not probed yet) and kicks a background refresh
+        assert body["products"]["millm"]["available"] in (False, None)
         assert "mistudio" in body["products"]
+        # reasons are sanitized categories, never internal URLs
+        for product in body["products"].values():
+            assert "http" not in (product["reason"] or "")
+
+
+class TestRound2Fixes:
+    """009 R2 pins."""
+
+    def test_snapshot_never_blocks_and_sanitizes(self):
+        gate = HealthGate("http://millm-backend.millm.svc:8000")
+        available, reason = gate.snapshot("millm")
+        assert available is None and reason == "not probed yet"
+        assert HealthGate.public_reason(
+            "ConnectError: boom (http://internal.svc:8000/api/health)"
+        ) == "unreachable"
+        assert HealthGate.public_reason("MILLM_API_URL is not configured") \
+            == "not configured"
+
+    def test_cache_stamped_after_probe(self):
+        """A slow probe must not eat into the TTL window (009 R2)."""
+        import time as _time
+
+        gate = HealthGate("http://millm:8000", ttl_s=10.0)
+
+        async def slow_get(url):
+            await __import__("anyio").sleep(0.05)
+            return httpx.Response(200, json={"status": "healthy"})
+
+        stub = MagicMock()
+        stub.get = slow_get
+        gate._http = stub
+        anyio.run(gate.check, "millm")
+        stamped = gate._cache["millm"][0]
+        assert _time.monotonic() - stamped < 0.05  # post-probe stamp
+
+    def test_single_flight_under_concurrency(self):
+        gate = HealthGate("http://millm:8000", ttl_s=60.0)
+        calls = []
+
+        async def get(url):
+            calls.append(url)
+            await __import__("anyio").sleep(0.02)
+            return httpx.Response(200, json={"status": "healthy"})
+
+        stub = MagicMock()
+        stub.get = get
+        gate._http = stub
+
+        async def run():
+            import asyncio
+
+            await asyncio.gather(*[gate.check("millm") for _ in range(8)])
+
+        anyio.run(run)
+        assert len(calls) == 1  # no thundering herd (009 R2)
+
+    def test_raw_get_2xx_non_json_is_structured(self):
+        def handler(request):
+            return httpx.Response(200, text="<html>splash</html>")
+
+        with pytest.raises(BackendError, match="non-JSON"):
+            anyio.run(make_client(handler).raw_get, "/api/clusters/x/export")
+
+    def test_raw_get_non_envelope_4xx_stays_structured(self):
+        def handler(request):
+            return httpx.Response(422, json={"detail": [{"loc": ["query"]}]})
+
+        with pytest.raises(BackendError) as exc:
+            anyio.run(make_client(handler).raw_get, "/api/clusters/x/export")
+        assert isinstance(exc.value.detail, dict)  # parsed, not re-stringified
+
+    def test_hub_import_forwards_on_conflict(self):
+        from src.mcp_server.tools import millm_clusters
+
+        tool, millm = _register_and_get(millm_clusters, "millm_import_cluster")
+        anyio.run(lambda: tool.run({"repo_id": "org/pack",
+                                    "filename": "a.cluster.json",
+                                    "on_conflict": "fail"}))
+        body = millm.post.call_args.kwargs["json_body"]
+        assert body["on_conflict"] == "fail"
+
+    def test_sensing_since_rejects_naive_timestamps(self):
+        from src.mcp_server.tools import millm_sensing
+
+        tool, millm = _register_and_get(millm_sensing, "millm_sensing_events")
+        result = anyio.run(lambda: tool.run({"since": "2026-07-16 09:00"}))
+        assert "UTC offset" in str(result)
+        millm.get.assert_not_called()
+        anyio.run(lambda: tool.run({"since": "2026-07-16T09:00:00Z"}))
+        millm.get.assert_awaited_once()
+
+    def test_close_backend_clients_hook_exists(self):
+        mcp, _ = build_server(make_settings(tool_categories="read"))
+        assert callable(getattr(mcp, "close_backend_clients", None))
+        anyio.run(mcp.close_backend_clients)

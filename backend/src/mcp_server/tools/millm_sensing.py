@@ -31,7 +31,20 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         fired members with peak activations, score, human summary, AND the
         ±K token context window (context_text/context_token_ids) when the
         cluster captures context. `since` (ISO-8601 timestamp) time-bounds
-        polling so agents fetch only new events."""
+        polling so agents fetch only new events. MUST carry an explicit
+        UTC offset (e.g. 2026-07-16T12:00:00Z) — naive timestamps are
+        rejected because the server would silently assume UTC."""
+        if since is not None:
+            from datetime import datetime
+
+            try:
+                parsed = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError:
+                return {"error": f"`since` is not ISO-8601: {since!r}"}
+            if parsed.tzinfo is None:
+                return {"error": "`since` must carry a UTC offset "
+                                 "(e.g. ...T12:00:00Z) — naive timestamps "
+                                 "shift the polling window silently"}
         return await millm.get("/api/sensing/events",
                                profile_id=profile_id, limit=limit,
                                since=since)
