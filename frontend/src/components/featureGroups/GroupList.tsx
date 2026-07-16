@@ -61,18 +61,18 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
           </select>
         </label>
         <span className="text-xs text-slate-600 ml-auto">
-          {groupsTotal.toLocaleString()} groups
+          {groupsTotal.toLocaleString()} clusters
         </span>
       </div>
 
       {/* Only this region scrolls; the filter bar above stays pinned. */}
       <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-2">
       {isLoading && groups.length === 0 && (
-        <p className="text-sm text-slate-500 py-6 text-center">Loading groups…</p>
+        <p className="text-sm text-slate-500 py-6 text-center">Loading clusters…</p>
       )}
       {!isLoading && groups.length === 0 && (
         <p className="text-sm text-slate-500 py-6 text-center">
-          No groups match the current filters.
+          No clusters match the current filters.
         </p>
       )}
 

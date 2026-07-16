@@ -64,7 +64,7 @@ Categories can be disabled by the operator — if a tool is absent from your too
 | `get_feature_token_analysis` / `get_feature_logit_lens` / `get_feature_nlp_analysis` | Aggregated token stats · promoted/suppressed vocabulary · stored NLP analysis (may be empty) |
 | `get_feature_correlations` / `get_feature_ablation` | Slower analyses; cached server-side after first call |
 
-### Cross-feature grouping (`groups`)
+### Cross-feature clustering (`groups`)
 | Tool | Use for |
 |------|---------|
 | `compute_feature_groups(extraction_id, force=False)` | Build the token→feature index (background job, CPU-only, minutes). Idempotent: re-running with same params short-circuits |

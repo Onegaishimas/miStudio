@@ -31,6 +31,7 @@ import {
   BatchState,
   CombinedSteeringRequest,
   CombinedSteeringResponse,
+  ClusterContext,
 } from '../types/steering';
 import { SAE } from '../types/sae';
 import * as steeringApi from '../api/steering';
@@ -239,14 +240,41 @@ function createCombinedResolver(
  * SteeringComparisonResponse so the existing batch-results UI can render a
  * blended output without special-casing. The one "steered" entry is the summed
  * (blended) generation; unsteered is the baseline when present.
+ *
+ * Feature 012: also carries `applied_features` (server truth) and titles the
+ * blend via blendedTitle.
  */
+
+/**
+ * Blended result title chain (Feature 012): cluster display token → generic,
+ * with the single-feature case folded in (a 1-feature blend is honestly titled
+ * by the member itself; the cluster token prefixes it when provenance exists).
+ * Feature 014 will prepend an authored-profile-name tier here — one function
+ * owns the whole chain so future tiers land in exactly one place.
+ */
+export function blendedTitle(
+  ctx: ClusterContext | null,
+  n: number,
+  loneLabel?: string | null,
+): string {
+  if (n === 1) {
+    const label = loneLabel || 'Blended (1 feature)';
+    return ctx ? `${ctx.display_token} — ${label}` : label;
+  }
+  const blend = `Blended (${n} features)`;
+  return ctx ? `${ctx.display_token} — ${blend}` : blend;
+}
+
 function combinedToComparison(
   c: CombinedSteeringResponse,
+  ctx: ClusterContext | null = null,
 ): SteeringComparisonResponse {
-  const blendedLabel =
-    c.features_applied.length === 1
-      ? c.features_applied[0].label || `Feature ${c.features_applied[0].feature_idx}`
-      : `Blended (${c.features_applied.length} features)`;
+  const fa = c.features_applied;
+  const blendedLabel = blendedTitle(
+    ctx,
+    fa.length,
+    fa.length === 1 ? fa[0].label || `Feature #${fa[0].feature_idx}` : undefined,
+  );
   return {
     comparison_id: c.combined_id,
     sae_id: c.sae_id,
@@ -269,6 +297,9 @@ function combinedToComparison(
     ],
     steered_multi: null,
     metrics_summary: null,
+    // Feature 012: full applied-features summary rides the adapted result so
+    // the UI can prove every member contributed (server-truth, not request state).
+    applied_features: c.features_applied,
     total_time_ms: c.total_time_ms,
     created_at: c.created_at,
   };
@@ -280,6 +311,12 @@ interface SteeringState {
 
   // Selected features (up to 4)
   selectedFeatures: SelectedFeature[];
+
+  // Cluster provenance (Feature 012): non-null only while the selection is
+  // exactly the set handed off from one cluster. Any selection mutation clears
+  // it (dropping to the generic label is always honest; a stale cluster label
+  // never is). Deliberately NOT in the persist partialize.
+  clusterContext: ClusterContext | null;
 
   // Prompts (batch support)
   prompts: string[];
@@ -332,6 +369,14 @@ interface SteeringState {
 
   // Actions - SAE Selection
   selectSAE: (sae: SAE | null) => void;
+
+  // Cluster context (Feature 012)
+  setClusterContext: (ctx: ClusterContext | null) => void;
+
+  // Title baked for the CURRENT combinedResults at completion time (Feature
+  // 012). Live-deriving from clusterContext retitles old results when context
+  // changes — the exact mislabeling this feature removes.
+  combinedResultsTitle: string | null;
 
   // Actions - Feature Selection
   addFeature: (feature: AddFeatureInput) => boolean;
@@ -417,6 +462,8 @@ export const useSteeringStore = create<SteeringState>()(
       // Initial state
       selectedSAE: null,
       selectedFeatures: [],
+      clusterContext: null,
+      combinedResultsTitle: null,
       prompts: [''],
       generationParams: { ...DEFAULT_GENERATION_PARAMS },
       advancedParams: null,
@@ -450,9 +497,18 @@ export const useSteeringStore = create<SteeringState>()(
         set({
           selectedSAE: sae,
           selectedFeatures: [], // Clear features when SAE changes
+          clusterContext: null,
           currentComparison: null,
           sweepResults: null,
+          combinedResults: null, // stale results from another SAE must not linger
+          combinedResultsTitle: null,
         });
+      },
+
+      // Feature 012: cluster provenance. Callers set it ONLY after a clean
+      // single-cluster hand-off; every selection mutation clears it.
+      setClusterContext: (ctx: ClusterContext | null) => {
+        set({ clusterContext: ctx });
       },
 
       // Add a feature to selection (returns false if max reached)
@@ -501,7 +557,8 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: feature.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, newFeature] });
+        // Any selection mutation invalidates cluster provenance (Feature 012).
+        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null });
         return true;
       },
 
@@ -511,6 +568,7 @@ export const useSteeringStore = create<SteeringState>()(
           selectedFeatures: state.selectedFeatures.filter(
             (f) => f.instance_id !== instanceId
           ),
+          clusterContext: null, // selection mutated (Feature 012)
         }));
       },
 
@@ -560,7 +618,7 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: original.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature] });
+        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null });
         return true;
       },
 
@@ -641,7 +699,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear all selected features
       clearFeatures: () => {
-        set({ selectedFeatures: [], currentComparison: null });
+        set({ selectedFeatures: [], clusterContext: null, currentComparison: null });
       },
 
       // Reorder features (drag and drop)
@@ -1051,6 +1109,9 @@ export const useSteeringStore = create<SteeringState>()(
       // prompt; Compare runs the per-feature comparison per prompt.
       generateBatchComparison: async (includeUnsteered = true, computeMetrics = false) => {
         const { selectedSAE, selectedFeatures, prompts, generationParams, advancedParams, isGenerating, batchState, combinedMode } = get();
+        // Provenance snapshot for the whole batch: results are titled by the
+        // context they were generated under, immune to mid-batch mutations.
+        const clusterContextAtStart = get().clusterContext;
 
         // Guard against double submission
         if (isGenerating || batchState?.isRunning) {
@@ -1156,7 +1217,7 @@ export const useSteeringStore = create<SteeringState>()(
                 },
               );
               // Adapt to the comparison shape the batch UI renders.
-              response = combinedToComparison(combined);
+              response = combinedToComparison(combined, clusterContextAtStart);
             } else {
               const request: SteeringComparisonRequest = {
                 sae_id: selectedSAE.id,
@@ -1424,6 +1485,10 @@ export const useSteeringStore = create<SteeringState>()(
             compute_metrics: computeMetrics,
           };
 
+          // Snapshot provenance at submit: the result must be titled by the
+          // context it was GENERATED under, not whatever is live at completion.
+          const ctxAtSubmit = get().clusterContext;
+
           // Submit async task
           const taskResponse = await steeringApi.submitAsyncCombined(request);
           set({ taskId: taskResponse.task_id });
@@ -1449,6 +1514,13 @@ export const useSteeringStore = create<SteeringState>()(
 
           set({
             combinedResults: result,
+            combinedResultsTitle: blendedTitle(
+              ctxAtSubmit,
+              result.features_applied.length,
+              result.features_applied.length === 1
+                ? result.features_applied[0].label || `Feature #${result.features_applied[0].feature_idx}`
+                : undefined,
+            ),
             isCombinedGenerating: false,
             progress: 100,
             progressMessage: 'Complete',
@@ -1470,7 +1542,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear combined results
       clearCombinedResults: () => {
-        set({ combinedResults: null });
+        set({ combinedResults: null, combinedResultsTitle: null });
       },
 
       // Update progress (called by WebSocket)
@@ -1554,6 +1626,9 @@ export const useSteeringStore = create<SteeringState>()(
           currentComparison: experiment.results,
           comparisonId: experiment.results.comparison_id,
           batchState: null, // Clear batch state when loading experiment
+          clusterContext: null, // selection replaced wholesale (Feature 012)
+          combinedResults: null,
+          combinedResultsTitle: null,
         });
       },
 
@@ -1618,6 +1693,9 @@ export const useSteeringStore = create<SteeringState>()(
           set({
             selectedSAE: null,
             selectedFeatures: [],
+            clusterContext: null,
+            combinedResults: null,
+            combinedResultsTitle: null,
             prompts: [''],
             generationParams: { ...DEFAULT_GENERATION_PARAMS },
             advancedParams: null,
@@ -1649,6 +1727,8 @@ export const useSteeringStore = create<SteeringState>()(
             batchState: null,
             isSweeping: false,
             sweepResults: null,
+            combinedResults: null,
+            combinedResultsTitle: null,
             error: null,
           });
 

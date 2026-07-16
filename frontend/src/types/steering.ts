@@ -16,6 +16,19 @@
 import type { StrengthSource } from '../utils/steeringStrength';
 
 /**
+ * Cluster provenance for a steering selection (Feature 012).
+ *
+ * Set only when EVERY selected feature was handed off from one cluster
+ * (feature group); any later mutation of the selection clears it. Drives the
+ * cluster-titled result labels and the cluster chip. Never persisted.
+ */
+export interface ClusterContext {
+  group_id: string;
+  /** The cluster's shared surface token — label tier 2 (tier 1 = authored profile name, Feature 014). */
+  display_token: string;
+}
+
+/**
  * Color options for selected features.
  * Up to 20 features (Feature 011). Colors are cosmetic — the original 4
  * (teal/blue/purple/amber) come first for continuity, then 16 more hues.
@@ -225,6 +238,13 @@ export interface SteeringComparisonResponse {
   unsteered: UnsteeredOutput | null;
   steered: SteeredOutput[];
   steered_multi?: SteeredOutputMulti[] | null; // Multi-strength results (when additional_strengths provided)
+  /**
+   * Feature 012 (frontend-only enrichment): per-member applied list from a
+   * combined (Blended) run, copied off CombinedSteeringResponse by the
+   * adapter so results can prove every member contributed. The server compare
+   * endpoint never returns this field.
+   */
+  applied_features?: CombinedFeatureApplied[];
   metrics_summary: Record<string, any> | null;
   total_time_ms: number;
   created_at: string;

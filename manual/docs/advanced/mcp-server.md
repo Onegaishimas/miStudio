@@ -6,7 +6,7 @@ description: "Agentic access — let Claude Code and other MCP clients drive miS
 
 # MCP Server: Agentic Access
 
-miStudio ships an optional **MCP (Model Context Protocol) server** that exposes the post-extraction workflow — feature analysis, [cross-feature grouping](/core-workflow/feature-groups), steering, and label write-back — as tools for agentic AI clients like Claude Code. An agent can run the full *analyze → group → steer → relabel* loop autonomously, with every action flowing through the same REST API and appearing in the UI like any other work.
+miStudio ships an optional **MCP (Model Context Protocol) server** that exposes the post-extraction workflow — feature analysis, [cross-feature clustering](/core-workflow/feature-groups), steering, and label write-back — as tools for agentic AI clients like Claude Code. An agent can run the full *analyze → group → steer → relabel* loop autonomously, with every action flowing through the same REST API and appearing in the UI like any other work.
 
 ## Enabling the Server
 
@@ -93,7 +93,7 @@ Long-running operations follow the platform's async pattern: the start tool retu
 
 A Claude Code session pointed at the server, instructed with natural language only:
 
-1. *"List extractions and build feature groups for the newest one"* → `list_extractions`, `compute_feature_groups`, `get_task_status` until complete
+1. *"List extractions and build feature clusters for the newest one"* → `list_extractions`, `compute_feature_groups`, `get_task_status` until complete
 2. *"Show me the biggest groups"* → `get_feature_groups(sort_by="size")` — say it finds a 12-member `"love"` group with cohesion 0.81
 3. *"What do the members have in common?"* → `get_feature_group_members`, then `get_feature_examples` + `get_feature_logit_lens` per member → agent hypothesizes "expressions of affection"
 4. *"Validate that by steering"* → `enter_steering_mode`, `steer_sweep(feature_idx=4821, strength_values=[0, 10, 30])`, `get_steering_result` → steered outputs turn affectionate; baseline doesn't

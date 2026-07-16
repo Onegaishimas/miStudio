@@ -381,7 +381,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
           <SectionHeader
             id="clusters"
             icon={<Layers className="w-5 h-5" />}
-            title="Semantic Clusters"
+            title="Semantic Token Clusters (analysis)"
             subtitle={`${semantic_clusters.length} clusters identified`}
           />
           {expandedSections.has('clusters') && (

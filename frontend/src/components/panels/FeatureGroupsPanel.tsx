@@ -32,7 +32,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
     clearSelection,
     error,
   } = useFeatureGroupsStore();
-  const { selectSAE, addFeature } = useSteeringStore();
+  const { selectSAE, addFeature, setClusterContext } = useSteeringStore();
   const [detailFeatureId, setDetailFeatureId] = useState<string | null>(null);
   const [handoffError, setHandoffError] = useState<string | null>(null);
 
@@ -65,8 +65,18 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
       return;
     }
     try {
+      // Cluster provenance from the selection's own stamps (Feature 012): each
+      // member records which cluster it was selected FROM, so provenance is
+      // independent of whichever cluster happens to be expanded right now.
+      const members = [...selection.values()];
+      const firstGroup = members[0]?.group_id;
+      const sourceCluster =
+        firstGroup && members.every((m) => m.group_id === firstGroup)
+          ? { group_id: firstGroup, display_token: members[0].display_token }
+          : null;
+
       const sae = await getSAE(saeId);
-      selectSAE(sae); // clears prior selection
+      selectSAE(sae); // clears prior selection + cluster context
       const layer = currentExtraction.layer_index ?? sae.layer ?? 0;
       let added = 0;
       for (const [featureId, member] of selection.entries()) {
@@ -84,6 +94,11 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         added += 1;
       }
       if (added > 0) {
+        // Set context LAST — addFeature clears it on every mutation, and it
+        // must only stand when the full selection made it across (Feature 012).
+        if (sourceCluster && added === selection.size) {
+          setClusterContext(sourceCluster);
+        }
         clearSelection();
         onNavigateToSteering?.();
       }
@@ -101,7 +116,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Boxes className="w-5 h-5 text-emerald-400" />
-            <h1 className="text-lg font-semibold text-slate-100">Feature Groups</h1>
+            <h1 className="text-lg font-semibold text-slate-100">Clusters</h1>
           </div>
           {selection.size > 0 && (
             <button
@@ -115,9 +130,9 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         </div>
 
         <p className="text-sm text-slate-500 mb-4">
-          Groups of features that fire on the same top activating token with similar surrounding
-          context — candidate concept clusters. Select members and hand them to Steering to
-          validate a group's hypothesized meaning.
+          Clusters of features that fire on the same top activating token with similar surrounding
+          context — candidate units of meaning. Select members and hand them to Steering to
+          validate a cluster's hypothesized meaning.
         </p>
 
         <div className="mb-4">

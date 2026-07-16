@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useSteeringStore, MAX_SELECTED_FEATURES } from './steeringStore';
+import { useSteeringStore, MAX_SELECTED_FEATURES, blendedTitle } from './steeringStore';
 import { DEFAULT_GENERATION_PARAMS } from '../types/steering';
 import type { SAE } from '../types/sae';
 import type { SteeringComparisonResponse, StrengthSweepResponse } from '../types/steering';
@@ -50,6 +50,7 @@ const initialState = {
   currentComparison: null,
   recentComparisons: [],
   batchState: null,
+  clusterContext: null,
   combinedMode: false,
   isCombinedGenerating: false,
   isSweeping: false,
@@ -1060,6 +1061,152 @@ describe('steeringStore', () => {
       expect(result.current.prompts).toEqual(['']);
       expect(result.current.selectedFeatures).toHaveLength(0);
       expect(result.current.error).toBeNull();
+    });
+  });
+
+  describe('Cluster Context (Feature 012)', () => {
+    const ctx = { group_id: 'g1', display_token: 'fear' };
+
+    it('setClusterContext stores and clears', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.setClusterContext(ctx));
+      expect(result.current.clusterContext).toEqual(ctx);
+      act(() => result.current.setClusterContext(null));
+      expect(result.current.clusterContext).toBeNull();
+    });
+
+    it('is cleared by every selection mutation', () => {
+      const { result } = renderHook(() => useSteeringStore());
+
+      // addFeature clears
+      act(() => {
+        result.current.setClusterContext(ctx);
+        result.current.addFeature({ feature_idx: 1, layer: 6, strength: 1 });
+      });
+      expect(result.current.clusterContext).toBeNull();
+
+      // removeFeature clears
+      act(() => result.current.setClusterContext(ctx));
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.removeFeature(inst));
+      expect(result.current.clusterContext).toBeNull();
+
+      // duplicateFeature clears
+      act(() => {
+        result.current.addFeature({ feature_idx: 2, layer: 6, strength: 1 });
+      });
+      const inst2 = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.setClusterContext(ctx));
+      act(() => result.current.duplicateFeature(inst2));
+      expect(result.current.clusterContext).toBeNull();
+
+      // clearFeatures clears
+      act(() => result.current.setClusterContext(ctx));
+      act(() => result.current.clearFeatures());
+      expect(result.current.clusterContext).toBeNull();
+
+      // selectSAE clears
+      act(() => result.current.setClusterContext(ctx));
+      act(() => result.current.selectSAE(mockSAE));
+      expect(result.current.clusterContext).toBeNull();
+    });
+
+    it('survives strength edits (not a selection mutation)', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.addFeature({ feature_idx: 1, layer: 6, strength: 1 });
+        result.current.setClusterContext(ctx);
+      });
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.updateFeatureStrength(inst, 2.5));
+      expect(result.current.clusterContext).toEqual(ctx);
+    });
+
+    it('blendedTitle: token tier, generic tier, and honest single-feature titles', () => {
+      expect(blendedTitle(null, 3)).toBe('Blended (3 features)');
+      expect(blendedTitle(ctx, 3)).toBe('fear — Blended (3 features)');
+      // Single feature: the member's own identity, cluster-prefixed when known
+      expect(blendedTitle(ctx, 1, 'anxiety spike')).toBe('fear — anxiety spike');
+      expect(blendedTitle(null, 1, 'anxiety spike')).toBe('anxiety spike');
+      expect(blendedTitle(null, 1)).toBe('Blended (1 feature)');
+    });
+
+    it('loadExperiment and resetSession clear stale cluster context + combined results', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.setClusterContext(ctx);
+        useSteeringStore.setState({
+          combinedResults: { combined_id: 'x' } as any,
+          combinedResultsTitle: 'fear — Blended (3 features)',
+        });
+      });
+      act(() =>
+        result.current.loadExperiment({
+          id: 'e1',
+          name: 'exp',
+          selected_features: [],
+          prompt: 'p',
+          generation_params: { ...DEFAULT_GENERATION_PARAMS },
+          results: { comparison_id: 'c1' } as any,
+          created_at: new Date().toISOString(),
+        } as any),
+      );
+      expect(result.current.clusterContext).toBeNull();
+      expect(result.current.combinedResults).toBeNull();
+      expect(result.current.combinedResultsTitle).toBeNull();
+
+      // resetSession (first click) also clears combined results
+      act(() => {
+        result.current.setClusterContext(ctx);
+        useSteeringStore.setState({
+          combinedResults: { combined_id: 'y' } as any,
+          combinedResultsTitle: 't',
+        });
+      });
+      act(() => result.current.resetSession());
+      expect(result.current.combinedResults).toBeNull();
+      expect(result.current.combinedResultsTitle).toBeNull();
+    });
+
+    it('combined completion carries applied_features + cluster title into batch results', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.setPrompts(['P1']);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1.5 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 2.0 });
+        result.current.setCombinedMode(true);
+        result.current.setPrompts(['P1', 'P2']); // batch
+        result.current.setClusterContext(ctx);
+      });
+
+      vi.mocked(steeringApi.submitAsyncCombined).mockImplementation(async () => ({
+        task_id: 'ctask-ctx', status: 'pending',
+      }) as any);
+
+      const batchPromise = result.current.generateBatchComparison();
+      await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
+
+      const combined = {
+        combined_id: 'cmb-ctx', sae_id: mockSAE.id, model_id: 'm', prompt: 'P1',
+        combined_output: 'out',
+        features_applied: [
+          { feature_idx: 100, layer: 6, strength: 1.5, label: null, color: 'teal' },
+          { feature_idx: 200, layer: 6, strength: 2.0, label: null, color: 'blue' },
+        ],
+        baseline_output: null, combined_metrics: null, baseline_metrics: null,
+        total_steering_strength: 3.5, total_time_ms: 10, created_at: new Date().toISOString(),
+      };
+      act(() => { result.current.handleAsyncCompleted(combined as any); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      // finish prompt 2
+      act(() => { result.current.handleAsyncCompleted({ ...combined, combined_id: 'cmb-ctx2', prompt: 'P2' } as any); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      await batchPromise;
+
+      const first = result.current.batchState?.results[0].comparison;
+      expect(first?.applied_features).toHaveLength(2);
+      expect(first?.steered[0].feature_config.label).toBe('fear — Blended (2 features)');
     });
   });
 });

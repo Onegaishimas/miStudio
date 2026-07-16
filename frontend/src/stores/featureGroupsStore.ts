@@ -33,6 +33,14 @@ export interface SelectedMember {
   neuron_index: number;
   max_activation: number | null;
   activation_frequency: number | null;
+  /**
+   * Provenance stamp (Feature 012): the cluster this member was selected FROM,
+   * recorded at toggle time. Makes the steering hand-off's cluster identity
+   * independent of which cluster happens to be expanded when "Steer selected"
+   * is clicked.
+   */
+  group_id: string;
+  display_token: string;
 }
 
 interface FeatureGroupsState {
@@ -242,6 +250,8 @@ export const useFeatureGroupsStore = create<FeatureGroupsState>((set, get) => ({
             neuron_index: m.neuron_index,
             max_activation: m.max_activation,
             activation_frequency: m.activation_frequency,
+            group_id: m.group_id,
+            display_token: m.display_token,
           });
         } else {
           selection.delete(m.feature_id);

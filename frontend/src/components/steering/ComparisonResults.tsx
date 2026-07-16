@@ -25,6 +25,7 @@ import {
   BatchPromptResult,
 } from '../../types/steering';
 import { useSteeringStore } from '../../stores/steeringStore';
+import { AppliedFeaturesSummary } from './AppliedFeaturesSummary';
 import { COMPONENTS } from '../../config/brand';
 
 interface ComparisonResultsProps {
@@ -85,6 +86,17 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
     }
     lines.push(comp.prompt);
     lines.push('');
+
+    // Feature 012: include the server-truth applied-features list for blended
+    // results so exported/copied text carries verifiable provenance.
+    if (comp.applied_features && comp.applied_features.length > 0) {
+      lines.push(`--- APPLIED FEATURES (${comp.applied_features.length}) ---`);
+      comp.applied_features.forEach((f) => {
+        const sign = f.strength > 0 ? '+' : '';
+        lines.push(`#${f.feature_idx}${f.label ? ` ${f.label}` : ''} @ ${sign}${f.strength}`);
+      });
+      lines.push('');
+    }
 
     // Add unsteered baseline
     if (comp.unsteered) {
@@ -569,6 +581,8 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
             </button>
           </div>
           <p className="text-slate-200 mt-2">{comp.prompt}</p>
+          {/* Feature 012: server-truth applied-features summary for blended results */}
+          {comp.applied_features && <AppliedFeaturesSummary applied={comp.applied_features} />}
         </div>
 
         {/* Unsteered baseline */}
