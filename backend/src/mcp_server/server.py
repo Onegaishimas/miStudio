@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse
 
 from .client import MiStudioClient
 from .config import MCPSettings
-from .tools import CATEGORY_MODULES
+from .tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,15 @@ steer_sweep (causal validation) → update_feature_label with evidence notes.
 Long-running operations return task ids — poll get_task_status /
 get_steering_result. Steering is GPU-heavy: enter_steering_mode first, exit
 when done, and respect the guardrail messages.
+
+Cross-product (when millm_* tools are present): miLLM is the always-on
+serving runtime. Move a tuned cluster into production with
+export_cluster_definition → millm_import_cluster(definition=…, activate=true),
+then millm_set_intensity to dial it and millm_sensing_enable /
+millm_sensing_events to watch its members co-fire on live traffic.
+millm_status answers "what is steering right now" in one call. When miLLM is
+down, its tools return {"unavailable": "millm", "reason": …} — report the
+reason, don't retry in a loop.
 """
 
 
@@ -97,6 +106,28 @@ def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, M
         for module in modules:
             module.register(mcp, client, settings)
         registered.append(category)
+
+    # miLLM categories (Unified MCP, Feature 9): wired against MiLLMClient +
+    # HealthGate. Unset MILLM_API_URL skips them at REGISTRATION (log once) —
+    # a running-but-unreachable miLLM instead keeps tools registered and the
+    # gate returns structured unavailable per call (contract §3).
+    requested_millm = [c for c in MILLM_CATEGORY_MODULES if c in categories]
+    if requested_millm:
+        if settings.millm_api_url:
+            from .health_gate import HealthGate
+            from .millm_client import MiLLMClient
+
+            millm_client = MiLLMClient(settings.millm_api_url)
+            gate = HealthGate(settings.millm_api_url)
+            for category in requested_millm:
+                for module in MILLM_CATEGORY_MODULES[category]:
+                    module.register(mcp, millm_client, gate)
+                registered.append(category)
+        else:
+            logger.warning(
+                "millm categories requested but MILLM_API_URL is unset — "
+                f"skipping: {sorted(requested_millm)}"
+            )
     logger.info(f"MCP tool categories enabled: {sorted(registered)}")
 
     @mcp.custom_route("/health", methods=["GET"])

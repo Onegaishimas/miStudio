@@ -5,7 +5,13 @@ import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-VALID_CATEGORIES = {"read", "groups", "steering", "labeling", "experiments", "profiles", "jobs", "admin"}
+VALID_CATEGORIES = {
+    "read", "groups", "steering", "labeling", "experiments", "profiles",
+    "jobs", "admin",
+    # Unified MCP (miLLM Feature 9): opt-in, functional only with
+    # MILLM_API_URL set — never in DEFAULT_CATEGORIES.
+    "millm_runtime", "millm_clusters", "millm_sensing",
+}
 DEFAULT_CATEGORIES = "read,groups,steering,labeling,experiments,profiles,jobs"
 
 
@@ -31,6 +37,12 @@ class MCPSettings(BaseSettings):
     @property
     def api_url(self) -> str:
         return os.environ.get("MISTUDIO_API_URL", "http://localhost:8000").rstrip("/")
+
+    # miLLM base URL (Unified MCP, Feature 9). Empty = millm_* categories
+    # are skipped at registration even when requested (logged once).
+    @property
+    def millm_api_url(self) -> str:
+        return os.environ.get("MILLM_API_URL", "").rstrip("/")
 
     def enabled_categories(self) -> set[str]:
         requested = {c.strip() for c in self.tool_categories.split(",") if c.strip()}
