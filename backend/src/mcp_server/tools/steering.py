@@ -78,10 +78,20 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     ) -> Any:
         """Compute the principled starting strength allocation for steering a
         CLUSTER of features (Feature 013). members: [{feature_idx, layer,
-        similarity?, activation_frequency?, sign?}] (1-20, single layer).
+        similarity?, activation_frequency?, sign?}] (1-20, all on the SAE's layer).
         Returns {B, B_dir, G, f_eff, weights, strengths, flags, constants_used}.
-        Read-only and CPU-fast — safe without steering mode. Use it to seed
-        steer_combined strengths and to run the calibration protocol."""
+        Read-only — safe without steering mode.
+
+        HONOR THE FLAGS CONTRACT before seeding steer_combined:
+        - 'low_cohesion': the cluster fails the cohesion gate — the UI refuses
+          these strengths and keeps per-feature solo baselines; you should too
+          unless deliberately testing the gate.
+        - 'cancellation': positive members partially cancel (worst pair in
+          cancellation_pair) — the blended direction is unreliable.
+        - 'approximate': decoder unavailable; constant-budget fallback (G=1).
+        - 'default_budget': no activation frequencies known.
+        - 'nonunit_decoder': decoder columns deviate from unit norm — the law
+          extrapolates; prefer running the calibration protocol first."""
         body: dict = {"sae_id": sae_id, "members": members}
         if group_cohesion is not None:
             body["group_cohesion"] = group_cohesion

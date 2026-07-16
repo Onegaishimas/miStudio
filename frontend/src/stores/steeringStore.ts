@@ -406,6 +406,9 @@ interface SteeringState {
   // server-computed allocation governs the current selection. The formula is
   // server-side; the frontend owns only budget-preserving rebalance.
   clusterBudget: ClusterBudget | null;
+  // One-line notice shown when the budget model deliberately did NOT engage
+  // (e.g. low-cohesion gate). Cleared alongside clusterBudget.
+  clusterNotice: string | null;
   // Master cluster-intensity dial λ ∈ [0,2]; applied ONCE, in the request
   // builders (tiles show pre-λ strengths). Not persisted.
   intensity: number;
@@ -497,6 +500,7 @@ export const useSteeringStore = create<SteeringState>()(
       clusterContext: null,
       combinedResultsTitle: null,
       clusterBudget: null,
+      clusterNotice: null,
       intensity: 1,
       prompts: [''],
       generationParams: { ...DEFAULT_GENERATION_PARAMS },
@@ -533,6 +537,7 @@ export const useSteeringStore = create<SteeringState>()(
           selectedFeatures: [], // Clear features when SAE changes
           clusterContext: null,
           clusterBudget: null,
+          clusterNotice: null,
           intensity: 1,
           currentComparison: null,
           sweepResults: null,
@@ -557,7 +562,22 @@ export const useSteeringStore = create<SteeringState>()(
         // N=1 routes through the solo path verbatim (IDL-29 step 10).
         if (selectedFeatures.length === 1) return;
 
-        const requestKey = selectedFeatures.map((f) => f.feature_idx).sort((a, b) => a - b).join(',');
+        // Duplicate feature indices would double-count one direction in the
+        // formula — refuse and keep the solo baselines (v1 single-membership).
+        const idxs = selectedFeatures.map((f) => f.feature_idx);
+        if (new Set(idxs).size !== idxs.length) {
+          console.warn('[SteeringStore] Duplicate feature indices — skipping cluster allocation');
+          return;
+        }
+
+        // Snapshot the request order: response arrays are index-aligned with
+        // THIS order, and instance ids make the apply step order-safe even if
+        // the user reorders tiles while the request is in flight.
+        const requestMembers = selectedFeatures.map((f) => ({
+          instance_id: f.instance_id,
+          feature_idx: f.feature_idx,
+        }));
+        const requestKey = requestMembers.map((m) => m.instance_id).sort().join(',');
         try {
           const allocation = await steeringApi.computeClusterAllocation({
             sae_id: selectedSAE.id,
@@ -571,18 +591,37 @@ export const useSteeringStore = create<SteeringState>()(
             group_cohesion: groupCohesion,
           });
 
-          // Stale guard: selection must be unchanged.
+          // Stale guard: same instances, same SAE.
           const current = get().selectedFeatures;
-          const currentKey = current.map((f) => f.feature_idx).sort((a, b) => a - b).join(',');
+          const currentKey = current.map((f) => f.instance_id).sort().join(',');
           if (currentKey !== requestKey || get().selectedSAE?.id !== selectedSAE.id) {
             console.log('[SteeringStore] Dropping stale cluster allocation');
             return;
           }
 
-          const weightsByIdx: Record<number, number> = {};
-          selectedFeatures.forEach((f, i) => {
-            weightsByIdx[f.feature_idx] = allocation.weights[i] ?? 0;
+          // Low-cohesion gate: keep solo baselines AND no governing budget —
+          // rebalance, λ, and the budget bar must not engage on a gated cluster.
+          if (allocation.flags.includes('low_cohesion')) {
+            set({
+              clusterBudget: null,
+              clusterNotice:
+                'Low cluster cohesion — kept per-feature baselines (budget model gated)',
+            });
+            return;
+          }
+
+          // Per-instance allocation map, built from the REQUEST order (the
+          // only order the response arrays are aligned with). Server strengths
+          // already carry the member sign.
+          const allocByInstance: Record<string, { weight: number; strength: number }> = {};
+          requestMembers.forEach((m, i) => {
+            allocByInstance[m.instance_id] = {
+              weight: allocation.weights[i] ?? 0,
+              strength: allocation.strengths[i] ?? 0,
+            };
           });
+          const weightsByInstance: Record<string, number> = {};
+          for (const [id, a] of Object.entries(allocByInstance)) weightsByInstance[id] = a.weight;
 
           set({
             clusterBudget: {
@@ -591,17 +630,15 @@ export const useSteeringStore = create<SteeringState>()(
               G: allocation.G,
               flags: allocation.flags,
               approximate: allocation.approximate,
-              weightsByIdx,
+              weightsByInstance,
             },
-            // Low-cohesion clusters keep their solo baselines (the gate):
-            selectedFeatures: allocation.flags.includes('low_cohesion')
-              ? current
-              : current.map((f, i) => ({
-                  ...f,
-                  strength: allocation.strengths[i] ?? f.strength,
-                  strengthSource: 'cluster' as const,
-                  pinned: false,
-                })),
+            clusterNotice: null,
+            selectedFeatures: current.map((f) => {
+              const a = allocByInstance[f.instance_id];
+              return a
+                ? { ...f, strength: a.strength, strengthSource: 'cluster' as const, pinned: false }
+                : f;
+            }),
           });
         } catch (error) {
           // Allocation failure is non-fatal: solo baselines remain in effect.
@@ -634,10 +671,10 @@ export const useSteeringStore = create<SteeringState>()(
             for (const f of features) if (!f.pinned) f.strength = 0;
           } else {
             const wsum = unpinned.reduce(
-              (s, f) => s + (clusterBudget.weightsByIdx[f.feature_idx] ?? 0), 0);
+              (s, f) => s + (clusterBudget.weightsByInstance[f.instance_id] ?? 0), 0);
             for (const f of features) {
               if (f.pinned) continue;
-              const w = clusterBudget.weightsByIdx[f.feature_idx] ?? 0;
+              const w = clusterBudget.weightsByInstance[f.instance_id] ?? 0;
               const share = wsum > 0 ? w / wsum : 1 / unpinned.length;
               const sign = f.strength < 0 ? -1 : 1;
               f.strength = Math.round(sign * remaining * share * 10) / 10;
@@ -707,7 +744,7 @@ export const useSteeringStore = create<SteeringState>()(
 
         // Any selection mutation invalidates cluster provenance (Feature 012)
         // and the cluster budget computed for it (Feature 013).
-        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, clusterBudget: null });
+        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, clusterBudget: null, clusterNotice: null });
         return true;
       },
 
@@ -719,6 +756,7 @@ export const useSteeringStore = create<SteeringState>()(
           ),
           clusterContext: null, // selection mutated (Feature 012)
           clusterBudget: null,
+          clusterNotice: null,
         }));
       },
 
@@ -768,7 +806,7 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: original.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, clusterBudget: null });
+        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, clusterBudget: null, clusterNotice: null });
         return true;
       },
 
@@ -831,6 +869,7 @@ export const useSteeringStore = create<SteeringState>()(
         // applying one exits cluster mode (Feature 013, documented behavior).
         set((state) => ({
           clusterBudget: null,
+          clusterNotice: null,
           selectedFeatures: state.selectedFeatures.map((f) => ({
             ...f,
             strength,
@@ -853,7 +892,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear all selected features
       clearFeatures: () => {
-        set({ selectedFeatures: [], clusterContext: null, clusterBudget: null, currentComparison: null });
+        set({ selectedFeatures: [], clusterContext: null, clusterBudget: null, clusterNotice: null, currentComparison: null });
       },
 
       // Reorder features (drag and drop)
@@ -995,7 +1034,9 @@ export const useSteeringStore = create<SteeringState>()(
           const request: SteeringComparisonRequest = {
             sae_id: selectedSAE.id,
             prompt,
-            selected_features: selectedFeatures,
+            // λ applies in Compare too — the dial governs the selection, not
+            // just the Blended request path (013 review finding).
+            selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
             generation_params: generationParams,
             include_unsteered: includeUnsteered,
             compute_metrics: computeMetrics,
@@ -1376,7 +1417,8 @@ export const useSteeringStore = create<SteeringState>()(
               const request: SteeringComparisonRequest = {
                 sae_id: selectedSAE.id,
                 prompt,
-                selected_features: selectedFeatures,
+                // λ applies in batch Compare too (parity with Blended).
+                selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
                 generation_params: generationParams,
                 include_unsteered: includeUnsteered,
                 compute_metrics: computeMetrics,
@@ -1782,6 +1824,7 @@ export const useSteeringStore = create<SteeringState>()(
           batchState: null, // Clear batch state when loading experiment
           clusterContext: null, // selection replaced wholesale (Feature 012)
           clusterBudget: null,
+          clusterNotice: null,
           combinedResults: null,
           combinedResultsTitle: null,
         });
@@ -1850,6 +1893,7 @@ export const useSteeringStore = create<SteeringState>()(
             selectedFeatures: [],
             clusterContext: null,
             clusterBudget: null,
+            clusterNotice: null,
             intensity: 1,
             combinedResults: null,
             combinedResultsTitle: null,
@@ -2040,7 +2084,14 @@ export const useSteeringStore = create<SteeringState>()(
           progressMessage: state.progressMessage,
           // Configuration state (so user doesn't lose their setup)
           selectedSAE: state.selectedSAE,
-          selectedFeatures: state.selectedFeatures,
+          // clusterBudget/intensity are session-only, so rehydrated features
+          // must not claim a governing budget: unpin and demote 'cluster' to
+          // 'manual' (strength values themselves are kept).
+          selectedFeatures: state.selectedFeatures.map((f) => ({
+            ...f,
+            pinned: false,
+            strengthSource: f.strengthSource === 'cluster' ? ('manual' as const) : f.strengthSource,
+          })),
           prompts: state.prompts,
           generationParams: state.generationParams,
           advancedParams: state.advancedParams,

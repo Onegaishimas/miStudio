@@ -1214,9 +1214,11 @@ describe('steeringStore', () => {
   });
 
   describe('Cluster Strength Budget (Feature 013)', () => {
+    // weightsByInstance content only matters for rebalance; the intensity test
+    // needs mere truthiness.
     const budget = {
       B: 2.4, B_dir: 2.4, G: 1.0, flags: [], approximate: false,
-      weightsByIdx: { 100: 0.5, 200: 0.3, 300: 0.2 },
+      weightsByInstance: {} as Record<string, number>,
     };
 
     const setupCluster = (result: any) => {
@@ -1224,7 +1226,12 @@ describe('steeringStore', () => {
         result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1.2 });
         result.current.addFeature({ feature_idx: 200, layer: 6, strength: 0.7 });
         result.current.addFeature({ feature_idx: 300, layer: 6, strength: 0.5 });
-        useSteeringStore.setState({ clusterBudget: budget });
+      });
+      const [a, b, c] = result.current.selectedFeatures.map((f: any) => f.instance_id);
+      act(() => {
+        useSteeringStore.setState({
+          clusterBudget: { ...budget, weightsByInstance: { [a]: 0.5, [b]: 0.3, [c]: 0.2 } },
+        });
       });
     };
 
@@ -1417,7 +1424,134 @@ describe('steeringStore', () => {
       } as any);
       await act(async () => { await result.current.requestClusterAllocation(0.2); });
       expect(result.current.selectedFeatures.map((f) => f.strength)).toEqual(before);
-      expect(result.current.clusterBudget?.flags).toContain('low_cohesion');
+      // Gated: no governing budget (rebalance/λ/bar must not engage), notice set.
+      expect(result.current.clusterBudget).toBeNull();
+      expect(result.current.clusterNotice).toMatch(/cohesion/i);
+    });
+
+    it('duplicate feature indices refuse allocation (v1 single-membership)', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 10 });
+      });
+      act(() => { result.current.duplicateFeature(result.current.selectedFeatures[0].instance_id); });
+      vi.mocked(steeringApi.computeClusterAllocation).mockClear();
+      await act(async () => { await result.current.requestClusterAllocation(0.9); });
+      expect(steeringApi.computeClusterAllocation).not.toHaveBeenCalled();
+      expect(result.current.clusterBudget).toBeNull();
+    });
+
+    it('allocation maps strengths by instance from the REQUEST order (reorder-safe)', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 10 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 10 });
+      });
+      let resolveFn: any;
+      vi.mocked(steeringApi.computeClusterAllocation).mockImplementation(
+        () => new Promise((res) => { resolveFn = res; }),
+      );
+      const pending = result.current.requestClusterAllocation(0.9);
+      // User drags tiles into reverse order while the request is in flight —
+      // same instance set, so the stale guard passes.
+      act(() => {
+        useSteeringStore.setState({
+          selectedFeatures: [...useSteeringStore.getState().selectedFeatures].reverse(),
+        });
+      });
+      // Response arrays are aligned with the request order: [100, 200]
+      resolveFn({ B: 3, B_dir: 3, G: 1, f_eff: 0.1, weights: [0.6, 0.4], strengths: [1.8, -1.2],
+        flags: [], cancellation_pair: null, constants_used: {}, formula_id: 'x', approximate: false });
+      await act(async () => { await pending; });
+      const byIdx = Object.fromEntries(
+        result.current.selectedFeatures.map((f) => [f.feature_idx, f.strength]),
+      );
+      // 100 got 1.8, 200 got −1.2 (sign carried), regardless of tile order.
+      expect(byIdx[100]).toBe(1.8);
+      expect(byIdx[200]).toBe(-1.2);
+    });
+
+    it('λ applies in Compare requests too (parity with Blended)', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.setPrompts(['P']);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 2.0 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 1.0 });
+        useSteeringStore.setState({ clusterBudget: budget, intensity: 0.5 });
+      });
+      let captured: any = null;
+      vi.mocked(steeringApi.submitAsyncComparison).mockImplementation(async (req: any) => {
+        captured = req;
+        return { task_id: 'tc', status: 'pending' } as any;
+      });
+      const p = result.current.generateComparison(true, false).catch(() => {});
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      expect(captured.selected_features.map((f: any) => f.strength)).toEqual([1.0, 0.5]);
+      expect(result.current.selectedFeatures.map((f) => f.strength)).toEqual([2.0, 1.0]);
+      act(() => { useSteeringStore.setState({ error: null }); });
+      void p;
+    });
+
+    it('persist partialize strips pinned and demotes cluster→manual', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      act(() => {
+        useSteeringStore.setState({
+          selectedFeatures: useSteeringStore.getState().selectedFeatures.map((f, i) => ({
+            ...f,
+            pinned: i === 0,
+            strengthSource: 'cluster' as const,
+          })),
+        });
+      });
+      const raw = localStorage.getItem('miStudio-steering');
+      expect(raw).toBeTruthy();
+      const persisted = JSON.parse(raw!).state.selectedFeatures;
+      expect(persisted.every((f: any) => f.pinned === false)).toBe(true);
+      expect(persisted.every((f: any) => f.strengthSource === 'manual')).toBe(true);
+      // Live state untouched
+      expect(result.current.selectedFeatures[0].pinned).toBe(true);
+    });
+
+    it('togglePin unpins a pinned member', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.rebalanceStrength(inst, 1.6));
+      expect(result.current.selectedFeatures[0].pinned).toBe(true);
+      act(() => result.current.togglePin(inst));
+      expect(result.current.selectedFeatures[0].pinned).toBe(false);
+    });
+
+    // Parity with the backend reference implementation (rebalance() in
+    // cluster_allocation_service.py) — shared vectors, shared expectations.
+    it('rebalance parity: backend reference vectors', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      // Vector set 1: [1.2 pinned-by-edit, 0.8, 0.8], w=1/3 each, B=2.4
+      act(() => {
+        result.current.addFeature({ feature_idx: 1, layer: 6, strength: 0.8 });
+        result.current.addFeature({ feature_idx: 2, layer: 6, strength: 0.8 });
+        result.current.addFeature({ feature_idx: 3, layer: 6, strength: 0.8 });
+      });
+      const ids = result.current.selectedFeatures.map((f) => f.instance_id);
+      act(() => {
+        useSteeringStore.setState({
+          clusterBudget: {
+            B: 2.4, B_dir: 2.4, G: 1.0, flags: [], approximate: false,
+            weightsByInstance: { [ids[0]]: 1 / 3, [ids[1]]: 1 / 3, [ids[2]]: 1 / 3 },
+          },
+        });
+      });
+      act(() => result.current.rebalanceStrength(ids[0], 1.2));
+      // Backend: out=[1.2, 0.6, 0.6], Σ=2.4
+      const out = result.current.selectedFeatures.map((f) => f.strength);
+      expect(out[0]).toBe(1.2);
+      expect(out[1]).toBeCloseTo(0.6, 1);
+      expect(out[2]).toBeCloseTo(0.6, 1);
+      expect(out.reduce((s, v) => s + Math.abs(v), 0)).toBeCloseTo(2.4, 1);
     });
   });
 });
