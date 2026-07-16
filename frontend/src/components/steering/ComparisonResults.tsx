@@ -145,7 +145,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
       // Single-strength mode: original steered outputs
       comp.steered.forEach((output) => {
         // Feature 012: blended results use their baked title (see render path).
-        const isBlended = !!comp.applied_features;
+        const isBlended = !!comp.applied_features && comp.applied_features.length > 0;
         const matchingFeature = isBlended
           ? undefined
           : selectedFeatures.find(
@@ -607,7 +607,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
             // present) carry their title BAKED in feature_config.label — use it
             // verbatim so provenance can never retitle from live state. Compare
             // results keep the live label lookup.
-            const isBlended = !!comp.applied_features;
+            const isBlended = !!comp.applied_features && comp.applied_features.length > 0;
             const matchingFeature = isBlended
               ? undefined
               : selectedFeatures.find(

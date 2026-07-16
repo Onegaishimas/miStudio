@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Boxes, Sliders } from 'lucide-react';
 import { getSAE } from '../../api/saes';
-import { useFeatureGroupsStore } from '../../stores/featureGroupsStore';
+import { useFeatureGroupsStore, deriveSourceCluster } from '../../stores/featureGroupsStore';
 import { useFeaturesStore } from '../../stores/featuresStore';
 import { useSteeringStore } from '../../stores/steeringStore';
 import { useFeatureGroupsWebSocket } from '../../hooks/useFeatureGroupsWebSocket';
@@ -32,7 +32,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
     clearSelection,
     error,
   } = useFeatureGroupsStore();
-  const { selectSAE, addFeature, setClusterContext } = useSteeringStore();
+  const { selectSAE, addFeature, setClusterContext, requestClusterAllocation } = useSteeringStore();
   const [detailFeatureId, setDetailFeatureId] = useState<string | null>(null);
   const [handoffError, setHandoffError] = useState<string | null>(null);
 
@@ -69,11 +69,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
       // member records which cluster it was selected FROM, so provenance is
       // independent of whichever cluster happens to be expanded right now.
       const members = [...selection.values()];
-      const firstGroup = members[0]?.group_id;
-      const sourceCluster =
-        firstGroup && members.every((m) => m.group_id === firstGroup)
-          ? { group_id: firstGroup, display_token: members[0].display_token }
-          : null;
+      const sourceCluster = deriveSourceCluster(members);
 
       const sae = await getSAE(saeId);
       selectSAE(sae); // clears prior selection + cluster context
@@ -89,6 +85,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
           feature_id: featureId,
           max_activation: member.max_activation,
           activation_frequency: member.activation_frequency,
+          similarity: member.similarity,
         });
         if (!ok) break; // max features reached
         added += 1;
@@ -98,6 +95,9 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         // must only stand when the full selection made it across (Feature 012).
         if (sourceCluster && added === selection.size) {
           setClusterContext(sourceCluster);
+          // Feature 013: fetch the principled cluster allocation (progressive —
+          // solo baselines stay until it lands; failures are non-fatal).
+          void requestClusterAllocation(members[0]?.cohesion ?? null);
         }
         clearSelection();
         onNavigateToSteering?.();

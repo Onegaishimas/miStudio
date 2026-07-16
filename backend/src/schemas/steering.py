@@ -518,3 +518,40 @@ class CombinedSteeringResponse(BaseModel):
     # Timing
     total_time_ms: int = Field(..., description="Total generation time in milliseconds")
     created_at: datetime = Field(..., description="Response creation timestamp")
+
+# ============================================================================
+# Cluster Strength Allocation Schemas (Feature 013, IDL-29)
+# ============================================================================
+
+class ClusterAllocationMember(BaseModel):
+    """A cluster member submitted for strength allocation."""
+
+    feature_idx: int = Field(..., ge=0)
+    layer: int = Field(..., ge=0)
+    similarity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Context similarity to the cluster")
+    activation_frequency: Optional[float] = Field(None, description="Fraction of tokens where the feature fires")
+    sign: Literal[1, -1] = Field(1, description="+1 boost, -1 suppress")
+
+
+class ClusterAllocationRequest(BaseModel):
+    """Request a principled starting allocation for steering a cluster."""
+
+    sae_id: str = Field(..., description="SAE whose decoder defines the injected directions")
+    members: List[ClusterAllocationMember] = Field(..., min_length=1, max_length=20)
+    group_cohesion: Optional[float] = Field(None, ge=0.0, le=1.0, description="Source cluster cohesion for the gate")
+
+
+class ClusterAllocationResponse(BaseModel):
+    """Computed allocation: budget, gain, per-member strengths, flags."""
+
+    B: float = Field(..., description="Total strength budget Σ|strength_i|")
+    B_dir: float = Field(..., description="Direction budget from the solo law at f_eff")
+    G: float = Field(..., description="Resultant-norm gain ‖Σ σᵢwᵢdᵢ‖ (1.0 when approximate)")
+    f_eff: Optional[float] = Field(None, description="Similarity-weighted mean member frequency")
+    weights: List[float]
+    strengths: List[float] = Field(..., description="Per-member signed strengths (0.1 grain)")
+    flags: List[str] = Field(default_factory=list, description="cancellation | low_cohesion | default_budget | cap_bound | approximate | uniform_weights | inactive_member")
+    cancellation_pair: Optional[List[int]] = Field(None, description="Worst-opposed feature_idx pair when cancellation flagged")
+    constants_used: Dict[str, float]
+    formula_id: str
+    approximate: bool = False

@@ -71,6 +71,23 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get("/steering/status")
 
     @mcp.tool()
+    async def compute_cluster_allocation(
+        sae_id: str,
+        members: list[dict],
+        group_cohesion: Optional[float] = None,
+    ) -> Any:
+        """Compute the principled starting strength allocation for steering a
+        CLUSTER of features (Feature 013). members: [{feature_idx, layer,
+        similarity?, activation_frequency?, sign?}] (1-20, single layer).
+        Returns {B, B_dir, G, f_eff, weights, strengths, flags, constants_used}.
+        Read-only and CPU-fast — safe without steering mode. Use it to seed
+        steer_combined strengths and to run the calibration protocol."""
+        body: dict = {"sae_id": sae_id, "members": members}
+        if group_cohesion is not None:
+            body["group_cohesion"] = group_cohesion
+        return await client.post("/steering/cluster-allocation", json_body=body)
+
+    @mcp.tool()
     async def get_steering_mode() -> Any:
         """Is steering mode active (model+SAE pre-loaded on the GPU)?"""
         return await client.get("/steering/mode")

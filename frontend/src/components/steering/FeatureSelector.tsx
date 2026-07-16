@@ -18,6 +18,7 @@ import { useSAEsStore } from '../../stores/saesStore';
 import { SAEStatus } from '../../types/sae';
 import { SelectedFeature } from '../../types/steering';
 import { SelectedFeatureCard } from './SelectedFeatureCard';
+import { ClusterBudgetBar } from './ClusterBudgetBar';
 import { FeatureBrowser } from './FeatureBrowser';
 import { FeatureDetailModal } from '../features/FeatureDetailModal';
 import { COMPONENTS } from '../../config/brand';
@@ -64,6 +65,8 @@ export function FeatureSelector() {
     applyAutoBaseline,
     clearFeatures,
     clusterContext,
+    clusterBudget,
+    rebalanceStrength,
   } = useSteeringStore();
 
   // Strength preset values
@@ -263,6 +266,9 @@ export function FeatureSelector() {
               </div>
             )}
 
+            {/* Cluster budget bar (Feature 013) */}
+            <ClusterBudgetBar />
+
             {/* Feature count header */}
             <div className="p-4 pb-2 flex items-center justify-between">
               <h3 className="text-sm font-medium text-slate-300">
@@ -313,7 +319,9 @@ export function FeatureSelector() {
                   key={feature.instance_id}
                   feature={feature}
                   onStrengthChange={(strength) =>
-                    updateFeatureStrength(feature.instance_id, strength)
+                    clusterBudget
+                      ? rebalanceStrength(feature.instance_id, strength)
+                      : updateFeatureStrength(feature.instance_id, strength)
                   }
                   onAdditionalStrengthsChange={(strengths) =>
                     setAdditionalStrengths(feature.instance_id, strengths)

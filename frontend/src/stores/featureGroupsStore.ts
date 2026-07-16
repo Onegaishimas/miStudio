@@ -41,6 +41,27 @@ export interface SelectedMember {
    */
   group_id: string;
   display_token: string;
+  /** Member context similarity — feeds the 013 strength allocation. */
+  similarity: number | null;
+  /** Source cluster cohesion (group-level) — feeds the 013 cohesion gate. */
+  cohesion: number | null;
+}
+
+/**
+ * Derive single-cluster provenance from selection stamps (Features 012/013).
+ * Returns the cluster identity only when EVERY member was selected from the
+ * same cluster and the display token is non-empty — mixed or unstamped
+ * selections yield null (no false cluster claims).
+ */
+export function deriveSourceCluster(
+  members: SelectedMember[],
+): { group_id: string; display_token: string } | null {
+  const firstGroup = members[0]?.group_id;
+  const token = members[0]?.display_token?.trim();
+  if (!firstGroup || !token) return null;
+  return members.every((m) => m.group_id === firstGroup)
+    ? { group_id: firstGroup, display_token: token }
+    : null;
 }
 
 interface FeatureGroupsState {
@@ -252,6 +273,8 @@ export const useFeatureGroupsStore = create<FeatureGroupsState>((set, get) => ({
             activation_frequency: m.activation_frequency,
             group_id: m.group_id,
             display_token: m.display_token,
+            similarity: m.similarity,
+            cohesion: m.cohesion,
           });
         } else {
           selection.delete(m.feature_id);

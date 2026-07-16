@@ -32,10 +32,11 @@ echo "== manual audit =="
 # matching so a line with both a slug link and forbidden copy is still caught.
 manual_fail=0
 while IFS= read -r -d '' f; do
-  cleaned=$(sed -e 's/feature-groups//g' -e 's/feature_groups//g' "$f")
-  if printf '%s' "$cleaned" | grep -qiE "feature groups?\b"; then
+  # Allowlist only slug/identifier CONTEXTS: URL-path slugs and snake_case ids.
+  cleaned=$(sed -E -e 's/#[A-Za-z0-9_-]+//g' -e 's|[A-Za-z0-9/._-]*/feature-groups[A-Za-z0-9_-]*||g' -e 's/feature_groups//g' "$f")
+  if printf '%s' "$cleaned" | grep -qiE "feature[ -]groups?\b"; then
     echo "FAIL: $f still contains user-facing 'feature group(s)':"
-    printf '%s\n' "$cleaned" | grep -inE "feature groups?\b" | head -5
+    printf '%s\n' "$cleaned" | grep -inE "feature[ -]groups?\b" | head -5
     manual_fail=1
   fi
 done < <(find manual/docs -name '*.md' -print0)

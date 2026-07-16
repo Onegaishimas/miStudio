@@ -13,7 +13,7 @@
  */
 
 import { useState } from 'react';
-import { GripVertical, X, Hash, Layers, Plus, ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import { GripVertical, X, Hash, Layers, Plus, ChevronDown, ChevronRight, Sparkles, Pin } from 'lucide-react';
 import { SelectedFeature, FEATURE_COLORS, getStrengthWarningLevel } from '../../types/steering';
 import { StrengthSlider } from './StrengthSlider';
 
@@ -182,6 +182,24 @@ export function SelectedFeatureCard({
           >
             <Sparkles className="w-2.5 h-2.5" />
             auto
+          </span>
+        )}
+        {strengthSource === 'cluster' && (
+          <span
+            className="flex items-center gap-0.5 text-[10px] font-medium text-cyan-400 bg-cyan-500/10 rounded px-1 py-0.5 shrink-0"
+            title="Strength set by the cluster budget model (edit to pin; others rebalance)"
+          >
+            <Sparkles className="w-2.5 h-2.5" />
+            cluster
+          </span>
+        )}
+        {feature.pinned && (
+          <span
+            className="flex items-center gap-0.5 text-[10px] font-medium text-amber-400 bg-amber-500/10 rounded px-1 py-0.5 shrink-0"
+            title="Pinned — excluded from budget rebalancing"
+          >
+            <Pin className="w-2.5 h-2.5" />
+            pinned
           </span>
         )}
         {strengthSource === 'default' && (

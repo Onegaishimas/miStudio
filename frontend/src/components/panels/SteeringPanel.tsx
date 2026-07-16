@@ -86,6 +86,9 @@ export function SteeringPanel() {
     generateCombined,
     clearCombinedResults,
     clusterContext,
+    clusterBudget,
+    intensity,
+    setIntensity,
   } = useSteeringStore();
 
   const { saes, fetchSAEs } = useSAEsStore();
@@ -598,6 +601,27 @@ export function SteeringPanel() {
                         </div>
                       );
                     })()}
+                    {/* Cluster intensity dial (Feature 013): scales the whole
+                        cluster at request time; λ=0 previews unsteered. */}
+                    {clusterBudget && (
+                      <label
+                        className="flex items-center gap-2 text-xs text-slate-400 select-none"
+                        title="Scales every member strength at generation time (tiles show unscaled values)"
+                      >
+                        <span className="text-cyan-400 font-mono">λ {intensity.toFixed(2)}</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.05}
+                          value={intensity}
+                          onChange={(e) => setIntensity(Number(e.target.value))}
+                          disabled={isGenerating || isCombinedGenerating}
+                          className="w-28 accent-cyan-500"
+                          aria-label="Cluster intensity"
+                        />
+                      </label>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Stop button for batch mode */}

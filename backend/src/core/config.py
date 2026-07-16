@@ -187,6 +187,14 @@ class Settings(BaseSettings):
     )
 
     # Steering Configuration
+    # Feature 013 (IDL-29): cluster strength-model constants. JSON:
+    # {"default": {"a","b","m","M","cohesion_gate"}, "per_sae": {"<sae_id>": {...}}}
+    # Per-SAE calibration (MCP validation protocol) writes here — no code change.
+    steering_cluster_constants_json: str = Field(
+        default="{}",
+        description="Overrides for the cluster strength budget model constants",
+    )
+
     steering_timeout_seconds: int = Field(
         default=120,
         ge=30,

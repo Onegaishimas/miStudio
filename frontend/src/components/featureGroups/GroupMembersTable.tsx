@@ -58,6 +58,8 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                       activation_frequency: m.activation_frequency,
                       group_id: groupDetail.group_id,
                       display_token: groupDetail.display_token,
+                      similarity: m.similarity,
+                      cohesion: groupDetail.cohesion,
                     })),
                     !allSelected,
                   )
@@ -91,6 +93,8 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                       activation_frequency: member.activation_frequency,
                       group_id: groupDetail.group_id,
                       display_token: groupDetail.display_token,
+                      similarity: member.similarity,
+                      cohesion: groupDetail.cohesion,
                     })
                   }
                   className="accent-emerald-500"
