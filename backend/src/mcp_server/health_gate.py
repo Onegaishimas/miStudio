@@ -30,29 +30,82 @@ class HealthGate:
         self._ttl = ttl_s
         # product -> (checked_at_monotonic, available, reason)
         self._cache: dict[str, tuple[float, bool, str]] = {}
-        # One long-lived client: a fresh AsyncClient per probe cost a TCP
-        # setup every TTL window (009 R1).
-        self._http = httpx.AsyncClient(timeout=PROBE_TIMEOUT_S,
-                                       follow_redirects=False)
+        # Lazily built long-lived client (009 R2: eager construction leaked
+        # a client per instantiation in tests; per-probe construction cost a
+        # TCP setup every TTL window).
+        self._http: Optional[httpx.AsyncClient] = None
+        # Single-flight per product: concurrent tool calls at TTL expiry
+        # must not stampede an already-struggling backend (009 R2).
+        self._locks: dict[str, "__import__('asyncio').Lock"] = {}
+
+    def _client(self) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(timeout=PROBE_TIMEOUT_S,
+                                           follow_redirects=False)
+        return self._http
 
     async def aclose(self) -> None:
-        await self._http.aclose()
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
 
     async def check(self, product: str) -> tuple[bool, str]:
         """(available, reason). reason is agent-readable on refusal."""
-        now = time.monotonic()
+        import asyncio
+
         hit = self._cache.get(product)
-        if hit is not None and now - hit[0] < self._ttl:
+        if hit is not None and time.monotonic() - hit[0] < self._ttl:
             return hit[1], hit[2]
-        available, reason = await self._probe(product)
-        self._cache[product] = (now, available, reason)
+        lock = self._locks.setdefault(product, asyncio.Lock())
+        async with lock:
+            # Re-check under the lock — a concurrent caller may have probed.
+            hit = self._cache.get(product)
+            if hit is not None and time.monotonic() - hit[0] < self._ttl:
+                return hit[1], hit[2]
+            available, reason = await self._probe(product)
+            # Stamp AFTER the probe: stamping before it burned up to the
+            # probe timeout out of every TTL window (009 R2).
+            self._cache[product] = (time.monotonic(), available, reason)
         return available, reason
+
+    def snapshot(self, product: str) -> tuple[Optional[bool], str]:
+        """Last known state WITHOUT probing — never blocks (the /health
+        route runs on orchestrator probe timeouts; a hung backend must not
+        take the MCP server out of rotation: 009 R2). Kicks off a background
+        refresh when the entry is stale. (None, ...) = never probed yet."""
+        import asyncio
+
+        hit = self._cache.get(product)
+        stale = hit is None or time.monotonic() - hit[0] >= self._ttl
+        if stale:
+            try:
+                asyncio.get_running_loop().create_task(self.check(product))
+            except RuntimeError:
+                pass  # no loop (sync test context) — next check() will probe
+        if hit is None:
+            return None, "not probed yet"
+        return hit[1], hit[2]
 
     def invalidate(self, product: Optional[str] = None) -> None:
         if product is None:
             self._cache.clear()
         else:
             self._cache.pop(product, None)
+
+    @staticmethod
+    def public_reason(reason: str) -> str:
+        """Coarse category safe for the UNAUTHENTICATED /health route —
+        detailed reasons carry internal URLs and exception internals
+        (009 R2 topology leak) and stay in logs + authenticated tools."""
+        if reason in ("ok", "not probed yet"):
+            return reason
+        if "not configured" in reason:
+            return "not configured"
+        if "unhealthy" in reason:
+            return "unhealthy"
+        if reason.startswith("HTTP "):
+            return "error response"
+        return "unreachable"
 
     async def _probe(self, product: str) -> tuple[bool, str]:
         path = _HEALTH_PATHS.get(product)
@@ -65,7 +118,7 @@ class HealthGate:
                            else f"{product} URL is not configured")
         url = f"{base}{path}"
         try:
-            response = await self._http.get(url)
+            response = await self._client().get(url)
         except httpx.HTTPError as e:
             return False, f"{type(e).__name__}: {e} ({url})"
         # Strictly 2xx: a 3xx from an ingress fronting a dead backend must
@@ -74,6 +127,8 @@ class HealthGate:
             return False, f"HTTP {response.status_code} from {url}"
         # Contract: available <=> 2xx AND status != 'unhealthy'. degraded IS
         # available (miLLM with no model loaded still accepts imports).
+        # NOTE: today's liveness endpoints hardcode healthy statuses — this
+        # branch is defensive for the contract's reserved semantics.
         try:
             body = response.json()
             if isinstance(body, dict) and body.get("status") == "unhealthy":

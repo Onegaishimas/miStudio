@@ -134,21 +134,46 @@ def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, M
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(request: Request) -> JSONResponse:
-        # Per-product availability (US-9.4). Probes are TTL-cached (10 s),
-        # so orchestrator readiness checks don't hammer the backends; the
-        # server itself is "ok" regardless — a down product degrades its
-        # tools to structured-unavailable, never the whole server.
+        # Per-product availability (US-9.4) — NEVER blocks on live probes:
+        # this route answers orchestrator readiness/liveness checks (default
+        # timeout 1 s), and a hung backend must degrade its TOOLS, not take
+        # the MCP server out of rotation or restart-loop it (009 R2).
+        # snapshot() serves the last known state and refreshes in the
+        # background. Reasons are coarse categories — the route is
+        # unauthenticated and detailed reasons carry internal URLs.
         products = {}
-        product_names = ["mistudio"] + (
-            ["millm"] if settings.millm_api_url else []
-        )
+        product_names = ["mistudio"]
+        if settings.millm_api_url or requested_millm:
+            product_names.append("millm")
         for product in product_names:
-            available, reason = await gate.check(product)
-            products[product] = {"available": available, "reason": reason}
+            available, reason = gate.snapshot(product)
+            products[product] = {
+                "available": available,
+                "reason": gate.public_reason(reason),
+            }
         return JSONResponse(
             {"status": "ok", "service": "mistudio-mcp",
              "categories": sorted(registered), "products": products}
         )
+
+    # Shutdown hooks (009 R2: aclose existed with zero callers). __main__
+    # and tests can close everything via mcp — build_server's 2-tuple
+    # return shape is load-bearing for existing callers.
+    closables = [client, gate]
+    if settings.millm_api_url and requested_millm:
+        closables.append(millm_client)
+
+    async def _close_backend_clients() -> None:
+        for closable in closables:
+            try:
+                close = getattr(closable, "aclose", None) or getattr(
+                    closable, "close", None)
+                if close is not None:
+                    await close()
+            except Exception:  # noqa: BLE001 — best-effort shutdown
+                pass
+
+    mcp.close_backend_clients = _close_backend_clients  # type: ignore[attr-defined]
 
     return mcp, client
 
