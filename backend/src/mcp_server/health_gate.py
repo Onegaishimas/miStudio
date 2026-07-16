@@ -16,15 +16,27 @@ import httpx
 
 PROBE_TIMEOUT_S = 3.0
 
+# product -> health path relative to that product's base URL
+_HEALTH_PATHS = {"millm": "/api/health", "mistudio": "/api/v1/system/health"}
+
 
 class HealthGate:
     """TTL-cached availability probes, one entry per product."""
 
-    def __init__(self, millm_url: str = "", ttl_s: float = 10.0) -> None:
-        self._millm_url = millm_url.rstrip("/")
+    def __init__(self, millm_url: str = "", ttl_s: float = 10.0,
+                 mistudio_url: str = "") -> None:
+        self._urls = {"millm": millm_url.rstrip("/"),
+                      "mistudio": mistudio_url.rstrip("/")}
         self._ttl = ttl_s
         # product -> (checked_at_monotonic, available, reason)
         self._cache: dict[str, tuple[float, bool, str]] = {}
+        # One long-lived client: a fresh AsyncClient per probe cost a TCP
+        # setup every TTL window (009 R1).
+        self._http = httpx.AsyncClient(timeout=PROBE_TIMEOUT_S,
+                                       follow_redirects=False)
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
 
     async def check(self, product: str) -> tuple[bool, str]:
         """(available, reason). reason is agent-readable on refusal."""
@@ -43,19 +55,31 @@ class HealthGate:
             self._cache.pop(product, None)
 
     async def _probe(self, product: str) -> tuple[bool, str]:
-        if product != "millm":
+        path = _HEALTH_PATHS.get(product)
+        if path is None:
             return False, f"unknown product '{product}'"
-        if not self._millm_url:
-            return False, "MILLM_API_URL is not configured"
-        url = f"{self._millm_url}/api/health"
+        base = self._urls.get(product, "")
+        if not base:
+            return False, ("MILLM_API_URL is not configured"
+                           if product == "millm"
+                           else f"{product} URL is not configured")
+        url = f"{base}{path}"
         try:
-            async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_S) as http:
-                response = await http.get(url)
+            response = await self._http.get(url)
         except httpx.HTTPError as e:
             return False, f"{type(e).__name__}: {e} ({url})"
-        if response.status_code >= 400:
+        # Strictly 2xx: a 3xx from an ingress fronting a dead backend must
+        # not count as available (009 R1; redirects are not followed).
+        if not 200 <= response.status_code < 300:
             return False, f"HTTP {response.status_code} from {url}"
-        # Any 2xx — including a 'degraded' status body — is available.
+        # Contract: available <=> 2xx AND status != 'unhealthy'. degraded IS
+        # available (miLLM with no model loaded still accepts imports).
+        try:
+            body = response.json()
+            if isinstance(body, dict) and body.get("status") == "unhealthy":
+                return False, f"status 'unhealthy' from {url}"
+        except ValueError:
+            pass  # non-JSON body on 2xx — treat as available
         return True, "ok"
 
 

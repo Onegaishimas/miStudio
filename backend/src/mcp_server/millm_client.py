@@ -94,5 +94,18 @@ class MiLLMClient:
         except httpx.HTTPError as e:
             raise BackendError(0, f"miLLM backend unreachable: {e}")
         if response.status_code >= 400:
+            # Export failures still arrive as envelope JSON — surface the
+            # structured {code, message, details} like every other path
+            # (009 R1: agents got the envelope as an escaped string blob).
+            try:
+                body = response.json()
+            except json.JSONDecodeError:
+                body = None
+            if isinstance(body, dict) and body.get("error"):
+                error = body["error"]
+                raise BackendError(response.status_code,
+                                   {"code": error.get("code", "MILLM_ERROR"),
+                                    "message": error.get("message", ""),
+                                    "details": error.get("details")})
             raise BackendError(response.status_code, response.text)
         return response.json()

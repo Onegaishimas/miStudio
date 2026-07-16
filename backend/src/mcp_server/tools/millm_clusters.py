@@ -29,6 +29,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         filename: Optional[str] = None,
         revision: Optional[str] = None,
         activate: bool = False,
+        on_conflict: Optional[str] = None,
     ) -> Any:
         """Import a mistudio.cluster-definition/v1 into miLLM.
 
@@ -36,19 +37,25 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         the result of miStudio's export_cluster_definition) OR
         `repo_id`+`filename` (a public Hugging Face cluster pack).
         Incompatible definitions import as UNBOUND and refuse only at
-        activation. Caps: 1 MB, 20 members/definition."""
-        if bool(definition) == bool(repo_id):
+        activation. Caps: 1 MB, 20 members/definition. on_conflict:
+        'rename' (default — dedupes the name) or 'fail'."""
+        # Presence checks, not truthiness: an empty-dict definition should
+        # reach miLLM's validator for a real contract error (009 R1).
+        if (definition is not None) == (repo_id is not None):
             return {"error": "provide exactly one source: `definition` OR "
                              "`repo_id`+`filename`"}
-        if repo_id and not filename:
+        if repo_id is not None and not filename:
             return {"error": "`filename` is required with `repo_id`"}
+        if on_conflict not in (None, "rename", "fail"):
+            return {"error": "`on_conflict` must be 'rename' or 'fail'"}
         ok, reason = await gate.check("millm")
         if not ok:
             return {"unavailable": "millm", "reason": reason}
-        if definition:
+        if definition is not None:
             return await millm.post("/api/clusters/import",
                                     json_body=definition,
-                                    activate=str(bool(activate)).lower())
+                                    activate=str(bool(activate)).lower(),
+                                    on_conflict=on_conflict)
         body: dict[str, Any] = {"repo_id": repo_id, "filename": filename,
                                 "activate": bool(activate)}
         if revision:
