@@ -8,7 +8,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Boxes, Sliders, BookMarked } from 'lucide-react';
-import { getSAE } from '../../api/saes';
+import { getSAE, getSAEs } from '../../api/saes';
+import type { SAE } from '../../types/sae';
+import { composeSAEOptionLabel } from '../../utils/saeOptionLabel';
 import { useFeatureGroupsStore, deriveSourceCluster } from '../../stores/featureGroupsStore';
 import { useFeaturesStore } from '../../stores/featuresStore';
 import { useSteeringStore } from '../../stores/steeringStore';
@@ -36,12 +38,28 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
   const { selectSAE, addFeature, setClusterContext, requestClusterAllocation } = useSteeringStore();
   const [detailFeatureId, setDetailFeatureId] = useState<string | null>(null);
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  // Linked-SAE lookup so dropdown labels can show layer/hook/width — the
+  // extraction records only carry name + model. Best-effort enrichment:
+  // labels degrade gracefully (chips omitted) until/unless this resolves.
+  const [saesById, setSaesById] = useState<Record<string, SAE>>({});
 
   useFeatureGroupsWebSocket(extractionId);
 
   useEffect(() => {
     void fetchAllExtractions(['completed']);
   }, [fetchAllExtractions]);
+
+  useEffect(() => {
+    void getSAEs({ limit: 100 })
+      .then((response) => {
+        const map: Record<string, SAE> = {};
+        for (const sae of response.data) map[sae.id] = sae;
+        setSaesById(map);
+      })
+      .catch(() => {
+        // Label enrichment only — the dropdown still renders without it.
+      });
+  }, []);
 
   const completedExtractions = useMemo(
     () => allExtractions.filter((e) => e.status === 'completed'),
@@ -159,13 +177,22 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
             className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 w-full max-w-xl"
           >
             <option value="">Select a completed extraction…</option>
-            {completedExtractions.map((extraction) => (
-              <option key={extraction.id} value={extraction.id}>
-                {extraction.sae_name || extraction.id}
-                {extraction.model_name ? ` — ${extraction.model_name}` : ''}
-                {extraction.layer_index != null ? ` (L${extraction.layer_index})` : ''}
-              </option>
-            ))}
+            {completedExtractions.map((extraction) => {
+              const sae = extraction.external_sae_id
+                ? saesById[extraction.external_sae_id]
+                : undefined;
+              return (
+                <option key={extraction.id} value={extraction.id}>
+                  {composeSAEOptionLabel({
+                    name: extraction.sae_name || extraction.id,
+                    modelName: extraction.model_name ?? sae?.model_name,
+                    layer: extraction.layer_index ?? sae?.layer,
+                    hookType: extraction.hook_type ?? sae?.hook_type,
+                    width: sae?.n_features ?? extraction.total_features,
+                  })}
+                </option>
+              );
+            })}
           </select>
         </div>
 

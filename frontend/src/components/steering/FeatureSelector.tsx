@@ -24,6 +24,7 @@ import { SaveProfileDialog } from './SaveProfileDialog';
 import { useClusterProfilesStore } from '../../stores/clusterProfilesStore';
 import { FeatureBrowser } from './FeatureBrowser';
 import { FeatureDetailModal } from '../features/FeatureDetailModal';
+import { composeSAEOptionLabel } from '../../utils/saeOptionLabel';
 import { COMPONENTS } from '../../config/brand';
 
 // Context menu state interface
@@ -239,7 +240,13 @@ export function FeatureSelector() {
           <option value="">Choose an SAE...</option>
           {readySAEs.map((sae) => (
             <option key={sae.id} value={sae.id}>
-              {sae.name} {sae.layer != null && `(L${sae.layer})`}
+              {composeSAEOptionLabel({
+                name: sae.name,
+                modelName: sae.model_name,
+                layer: sae.layer,
+                hookType: sae.hook_type,
+                width: sae.n_features,
+              })}
             </option>
           ))}
         </select>
