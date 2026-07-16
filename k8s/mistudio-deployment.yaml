@@ -354,7 +354,11 @@ spec:
                   name: mistudio-secrets
                   key: mcp-auth-token
             - name: MCP_TOOL_CATEGORIES
-              value: "read,groups,steering,labeling,experiments,profiles,jobs"
+              value: "read,groups,steering,labeling,experiments,profiles,jobs,millm_runtime,millm_clusters,millm_sensing"
+            # Unified MCP (miLLM Feature 9): millm_* categories talk to the
+            # miLLM deployment; unset/empty URL skips them at registration.
+            - name: MILLM_API_URL
+              value: "http://millm-backend.millm.svc.cluster.local:8000"
             - name: MCP_STEERING_APPROVAL
               value: "false"
           readinessProbe:

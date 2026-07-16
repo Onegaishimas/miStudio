@@ -19,7 +19,10 @@ class TestConfig:
     def test_default_categories_exclude_admin(self):
         cats = make_settings().enabled_categories()
         assert "admin" not in cats
-        assert {"read", "groups", "steering", "labeling", "experiments", "jobs"} == cats
+        assert {"read", "groups", "steering", "labeling", "experiments",
+                "profiles", "jobs"} == cats
+        # Unified MCP categories are opt-in only
+        assert not any(c.startswith("millm_") for c in cats)
 
     def test_unknown_category_rejected(self):
         with pytest.raises(ValueError, match="Unknown MCP tool categories"):
