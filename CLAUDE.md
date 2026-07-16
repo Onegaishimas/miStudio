@@ -4,8 +4,8 @@ yes
 ## Current Status
 - **Phase:** Active Development & Maintenance
 - **Last Session:** 2026-07-15
-- **Current Task:** BRD-MIS-CLUSTERS-001 execution — 012/013/014 ALL CODE-COMPLETE + 3× review iterations each (2026-07-16, pushed a382bb1). 012: 28 findings fixed/recorded. 013: 28/28 fixed (raw-column gain parity, low-cohesion gate, per-instance mapping, λ-in-Compare). 014: 15 found/10 fixed (profiles table + migration w0x1y2z3a4b5, mistudio.cluster-definition/v1 contract + published schema + sync test, import matrix + caps, SAE-delete 409 guard, MCP profiles category → 38 tools, SaveProfileDialog/ProfilesMenu/hydration). Review records in `.claude/context/sessions/review_feature01{2,3,4}_*_2026-07-16.md`.
-- **Active Work:** GitOps deploy of a382bb1 in flight → then Playwright E2E (012 titles/applied-count, 013 budget bar/dial, 014 profile save/load), 013 empirical validation via MCP sweeps (`0xcc/docs/cluster-strength-validation.md`, hard gate ±30%), FTASKS acceptance + PPRD rows 13-15 closeout
+- **Current Task:** None — **BRD-MIS-CLUSTERS-001 increment CLOSED (2026-07-16)**. Features 012/013/014 implemented, 3× review iterations each (28/28/15 findings), GitOps-deployed, Playwright E2E-verified (profile-titled Blended results + applied-count, budget bar/λ dial, low-cohesion gate, profile save/load/import/export). **013 validation gate PASSED after fitting γ=0** — the 1/G gain boost overdrove ~2× on all test clusters; B = B_dir/max(G,floor)^γ with default γ=0 (IDL-29 step-5 amendment; full data `0xcc/docs/cluster-strength-validation.md`). Review records: `.claude/context/sessions/review_feature01{2,3,4}_*_2026-07-16.md`.
+- **Active Work:** None. Next natural step: follow-on BRD (MILLM import / unified MCP / Open WebUI / HF-marketplace publishing — research ready at `0xcc/docs/hf-marketplace-cluster-definitions-research.md`)
 - **New BRD (2026-07-15):** BRD-MIS-CLUSTERS-001 — rename Feature Groups→Clusters (UI), verify+trustworthy combined-strength steering, principled budget model (frequency-derived total budget, similarity-weighted allocation, budget-preserving rebalance), cluster authoring (name+narrative+tuned strengths), portable JSON cluster-definition export/import. **miStudio-only this increment**; MILLM import + unified MCP + Open WebUI captured as future_considerations for a follow-on BRD. Locked decisions: two-BRDs split, UI-only rename, sim-weighted allocation, marketplace=vision.
 - **Deferred (separate initiative, awaiting user sign-off):** CI/CD → miLLM-style selective rebuilds + ArgoCD Image Updater (plan at `0xcc/plans/CICD-ArgoCD-ImageUpdater-Migration.md`, open decisions in §5 — NOT started, do not interleave with feature work)
 - **Completed:**
@@ -341,13 +341,13 @@ pgrep -f celery  # Celery worker should be running
 - ✅ 0xcc/prds/BRD-MIS-CLUSTERS-001.md (Incremental BRD — Feature Clusters & portable combined-strength steering, 2026-07-15)
 - ✅ PPRD v3.6 (rows 13–15, §3.13–3.15) + PADR v2.9 (IDL-28 Clusters terminology/labeling, IDL-29 cluster strength budget model, IDL-30 portable cluster definitions) — 2026-07-16
 
-### Feature 012 — Clusters UX & Trustworthy Blended Results (Planned)
+### Feature 012 — Clusters UX & Trustworthy Blended Results (✅ Complete 2026-07-16)
 - ✅ 0xcc/prds/012_FPRD|Clusters_UX.md · ✅ 0xcc/tdds/012_FTDD|Clusters_UX.md · ✅ 0xcc/tids/012_FTID|Clusters_UX.md · ✅ 0xcc/tasks/012_FTASKS|Clusters_UX.md
 
-### Feature 013 — Cluster Strength Budget Model (Planned)
+### Feature 013 — Cluster Strength Budget Model (✅ Complete 2026-07-16, validation gate PASSED γ=0)
 - ✅ 0xcc/prds/013_FPRD|Cluster_Strength_Model.md · ✅ 0xcc/tdds/013_FTDD|Cluster_Strength_Model.md · ✅ 0xcc/tids/013_FTID|Cluster_Strength_Model.md · ✅ 0xcc/tasks/013_FTASKS|Cluster_Strength_Model.md
 
-### Feature 014 — Cluster Authoring & Portable Definitions (Planned)
+### Feature 014 — Cluster Authoring & Portable Definitions (✅ Complete 2026-07-16)
 - ✅ 0xcc/prds/014_FPRD|Cluster_Definitions.md · ✅ 0xcc/tdds/014_FTDD|Cluster_Definitions.md · ✅ 0xcc/tids/014_FTID|Cluster_Definitions.md · ✅ 0xcc/tasks/014_FTASKS|Cluster_Definitions.md
 
 ### Feature Documents

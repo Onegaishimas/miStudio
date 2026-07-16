@@ -2,16 +2,16 @@
 
 **Document ID:** 012_FTASKS|Clusters_UX
 **Version:** 1.1
-**Status:** Implemented + 3 review iterations done — E2E/acceptance pending deploy (2026-07-16)
+**Status:** ✅ COMPLETE — implemented, 3× reviewed (28 findings), deployed, E2E-verified (2026-07-16)
 **Source:** 012_FPRD|Clusters_UX · 012_FTDD · 012_FTID · IDL-28
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
 | Phase 1: Rename copy | 3 tasks | ✅ Complete |
 | Phase 2: Cluster context plumbing | 3 tasks | ✅ Complete |
-| Phase 3: Labels + verification surface | 3 tasks | ✅ Complete (E2E hook pending deploy) |
+| Phase 3: Labels + verification surface | 3 tasks | ✅ Complete |
 | Phase 4: Manual + audit | 2 tasks | ✅ Complete |
-| Phase 5: Feature acceptance | 1 task | 🔄 In progress (deploy + E2E + closeout) |
+| Phase 5: Feature acceptance | 1 task | ✅ Complete (2026-07-16) |
 
 ---
 
@@ -49,7 +49,7 @@
 - [x] New component; adapter attaches `applied_features`; render on combined card + batch cards; type extension `SteeringComparisonResponse.applied_features?`
 
 ### Task 3.3: Verification E2E hook
-- [ ] E2E assertion: `features_applied` length == selected member count on a Blended run
+- [x] E2E assertion: applied-features surface showed (19) == member count on a live Blended run 2026-07-16 (`0xcc/caps/miStudio_Steering_Panel-BlendedProfileTitled_20260716.png`)
 
 ## Phase 4: Manual + audit
 
@@ -62,10 +62,10 @@
 ## Phase 5: Feature acceptance
 
 ### Task 5.1: Acceptance (per instruct 007)
-- [ ] Verify every FPRD §8 success criterion (copy audit zero-hits; cluster-titled Blended results; mixed-selection generic title; E2E applied-count assertion; no backend identifier changed)
+- [x] FPRD §8 verified: copy audit zero-hits (`npm run audit:clusters`); cluster/profile-titled Blended results E2E'd; partial hand-off correctly refused the cluster label (>20-member select-all test); applied-count assertion passed; no backend identifiers changed
 - [x] Full test suites green (backend pytest, frontend vitest, type-check, build) *(backend 100% green; frontend steering suites green — 98 pre-existing failures in unrelated dataset/model panels, pre-date 012/013)*
-- [ ] Playwright E2E + screenshot to `0xcc/caps/`
-- [ ] Update CLAUDE.md Document Inventory + statuses (FPRD/FTDD/FTID/FTASKS → ✅, PPRD row 13 → Complete)
+- [x] Playwright E2E + screenshots: `miStudio_Steering_Panel-ClusterBudget_20260716.png`, `-ProfileLoaded_`, `-BlendedProfileTitled_`
+- [x] CLAUDE.md + PPRD v3.7 row 13 → ✅ Complete (2026-07-16)
 
 ---
 

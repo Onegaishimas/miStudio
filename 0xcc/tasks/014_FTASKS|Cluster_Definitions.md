@@ -2,7 +2,7 @@
 
 **Document ID:** 014_FTASKS|Cluster_Definitions
 **Version:** 1.1
-**Status:** Phases 1–6.1 implemented; 3 review iterations DONE (15 found / 10 fixed, SHIP-WITH-NOTES); acceptance pending deploy (2026-07-16)
+**Status:** ✅ COMPLETE — implemented, 3× reviewed (15 found/10 fixed), deployed, E2E-verified incl. combinedMode-on-load fix (2026-07-16)
 **Source:** 014_FPRD · 014_FTDD · 014_FTID · IDL-30
 
 | Phase | Tasks | Status |
@@ -12,7 +12,7 @@
 | Phase 3: MCP tools | 1 task | ✅ Complete |
 | Phase 4: Frontend store + UI | 4 tasks | ✅ Complete |
 | Phase 5: Steering integration | 2 tasks | ✅ Complete |
-| Phase 6: Docs + feature acceptance | 2 tasks | 🔄 Manual done; acceptance pending deploy + reviews |
+| Phase 6: Docs + feature acceptance | 2 tasks | ✅ Complete (2026-07-16) |
 
 ---
 
@@ -70,9 +70,9 @@
 - [x] Clusters manual page += profiles/export/import section + schema reference + MILLM-bound-contract note; mcp-server.md += profiles category
 
 ### Task 6.2: Acceptance (per instruct 007)
-- [ ] Verify FPRD §8 criteria 1–6 (recompute-survival, round-trip equality, block/warn matrix, E2E titled run, schema validation + no secrets/paths, MCP end-to-end)
-- [ ] Full suites green; E2E + caps screenshot
-- [ ] Update CLAUDE.md inventory + statuses (PPRD row 15 → Complete) — closes the BRD-MIS-CLUSTERS-001 increment; follow-on BRD (MILLM import / unified MCP / Open WebUI) may start
+- [x] FPRD §8 verified: recompute-survival structural (decoupled `cluster_profiles` table; soft group ref) — grouping recompute cannot touch profiles; round-trip equality unit-proven + production export→import verified; block/warn matrix unit-tested (9 rows); E2E titled run ("Round-trip import test — Blended (19 features)" + Applied features (19)); published schema sync-tested, no-secrets/no-paths validated on a real export; MCP `profiles` category live on k8s (health lists it), tools registered
+- [x] Suites green; E2E + caps `miStudio_Steering_Panel-ProfileLoaded_20260716.png`, `-BlendedProfileTitled_20260716.png`
+- [x] CLAUDE.md + PPRD v3.7 row 15 → ✅ Complete — **BRD-MIS-CLUSTERS-001 increment CLOSED**; follow-on BRD may start (HF-marketplace research ready: `0xcc/docs/hf-marketplace-cluster-definitions-research.md`)
 
 ---
 

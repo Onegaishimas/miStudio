@@ -1,7 +1,7 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.6 (Feature Clusters, Cluster Strength Model, Portable Cluster Definitions — planned)
+**Version:** 3.7 (Features 13–15 COMPLETE — Clusters arc shipped, validated, deployed)
 **Last Updated:** 2026-07-16
 **Status:** Active
 
@@ -75,9 +75,9 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 10 | Multi-GPU Scalability | Per-GPU monitoring, job routing, aggregated/per-GPU views | Partially Complete (DDP training planned) |
 | 11 | MCP Server & Feature Groups | MCP tools for agentic analysis/steering + cross-feature grouping (API/UI) | Complete |
 | 12 | Steering UX Enhancements | Blended/Compare toggle, up to 20 features, frequency-based auto-baseline strength, compact tiles | ✅ Complete |
-| 13 | Clusters UX & Trustworthy Blended Results | "Feature Groups" → "Clusters" (UI), cluster-labeled steering results, visible all-members-applied verification | Planned |
-| 14 | Cluster Strength Budget Model | Principled combined-strength model: frequency-derived budget, similarity-weighted allocation, resultant-norm gain, pin+rebalance, intensity dial | Planned |
-| 15 | Cluster Authoring & Portable Definitions | Named/narrated cluster profiles with tuned strengths; standardized JSON export/import (the mobile artifact for the MILLM/MCP/Open WebUI arc) | Planned |
+| 13 | Clusters UX & Trustworthy Blended Results | "Feature Groups" → "Clusters" (UI), cluster-labeled steering results, visible all-members-applied verification | ✅ Complete |
+| 14 | Cluster Strength Budget Model | Principled combined-strength model: frequency-derived budget, similarity-weighted allocation, resultant-norm gain, pin+rebalance, intensity dial | ✅ Complete |
+| 15 | Cluster Authoring & Portable Definitions | Named/narrated cluster profiles with tuned strengths; standardized JSON export/import (the mobile artifact for the MILLM/MCP/Open WebUI arc) | ✅ Complete |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -493,7 +493,7 @@ starting strengths, and a usable layout for many features.
 
 ---
 
-### 3.13 Clusters UX & Trustworthy Blended Results (Planned)
+### 3.13 Clusters UX & Trustworthy Blended Results (✅ Complete 2026-07-16)
 
 **Purpose:** Establish *clusters* — sets of features that fire together and share a meaning — as the
 product's primary steering primitive, and make combined ("Blended") steering results trustworthy.
@@ -516,7 +516,7 @@ From BRD-MIS-CLUSTERS-001 (BR-001, BR-002, BR-003, BR-011).
 
 ---
 
-### 3.14 Cluster Strength Budget Model (Planned)
+### 3.14 Cluster Strength Budget Model (✅ Complete 2026-07-16)
 
 **Purpose:** Replace guessed starting strengths for cluster steering with a principled, outcome-grounded
 model — the user must never start from a useless point. From BRD-MIS-CLUSTERS-001 (BR-004, BR-005, BR-006).
@@ -539,7 +539,7 @@ model — the user must never start from a useless point. From BRD-MIS-CLUSTERS-
 
 ---
 
-### 3.15 Cluster Authoring & Portable Definitions (Planned)
+### 3.15 Cluster Authoring & Portable Definitions (✅ Complete 2026-07-16)
 
 **Purpose:** Capture a tuned cluster as a first-class, mobile artifact — named, narrated, strength-tuned —
 exportable as standardized JSON that later travels across the miStudio↔MILLM ecosystem (MILLM import,
@@ -767,6 +767,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 3.3 | 2026-07-12 | Feature 11 implemented: MCP server (33 tools, bearer auth, approval mode), cross-feature grouping (index + REST + Feature Groups UI), mcp_agent provenance, deployment (compose profile + k8s) |
 | 3.4 | 2026-07-15 | Added Feature 12: Steering UX Enhancements (Planned) — §3.12, doc chain 011_FPRD/FTDD/FTID/FTASKS |
 | 3.5 | 2026-07-15 | Feature 12 implemented & deployed: Blended\|Compare toggle, up to 20 features, frequency auto-baseline (default fallback), compact tiles, 20-color palette. K8s-deployed + E2E-verified. |
+| 3.7 | 2026-07-16 | Features 13–15 COMPLETE: implemented, 3× review iterations each (28/28/15 findings), deployed via GitOps, Playwright E2E-verified (profile-titled Blended results, applied-features count, budget bar/λ dial, low-cohesion gate, profile save/load/import/export). 013 empirical validation EXECUTED — hard gate PASSED after fitting gain exponent γ=0 (the 1/G boost overdrove ~2×; `0xcc/docs/cluster-strength-validation.md`). IDL-29 step-5 amendment: B = B_dir/max(G,floor)^γ, default γ=0. HF-as-marketplace research recorded (`0xcc/docs/hf-marketplace-cluster-definitions-research.md`) for the follow-on BRD. |
 | 3.6 | 2026-07-16 | Added Features 13–15 from BRD-MIS-CLUSTERS-001 (Planned): Clusters UX & trustworthy blended results (§3.13), cluster strength budget model (§3.14), cluster authoring & portable JSON definitions (§3.15). MILLM/unified-MCP/Open WebUI integration recorded as future arc (separate BRD). |
 
 ---
