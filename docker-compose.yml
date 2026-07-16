@@ -149,7 +149,7 @@ services:
     environment:
       MISTUDIO_API_URL: http://backend:8000
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in .env to enable the MCP server}
-      MCP_TOOL_CATEGORIES: ${MCP_TOOL_CATEGORIES:-read,groups,steering,labeling,experiments,jobs}
+      MCP_TOOL_CATEGORIES: ${MCP_TOOL_CATEGORIES:-read,groups,steering,labeling,experiments,profiles,jobs}
       MCP_STEERING_APPROVAL: ${MCP_STEERING_APPROVAL:-false}
       MCP_STEERING_MAX_CONCURRENT: ${MCP_STEERING_MAX_CONCURRENT:-2}
       MCP_STEERING_MAX_NEW_TOKENS: ${MCP_STEERING_MAX_NEW_TOKENS:-512}

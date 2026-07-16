@@ -320,13 +320,36 @@ async def import_sae_from_file(
 async def delete_sae(
     sae_id: str,
     delete_files: bool = Query(True, description="Delete local files"),
+    force: bool = Query(False, description="Unbind cluster profiles and delete anyway"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Delete a single SAE.
 
     Soft-deletes the SAE record. Optionally deletes local files.
+    Guarded (Feature 014): SAEs with bound cluster profiles return a structured
+    409 unless ``force`` — force unbinds the profiles (they survive as unbound,
+    steerable after re-binding) rather than destroying user-authored work.
     """
+    from src.services.cluster_profile_service import ClusterProfileService
+
+    profile_count = await ClusterProfileService.count_for_sae(db, sae_id)
+    if profile_count > 0:
+        if not force:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "PROFILES_BOUND",
+                    "profile_count": profile_count,
+                    "message": (
+                        f"{profile_count} cluster profile(s) are bound to this SAE. "
+                        "Delete them, or retry with force=true to unbind them "
+                        "(profiles are kept, marked unbound)."
+                    ),
+                },
+            )
+        await ClusterProfileService.unbind_for_sae(db, sae_id)
+
     success = await SAEManagerService.delete_sae(db, sae_id, delete_files)
     if not success:
         raise HTTPException(404, f"SAE not found: {sae_id}")

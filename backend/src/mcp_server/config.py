@@ -5,8 +5,8 @@ import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-VALID_CATEGORIES = {"read", "groups", "steering", "labeling", "experiments", "jobs", "admin"}
-DEFAULT_CATEGORIES = "read,groups,steering,labeling,experiments,jobs"
+VALID_CATEGORIES = {"read", "groups", "steering", "labeling", "experiments", "profiles", "jobs", "admin"}
+DEFAULT_CATEGORIES = "read,groups,steering,labeling,experiments,profiles,jobs"
 
 
 class MCPSettings(BaseSettings):
