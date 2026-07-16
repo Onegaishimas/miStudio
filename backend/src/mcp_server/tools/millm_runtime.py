@@ -32,11 +32,15 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_activate_profile(profile_id: str) -> Any:
+    async def millm_activate_profile(profile_id: str,
+                                     apply_steering: bool = True) -> Any:
         """Activate a miLLM profile by id — replaces the live steering.
         Cluster rows enforce the declared-feature-space gate server-side
         (a mismatched SAE refuses with a clear reason)."""
-        return await millm.post(f"/api/profiles/{profile_id}/activate")
+        # The route declares a required request body (009 R1: a body-less
+        # POST 422s with 'Field required').
+        return await millm.post(f"/api/profiles/{profile_id}/activate",
+                                json_body={"apply_steering": bool(apply_steering)})
 
     @mcp.tool()
     @gated(gate, "millm")
@@ -48,11 +52,13 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     @mcp.tool()
     @gated(gate, "millm")
     async def millm_set_intensity(intensity: float,
-                                  reapply: Optional[bool] = True) -> Any:
+                                  reapply: Optional[bool] = None) -> Any:
         """Set the ACTIVE cluster's persistent intensity dial (lambda). The
         authored intensity_range is enforced server-side; dialing to 0 is
         always allowed. Affects all traffic (global dial) — per-request
         dialing uses the OpenAI-side steering_intensity field instead."""
+        # None means "use the default" (True) — bool(None) inverted it
+        # for agents that populate optional fields with null (009 R1).
         return await millm.put("/api/clusters/active/intensity",
                                json_body={"intensity": intensity,
-                                          "reapply": bool(reapply)})
+                                          "reapply": reapply is not False})

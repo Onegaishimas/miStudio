@@ -111,30 +111,41 @@ class TestHealthGate:
 
         return gate
 
+    @staticmethod
+    def _stub_http(gate, responder):
+        """Replace the gate's long-lived probe client (built in __init__)."""
+        stub = MagicMock()
+        stub.get = responder
+        gate._http = stub
+
     def test_2xx_is_available_even_degraded(self):
         gate = HealthGate("http://millm:8000")
-
-        async def run():
-            with patch("src.mcp_server.health_gate.httpx.AsyncClient") as MockHttp:
-                instance = MockHttp.return_value.__aenter__.return_value
-                instance.get = AsyncMock(return_value=httpx.Response(
-                    200, json={"status": "degraded"}))
-                return await gate.check("millm")
-
-        ok, reason = anyio.run(run)
+        self._stub_http(gate, AsyncMock(return_value=httpx.Response(
+            200, json={"status": "degraded"})))
+        ok, reason = anyio.run(gate.check, "millm")
         assert ok is True and reason == "ok"
+
+    def test_unhealthy_body_refuses(self):
+        """Contract: available <=> 2xx AND status != 'unhealthy' (R1 fix)."""
+        gate = HealthGate("http://millm:8000")
+        self._stub_http(gate, AsyncMock(return_value=httpx.Response(
+            200, json={"status": "unhealthy"})))
+        ok, reason = anyio.run(gate.check, "millm")
+        assert ok is False and "unhealthy" in reason
+
+    def test_3xx_refuses(self):
+        """An ingress redirect fronting a dead backend is NOT available."""
+        gate = HealthGate("http://millm:8000")
+        self._stub_http(gate, AsyncMock(return_value=httpx.Response(
+            307, headers={"location": "http://elsewhere"})))
+        ok, reason = anyio.run(gate.check, "millm")
+        assert ok is False and "307" in reason
 
     def test_connection_failure_refuses_with_reason(self):
         gate = HealthGate("http://millm:8000")
-
-        async def run():
-            with patch("src.mcp_server.health_gate.httpx.AsyncClient") as MockHttp:
-                instance = MockHttp.return_value.__aenter__.return_value
-                instance.get = AsyncMock(
-                    side_effect=httpx.ConnectError("refused"))
-                return await gate.check("millm")
-
-        ok, reason = anyio.run(run)
+        self._stub_http(gate, AsyncMock(
+            side_effect=httpx.ConnectError("refused")))
+        ok, reason = anyio.run(gate.check, "millm")
         assert ok is False
         assert "ConnectError" in reason and "/api/health" in reason
 
@@ -142,20 +153,31 @@ class TestHealthGate:
         gate = HealthGate("http://millm:8000", ttl_s=60.0)
         calls = []
 
+        async def get(url):
+            calls.append(url)
+            return httpx.Response(200, json={"status": "healthy"})
+
+        self._stub_http(gate, get)
+
         async def run():
-            with patch("src.mcp_server.health_gate.httpx.AsyncClient") as MockHttp:
-                instance = MockHttp.return_value.__aenter__.return_value
-
-                async def get(url):
-                    calls.append(url)
-                    return httpx.Response(200, json={"status": "healthy"})
-
-                instance.get = get
-                await gate.check("millm")
-                await gate.check("millm")
+            await gate.check("millm")
+            await gate.check("millm")
 
         anyio.run(run)
         assert len(calls) == 1  # second check served from cache
+
+    def test_mistudio_product_probes_v1_system_health(self):
+        gate = HealthGate("", mistudio_url="http://backend:8000")
+        seen = []
+
+        async def get(url):
+            seen.append(url)
+            return httpx.Response(200, json={"status": "healthy"})
+
+        self._stub_http(gate, get)
+        ok, _ = anyio.run(gate.check, "mistudio")
+        assert ok is True
+        assert seen == ["http://backend:8000/api/v1/system/health"]
 
     def test_unconfigured_url_refuses(self):
         gate = HealthGate("")
@@ -299,3 +321,85 @@ class TestTopology:
     def test_default_categories_exclude_millm(self):
         cats = make_settings().enabled_categories()
         assert not any(c.startswith("millm_") for c in cats)
+
+
+class TestRound1Fixes:
+    """009 R1 regression pins."""
+
+    def test_activate_profile_sends_required_body(self):
+        """R1 #1 (confirmed): a body-less POST 422s on the real route."""
+        from src.mcp_server.tools import millm_runtime
+
+        tool, millm = _register_and_get(millm_runtime,
+                                        "millm_activate_profile")
+        anyio.run(lambda: tool.run({"profile_id": "prof_x"}))
+        args, kwargs = millm.post.call_args
+        assert args[0] == "/api/profiles/prof_x/activate"
+        assert kwargs["json_body"] == {"apply_steering": True}
+
+    def test_set_intensity_null_reapply_means_true(self):
+        from src.mcp_server.tools import millm_runtime
+
+        tool, millm = _register_and_get(millm_runtime, "millm_set_intensity")
+        anyio.run(lambda: tool.run({"intensity": 1.2, "reapply": None}))
+        kwargs = millm.put.call_args.kwargs
+        assert kwargs["json_body"]["reapply"] is True
+
+    def test_import_empty_dict_definition_reaches_millm(self):
+        """R1 #10: presence, not truthiness — {} goes to the real validator."""
+        from src.mcp_server.tools import millm_clusters
+
+        tool, millm = _register_and_get(millm_clusters,
+                                        "millm_import_cluster")
+        anyio.run(lambda: tool.run({"definition": {}}))
+        millm.post.assert_awaited_once()
+
+    def test_import_on_conflict_passthrough_and_validation(self):
+        from src.mcp_server.tools import millm_clusters
+
+        tool, millm = _register_and_get(millm_clusters,
+                                        "millm_import_cluster")
+        result = anyio.run(lambda: tool.run({"definition": {"kind": "x"},
+                                             "on_conflict": "explode"}))
+        assert "on_conflict" in str(result)
+        millm.post.assert_not_called()
+        anyio.run(lambda: tool.run({"definition": {"kind": "x"},
+                                    "on_conflict": "fail"}))
+        assert millm.post.call_args.kwargs["on_conflict"] == "fail"
+
+    def test_sensing_events_passes_since(self):
+        from src.mcp_server.tools import millm_sensing
+
+        tool, millm = _register_and_get(millm_sensing, "millm_sensing_events")
+        anyio.run(lambda: tool.run({"since": "2026-07-16T00:00:00Z"}))
+        assert millm.get.call_args.kwargs["since"] == "2026-07-16T00:00:00Z"
+
+    def test_raw_get_envelope_error_is_structured(self):
+        def handler(request):
+            return httpx.Response(404, json={
+                "success": False, "data": None,
+                "error": {"code": "PROFILE_NOT_FOUND", "message": "gone"}})
+
+        with pytest.raises(BackendError) as exc:
+            anyio.run(make_client(handler).raw_get,
+                      "/api/clusters/ghost/export")
+        assert exc.value.detail["code"] == "PROFILE_NOT_FOUND"
+
+    def test_health_route_reports_products(self, monkeypatch):
+        monkeypatch.setenv("MILLM_API_URL", "http://127.0.0.1:1")
+        mcp, _ = build_server(make_settings(tool_categories="read"))
+
+        async def run():
+            import httpx as _httpx
+            from starlette.applications import Starlette
+
+            app = mcp.streamable_http_app()
+            transport = _httpx.ASGITransport(app=app)
+            async with _httpx.AsyncClient(transport=transport,
+                                          base_url="http://t") as http:
+                return await http.get("/health")
+
+        response = anyio.run(run)
+        body = response.json()
+        assert body["products"]["millm"]["available"] is False
+        assert "mistudio" in body["products"]

@@ -111,14 +111,16 @@ def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, M
     # HealthGate. Unset MILLM_API_URL skips them at REGISTRATION (log once) —
     # a running-but-unreachable miLLM instead keeps tools registered and the
     # gate returns structured unavailable per call (contract §3).
+    from .health_gate import HealthGate
+
+    gate = HealthGate(settings.millm_api_url, mistudio_url=settings.api_url)
+
     requested_millm = [c for c in MILLM_CATEGORY_MODULES if c in categories]
     if requested_millm:
         if settings.millm_api_url:
-            from .health_gate import HealthGate
             from .millm_client import MiLLMClient
 
             millm_client = MiLLMClient(settings.millm_api_url)
-            gate = HealthGate(settings.millm_api_url)
             for category in requested_millm:
                 for module in MILLM_CATEGORY_MODULES[category]:
                     module.register(mcp, millm_client, gate)
@@ -132,8 +134,20 @@ def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, M
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(request: Request) -> JSONResponse:
+        # Per-product availability (US-9.4). Probes are TTL-cached (10 s),
+        # so orchestrator readiness checks don't hammer the backends; the
+        # server itself is "ok" regardless — a down product degrades its
+        # tools to structured-unavailable, never the whole server.
+        products = {}
+        product_names = ["mistudio"] + (
+            ["millm"] if settings.millm_api_url else []
+        )
+        for product in product_names:
+            available, reason = await gate.check(product)
+            products[product] = {"available": available, "reason": reason}
         return JSONResponse(
-            {"status": "ok", "service": "mistudio-mcp", "categories": sorted(registered)}
+            {"status": "ok", "service": "mistudio-mcp",
+             "categories": sorted(registered), "products": products}
         )
 
     return mcp, client

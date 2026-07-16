@@ -25,13 +25,16 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     @mcp.tool()
     @gated(gate, "millm")
     async def millm_sensing_events(profile_id: Optional[str] = None,
-                                   limit: int = 50) -> Any:
-        """Co-activation events newest-first (span, fired members, score,
-        summary). Event DETAIL (±K token context) is in each event's
-        context fields when fetched individually via the REST detail route;
-        list rows carry the human summary."""
+                                   limit: int = 50,
+                                   since: Optional[str] = None) -> Any:
+        """Co-activation events newest-first. Each row carries the span,
+        fired members with peak activations, score, human summary, AND the
+        ±K token context window (context_text/context_token_ids) when the
+        cluster captures context. `since` (ISO-8601 timestamp) time-bounds
+        polling so agents fetch only new events."""
         return await millm.get("/api/sensing/events",
-                               profile_id=profile_id, limit=limit)
+                               profile_id=profile_id, limit=limit,
+                               since=since)
 
     @mcp.tool()
     @gated(gate, "millm")
