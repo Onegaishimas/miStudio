@@ -36,7 +36,7 @@ spec:
                   name: mistudio-secrets
                   key: mcp-auth-token
             - name: MCP_TOOL_CATEGORIES
-              value: "read,groups,steering,labeling,experiments,jobs"
+              value: "read,groups,steering,labeling,experiments,profiles,jobs"
             - name: MCP_STEERING_APPROVAL
               value: "false"
           readinessProbe:
