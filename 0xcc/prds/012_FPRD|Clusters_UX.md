@@ -66,6 +66,10 @@ every member of a steered cluster actually contributed.
 ### 3.3 Trustworthy result labels (BR-003)
 8. Combined-result titles use the fallback chain: authored profile name (Feature 014, when present) →
    cluster `display_token` → "Blended (N features)". Never a single member's label/index.
+   **Accepted deviation (review iteration 3, recorded):** a ONE-feature blend is honestly titled by the
+   member itself (cluster-prefixed when provenance exists, e.g. "fear — anxiety spike") — presenting a
+   lone member as "Blended (1 feature)" under a cluster token would be the misleading claim. Feature 014
+   must not "fix" this back.
 9. Batch-mode prompt boxes use the same chain (each prompt's result is titled by the cluster).
 10. Compare-mode per-feature outputs keep per-feature labels (they ARE per-feature — correct today).
 

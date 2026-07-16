@@ -16,6 +16,49 @@
 import type { StrengthSource } from '../utils/steeringStrength';
 
 /**
+ * Cluster provenance for a steering selection (Feature 012).
+ *
+ * Set only when EVERY selected feature was handed off from one cluster
+ * (feature group); any later mutation of the selection clears it. Drives the
+ * cluster-titled result labels and the cluster chip. Never persisted.
+ */
+export interface ClusterContext {
+  group_id: string;
+  /** The cluster's shared surface token — label tier 2 (tier 1 = authored profile name, Feature 014). */
+  display_token: string;
+}
+
+/**
+ * Server-computed cluster strength allocation (Feature 013, IDL-29).
+ * The formula lives server-side (single source of truth); the frontend only
+ * performs budget-preserving rebalance on these values.
+ */
+export interface ClusterAllocation {
+  B: number;
+  B_dir: number;
+  G: number;
+  f_eff: number | null;
+  weights: number[];
+  strengths: number[];
+  flags: string[];
+  cancellation_pair: number[] | null;
+  constants_used: Record<string, number>;
+  formula_id: string;
+  approximate: boolean;
+}
+
+/** Cluster budget state held while a cluster allocation is active. */
+export interface ClusterBudget {
+  B: number;
+  B_dir: number;
+  G: number;
+  flags: string[];
+  approximate: boolean;
+  /** weight per feature_idx (allocation-time mapping) */
+  weightsByIdx: Record<number, number>;
+}
+
+/**
  * Color options for selected features.
  * Up to 20 features (Feature 011). Colors are cosmetic — the original 4
  * (teal/blue/purple/amber) come first for continuity, then 16 more hues.
@@ -104,7 +147,11 @@ export interface SelectedFeature {
   // Feature 011: stats carried for the frequency-based auto-baseline + tile display
   max_activation?: number | null;
   activation_frequency?: number | null;
-  strengthSource?: StrengthSource; // 'auto' | 'default' | 'manual'
+  /** Feature 013: member context similarity (cluster hand-offs only). */
+  similarity?: number | null;
+  strengthSource?: StrengthSource; // 'auto' | 'default' | 'manual' | 'cluster'
+  /** Feature 013: manually-edited member in cluster mode — excluded from rebalance. */
+  pinned?: boolean;
 }
 
 /**
@@ -225,6 +272,13 @@ export interface SteeringComparisonResponse {
   unsteered: UnsteeredOutput | null;
   steered: SteeredOutput[];
   steered_multi?: SteeredOutputMulti[] | null; // Multi-strength results (when additional_strengths provided)
+  /**
+   * Feature 012 (frontend-only enrichment): per-member applied list from a
+   * combined (Blended) run, copied off CombinedSteeringResponse by the
+   * adapter so results can prove every member contributed. The server compare
+   * endpoint never returns this field.
+   */
+  applied_features?: CombinedFeatureApplied[];
   metrics_summary: Record<string, any> | null;
   total_time_ms: number;
   created_at: string;

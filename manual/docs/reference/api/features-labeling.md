@@ -43,9 +43,9 @@ These routers are mounted **without a prefix** — paths sit directly under `/ap
 | `GET` | `/features/{id}/nlp-analysis` | Retrieve stored analysis |
 | `POST` | `/analysis/cleanup` | Clean up orphaned analysis artifacts |
 
-## Cross-feature grouping (Feature Groups)
+## Cross-feature clustering (Clusters)
 
-Powers the [Feature Groups view](/core-workflow/feature-groups) and the [MCP server's](/advanced/mcp-server) `groups` tools.
+Powers the [Clusters view](/core-workflow/feature-groups) and the [MCP server's](/advanced/mcp-server) `groups` tools.
 
 | Method | Path | Description |
 |--------|------|-------------|

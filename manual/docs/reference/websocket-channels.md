@@ -31,7 +31,7 @@ For how emissions travel from Celery workers to your browser, see [System Archit
 | `steering/{task_id}` | `steering:progress`, `steering:completed`, `steering:failed` | Async steering generation |
 | `neuronpedia/{job_id}/export` | `export:progress` | Neuronpedia ZIP export |
 | `neuronpedia/push/{push_job_id}` | `neuronpedia:push_progress`, `neuronpedia:push_completed`, `neuronpedia:push_failed` | Direct push to local Neuronpedia |
-| `extractions/{id}/feature-groups` | `feature_groups:progress`, `feature_groups:completed`, `feature_groups:failed` | Cross-feature grouping precompute |
+| `extractions/{id}/feature-groups` | `feature_groups:progress`, `feature_groups:completed`, `feature_groups:failed` | Cross-feature clustering precompute |
 | `mcp/approvals` | `approval:created`, `approval:resolved` | Agent steering approval queue (operator-approval mode) |
 
 ## System monitoring

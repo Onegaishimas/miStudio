@@ -1,20 +1,20 @@
 ---
 sidebar_position: 5
-title: "Feature Groups"
+title: "Clusters"
 description: "Cross-feature analysis — browse features that share a top activating token"
 ---
 
-# Feature Groups — Finding Concept Clusters
+# Clusters — Finding Units of Meaning
 
-A single SAE extraction can produce tens of thousands of features, and related concepts are scattered across them: one feature fires on *love* in romantic contexts, another on *love* in "would love to" constructions, a third on *amour*. The **Feature Groups** panel finds these candidate concept clusters automatically — features that share the same **top activating token** (case- and tokenizer-marker-insensitive) with **similar surrounding context**.
+A single SAE extraction can produce tens of thousands of features, and related concepts are scattered across them: one feature fires on *love* in romantic contexts, another on *love* in "would love to" constructions, a third on *amour*. The **Clusters** panel finds these candidate clusters automatically — features that share the same **top activating token** (case- and tokenizer-marker-insensitive) with **similar surrounding context**.
 
 The same capability powers the [MCP server's](/advanced/mcp-server) grouping tools — the UI and agents query identical endpoints, so there is exactly one view of the data.
 
-![Feature Groups panel — grouped by top activating token, sorted by cohesion](/img/miStudio_FeatureGroups_Panel-Browse.jpg)
+![Clusters panel — grouped by top activating token, sorted by cohesion](/img/miStudio_FeatureGroups_Panel-Browse.jpg)
 
 ## Building the Index
 
-1. Open **Feature Groups** in the sidebar and pick a completed extraction
+1. Open **Clusters** in the sidebar and pick a completed extraction
 2. Click **Compute Index** — a CPU-only background job that:
    - reads each feature's top activating examples,
    - normalizes prime tokens (strips `▁`/`Ġ`/`##` markers, case-folds),
@@ -22,7 +22,7 @@ The same capability powers the [MCP server's](/advanced/mcp-server) grouping too
    - and splits each shared-token bucket into subgroups by context similarity (TF-IDF cosine over the ±5-token windows)
 3. Progress streams live; a few minutes for very large extractions
 
-Extractions are immutable, so the index never goes stale — labels and stars shown in groups are always joined live from the current feature records. Recompute only if you want different parameters.
+Extractions are immutable, so the index never goes stale — labels and stars shown in clusters are always joined live from the current feature records. Recompute only if you want different parameters.
 
 ## Browsing Groups
 
@@ -48,4 +48,4 @@ The point of a group is a hypothesis: *"these N features encode roughly the same
 
 ## API
 
-Everything here is available programmatically — see the [Feature Groups API reference](/reference/api/features-labeling#cross-feature-grouping-feature-groups) and the [MCP tool catalog](/advanced/mcp-server#tool-catalog-33-tools).
+Everything here is available programmatically — see the [Clusters API reference](/reference/api/features-labeling#cross-feature-grouping-feature-groups) and the [MCP tool catalog](/advanced/mcp-server#tool-catalog-33-tools).

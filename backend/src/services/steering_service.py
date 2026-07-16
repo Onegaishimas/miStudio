@@ -287,6 +287,26 @@ class FeatureSteeringConfig:
         return 1 + self.strength
 
 
+def resolve_decoder_weight(sae_model) -> Optional["torch.Tensor"]:
+    """
+    Resolve an SAE's decoder weight matrix as [d_model, d_sae].
+
+    Single source of truth for decoder orientation across the steering hook and
+    the cluster-allocation service (Feature 013) — the gain computation must see
+    exactly the directions the hook will inject.
+    """
+    if hasattr(sae_model, 'tied_weights') and sae_model.tied_weights:
+        # Tied weights: decoder = encoder.weight.T
+        return sae_model.encoder.weight.t()  # [d_model, d_sae]
+    if hasattr(sae_model, 'decoder_weight') and not isinstance(getattr(sae_model, 'decoder', None), nn.Linear):
+        # JumpReLUSAE: decoder_weight property returns [d_model, d_sae]
+        return sae_model.decoder_weight
+    if hasattr(sae_model, 'decoder') and sae_model.decoder is not None:
+        if hasattr(sae_model.decoder, 'weight'):
+            return sae_model.decoder.weight  # [d_model, d_sae]
+    return None
+
+
 @dataclass
 class LoadedSAE:
     """Container for a loaded SAE model and its metadata."""
@@ -969,18 +989,9 @@ class SteeringService:
                     return output
 
                 with torch.no_grad():
-                    # Get decoder weights - handle different SAE architectures
-                    decoder_weight = None
-
-                    if hasattr(sae.model, 'tied_weights') and sae.model.tied_weights:
-                        # Tied weights: decoder = encoder.weight.T
-                        decoder_weight = sae.model.encoder.weight.t()  # [hidden_dim, latent_dim]
-                    elif hasattr(sae.model, 'decoder_weight') and not isinstance(getattr(sae.model, 'decoder', None), nn.Linear):
-                        # JumpReLUSAE: decoder_weight property returns [d_model, d_sae]
-                        decoder_weight = sae.model.decoder_weight  # [hidden_dim, latent_dim]
-                    elif hasattr(sae.model, 'decoder') and sae.model.decoder is not None:
-                        if hasattr(sae.model.decoder, 'weight'):
-                            decoder_weight = sae.model.decoder.weight  # [hidden_dim, latent_dim]
+                    # Get decoder weights via the shared resolver (kept in
+                    # lock-step with the cluster-allocation gain computation).
+                    decoder_weight = resolve_decoder_weight(sae.model)
 
                     if decoder_weight is None:
                         logger.warning("Could not find decoder weights, skipping steering")

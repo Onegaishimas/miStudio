@@ -12,12 +12,13 @@
 
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy } from 'lucide-react';
+import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy, Boxes } from 'lucide-react';
 import { useSteeringStore, MAX_SELECTED_FEATURES } from '../../stores/steeringStore';
 import { useSAEsStore } from '../../stores/saesStore';
 import { SAEStatus } from '../../types/sae';
 import { SelectedFeature } from '../../types/steering';
 import { SelectedFeatureCard } from './SelectedFeatureCard';
+import { ClusterBudgetBar } from './ClusterBudgetBar';
 import { FeatureBrowser } from './FeatureBrowser';
 import { FeatureDetailModal } from '../features/FeatureDetailModal';
 import { COMPONENTS } from '../../config/brand';
@@ -63,6 +64,9 @@ export function FeatureSelector() {
     applyStrengthPreset,
     applyAutoBaseline,
     clearFeatures,
+    clusterContext,
+    clusterBudget,
+    rebalanceStrength,
   } = useSteeringStore();
 
   // Strength preset values
@@ -245,6 +249,26 @@ export function FeatureSelector() {
       <div className="flex-1 overflow-y-auto">
         {selectedSAE ? (
           <>
+            {/* Cluster provenance chip (Feature 012). Count derives from the live
+                selection — while context stands, the selection IS the hand-off set. */}
+            {clusterContext && (
+              <div className="px-4 pt-3">
+                <span
+                  className={`${COMPONENTS.badge.default} gap-1.5 border-cyan-500/40 bg-cyan-500/10 text-cyan-300`}
+                  title={`These features were handed off together from the "${clusterContext.display_token}" cluster`}
+                >
+                  <Boxes className="w-3 h-3" />
+                  {clusterContext.display_token}
+                  <span className="text-cyan-500/70">
+                    · {selectedFeatures.length} member{selectedFeatures.length !== 1 ? 's' : ''} selected
+                  </span>
+                </span>
+              </div>
+            )}
+
+            {/* Cluster budget bar (Feature 013) */}
+            <ClusterBudgetBar />
+
             {/* Feature count header */}
             <div className="p-4 pb-2 flex items-center justify-between">
               <h3 className="text-sm font-medium text-slate-300">
@@ -295,7 +319,9 @@ export function FeatureSelector() {
                   key={feature.instance_id}
                   feature={feature}
                   onStrengthChange={(strength) =>
-                    updateFeatureStrength(feature.instance_id, strength)
+                    clusterBudget
+                      ? rebalanceStrength(feature.instance_id, strength)
+                      : updateFeatureStrength(feature.instance_id, strength)
                   }
                   onAdditionalStrengthsChange={(strengths) =>
                     setAdditionalStrengths(feature.instance_id, strengths)

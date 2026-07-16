@@ -56,6 +56,10 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                       neuron_index: m.neuron_index,
                       max_activation: m.max_activation,
                       activation_frequency: m.activation_frequency,
+                      group_id: groupDetail.group_id,
+                      display_token: groupDetail.display_token,
+                      similarity: m.similarity,
+                      cohesion: groupDetail.cohesion,
                     })),
                     !allSelected,
                   )
@@ -87,6 +91,10 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                       neuron_index: member.neuron_index,
                       max_activation: member.max_activation,
                       activation_frequency: member.activation_frequency,
+                      group_id: groupDetail.group_id,
+                      display_token: groupDetail.display_token,
+                      similarity: member.similarity,
+                      cohesion: groupDetail.cohesion,
                     })
                   }
                   className="accent-emerald-500"

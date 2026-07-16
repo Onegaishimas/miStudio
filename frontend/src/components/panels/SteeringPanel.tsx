@@ -17,7 +17,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Play, Loader, AlertCircle, ChevronLeft, ChevronRight, Brain, StopCircle, History, ChevronDown, RotateCcw, Power, PowerOff, Combine, Layers } from 'lucide-react';
 import { getTaskResult } from '../../api/steering';
 import { getSteeringModeStatus, enterSteeringMode, exitSteeringMode } from '../../api/steering';
-import { useSteeringStore, selectCanGenerate, selectCanGenerateBatch } from '../../stores/steeringStore';
+import { useSteeringStore, selectCanGenerate, selectCanGenerateBatch, blendedTitle } from '../../stores/steeringStore';
 import { useSAEsStore } from '../../stores/saesStore';
 import { usePromptTemplatesStore } from '../../stores/promptTemplatesStore';
 import { SAEStatus } from '../../types/sae';
@@ -29,6 +29,7 @@ import { ComparisonResults } from '../steering/ComparisonResults';
 import { PromptListEditor } from '../steering/PromptListEditor';
 import { COMPONENTS } from '../../config/brand';
 import { useSteeringWebSocket } from '../../hooks/useSteeringWebSocket';
+import { AppliedFeaturesSummary } from '../steering/AppliedFeaturesSummary';
 import type { SteeringProgressEvent, SteeringCompletedEvent, SteeringFailedEvent } from '../../hooks/useSteeringWebSocket';
 
 export function SteeringPanel() {
@@ -81,8 +82,13 @@ export function SteeringPanel() {
     setCombinedMode,
     isCombinedGenerating,
     combinedResults,
+    combinedResultsTitle,
     generateCombined,
     clearCombinedResults,
+    clusterContext,
+    clusterBudget,
+    intensity,
+    setIntensity,
   } = useSteeringStore();
 
   const { saes, fetchSAEs } = useSAEsStore();
@@ -531,6 +537,7 @@ export function SteeringPanel() {
                       ) : combinedMode && !isBatchMode ? (
                         <span className="text-cyan-400">
                           <Combine className="w-3 h-3 inline-block mr-1 -mt-0.5" />
+                          {clusterContext ? `${clusterContext.display_token} · ` : ''}
                           {selectedFeatures.length} feature{selectedFeatures.length !== 1 ? 's' : ''} blended
                         </span>
                       ) : isBatchMode ? (
@@ -594,6 +601,27 @@ export function SteeringPanel() {
                         </div>
                       );
                     })()}
+                    {/* Cluster intensity dial (Feature 013): scales the whole
+                        cluster at request time; λ=0 previews unsteered. */}
+                    {clusterBudget && (
+                      <label
+                        className="flex items-center gap-2 text-xs text-slate-400 select-none"
+                        title="Scales every member strength at generation time (tiles show unscaled values)"
+                      >
+                        <span className="text-cyan-400 font-mono">λ {intensity.toFixed(2)}</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.05}
+                          value={intensity}
+                          onChange={(e) => setIntensity(Number(e.target.value))}
+                          disabled={isGenerating || isCombinedGenerating}
+                          className="w-28 accent-cyan-500"
+                          aria-label="Cluster intensity"
+                        />
+                      </label>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Stop button for batch mode */}
@@ -710,7 +738,7 @@ export function SteeringPanel() {
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Combine className="w-5 h-5 text-cyan-400" />
-                      <h3 className="text-lg font-medium text-slate-100">Combined Steering Result</h3>
+                      <h3 className="text-lg font-medium text-slate-100">{combinedResultsTitle ?? blendedTitle(null, combinedResults.features_applied.length)}</h3>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500">
@@ -725,22 +753,9 @@ export function SteeringPanel() {
                     </div>
                   </div>
 
-                  {/* Features Applied */}
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {combinedResults.features_applied.map((f, idx) => (
-                      <span
-                        key={idx}
-                        className={`px-2 py-1 text-xs rounded border ${
-                          f.strength > 0
-                            ? 'border-green-500/30 bg-green-500/10 text-green-400'
-                            : f.strength < 0
-                            ? 'border-red-500/30 bg-red-500/10 text-red-400'
-                            : 'border-slate-500/30 bg-slate-500/10 text-slate-400'
-                        }`}
-                      >
-                        {f.label || `Feature ${f.feature_idx}`}: {f.strength > 0 ? '+' : ''}{f.strength.toFixed(1)}
-                      </span>
-                    ))}
+                  {/* Features Applied — shared server-truth surface (Feature 012) */}
+                  <div className="mb-4">
+                    <AppliedFeaturesSummary applied={combinedResults.features_applied} />
                   </div>
 
                   {/* Side-by-side comparison if baseline available */}

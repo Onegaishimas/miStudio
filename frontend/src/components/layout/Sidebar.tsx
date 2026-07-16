@@ -27,7 +27,7 @@ const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'training', label: 'Training', icon: GraduationCap },
   { id: 'extractions', label: 'Extractions', icon: Layers },
   { id: 'labeling', label: 'Labeling', icon: Tags },
-  { id: 'feature-groups', label: 'Feature Groups', icon: Boxes },
+  { id: 'feature-groups', label: 'Clusters', icon: Boxes },
   { id: 'saes', label: 'SAEs', icon: Network },
   { id: 'steering', label: 'Steering', icon: Sliders },
   { id: 'templates', label: 'Templates', icon: FileText },

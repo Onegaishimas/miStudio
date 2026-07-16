@@ -26,7 +26,7 @@ export const BASELINE_SLOPE = 2.6;
 export const BASELINE_MIN = 1.0;
 export const BASELINE_MAX = 3.0;
 
-export type StrengthSource = 'auto' | 'default' | 'manual';
+export type StrengthSource = 'auto' | 'default' | 'manual' | 'cluster';
 
 export interface BaselineStrength {
   value: number;

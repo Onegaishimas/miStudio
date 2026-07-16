@@ -98,3 +98,18 @@ NOT renamed: `feature_groups*` tables, `feature-groups` REST paths, MCP tool nam
 | "Clusters" vs NLP "Semantic Clusters" confusion | Relabel NLP section in the same PR as the nav rename |
 | Manual slug change breaks inbound links | Keep slug `feature-groups` in v1; only copy changes |
 | `features_applied` absent on old cached results | Expander renders only when field present |
+
+## 8. As-built deviations & recorded debt (review iteration 3, 2026-07-16)
+
+- **Provenance = per-member stamps, not the expanded cluster.** §2's original "currently expanded
+  cluster" rule shipped stronger: `SelectedMember` carries `{group_id, display_token, similarity,
+  cohesion}` stamped at toggle time; `deriveSourceCluster()` (featureGroupsStore) owns the validity rule.
+  Provenance survives collapse/other-expand; mixed stamps ⇒ null.
+- **Two title-baking mechanisms (AR-1):** batch bakes into result data (`feature_config.label` via the
+  adapter); single-prompt bakes into the parallel `combinedResultsTitle` state. Feature 014's authored-name
+  tier must touch BOTH; unify later by routing single-prompt through the adapter.
+- **Durability asymmetry (AR-2):** blended single-prompt results are ephemeral (excluded from
+  recentComparisons by design, not persisted); compare results persist via recents, batch via batchState.
+  014 backlog: consider persisting blended results (natural home: cluster profiles).
+- **Titling philosophy fork (AR-3, intentional per FPRD §3.3.10):** blended = baked/immutable; compare =
+  live label lookup (finished compare results still retitle on relabel). Documented, not accidental.

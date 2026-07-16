@@ -304,3 +304,26 @@ export async function exitSteeringMode(): Promise<ExitSteeringModeResponse> {
     method: 'POST',
   });
 }
+
+/**
+ * Feature 013: server-side cluster strength allocation (IDL-29 formula).
+ */
+export interface ClusterAllocationMemberInput {
+  feature_idx: number;
+  layer: number;
+  similarity?: number | null;
+  activation_frequency?: number | null;
+  sign?: 1 | -1;
+}
+
+export async function computeClusterAllocation(body: {
+  sae_id: string;
+  members: ClusterAllocationMemberInput[];
+  group_cohesion?: number | null;
+}): Promise<import('../types/steering').ClusterAllocation> {
+  return fetchAPI<import('../types/steering').ClusterAllocation>('/steering/cluster-allocation', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+

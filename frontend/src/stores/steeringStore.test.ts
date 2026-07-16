@@ -13,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useSteeringStore, MAX_SELECTED_FEATURES } from './steeringStore';
+import { useSteeringStore, MAX_SELECTED_FEATURES, blendedTitle } from './steeringStore';
 import { DEFAULT_GENERATION_PARAMS } from '../types/steering';
 import type { SAE } from '../types/sae';
 import type { SteeringComparisonResponse, StrengthSweepResponse } from '../types/steering';
@@ -22,6 +22,7 @@ import type { SteeringComparisonResponse, StrengthSweepResponse } from '../types
 vi.mock('../api/steering', () => ({
   submitAsyncComparison: vi.fn(),
   submitAsyncCombined: vi.fn(),
+  computeClusterAllocation: vi.fn(),
   submitAsyncSweep: vi.fn(),
   cancelTask: vi.fn(),
   getExperiments: vi.fn(),
@@ -50,6 +51,9 @@ const initialState = {
   currentComparison: null,
   recentComparisons: [],
   batchState: null,
+  clusterContext: null,
+  clusterBudget: null,
+  intensity: 1,
   combinedMode: false,
   isCombinedGenerating: false,
   isSweeping: false,
@@ -1060,6 +1064,360 @@ describe('steeringStore', () => {
       expect(result.current.prompts).toEqual(['']);
       expect(result.current.selectedFeatures).toHaveLength(0);
       expect(result.current.error).toBeNull();
+    });
+  });
+
+  describe('Cluster Context (Feature 012)', () => {
+    const ctx = { group_id: 'g1', display_token: 'fear' };
+
+    it('setClusterContext stores and clears', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.setClusterContext(ctx));
+      expect(result.current.clusterContext).toEqual(ctx);
+      act(() => result.current.setClusterContext(null));
+      expect(result.current.clusterContext).toBeNull();
+    });
+
+    it('is cleared by every selection mutation', () => {
+      const { result } = renderHook(() => useSteeringStore());
+
+      // addFeature clears
+      act(() => {
+        result.current.setClusterContext(ctx);
+        result.current.addFeature({ feature_idx: 1, layer: 6, strength: 1 });
+      });
+      expect(result.current.clusterContext).toBeNull();
+
+      // removeFeature clears
+      act(() => result.current.setClusterContext(ctx));
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.removeFeature(inst));
+      expect(result.current.clusterContext).toBeNull();
+
+      // duplicateFeature clears
+      act(() => {
+        result.current.addFeature({ feature_idx: 2, layer: 6, strength: 1 });
+      });
+      const inst2 = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.setClusterContext(ctx));
+      act(() => result.current.duplicateFeature(inst2));
+      expect(result.current.clusterContext).toBeNull();
+
+      // clearFeatures clears
+      act(() => result.current.setClusterContext(ctx));
+      act(() => result.current.clearFeatures());
+      expect(result.current.clusterContext).toBeNull();
+
+      // selectSAE clears
+      act(() => result.current.setClusterContext(ctx));
+      act(() => result.current.selectSAE(mockSAE));
+      expect(result.current.clusterContext).toBeNull();
+    });
+
+    it('survives strength edits (not a selection mutation)', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.addFeature({ feature_idx: 1, layer: 6, strength: 1 });
+        result.current.setClusterContext(ctx);
+      });
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.updateFeatureStrength(inst, 2.5));
+      expect(result.current.clusterContext).toEqual(ctx);
+    });
+
+    it('blendedTitle: token tier, generic tier, and honest single-feature titles', () => {
+      expect(blendedTitle(null, 3)).toBe('Blended (3 features)');
+      expect(blendedTitle(ctx, 3)).toBe('fear — Blended (3 features)');
+      // Single feature: the member's own identity, cluster-prefixed when known
+      expect(blendedTitle(ctx, 1, 'anxiety spike')).toBe('fear — anxiety spike');
+      expect(blendedTitle(null, 1, 'anxiety spike')).toBe('anxiety spike');
+      expect(blendedTitle(null, 1)).toBe('Blended (1 feature)');
+    });
+
+    it('loadExperiment and resetSession clear stale cluster context + combined results', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.setClusterContext(ctx);
+        useSteeringStore.setState({
+          combinedResults: { combined_id: 'x' } as any,
+          combinedResultsTitle: 'fear — Blended (3 features)',
+        });
+      });
+      act(() =>
+        result.current.loadExperiment({
+          id: 'e1',
+          name: 'exp',
+          selected_features: [],
+          prompt: 'p',
+          generation_params: { ...DEFAULT_GENERATION_PARAMS },
+          results: { comparison_id: 'c1' } as any,
+          created_at: new Date().toISOString(),
+        } as any),
+      );
+      expect(result.current.clusterContext).toBeNull();
+      expect(result.current.combinedResults).toBeNull();
+      expect(result.current.combinedResultsTitle).toBeNull();
+
+      // resetSession (first click) also clears combined results
+      act(() => {
+        result.current.setClusterContext(ctx);
+        useSteeringStore.setState({
+          combinedResults: { combined_id: 'y' } as any,
+          combinedResultsTitle: 't',
+        });
+      });
+      act(() => result.current.resetSession());
+      expect(result.current.combinedResults).toBeNull();
+      expect(result.current.combinedResultsTitle).toBeNull();
+    });
+
+    it('combined completion carries applied_features + cluster title into batch results', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.setPrompts(['P1']);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1.5 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 2.0 });
+        result.current.setCombinedMode(true);
+        result.current.setPrompts(['P1', 'P2']); // batch
+        result.current.setClusterContext(ctx);
+      });
+
+      vi.mocked(steeringApi.submitAsyncCombined).mockImplementation(async () => ({
+        task_id: 'ctask-ctx', status: 'pending',
+      }) as any);
+
+      const batchPromise = result.current.generateBatchComparison();
+      await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
+
+      const combined = {
+        combined_id: 'cmb-ctx', sae_id: mockSAE.id, model_id: 'm', prompt: 'P1',
+        combined_output: 'out',
+        features_applied: [
+          { feature_idx: 100, layer: 6, strength: 1.5, label: null, color: 'teal' },
+          { feature_idx: 200, layer: 6, strength: 2.0, label: null, color: 'blue' },
+        ],
+        baseline_output: null, combined_metrics: null, baseline_metrics: null,
+        total_steering_strength: 3.5, total_time_ms: 10, created_at: new Date().toISOString(),
+      };
+      act(() => { result.current.handleAsyncCompleted(combined as any); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      // finish prompt 2
+      act(() => { result.current.handleAsyncCompleted({ ...combined, combined_id: 'cmb-ctx2', prompt: 'P2' } as any); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      await batchPromise;
+
+      const first = result.current.batchState?.results[0].comparison;
+      expect(first?.applied_features).toHaveLength(2);
+      expect(first?.steered[0].feature_config.label).toBe('fear — Blended (2 features)');
+    });
+  });
+
+  describe('Cluster Strength Budget (Feature 013)', () => {
+    const budget = {
+      B: 2.4, B_dir: 2.4, G: 1.0, flags: [], approximate: false,
+      weightsByIdx: { 100: 0.5, 200: 0.3, 300: 0.2 },
+    };
+
+    const setupCluster = (result: any) => {
+      act(() => {
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1.2 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 0.7 });
+        result.current.addFeature({ feature_idx: 300, layer: 6, strength: 0.5 });
+        useSteeringStore.setState({ clusterBudget: budget });
+      });
+    };
+
+    it('rebalanceStrength pins the edit and preserves the total budget', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.rebalanceStrength(inst, 1.6));
+      const feats = result.current.selectedFeatures;
+      expect(feats[0].strength).toBe(1.6);
+      expect(feats[0].pinned).toBe(true);
+      const total = feats.reduce((s, f) => s + Math.abs(f.strength), 0);
+      expect(total).toBeCloseTo(2.4, 1);
+      // Unpinned redistribute by renormalized weights (0.3:0.2 of 0.8)
+      expect(feats[1].strength).toBeCloseTo(0.5, 1);
+      expect(feats[2].strength).toBeCloseTo(0.3, 1);
+    });
+
+    it('property: random edit sequences keep Σ|strength| within grain of B', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      let seed = 42;
+      const rand = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+      for (let i = 0; i < 25; i++) {
+        const feats = result.current.selectedFeatures;
+        const unpinnedIdx = feats.map((f, j) => (f.pinned ? -1 : j)).filter((j) => j >= 0);
+        if (unpinnedIdx.length <= 1) break; // all-but-one pinned: rebalance can no longer conserve
+        const pick = unpinnedIdx[Math.floor(rand() * unpinnedIdx.length)];
+        const value = Math.round(rand() * 15) / 10; // 0..1.5
+        act(() => result.current.rebalanceStrength(feats[pick].instance_id, value));
+        const total = result.current.selectedFeatures.reduce((s, f) => s + Math.abs(f.strength), 0);
+        const pinnedTotal = result.current.selectedFeatures
+          .filter((f) => f.pinned).reduce((s, f) => s + Math.abs(f.strength), 0);
+        if (pinnedTotal <= 2.4) {
+          expect(total).toBeGreaterThanOrEqual(2.4 - 0.15);
+          expect(total).toBeLessThanOrEqual(2.4 + 0.15);
+        }
+      }
+    });
+
+    it('over-budget pin zeroes unpinned members, never rescales pins', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.rebalanceStrength(inst, 5.0));
+      const feats = result.current.selectedFeatures;
+      expect(feats[0].strength).toBe(5.0);
+      expect(feats[1].strength).toBe(0);
+      expect(feats[2].strength).toBe(0);
+    });
+
+    it('rebalanceStrength without a budget is a plain edit', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.addFeature({ feature_idx: 1, layer: 6, strength: 1 }));
+      const inst = result.current.selectedFeatures[0].instance_id;
+      act(() => result.current.rebalanceStrength(inst, 7));
+      expect(result.current.selectedFeatures[0].strength).toBe(7);
+      expect(result.current.selectedFeatures[0].pinned).toBeFalsy();
+    });
+
+    it('applyStrengthPreset exits cluster mode', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      act(() => result.current.applyStrengthPreset(50));
+      expect(result.current.clusterBudget).toBeNull();
+      expect(result.current.selectedFeatures.every((f) => f.strength === 50)).toBe(true);
+    });
+
+    it('selection mutations clear the budget', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      setupCluster(result);
+      act(() => result.current.addFeature({ feature_idx: 400, layer: 6, strength: 1 }));
+      expect(result.current.clusterBudget).toBeNull();
+    });
+
+    it('intensity is applied once, at request-build time', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.setPrompts(['P']);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 2.0 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 1.0 });
+        useSteeringStore.setState({ clusterBudget: budget, intensity: 0.5 });
+      });
+      let captured: any = null;
+      vi.mocked(steeringApi.submitAsyncCombined).mockImplementation(async (req: any) => {
+        captured = req;
+        return { task_id: 'ti', status: 'pending' } as any;
+      });
+      const p = result.current.generateCombined(true, false).catch(() => {});
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      expect(captured.selected_features.map((f: any) => f.strength)).toEqual([1.0, 0.5]);
+      // Tiles still show pre-λ values
+      expect(result.current.selectedFeatures.map((f) => f.strength)).toEqual([2.0, 1.0]);
+      act(() => { useSteeringStore.setState({ error: null }); });
+      void p;
+    });
+
+    it('requestClusterAllocation applies strengths + drops stale responses', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 10, activation_frequency: 0.2, similarity: 0.8 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 10, activation_frequency: 0.2, similarity: 0.8 });
+      });
+      vi.mocked(steeringApi.computeClusterAllocation).mockResolvedValue({
+        B: 2.4, B_dir: 2.4, G: 1.0, f_eff: 0.2,
+        weights: [0.5, 0.5], strengths: [1.2, 1.2], flags: [],
+        cancellation_pair: null, constants_used: {}, formula_id: 'freq-budget/sim-alloc@1',
+        approximate: false,
+      } as any);
+      await act(async () => { await result.current.requestClusterAllocation(0.8); });
+      const feats = result.current.selectedFeatures;
+      expect(feats.map((f) => f.strength)).toEqual([1.2, 1.2]);
+      expect(feats.every((f) => f.strengthSource === 'cluster')).toBe(true);
+      expect(result.current.clusterBudget?.B).toBe(2.4);
+
+      // Stale: selection changes while request in flight
+      let resolveFn: any;
+      vi.mocked(steeringApi.computeClusterAllocation).mockImplementation(
+        () => new Promise((res) => { resolveFn = res; }),
+      );
+      const pending = result.current.requestClusterAllocation(0.8);
+      act(() => { result.current.addFeature({ feature_idx: 300, layer: 6, strength: 5 }); });
+      resolveFn({ B: 9, B_dir: 9, G: 1, f_eff: 0.1, weights: [0.5, 0.5], strengths: [4.5, 4.5],
+        flags: [], cancellation_pair: null, constants_used: {}, formula_id: 'x', approximate: false });
+      await act(async () => { await pending; });
+      // Budget was cleared by the mutation and the stale response dropped
+      expect(result.current.clusterBudget).toBeNull();
+      expect(result.current.selectedFeatures.find((f) => f.feature_idx === 100)?.strength).not.toBe(4.5);
+    });
+
+    it('batch titles use the ctx snapshot even when context clears mid-batch (TE-3)', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.setPrompts(['P1', 'P2']);
+        result.current.addFeature({ feature_idx: 100, layer: 6, strength: 1 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, strength: 1 });
+        result.current.setCombinedMode(true);
+        result.current.setClusterContext({ group_id: 'g1', display_token: 'fear' });
+      });
+      vi.mocked(steeringApi.submitAsyncCombined).mockImplementation(async () => ({
+        task_id: `t-${Math.random()}`, status: 'pending',
+      }) as any);
+      const batch = result.current.generateBatchComparison();
+      await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
+
+      const combined = (id: string, prompt: string) => ({
+        combined_id: id, sae_id: mockSAE.id, model_id: 'm', prompt,
+        combined_output: 'o',
+        features_applied: [
+          { feature_idx: 100, layer: 6, strength: 1, label: null, color: 'teal' },
+          { feature_idx: 200, layer: 6, strength: 1, label: null, color: 'blue' },
+        ],
+        baseline_output: null, combined_metrics: null, baseline_metrics: null,
+        total_steering_strength: 2, total_time_ms: 1, created_at: new Date().toISOString(),
+      });
+      // Prompt 1 completes with ctx intact
+      act(() => { result.current.handleAsyncCompleted(combined('c1', 'P1') as any); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      // Context cleared mid-batch (e.g. another hand-off elsewhere)
+      act(() => { result.current.setClusterContext(null); });
+      // Prompt 2 completes AFTER the clear — must still use the snapshot title
+      act(() => { result.current.handleAsyncCompleted(combined('c2', 'P2') as any); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+      await batch;
+
+      const titles = result.current.batchState?.results.map(
+        (r) => r.comparison?.steered[0].feature_config.label,
+      );
+      expect(titles).toEqual([
+        'fear — Blended (2 features)',
+        'fear — Blended (2 features)',
+      ]);
+    });
+
+    it('low_cohesion keeps solo baselines (gate)', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => {
+        result.current.selectSAE(mockSAE);
+        result.current.addFeature({ feature_idx: 100, layer: 6, activation_frequency: 0.2 });
+        result.current.addFeature({ feature_idx: 200, layer: 6, activation_frequency: 0.2 });
+      });
+      const before = result.current.selectedFeatures.map((f) => f.strength);
+      vi.mocked(steeringApi.computeClusterAllocation).mockResolvedValue({
+        B: 2.4, B_dir: 2.4, G: 1.0, f_eff: 0.2, weights: [0.5, 0.5], strengths: [1.2, 1.2],
+        flags: ['low_cohesion'], cancellation_pair: null, constants_used: {},
+        formula_id: 'x', approximate: false,
+      } as any);
+      await act(async () => { await result.current.requestClusterAllocation(0.2); });
+      expect(result.current.selectedFeatures.map((f) => f.strength)).toEqual(before);
+      expect(result.current.clusterBudget?.flags).toContain('low_cohesion');
     });
   });
 });

@@ -39,9 +39,16 @@ from ....schemas.steering import (
     SteeringExperimentSaveRequest,
     CombinedSteeringRequest,
     CombinedSteeringResponse,
+    ClusterAllocationRequest,
+    ClusterAllocationResponse,
 )
 from ....services.sae_manager_service import SAEManagerService
-from ....services.steering_service import get_steering_service
+from ....services.steering_service import get_steering_service, resolve_decoder_weight
+from ....services.cluster_allocation_service import (
+    AllocationMember,
+    compute_allocation,
+    resolve_constants,
+)
 from ....services.model_service import ModelService
 from ....services.steering_resilience import (
     get_circuit_breaker,
@@ -1249,3 +1256,94 @@ async def delete_steering_experiments_batch(
         "deleted_count": deleted_count,
         "message": f"Deleted {deleted_count} experiments",
     }
+
+@router.post("/cluster-allocation", response_model=ClusterAllocationResponse)
+async def compute_cluster_strength_allocation(
+    request: ClusterAllocationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compute a principled starting strength allocation for a cluster (Feature 013).
+
+    CPU-fast: loads only the SAE (cached) to read decoder directions — no model
+    load, no generation, no steering-mode requirement, no Celery. The formula is
+    the single server-side source of truth (IDL-29); the frontend only performs
+    budget-preserving rebalance on the returned values.
+    """
+    import torch
+
+    sae = await SAEManagerService.get_sae(db, request.sae_id)
+    if not sae:
+        raise HTTPException(404, f"SAE not found: {request.sae_id}")
+    if str(sae.status.value if hasattr(sae.status, "value") else sae.status) != "ready":
+        raise HTTPException(400, f"SAE is not ready: {sae.status}")
+    if not sae.local_path:
+        raise HTTPException(400, "SAE has no local path")
+
+    # Bounds check against DB metadata up-front (also enforced against the real
+    # decoder inside compute_allocation when it loads).
+    if sae.n_features:
+        bad = [m.feature_idx for m in request.members if m.feature_idx >= sae.n_features]
+        if bad:
+            raise HTTPException(
+                400,
+                f"Feature indices out of bounds for this SAE ({sae.n_features} features): {bad}",
+            )
+
+    # Resolve the decoder via the SAME loader + orientation logic the steering
+    # hook uses. Failure degrades to the approximate (G=1) allocation.
+    decoder = None
+    try:
+        sae_path = settings.resolve_data_path(sae.local_path)
+        if sae_path.exists():
+            service = get_steering_service()
+            loaded = await service.load_sae(
+                sae_path,
+                request.sae_id,
+                layer=sae.layer,
+                d_model=sae.d_model,
+                n_features=sae.n_features,
+                architecture=sae.architecture,
+            )
+            dw = resolve_decoder_weight(loaded.model)
+            if dw is not None:
+                decoder = dw.detach().to("cpu", torch.float32)
+    except Exception as e:
+        logger.warning(f"[ClusterAllocation] Decoder unavailable, using approximate G=1: {e}")
+
+    members = [
+        AllocationMember(
+            feature_idx=m.feature_idx,
+            layer=m.layer,
+            similarity=m.similarity,
+            activation_frequency=m.activation_frequency,
+            sign=m.sign,
+        )
+        for m in request.members
+    ]
+    constants = resolve_constants(settings.steering_cluster_constants_json, request.sae_id)
+
+    try:
+        result = compute_allocation(
+            members,
+            decoder=decoder,
+            constants=constants,
+            group_cohesion=request.group_cohesion,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return ClusterAllocationResponse(
+        B=result.B,
+        B_dir=result.B_dir,
+        G=result.G,
+        f_eff=result.f_eff,
+        weights=result.weights,
+        strengths=result.strengths,
+        flags=result.flags,
+        cancellation_pair=list(result.cancellation_pair) if result.cancellation_pair else None,
+        constants_used=result.constants_used,
+        formula_id=result.formula_id,
+        approximate=result.approximate,
+    )
+

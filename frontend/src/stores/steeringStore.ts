@@ -31,6 +31,8 @@ import {
   BatchState,
   CombinedSteeringRequest,
   CombinedSteeringResponse,
+  ClusterContext,
+  ClusterBudget,
 } from '../types/steering';
 import { SAE } from '../types/sae';
 import * as steeringApi from '../api/steering';
@@ -239,14 +241,58 @@ function createCombinedResolver(
  * SteeringComparisonResponse so the existing batch-results UI can render a
  * blended output without special-casing. The one "steered" entry is the summed
  * (blended) generation; unsteered is the baseline when present.
+ *
+ * Feature 012: also carries `applied_features` (server truth) and titles the
+ * blend via blendedTitle.
  */
+
+/**
+ * Blended result title chain (Feature 012): cluster display token → generic,
+ * with the single-feature case folded in (a 1-feature blend is honestly titled
+ * by the member itself; the cluster token prefixes it when provenance exists).
+ * Feature 014 will prepend an authored-profile-name tier here — one function
+ * owns the whole chain so future tiers land in exactly one place.
+ */
+export function blendedTitle(
+  ctx: ClusterContext | null,
+  n: number,
+  loneLabel?: string | null,
+): string {
+  if (n === 1) {
+    const label = loneLabel || 'Blended (1 feature)';
+    return ctx ? `${ctx.display_token} — ${label}` : label;
+  }
+  const blend = `Blended (${n} features)`;
+  return ctx ? `${ctx.display_token} — ${blend}` : blend;
+}
+
+/**
+ * Apply the cluster-intensity dial λ ONCE, at request-build time (Feature 013
+ * step 9). Tiles/pins always show pre-λ strengths; only the outgoing request
+ * is scaled, and only while a cluster budget governs the selection.
+ */
+function applyIntensity(
+  features: SelectedFeature[],
+  intensity: number,
+  active: boolean,
+): SelectedFeature[] {
+  if (!active || intensity === 1) return features;
+  return features.map((f) => ({
+    ...f,
+    strength: Math.round(f.strength * intensity * 10) / 10,
+  }));
+}
+
 function combinedToComparison(
   c: CombinedSteeringResponse,
+  ctx: ClusterContext | null = null,
 ): SteeringComparisonResponse {
-  const blendedLabel =
-    c.features_applied.length === 1
-      ? c.features_applied[0].label || `Feature ${c.features_applied[0].feature_idx}`
-      : `Blended (${c.features_applied.length} features)`;
+  const fa = c.features_applied;
+  const blendedLabel = blendedTitle(
+    ctx,
+    fa.length,
+    fa.length === 1 ? fa[0].label || `Feature #${fa[0].feature_idx}` : undefined,
+  );
   return {
     comparison_id: c.combined_id,
     sae_id: c.sae_id,
@@ -269,6 +315,9 @@ function combinedToComparison(
     ],
     steered_multi: null,
     metrics_summary: null,
+    // Feature 012: full applied-features summary rides the adapted result so
+    // the UI can prove every member contributed (server-truth, not request state).
+    applied_features: c.features_applied,
     total_time_ms: c.total_time_ms,
     created_at: c.created_at,
   };
@@ -280,6 +329,12 @@ interface SteeringState {
 
   // Selected features (up to 4)
   selectedFeatures: SelectedFeature[];
+
+  // Cluster provenance (Feature 012): non-null only while the selection is
+  // exactly the set handed off from one cluster. Any selection mutation clears
+  // it (dropping to the generic label is always honest; a stale cluster label
+  // never is). Deliberately NOT in the persist partialize.
+  clusterContext: ClusterContext | null;
 
   // Prompts (batch support)
   prompts: string[];
@@ -332,6 +387,28 @@ interface SteeringState {
 
   // Actions - SAE Selection
   selectSAE: (sae: SAE | null) => void;
+
+  // Cluster context (Feature 012)
+  setClusterContext: (ctx: ClusterContext | null) => void;
+
+  // Feature 013: allocation + rebalance + intensity
+  requestClusterAllocation: (groupCohesion?: number | null) => Promise<void>;
+  rebalanceStrength: (instanceId: string, newStrength: number) => void;
+  togglePin: (instanceId: string) => void;
+  setIntensity: (value: number) => void;
+
+  // Title baked for the CURRENT combinedResults at completion time (Feature
+  // 012). Live-deriving from clusterContext retitles old results when context
+  // changes — the exact mislabeling this feature removes.
+  combinedResultsTitle: string | null;
+
+  // Feature 013 (IDL-29): cluster strength budget state. Non-null only while a
+  // server-computed allocation governs the current selection. The formula is
+  // server-side; the frontend owns only budget-preserving rebalance.
+  clusterBudget: ClusterBudget | null;
+  // Master cluster-intensity dial λ ∈ [0,2]; applied ONCE, in the request
+  // builders (tiles show pre-λ strengths). Not persisted.
+  intensity: number;
 
   // Actions - Feature Selection
   addFeature: (feature: AddFeatureInput) => boolean;
@@ -417,6 +494,10 @@ export const useSteeringStore = create<SteeringState>()(
       // Initial state
       selectedSAE: null,
       selectedFeatures: [],
+      clusterContext: null,
+      combinedResultsTitle: null,
+      clusterBudget: null,
+      intensity: 1,
       prompts: [''],
       generationParams: { ...DEFAULT_GENERATION_PARAMS },
       advancedParams: null,
@@ -450,9 +531,132 @@ export const useSteeringStore = create<SteeringState>()(
         set({
           selectedSAE: sae,
           selectedFeatures: [], // Clear features when SAE changes
+          clusterContext: null,
+          clusterBudget: null,
+          intensity: 1,
           currentComparison: null,
           sweepResults: null,
+          combinedResults: null, // stale results from another SAE must not linger
+          combinedResultsTitle: null,
         });
+      },
+
+      // Feature 012: cluster provenance. Callers set it ONLY after a clean
+      // single-cluster hand-off; every selection mutation clears it.
+      setClusterContext: (ctx: ClusterContext | null) => {
+        set({ clusterContext: ctx });
+      },
+
+      // Feature 013: request the server-computed allocation for the CURRENT
+      // selection (fires after a cluster hand-off). Progressive: the Feature
+      // 011 solo baselines already applied stay until the response lands; a
+      // stale response (selection changed meanwhile) is dropped.
+      requestClusterAllocation: async (groupCohesion: number | null = null) => {
+        const { selectedSAE, selectedFeatures } = get();
+        if (!selectedSAE || selectedFeatures.length === 0) return;
+        // N=1 routes through the solo path verbatim (IDL-29 step 10).
+        if (selectedFeatures.length === 1) return;
+
+        const requestKey = selectedFeatures.map((f) => f.feature_idx).sort((a, b) => a - b).join(',');
+        try {
+          const allocation = await steeringApi.computeClusterAllocation({
+            sae_id: selectedSAE.id,
+            members: selectedFeatures.map((f) => ({
+              feature_idx: f.feature_idx,
+              layer: f.layer,
+              similarity: f.similarity ?? null,
+              activation_frequency: f.activation_frequency ?? null,
+              sign: f.strength < 0 ? -1 : 1,
+            })),
+            group_cohesion: groupCohesion,
+          });
+
+          // Stale guard: selection must be unchanged.
+          const current = get().selectedFeatures;
+          const currentKey = current.map((f) => f.feature_idx).sort((a, b) => a - b).join(',');
+          if (currentKey !== requestKey || get().selectedSAE?.id !== selectedSAE.id) {
+            console.log('[SteeringStore] Dropping stale cluster allocation');
+            return;
+          }
+
+          const weightsByIdx: Record<number, number> = {};
+          selectedFeatures.forEach((f, i) => {
+            weightsByIdx[f.feature_idx] = allocation.weights[i] ?? 0;
+          });
+
+          set({
+            clusterBudget: {
+              B: allocation.B,
+              B_dir: allocation.B_dir,
+              G: allocation.G,
+              flags: allocation.flags,
+              approximate: allocation.approximate,
+              weightsByIdx,
+            },
+            // Low-cohesion clusters keep their solo baselines (the gate):
+            selectedFeatures: allocation.flags.includes('low_cohesion')
+              ? current
+              : current.map((f, i) => ({
+                  ...f,
+                  strength: allocation.strengths[i] ?? f.strength,
+                  strengthSource: 'cluster' as const,
+                  pinned: false,
+                })),
+          });
+        } catch (error) {
+          // Allocation failure is non-fatal: solo baselines remain in effect.
+          console.warn('[SteeringStore] Cluster allocation failed; keeping solo baselines', error);
+        }
+      },
+
+      // Feature 013: budget-preserving strength edit (cluster mode only).
+      // Pins the edited member; redistributes R = B − Σ|pinned| across
+      // unpinned members by renormalized allocation weights. B and G are never
+      // recomputed on strength edits.
+      rebalanceStrength: (instanceId: string, newStrength: number) => {
+        const { clusterBudget, selectedFeatures } = get();
+        if (!clusterBudget) {
+          // Not in cluster mode — plain edit.
+          get().updateFeatureStrength(instanceId, newStrength);
+          return;
+        }
+        const features = selectedFeatures.map((f) =>
+          f.instance_id === instanceId
+            ? { ...f, strength: newStrength, pinned: true, strengthSource: 'manual' as const }
+            : { ...f },
+        );
+        const pinnedTotal = features.filter((f) => f.pinned).reduce((s, f) => s + Math.abs(f.strength), 0);
+        const remaining = clusterBudget.B - pinnedTotal;
+        const unpinned = features.filter((f) => !f.pinned);
+        if (unpinned.length > 0) {
+          if (remaining < 0) {
+            // Over budget: unpinned drop to 0; pins are never rescaled.
+            for (const f of features) if (!f.pinned) f.strength = 0;
+          } else {
+            const wsum = unpinned.reduce(
+              (s, f) => s + (clusterBudget.weightsByIdx[f.feature_idx] ?? 0), 0);
+            for (const f of features) {
+              if (f.pinned) continue;
+              const w = clusterBudget.weightsByIdx[f.feature_idx] ?? 0;
+              const share = wsum > 0 ? w / wsum : 1 / unpinned.length;
+              const sign = f.strength < 0 ? -1 : 1;
+              f.strength = Math.round(sign * remaining * share * 10) / 10;
+            }
+          }
+        }
+        set({ selectedFeatures: features });
+      },
+
+      togglePin: (instanceId: string) => {
+        set((state) => ({
+          selectedFeatures: state.selectedFeatures.map((f) =>
+            f.instance_id === instanceId ? { ...f, pinned: !f.pinned } : f,
+          ),
+        }));
+      },
+
+      setIntensity: (value: number) => {
+        set({ intensity: Math.max(0, Math.min(2, value)) });
       },
 
       // Add a feature to selection (returns false if max reached)
@@ -501,7 +705,9 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: feature.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, newFeature] });
+        // Any selection mutation invalidates cluster provenance (Feature 012)
+        // and the cluster budget computed for it (Feature 013).
+        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, clusterBudget: null });
         return true;
       },
 
@@ -511,6 +717,8 @@ export const useSteeringStore = create<SteeringState>()(
           selectedFeatures: state.selectedFeatures.filter(
             (f) => f.instance_id !== instanceId
           ),
+          clusterContext: null, // selection mutated (Feature 012)
+          clusterBudget: null,
         }));
       },
 
@@ -560,7 +768,7 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: original.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature] });
+        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, clusterBudget: null });
         return true;
       },
 
@@ -619,11 +827,15 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Apply strength preset to all selected features
       applyStrengthPreset: (strength: number) => {
+        // Uniform presets are incompatible with a computed cluster budget —
+        // applying one exits cluster mode (Feature 013, documented behavior).
         set((state) => ({
+          clusterBudget: null,
           selectedFeatures: state.selectedFeatures.map((f) => ({
             ...f,
             strength,
             strengthSource: 'manual' as const,
+            pinned: false,
           })),
         }));
       },
@@ -641,7 +853,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear all selected features
       clearFeatures: () => {
-        set({ selectedFeatures: [], currentComparison: null });
+        set({ selectedFeatures: [], clusterContext: null, clusterBudget: null, currentComparison: null });
       },
 
       // Reorder features (drag and drop)
@@ -1051,6 +1263,9 @@ export const useSteeringStore = create<SteeringState>()(
       // prompt; Compare runs the per-feature comparison per prompt.
       generateBatchComparison: async (includeUnsteered = true, computeMetrics = false) => {
         const { selectedSAE, selectedFeatures, prompts, generationParams, advancedParams, isGenerating, batchState, combinedMode } = get();
+        // Provenance snapshot for the whole batch: results are titled by the
+        // context they were generated under, immune to mid-batch mutations.
+        const clusterContextAtStart = get().clusterContext;
 
         // Guard against double submission
         if (isGenerating || batchState?.isRunning) {
@@ -1137,7 +1352,7 @@ export const useSteeringStore = create<SteeringState>()(
               const combinedRequest: CombinedSteeringRequest = {
                 sae_id: selectedSAE.id,
                 prompt,
-                selected_features: selectedFeatures,
+                selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
                 generation_params: generationParams,
                 advanced_params: advancedParams ?? undefined,
                 include_baseline: includeUnsteered,
@@ -1156,7 +1371,7 @@ export const useSteeringStore = create<SteeringState>()(
                 },
               );
               // Adapt to the comparison shape the batch UI renders.
-              response = combinedToComparison(combined);
+              response = combinedToComparison(combined, clusterContextAtStart);
             } else {
               const request: SteeringComparisonRequest = {
                 sae_id: selectedSAE.id,
@@ -1417,12 +1632,16 @@ export const useSteeringStore = create<SteeringState>()(
           const request: CombinedSteeringRequest = {
             sae_id: selectedSAE.id,
             prompt,
-            selected_features: selectedFeatures,
+            selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
             generation_params: generationParams,
             advanced_params: advancedParams ?? undefined,
             include_baseline: includeBaseline,
             compute_metrics: computeMetrics,
           };
+
+          // Snapshot provenance at submit: the result must be titled by the
+          // context it was GENERATED under, not whatever is live at completion.
+          const ctxAtSubmit = get().clusterContext;
 
           // Submit async task
           const taskResponse = await steeringApi.submitAsyncCombined(request);
@@ -1449,6 +1668,13 @@ export const useSteeringStore = create<SteeringState>()(
 
           set({
             combinedResults: result,
+            combinedResultsTitle: blendedTitle(
+              ctxAtSubmit,
+              result.features_applied.length,
+              result.features_applied.length === 1
+                ? result.features_applied[0].label || `Feature #${result.features_applied[0].feature_idx}`
+                : undefined,
+            ),
             isCombinedGenerating: false,
             progress: 100,
             progressMessage: 'Complete',
@@ -1470,7 +1696,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear combined results
       clearCombinedResults: () => {
-        set({ combinedResults: null });
+        set({ combinedResults: null, combinedResultsTitle: null });
       },
 
       // Update progress (called by WebSocket)
@@ -1554,6 +1780,10 @@ export const useSteeringStore = create<SteeringState>()(
           currentComparison: experiment.results,
           comparisonId: experiment.results.comparison_id,
           batchState: null, // Clear batch state when loading experiment
+          clusterContext: null, // selection replaced wholesale (Feature 012)
+          clusterBudget: null,
+          combinedResults: null,
+          combinedResultsTitle: null,
         });
       },
 
@@ -1618,6 +1848,11 @@ export const useSteeringStore = create<SteeringState>()(
           set({
             selectedSAE: null,
             selectedFeatures: [],
+            clusterContext: null,
+            clusterBudget: null,
+            intensity: 1,
+            combinedResults: null,
+            combinedResultsTitle: null,
             prompts: [''],
             generationParams: { ...DEFAULT_GENERATION_PARAMS },
             advancedParams: null,
@@ -1649,6 +1884,8 @@ export const useSteeringStore = create<SteeringState>()(
             batchState: null,
             isSweeping: false,
             sweepResults: null,
+            combinedResults: null,
+            combinedResultsTitle: null,
             error: null,
           });
 
@@ -1696,7 +1933,30 @@ export const useSteeringStore = create<SteeringState>()(
           if (result.status.status === 'success' && result.result) {
             // Task completed while we were away - load results
             console.log('[SteeringStore] Task completed - loading results');
-            const comparison = result.result as SteeringComparisonResponse;
+            // Feature 012/QA guard: a recovered COMBINED result has no `steered`
+            // array — casting it into currentComparison crashes ComparisonResults.
+            const rawResult = result.result as unknown as Record<string, unknown>;
+            if (rawResult && 'combined_id' in rawResult) {
+              console.log('[SteeringStore] Recovered a combined result; restoring combinedResults instead');
+              const combined = rawResult as unknown as CombinedSteeringResponse;
+              set({
+                combinedResults: combined,
+                combinedResultsTitle: blendedTitle(
+                  null,
+                  combined.features_applied.length,
+                  combined.features_applied.length === 1
+                    ? combined.features_applied[0].label || `Feature #${combined.features_applied[0].feature_idx}`
+                    : undefined,
+                ),
+                isGenerating: false,
+                isCombinedGenerating: false,
+                taskId: null,
+                progress: 100,
+                progressMessage: 'Recovered combined result',
+              });
+              return;
+            }
+            const comparison = rawResult as unknown as SteeringComparisonResponse;
 
             // Add to recent comparisons for persistence
             const { recentComparisons: currentRecent } = get();
