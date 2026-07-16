@@ -178,7 +178,9 @@ class ClusterProfileService:
     ) -> ClusterProfile:
         if data.name is not None:
             profile.name = data.name
-        if data.narrative is not None:
+        # fields_set distinguishes "omitted" from an explicit null — narrative
+        # must be CLEARABLE via PATCH {"narrative": null} (review finding 014-F).
+        if "narrative" in data.model_fields_set:
             profile.narrative = data.narrative
         if data.members is not None:
             await ClusterProfileService._validate_bounds(db, profile.sae_id, data.members)

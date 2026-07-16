@@ -109,6 +109,27 @@ async def test_import_bundle_per_item_isolation():
 
 
 @pytest.mark.asyncio
+async def test_import_blocks_out_of_bounds_members_against_bound_sae():
+    """Definition metadata can lie — indices are checked against the ACTUAL bound SAE."""
+    db = _db_with_no_saes()
+    rows = MagicMock()
+    row = MagicMock()
+    row.id, row.n_features, row.layer, row.model_name = "sae_small", 100, 12, "gpt2"
+    rows.all.return_value = [row]
+    db.execute = AsyncMock(return_value=rows)
+    definition = _definition(
+        members=[ProfileMember(feature_idx=5000, strength=1.0)],
+        sae=DefinitionSAERef(mistudio_sae_id="sae_small"),  # claims no n_features
+    )
+    resp = await import_profiles(
+        ImportRequest(payload=definition.model_dump(mode="json")), db=db
+    )
+    assert resp.blocked == 1
+    assert resp.imported == 0
+    assert any("out of bounds" in w for w in resp.results[0].warnings)
+
+
+@pytest.mark.asyncio
 async def test_export_missing_profile_404():
     with patch(
         "src.api.v1.endpoints.cluster_profiles.ClusterProfileService.get",

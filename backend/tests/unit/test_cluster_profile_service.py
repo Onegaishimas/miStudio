@@ -201,6 +201,29 @@ async def test_unbound_round_trip_preserves_members_and_budget():
     assert result.schema_version == "1"
 
 
+@pytest.mark.asyncio
+async def test_update_narrative_clearable_via_explicit_null():
+    """PATCH {"narrative": null} must CLEAR the narrative (fields_set semantics)."""
+    from src.schemas.cluster_profile import ClusterProfileUpdate
+
+    profile = ClusterProfileService.from_definition(_definition(), bind_sae_id=None)
+    assert profile.narrative is not None
+    db = MagicMock()
+    db.commit = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
+    db.refresh = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
+    updated = await ClusterProfileService.update(
+        db, profile, ClusterProfileUpdate(narrative=None)
+    )
+    assert updated.narrative is None
+    # Omitting the field leaves it untouched
+    profile2 = ClusterProfileService.from_definition(_definition(), bind_sae_id=None)
+    updated2 = await ClusterProfileService.update(
+        db, profile2, ClusterProfileUpdate(name="renamed")
+    )
+    assert updated2.narrative is not None
+    assert updated2.name == "renamed"
+
+
 def test_from_definition_records_import_provenance():
     original = _definition()
     profile = ClusterProfileService.from_definition(original, bind_sae_id="sae_a")

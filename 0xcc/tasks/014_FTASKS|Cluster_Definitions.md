@@ -2,7 +2,7 @@
 
 **Document ID:** 014_FTASKS|Cluster_Definitions
 **Version:** 1.1
-**Status:** Phases 1–6.1 implemented (2026-07-16); reviews + acceptance pending
+**Status:** Phases 1–6.1 implemented; 3 review iterations DONE (15 found / 10 fixed, SHIP-WITH-NOTES); acceptance pending deploy (2026-07-16)
 **Source:** 014_FPRD · 014_FTDD · 014_FTID · IDL-30
 
 | Phase | Tasks | Status |
@@ -95,3 +95,16 @@
 - Data ✅ (Ph1, migration both directions) · API ✅ (Ph2) · MCP ✅ (Ph3) · UI/State ✅ (Ph4-5) ·
   Tests ✅ (matrix, round-trip property, recompute-survival integration, E2E) · Docs ✅ (Ph6) ·
   Acceptance ✅ (Ph6). Security: import caps + no secrets/paths in exports (Ph2 tests).
+
+## Review iterations (goal requirement: 3× /code-review + /review, ≥10 findings)
+
+- **Iteration 1 (multi-angle /code-review):** 14 findings — 9 fixed immediately (unbound-profile
+  visibility, auto-bind import, member-bounds block vs actual SAE, clearable narrative via fields_set,
+  delete confirm, self-describing budget provenance through save+load, error-detail hygiene, batch-delete
+  FK pre-check, import size/bundle caps), 4 recorded P3, 1 no-change-needed (soft-delete guard rationale).
+- **Iteration 2 (post-fix verification):** fixes verified green (31 backend / 79 frontend steering tests);
+  1 cosmetic finding ("N for this SAE" count) — fixed. Total 15 found / 10 fixed.
+- **Iteration 3 (/review, 4 perspectives):** SHIP-WITH-NOTES —
+  `.claude/context/sessions/review_feature014_cluster_definitions_2026-07-16.md`.
+  Remaining before close: deploy + migration, Playwright E2E (titled run via loaded profile,
+  import/export round-trip), MCP profiles smoke test.

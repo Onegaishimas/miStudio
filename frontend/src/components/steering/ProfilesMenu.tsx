@@ -40,11 +40,16 @@ export function ProfilesMenu() {
 
   useEffect(() => {
     if (open && selectedSAE) {
-      fetchProfiles(selectedSAE.id);
+      // Fetch ALL profiles: server-side sae_id filtering would hide unbound
+      // (imported) profiles, which must stay visible so they can be re-bound.
+      fetchProfiles();
     }
   }, [open, selectedSAE, fetchProfiles]);
 
   if (!selectedSAE) return null;
+
+  // Profiles bound to THIS SAE plus unbound ones (badged) — never other SAEs'.
+  const visibleProfiles = profiles.filter((p) => !p.sae_id || p.sae_id === selectedSAE.id);
 
   const handleLoad = (profile: ClusterProfile) => {
     const ok = loadProfileIntoSteering(profile);
@@ -61,12 +66,15 @@ export function ProfilesMenu() {
     try {
       const text = await file.text();
       const payload = JSON.parse(text) as Record<string, unknown>;
-      const resp = await importPayload(payload, selectedSAE.id);
+      // No forced binding: the server's compatibility matrix auto-binds to the
+      // best local SAE (same id → same n_features+layer), warns, or imports
+      // unbound. Forcing the currently-selected SAE would wrongly block
+      // bundles authored against other local SAEs.
+      const resp = await importPayload(payload, null);
       if (resp) {
         setNotice(
           `Imported ${resp.imported}, blocked ${resp.blocked}, errors ${resp.errors}`,
         );
-        fetchProfiles(selectedSAE.id);
       }
     } catch {
       setNotice('Not a valid JSON file');
@@ -88,7 +96,7 @@ export function ProfilesMenu() {
         <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-900/60 p-2 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-slate-500">
-              {isLoading ? 'Loading…' : `${profiles.length} for this SAE`}
+              {isLoading ? 'Loading…' : `${visibleProfiles.length} available`}
             </span>
             <button
               onClick={() => fileRef.current?.click()}
@@ -124,7 +132,7 @@ export function ProfilesMenu() {
             </div>
           )}
 
-          {profiles.map((p) => (
+          {visibleProfiles.map((p) => (
             <div key={p.id} className="rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5">
               <div className="flex items-center gap-2">
                 <button
@@ -158,7 +166,12 @@ export function ProfilesMenu() {
                   <Download className="w-3 h-3" />
                 </button>
                 <button
-                  onClick={() => deleteProfile(p.id)}
+                  onClick={() => {
+                    // eslint-disable-next-line no-alert
+                    if (window.confirm(`Delete cluster profile “${p.name}”? This cannot be undone.`)) {
+                      void deleteProfile(p.id);
+                    }
+                  }}
                   className="text-slate-400 hover:text-red-400"
                   title="Delete profile"
                 >
@@ -173,7 +186,7 @@ export function ProfilesMenu() {
             </div>
           ))}
 
-          {!isLoading && profiles.length === 0 && (
+          {!isLoading && visibleProfiles.length === 0 && (
             <p className="text-[11px] text-slate-600 py-1">
               No profiles yet — tune a cluster and “Save profile”.
             </p>

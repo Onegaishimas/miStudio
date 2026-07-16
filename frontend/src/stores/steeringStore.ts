@@ -650,6 +650,10 @@ export const useSteeringStore = create<SteeringState>()(
               flags: allocation.flags,
               approximate: allocation.approximate,
               weightsByInstance,
+              // Provenance for saved profiles (self-describing budgets, 014).
+              formula_id: allocation.formula_id,
+              constants: allocation.constants_used,
+              f_eff: allocation.f_eff,
             },
             clusterNotice: null,
             selectedFeatures: current.map((f) => {
@@ -761,6 +765,10 @@ export const useSteeringStore = create<SteeringState>()(
               flags: [],
               approximate: false,
               weightsByInstance,
+              // Carry the saved formula provenance back (self-describing).
+              formula_id: b.formula_id ?? undefined,
+              constants: b.constants ?? undefined,
+              f_eff: b.f_eff ?? null,
             };
           }
 

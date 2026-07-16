@@ -187,6 +187,27 @@ async def import_profiles(request: ImportRequest, db: AsyncSession = Depends(get
                 )
                 continue
             bind_id = decision.sae_id if decision.action in ("bind", "warn_bind") else None
+            # Member indices must fit the SAE actually being bound — metadata
+            # in the definition can lie or be absent (review finding 014-B).
+            if bind_id:
+                cand = next((s for s in local_saes if s["id"] == bind_id), None)
+                if cand and cand.get("n_features"):
+                    bad = [
+                        m.feature_idx for m in definition.members
+                        if m.feature_idx >= cand["n_features"]
+                    ]
+                    if bad:
+                        blocked += 1
+                        results.append(
+                            ImportItemResult(
+                                name=definition.name,
+                                status="blocked",
+                                warnings=decision.warnings
+                                + [f"Member indices out of bounds for {bind_id} "
+                                   f"({cand['n_features']} features): {bad}"],
+                            )
+                        )
+                        continue
             profile = ClusterProfileService.from_definition(definition, bind_id)
             db.add(profile)
             await db.commit()

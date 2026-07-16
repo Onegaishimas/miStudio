@@ -77,6 +77,9 @@ export function SaveProfileDialog() {
               B: clusterBudget.B,
               B_dir: clusterBudget.B_dir,
               G: clusterBudget.G,
+              f_eff: clusterBudget.f_eff ?? null,
+              formula_id: clusterBudget.formula_id ?? null,
+              constants: clusterBudget.constants ?? null,
               intensity,
             }
           : { intensity },
