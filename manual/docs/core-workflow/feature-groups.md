@@ -46,6 +46,31 @@ The point of a group is a hypothesis: *"these N features encode roughly the same
 2. Click **Steer selected** — the features land pre-populated in the [Steering panel](/core-workflow/steering)
 3. Generate with the group members individually and combined; if the hypothesized concept shifts the output in the predicted direction, the group is real
 
+## Cluster Profiles — Saving & Sharing What You Found
+
+Once a cluster is tuned (members selected, strengths validated, budget dialed in), you can make it durable:
+
+1. In Steering, click **Save profile** (or use **Steer & save profile…** directly from the Clusters panel)
+2. Give it a **name** (this becomes the title on Blended results) and an optional markdown **narrative** — what the cluster steers toward, the evidence, tuning notes
+3. The profile snapshots the members with their **explicit tuned strengths**, the strength budget, and the intensity dial λ
+
+Profiles are **decoupled from the recomputable grouping index** — recomputing clusters never touches saved profiles. Manage them under **Cluster profiles** in the Steering sidebar: **load** one back (strengths restore exactly as saved — no auto-baselines), **export**, or **delete**.
+
+### Portable definitions (export / import)
+
+Exports use the versioned, consumer-neutral `mistudio.cluster-definition/v1` JSON format (schema published at `docs/schemas/cluster-definition-v1.json` in the repo). Definitions carry no secrets and no local filesystem paths — they are safe to share.
+
+- **Export** one profile → `<name>.cluster.json`; several → a `mistudio.cluster-bundle/v1` file
+- **Import** a definition or bundle from the Cluster profiles panel. The compatibility matrix decides per item:
+  - **bind** — a local SAE matches (same id, or same `n_features` + layer)
+  - **warn + bind** — usable but model/layer differ (warnings shown)
+  - **blocked** — `n_features` mismatch: member indices would be meaningless
+  - **unbound** — no local SAE; the profile imports for reading and can be bound later
+
+:::info Toward MILLM and beyond
+The definition format is the contract future consumers (MILLM steering import, a unified MCP server, Open WebUI cluster controls) will read — profiles you author today are the artifacts that travel.
+:::
+
 ## API
 
-Everything here is available programmatically — see the [Clusters API reference](/reference/api/features-labeling#cross-feature-grouping-feature-groups) and the [MCP tool catalog](/advanced/mcp-server#tool-catalog-33-tools).
+Everything here is available programmatically — see the [Clusters API reference](/reference/api/features-labeling#cross-feature-grouping-feature-groups) and the [MCP tool catalog](/advanced/mcp-server#tool-catalog-38-tools). Cluster profiles: `GET/POST /api/v1/cluster-profiles`, `GET /{id}/export`, `POST /import`, `POST /export-bundle`; MCP tools in the `profiles` category (`list_cluster_profiles`, `get_cluster_profile`, `save_cluster_profile`, `export_cluster_definition`).

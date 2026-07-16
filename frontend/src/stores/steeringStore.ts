@@ -397,6 +397,19 @@ interface SteeringState {
   togglePin: (instanceId: string) => void;
   setIntensity: (value: number) => void;
 
+  // Feature 014: profile hydration. Replaces the selection with the profile's
+  // explicit tuned strengths (auto-baselines bypassed), restores the budget
+  // snapshot + λ, and sets activeProfile LAST. Returns false when the profile
+  // cannot load (unbound, SAE mismatch, no members).
+  loadProfileIntoSteering: (profile: import('../types/clusterProfile').ClusterProfile) => boolean;
+
+  // Active profile identity (label tier 1); cleared with clusterContext on any
+  // selection mutation — a stale profile title is the mislabeling 012 removed.
+  activeProfile: { id: string; name: string } | null;
+  // Transient hydration guard: requestClusterAllocation must not fire over a
+  // profile's explicit strengths (they ARE the tuned allocation).
+  isHydratingProfile: boolean;
+
   // Title baked for the CURRENT combinedResults at completion time (Feature
   // 012). Live-deriving from clusterContext retitles old results when context
   // changes — the exact mislabeling this feature removes.
@@ -501,6 +514,8 @@ export const useSteeringStore = create<SteeringState>()(
       combinedResultsTitle: null,
       clusterBudget: null,
       clusterNotice: null,
+      activeProfile: null,
+      isHydratingProfile: false,
       intensity: 1,
       prompts: [''],
       generationParams: { ...DEFAULT_GENERATION_PARAMS },
@@ -536,6 +551,7 @@ export const useSteeringStore = create<SteeringState>()(
           selectedSAE: sae,
           selectedFeatures: [], // Clear features when SAE changes
           clusterContext: null,
+          activeProfile: null,
           clusterBudget: null,
           clusterNotice: null,
           intensity: 1,
@@ -559,6 +575,9 @@ export const useSteeringStore = create<SteeringState>()(
       requestClusterAllocation: async (groupCohesion: number | null = null) => {
         const { selectedSAE, selectedFeatures } = get();
         if (!selectedSAE || selectedFeatures.length === 0) return;
+        // Profile hydration carries EXPLICIT tuned strengths — never overwrite
+        // them with a fresh allocation (Feature 014 guard).
+        if (get().isHydratingProfile || get().activeProfile) return;
         // N=1 routes through the solo path verbatim (IDL-29 step 10).
         if (selectedFeatures.length === 1) return;
 
@@ -696,6 +715,76 @@ export const useSteeringStore = create<SteeringState>()(
         set({ intensity: Math.max(0, Math.min(2, value)) });
       },
 
+      // Feature 014: hydrate a saved profile into the steering selection.
+      loadProfileIntoSteering: (profile) => {
+        const { selectedSAE } = get();
+        if (!profile.members || profile.members.length === 0) return false;
+        // Unbound profiles can't steer; bound profiles must match the panel's SAE
+        // (ProfilesMenu lists per-SAE, so this only trips on stale UI state).
+        if (!profile.sae_id || !selectedSAE || profile.sae_id !== selectedSAE.id) return false;
+        if (profile.members.length > MAX_SELECTED_FEATURES) return false;
+
+        set({ isHydratingProfile: true });
+        try {
+          const layer = selectedSAE.layer ?? 0;
+          const features: SelectedFeature[] = profile.members.map((m, i) => ({
+            instance_id: `${m.feature_idx}-${layer}-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 9)}`,
+            feature_idx: m.feature_idx,
+            feature_id: null, // DB feature id unknown from a portable profile
+            layer,
+            // Profile strengths are EXPLICIT tuned values — auto-baselines bypassed.
+            strength: m.strength,
+            strengthSource: 'manual' as const,
+            pinned: m.pinned ?? false,
+            label: m.label ?? null,
+            color: FEATURE_COLOR_ORDER[i % FEATURE_COLOR_ORDER.length],
+            max_activation: m.max_activation ?? null,
+            activation_frequency: m.activation_frequency ?? null,
+            similarity: m.similarity ?? null,
+          }));
+
+          // Budget snapshot (013): weights reconstructed from |strength| shares —
+          // exact for untouched allocations, a fair prior after manual edits.
+          const b = profile.budget;
+          let clusterBudget: ClusterBudget | null = null;
+          if (b && b.B != null) {
+            const totalAbs = features.reduce((s, f) => s + Math.abs(f.strength), 0);
+            const weightsByInstance: Record<string, number> = {};
+            features.forEach((f) => {
+              weightsByInstance[f.instance_id] =
+                totalAbs > 0 ? Math.abs(f.strength) / totalAbs : 1 / features.length;
+            });
+            clusterBudget = {
+              B: b.B,
+              B_dir: b.B_dir ?? b.B,
+              G: b.G ?? 1,
+              flags: [],
+              approximate: false,
+              weightsByInstance,
+            };
+          }
+
+          set({
+            selectedFeatures: features,
+            clusterBudget,
+            clusterNotice: null,
+            intensity: Math.max(0, Math.min(2, b?.intensity ?? 1)),
+            // Label tier 1: the authored profile name titles blended results
+            // through the existing clusterContext baking path.
+            clusterContext: {
+              group_id: profile.source_group_id ?? profile.id,
+              display_token: profile.name,
+            },
+            // Set LAST (FTID rule): consumers may react to activeProfile by
+            // reading the rest of the hydrated state.
+            activeProfile: { id: profile.id, name: profile.name },
+          });
+          return true;
+        } finally {
+          set({ isHydratingProfile: false });
+        }
+      },
+
       // Add a feature to selection (returns false if max reached)
       // Note: Duplicates of the same feature_idx/layer are now allowed (each gets unique instance_id)
       addFeature: (feature: AddFeatureInput) => {
@@ -744,7 +833,7 @@ export const useSteeringStore = create<SteeringState>()(
 
         // Any selection mutation invalidates cluster provenance (Feature 012)
         // and the cluster budget computed for it (Feature 013).
-        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, clusterBudget: null, clusterNotice: null });
+        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, activeProfile: null, clusterBudget: null, clusterNotice: null });
         return true;
       },
 
@@ -755,6 +844,7 @@ export const useSteeringStore = create<SteeringState>()(
             (f) => f.instance_id !== instanceId
           ),
           clusterContext: null, // selection mutated (Feature 012)
+          activeProfile: null,
           clusterBudget: null,
           clusterNotice: null,
         }));
@@ -806,7 +896,7 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: original.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, clusterBudget: null, clusterNotice: null });
+        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, activeProfile: null, clusterBudget: null, clusterNotice: null });
         return true;
       },
 
@@ -892,7 +982,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear all selected features
       clearFeatures: () => {
-        set({ selectedFeatures: [], clusterContext: null, clusterBudget: null, clusterNotice: null, currentComparison: null });
+        set({ selectedFeatures: [], clusterContext: null, activeProfile: null, clusterBudget: null, clusterNotice: null, currentComparison: null });
       },
 
       // Reorder features (drag and drop)
@@ -1823,6 +1913,7 @@ export const useSteeringStore = create<SteeringState>()(
           comparisonId: experiment.results.comparison_id,
           batchState: null, // Clear batch state when loading experiment
           clusterContext: null, // selection replaced wholesale (Feature 012)
+          activeProfile: null,
           clusterBudget: null,
           clusterNotice: null,
           combinedResults: null,
@@ -1892,6 +1983,7 @@ export const useSteeringStore = create<SteeringState>()(
             selectedSAE: null,
             selectedFeatures: [],
             clusterContext: null,
+            activeProfile: null,
             clusterBudget: null,
             clusterNotice: null,
             intensity: 1,

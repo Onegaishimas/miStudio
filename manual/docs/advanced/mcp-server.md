@@ -60,21 +60,22 @@ After connecting, paste the [**MCP Agent Instructions**](/advanced/mcp-agent-ins
 | Env variable | Default | Purpose |
 |--------------|---------|---------|
 | `MCP_AUTH_TOKEN` | *(required)* | Bearer token; startup refused if empty |
-| `MCP_TOOL_CATEGORIES` | `read,groups,steering,labeling,experiments,jobs` | Which tool categories are exposed; add `admin` to enable destructive deletes |
+| `MCP_TOOL_CATEGORIES` | `read,groups,steering,labeling,experiments,profiles,jobs` | Which tool categories are exposed; add `admin` to enable destructive deletes |
 | `MCP_STEERING_MAX_CONCURRENT` | `2` | Max in-flight agent steering tasks |
 | `MCP_STEERING_MAX_NEW_TOKENS` | `512` | Ceiling on generation length for agent steering |
 | `MCP_STEERING_APPROVAL` | `false` | Route agent steering through operator approval (see below) |
 
 Disabled categories simply don't appear in the agent's tool list. Disabling the whole server (omit the compose profile / scale the deployment to 0) never affects the frontend or REST API.
 
-## Tool Catalog (33 tools)
+## Tool Catalog (38 tools)
 
 | Category | Tools |
 |----------|-------|
 | **read** | `list_extractions`, `get_extraction_summary`, `list_trainings`, `search_features`, `get_feature`, `get_feature_examples`, `get_feature_token_analysis`, `get_feature_logit_lens`, `get_feature_correlations`, `get_feature_ablation`, `get_feature_nlp_analysis` |
 | **groups** | `compute_feature_groups`, `get_grouping_status`, `get_feature_groups`, `get_feature_group_members`, `find_features_by_token`, `find_related_features` |
-| **steering** | `steering_status`, `get_steering_mode`, `enter_steering_mode`, `exit_steering_mode`, `steer_compare`, `steer_sweep`, `steer_combined`, `get_steering_result`, `cancel_steering_task` (+ `get_approval_status` in approval mode) |
+| **steering** | `steering_status`, `get_steering_mode`, `enter_steering_mode`, `exit_steering_mode`, `steer_compare`, `steer_sweep`, `steer_combined`, `compute_cluster_allocation`, `get_steering_result`, `cancel_steering_task` (+ `get_approval_status` in approval mode) |
 | **experiments** | `save_experiment`, `list_experiments`, `get_experiment` |
+| **profiles** | `list_cluster_profiles`, `get_cluster_profile`, `save_cluster_profile`, `export_cluster_definition` — durable cluster profiles + portable `mistudio.cluster-definition/v1` export |
 | **labeling** | `update_feature_label`, `run_enhanced_labeling`, `get_enhanced_label` |
 | **jobs** | `get_task_status` |
 | **admin** *(off by default)* | `delete_experiment`, `delete_extraction` — destructive |

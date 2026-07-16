@@ -12,13 +12,16 @@
 
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy, Boxes } from 'lucide-react';
+import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy, Boxes, BookMarked } from 'lucide-react';
 import { useSteeringStore, MAX_SELECTED_FEATURES } from '../../stores/steeringStore';
 import { useSAEsStore } from '../../stores/saesStore';
 import { SAEStatus } from '../../types/sae';
 import { SelectedFeature } from '../../types/steering';
 import { SelectedFeatureCard } from './SelectedFeatureCard';
 import { ClusterBudgetBar } from './ClusterBudgetBar';
+import { ProfilesMenu } from './ProfilesMenu';
+import { SaveProfileDialog } from './SaveProfileDialog';
+import { useClusterProfilesStore } from '../../stores/clusterProfilesStore';
 import { FeatureBrowser } from './FeatureBrowser';
 import { FeatureDetailModal } from '../features/FeatureDetailModal';
 import { COMPONENTS } from '../../config/brand';
@@ -69,6 +72,7 @@ export function FeatureSelector() {
     rebalanceStrength,
     togglePin,
   } = useSteeringStore();
+  const { setSaveDialogOpen } = useClusterProfilesStore();
 
   // Strength preset values
   const PRESETS = [
@@ -270,20 +274,35 @@ export function FeatureSelector() {
             {/* Cluster budget bar (Feature 013) */}
             <ClusterBudgetBar />
 
+            {/* Saved cluster profiles (Feature 014): list/load/export/import */}
+            <ProfilesMenu />
+
             {/* Feature count header */}
             <div className="p-4 pb-2 flex items-center justify-between">
               <h3 className="text-sm font-medium text-slate-300">
                 Selected Features ({selectedFeatures.length}/{MAX_SELECTED_FEATURES})
               </h3>
-              {selectedFeatures.length > 0 && (
-                <button
-                  onClick={clearFeatures}
-                  className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  Clear all
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {selectedFeatures.length > 0 && (
+                  <button
+                    onClick={() => setSaveDialogOpen(true)}
+                    className="text-xs text-emerald-400/90 hover:text-emerald-300 flex items-center gap-1"
+                    title="Save the current selection + strengths as a cluster profile"
+                  >
+                    <BookMarked className="w-3 h-3" />
+                    Save profile
+                  </button>
+                )}
+                {selectedFeatures.length > 0 && (
+                  <button
+                    onClick={clearFeatures}
+                    className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Clear all
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Strength Presets */}
@@ -437,6 +456,9 @@ export function FeatureSelector() {
           onClose={handleCloseModal}
         />
       )}
+
+      {/* Save Cluster Profile dialog (Feature 014) */}
+      <SaveProfileDialog />
     </div>
   );
 }

@@ -1,73 +1,73 @@
 # Task List: Cluster Authoring & Portable Definitions
 
 **Document ID:** 014_FTASKS|Cluster_Definitions
-**Version:** 1.0
-**Status:** Not started
+**Version:** 1.1
+**Status:** Phases 1–6.1 implemented (2026-07-16); reviews + acceptance pending
 **Source:** 014_FPRD · 014_FTDD · 014_FTID · IDL-30
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
-| Phase 1: Data layer | 2 tasks | ⬜ Not started |
-| Phase 2: Service + REST + contract | 3 tasks | ⬜ Not started |
-| Phase 3: MCP tools | 1 task | ⬜ Not started |
-| Phase 4: Frontend store + UI | 4 tasks | ⬜ Not started |
-| Phase 5: Steering integration | 2 tasks | ⬜ Not started |
-| Phase 6: Docs + feature acceptance | 2 tasks | ⬜ Not started |
+| Phase 1: Data layer | 2 tasks | ✅ Complete |
+| Phase 2: Service + REST + contract | 3 tasks | ✅ Complete |
+| Phase 3: MCP tools | 1 task | ✅ Complete |
+| Phase 4: Frontend store + UI | 4 tasks | ✅ Complete |
+| Phase 5: Steering integration | 2 tasks | ✅ Complete |
+| Phase 6: Docs + feature acceptance | 2 tasks | 🔄 Manual done; acceptance pending deploy + reviews |
 
 ---
 
 ## Phase 1: Data layer
 
 ### Task 1.1: Model + migration
-- [ ] `models/cluster_profile.py` per FTDD §1 (JSONB members/budget, soft `source_group_id`, FK sae RESTRICT)
-- [ ] Alembic migration (verify single head first; upgrade+downgrade tested)
+- [x] `models/cluster_profile.py` per FTDD §1 (JSONB members/budget, soft `source_group_id`, FK sae RESTRICT)
+- [x] Alembic migration (verify single head first; upgrade+downgrade tested)
 
 ### Task 1.2: SAE-delete guard
-- [ ] `delete_sae` counts profiles → structured 409 (aqua-star-guard pattern); UI message
+- [x] `delete_sae` counts profiles → structured 409 (aqua-star-guard pattern); UI message
 
 ## Phase 2: Service + REST + contract
 
 ### Task 2.1: Schemas + published JSON Schema
-- [ ] `schemas/cluster_profile.py` (CRUD + strict `ClusterDefinitionV1`/`ClusterBundleV1`)
-- [ ] `docs/schemas/cluster-definition-v1.json` checked in + schema-sync test
+- [x] `schemas/cluster_profile.py` (CRUD + strict `ClusterDefinitionV1`/`ClusterBundleV1`)
+- [x] `docs/schemas/cluster-definition-v1.json` checked in + schema-sync test
 
 ### Task 2.2: Service
-- [ ] CRUD; `to_definition`/`from_definition`; compatibility matrix as pure function (unit-test all 7 rows); member-bounds validation vs bound SAE
+- [x] CRUD; `to_definition`/`from_definition`; compatibility matrix as pure function (unit-test all 7 rows); member-bounds validation vs bound SAE
 
 ### Task 2.3: Endpoints
-- [ ] CRUD + export (Content-Disposition) + export-bundle + import (JSON body, 1 MB/50 defs/20 members caps, per-item results); router registration; API tests incl. hostile-JSON
+- [x] CRUD + export (Content-Disposition) + export-bundle + import (JSON body, 1 MB/50 defs/20 members caps, per-item results); router registration; API tests incl. hostile-JSON
 
 ## Phase 3: MCP tools
 
 ### Task 3.1: profiles tools
-- [ ] `tools/profiles.py` (list/get/save/export); new `profiles` category wired through gating + env defaults (compose/k8s) + smoke test
+- [x] `tools/profiles.py` (list/get/save/export); new `profiles` category wired through gating + env defaults (compose/k8s) + smoke test
 
 ## Phase 4: Frontend store + UI
 
 ### Task 4.1: Types/api/store
-- [ ] `types/clusterProfile.ts`, `api/clusterProfiles.ts`, `clusterProfilesStore` (save snapshot / load hydration / import / export)
+- [x] `types/clusterProfile.ts`, `api/clusterProfiles.ts`, `clusterProfilesStore` (save snapshot / load hydration / import / export)
 
 ### Task 4.2: SaveProfileDialog
-- [ ] Name+narrative dialog with validation; markdown preview optional
+- [x] Name+narrative dialog with validation; markdown preview optional
 
 ### Task 4.3: ProfilesMenu
-- [ ] Per-SAE list, load/export/delete/import, `imported`/`unbound` badges, narrative popover (react-markdown)
+- [x] Per-SAE list, load/export/delete/import, `imported`/`unbound` badges, narrative popover (react-markdown)
 
 ### Task 4.4: Clusters-panel action
-- [ ] "Save as profile…" on expanded cluster (013 allocation → pre-filled dialog)
+- [x] "Save as profile…" on expanded cluster (013 allocation → pre-filled dialog)
 
 ## Phase 5: Steering integration
 
 ### Task 5.1: Load hydration
-- [ ] `loadIntoSteering`: explicit strengths (bypass auto-baseline), pins/intensity/budget snapshot, `activeProfile` set last, `isHydratingProfile` guard (no 013 allocation request)
+- [x] `loadIntoSteering`: explicit strengths (bypass auto-baseline), pins/intensity/budget snapshot, `activeProfile` set last, `isHydratingProfile` guard (no 013 allocation request)
 
 ### Task 5.2: Label tier 1 + save affordance
-- [ ] `blendedTitle` consumes activeProfile name; "Save cluster profile" visibility rules; store tests
+- [x] `blendedTitle` consumes activeProfile name; "Save cluster profile" visibility rules; store tests
 
 ## Phase 6: Docs + feature acceptance
 
 ### Task 6.1: Manual
-- [ ] Clusters manual page += profiles/export/import section + schema reference + MILLM-bound-contract note; mcp-server.md += profiles category
+- [x] Clusters manual page += profiles/export/import section + schema reference + MILLM-bound-contract note; mcp-server.md += profiles category
 
 ### Task 6.2: Acceptance (per instruct 007)
 - [ ] Verify FPRD §8 criteria 1–6 (recompute-survival, round-trip equality, block/warn matrix, E2E titled run, schema validation + no secrets/paths, MCP end-to-end)
