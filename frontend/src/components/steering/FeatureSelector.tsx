@@ -328,7 +328,7 @@ export function FeatureSelector() {
                     setAdditionalStrengths(feature.instance_id, strengths)
                   }
                   onRemove={() => removeFeature(feature.instance_id)}
-                  onTogglePin={() => togglePin(feature.instance_id)}
+                  onTogglePin={clusterBudget ? () => togglePin(feature.instance_id) : undefined}
                   onContextMenu={handleSelectedFeatureContextMenu}
                 />
               ))}

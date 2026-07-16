@@ -2,7 +2,7 @@
 
 **Document ID:** 013_FTASKS|Cluster_Strength_Model
 **Version:** 1.1
-**Status:** Phases 1–4 implemented; review iteration 1 fixed (27 findings); validation + acceptance pending deploy (2026-07-16)
+**Status:** Phases 1–4 implemented; 3 review iterations DONE (28 findings fixed, SHIP-WITH-NOTES); validation + acceptance pending deploy (2026-07-16)
 **Source:** 013_FPRD · 013_FTDD · 013_FTID · IDL-29
 
 | Phase | Tasks | Status |
@@ -114,7 +114,11 @@
     persist partialize strips `pinned` + demotes `cluster`→`manual`; pinned badge is click-to-unpin.
   - *Tests added:* 32 backend unit + 6 endpoint contract; frontend 63-test store suite incl. reorder-safety,
     dup refusal, λ-in-Compare, partialize, backend-parity rebalance vectors; `ClusterBudgetBar.test.tsx` (7).
-- **Iteration 2 (post-fix verification):** pending (next).
-- **Iteration 3 (/review, 4 perspectives):** pending.
+- **Iteration 2 (post-fix verification):** 1 new finding — stale "pinned" badge after budget-clearing
+  mutations → badge now gated on cluster mode (onTogglePin passed only when clusterBudget active). Fixed.
+- **Iteration 3 (/review, 4 perspectives):** SHIP-WITH-NOTES —
+  `.claude/context/sessions/review_feature013_cluster_strength_2026-07-16.md`. Ledger: 28 found / 28 fixed,
+  0 open P0/P1, 2 recorded P2 debts (constants duplication; profile-budget recompute rule for 014).
+  Remaining before close: empirical validation on deployed env (hard gate) + Playwright E2E.
 - *Recorded debt:* allocation constants (a,b,m,M) duplicated between `steeringStrength.ts` (solo path) and
   `cluster_allocation_service.py` defaults — consolidate when constants become per-SAE-calibrated (Ph5).
