@@ -56,6 +56,10 @@ export interface ClusterBudget {
   approximate: boolean;
   /** weight per selection instance (order/duplicate-safe allocation mapping) */
   weightsByInstance: Record<string, number>;
+  /** Formula provenance — travels into saved profiles (self-describing budgets, Feature 014). */
+  formula_id?: string;
+  constants?: Record<string, number>;
+  f_eff?: number | null;
 }
 
 /**

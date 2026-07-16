@@ -34,6 +34,7 @@ from .feature_grouping import (
     FeatureGroupMember,
     GroupingRunStatus,
 )
+from .cluster_profile import ClusterProfile
 from .agent_approval import AgentApprovalRequest, ApprovalStatus
 
 __all__ = [

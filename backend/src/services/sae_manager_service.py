@@ -752,8 +752,22 @@ class SAEManagerService:
         failed_ids = []
         errors = {}
 
+        # Local import avoids a service-layer import cycle (profiles → saes).
+        from src.services.cluster_profile_service import ClusterProfileService
+
         for sae_id in sae_ids:
             try:
+                # Feature 014 guard: bound cluster profiles block deletion
+                # (explicit check — the FK RESTRICT would otherwise poison the
+                # session mid-batch with an IntegrityError).
+                profile_count = await ClusterProfileService.count_for_sae(db, sae_id)
+                if profile_count > 0:
+                    failed_ids.append(sae_id)
+                    errors[sae_id] = (
+                        f"{profile_count} cluster profile(s) bound — delete them or "
+                        "delete the SAE individually with force=true"
+                    )
+                    continue
                 success = await SAEManagerService.delete_sae(db, sae_id, delete_files)
                 if success:
                     deleted_ids.append(sae_id)
@@ -761,6 +775,7 @@ class SAEManagerService:
                     failed_ids.append(sae_id)
                     errors[sae_id] = "SAE not found"
             except Exception as e:
+                await db.rollback()
                 failed_ids.append(sae_id)
                 errors[sae_id] = str(e)
 

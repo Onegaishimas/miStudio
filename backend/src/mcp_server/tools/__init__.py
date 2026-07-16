@@ -5,7 +5,7 @@ Each module exposes ``register(mcp, client, settings)``; ``server.py`` calls
 it only when the module's category is enabled via ``MCP_TOOL_CATEGORIES``.
 """
 
-from . import admin, discovery, experiments, features, groups, jobs, labeling, steering
+from . import admin, discovery, experiments, features, groups, jobs, labeling, profiles, steering
 
 # category name → module (registration order = tools/list order)
 CATEGORY_MODULES = {
@@ -13,6 +13,7 @@ CATEGORY_MODULES = {
     "groups": [groups],
     "steering": [steering],
     "experiments": [experiments],
+    "profiles": [profiles],
     "labeling": [labeling],
     "jobs": [jobs],
     "admin": [admin],

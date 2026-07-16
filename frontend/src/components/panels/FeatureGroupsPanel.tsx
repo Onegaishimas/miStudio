@@ -7,11 +7,12 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Sliders } from 'lucide-react';
+import { Boxes, Sliders, BookMarked } from 'lucide-react';
 import { getSAE } from '../../api/saes';
 import { useFeatureGroupsStore, deriveSourceCluster } from '../../stores/featureGroupsStore';
 import { useFeaturesStore } from '../../stores/featuresStore';
 import { useSteeringStore } from '../../stores/steeringStore';
+import { useClusterProfilesStore } from '../../stores/clusterProfilesStore';
 import { useFeatureGroupsWebSocket } from '../../hooks/useFeatureGroupsWebSocket';
 import { ComputeIndexBanner } from '../featureGroups/ComputeIndexBanner';
 import { GroupList } from '../featureGroups/GroupList';
@@ -56,7 +57,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
 
   const currentExtraction = completedExtractions.find((e) => e.id === extractionId);
 
-  const handleSteerSelected = async () => {
+  const handleSteerSelected = async (openSaveDialog = false) => {
     if (!currentExtraction || selection.size === 0) return;
     setHandoffError(null);
     const saeId = currentExtraction.external_sae_id;
@@ -101,6 +102,11 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         }
         clearSelection();
         onNavigateToSteering?.();
+        // Feature 014: "Steer & save profile…" opens the SaveProfileDialog on
+        // arrival in Steering (prefilled from the cluster context just set).
+        if (openSaveDialog) {
+          useClusterProfilesStore.getState().setSaveDialogOpen(true);
+        }
       }
     } catch (e: any) {
       setHandoffError(e.detail || e.message || 'Failed to hand off to steering');
@@ -119,13 +125,23 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
             <h1 className="text-lg font-semibold text-slate-100">Clusters</h1>
           </div>
           {selection.size > 0 && (
-            <button
-              onClick={() => void handleSteerSelected()}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-md"
-            >
-              <Sliders className="w-4 h-4" />
-              Steer selected ({selection.size})
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void handleSteerSelected()}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-md"
+              >
+                <Sliders className="w-4 h-4" />
+                Steer selected ({selection.size})
+              </button>
+              <button
+                onClick={() => void handleSteerSelected(true)}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-600/40 rounded-md"
+                title="Hand off to Steering and open the Save Cluster Profile dialog"
+              >
+                <BookMarked className="w-4 h-4" />
+                Steer &amp; save profile…
+              </button>
+            </div>
           )}
         </div>
 

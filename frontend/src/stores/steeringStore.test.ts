@@ -1526,6 +1526,79 @@ describe('steeringStore', () => {
       expect(result.current.selectedFeatures[0].pinned).toBe(false);
     });
 
+    // ── Feature 014: profile hydration ──────────────────────────────────
+
+    const mockProfile = {
+      id: 'clp_1',
+      sae_id: mockSAE.id,
+      model_id: null,
+      extraction_id: null,
+      source_group_id: 'grp_9',
+      name: 'Fear response',
+      narrative: null,
+      display_token: 'fear',
+      members: [
+        { feature_idx: 100, strength: 1.4, pinned: true, similarity: 0.9,
+          activation_frequency: 0.2, max_activation: 5, label: 'fear', sign: 1 as const },
+        { feature_idx: 200, strength: -0.6, pinned: false, similarity: 0.7,
+          activation_frequency: null, max_activation: null, label: null, sign: -1 as const },
+      ],
+      budget: { B: 2.0, B_dir: 2.2, G: 1.1, intensity: 1.5 },
+      schema_version: '1',
+      imported_from: null,
+      created_at: '2026-07-16T00:00:00Z',
+      updated_at: '2026-07-16T00:00:00Z',
+    };
+
+    it('loadProfileIntoSteering hydrates explicit strengths, budget, λ, title context', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.selectSAE(mockSAE));
+      let ok = false;
+      act(() => { ok = result.current.loadProfileIntoSteering(mockProfile as any); });
+      expect(ok).toBe(true);
+      const feats = result.current.selectedFeatures;
+      // Explicit tuned strengths — NOT auto-baselines (0.2 freq would give ~2.4)
+      expect(feats.map((f) => f.strength)).toEqual([1.4, -0.6]);
+      expect(feats.every((f) => f.strengthSource === 'manual')).toBe(true);
+      expect(feats[0].pinned).toBe(true);
+      expect(result.current.clusterBudget?.B).toBe(2.0);
+      expect(result.current.intensity).toBe(1.5);
+      // Label tier 1: the authored profile NAME titles blended results
+      expect(result.current.clusterContext?.display_token).toBe('Fear response');
+      expect(result.current.activeProfile).toEqual({ id: 'clp_1', name: 'Fear response' });
+    });
+
+    it('loadProfileIntoSteering refuses unbound and SAE-mismatched profiles', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.selectSAE(mockSAE));
+      let ok = true;
+      act(() => { ok = result.current.loadProfileIntoSteering({ ...mockProfile, sae_id: null } as any); });
+      expect(ok).toBe(false);
+      act(() => { ok = result.current.loadProfileIntoSteering({ ...mockProfile, sae_id: 'sae-other' } as any); });
+      expect(ok).toBe(false);
+      expect(result.current.selectedFeatures).toHaveLength(0);
+    });
+
+    it('requestClusterAllocation is a no-op while a profile is active (explicit strengths win)', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.selectSAE(mockSAE));
+      act(() => { result.current.loadProfileIntoSteering(mockProfile as any); });
+      vi.mocked(steeringApi.computeClusterAllocation).mockClear();
+      await act(async () => { await result.current.requestClusterAllocation(0.9); });
+      expect(steeringApi.computeClusterAllocation).not.toHaveBeenCalled();
+      expect(result.current.selectedFeatures.map((f) => f.strength)).toEqual([1.4, -0.6]);
+    });
+
+    it('selection mutations clear the active profile (stale titles are dishonest)', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.selectSAE(mockSAE));
+      act(() => { result.current.loadProfileIntoSteering(mockProfile as any); });
+      expect(result.current.activeProfile).not.toBeNull();
+      act(() => { result.current.addFeature({ feature_idx: 999, layer: 6, strength: 1 }); });
+      expect(result.current.activeProfile).toBeNull();
+      expect(result.current.clusterContext).toBeNull();
+    });
+
     // Parity with the backend reference implementation (rebalance() in
     // cluster_allocation_service.py) — shared vectors, shared expectations.
     it('rebalance parity: backend reference vectors', () => {
