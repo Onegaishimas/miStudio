@@ -776,6 +776,10 @@ export const useSteeringStore = create<SteeringState>()(
             selectedFeatures: features,
             clusterBudget,
             clusterNotice: null,
+            // A cluster profile is a BLENDED artifact — loading one switches to
+            // Blended mode (E2E finding: Compare default sent 19 sequential
+            // generations instead of one combined pass).
+            combinedMode: true,
             intensity: Math.max(0, Math.min(2, b?.intensity ?? 1)),
             // Label tier 1: the authored profile name titles blended results
             // through the existing clusterContext baking path.
