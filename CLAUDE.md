@@ -4,8 +4,9 @@ yes
 ## Current Status
 - **Phase:** Active Development & Maintenance
 - **Last Session:** 2026-07-15
-- **Current Task:** None — Feature 011 (Steering UX Enhancements) fully implemented, tested, deployed, E2E-verified
-- **Active Work:** None
+- **Current Task:** None — full XCC doc chain for BRD-MIS-CLUSTERS-001 COMPLETE (2026-07-16): PPRD v3.6 (rows 13-15, §3.13-3.15) + PADR v2.9 (IDL-28/29/30) + features 012/013/014 each with FPRD+FTDD+FTID+FTASKS. Per the owner's transcript: "take a breather" — review the chain, then execute 012 → 013 → 014 via `008_process-task-list.md` starting with `012_FTASKS|Clusters_UX.md`.
+- **Active Work:** None (planning increment closed; implementation not started)
+- **New BRD (2026-07-15):** BRD-MIS-CLUSTERS-001 — rename Feature Groups→Clusters (UI), verify+trustworthy combined-strength steering, principled budget model (frequency-derived total budget, similarity-weighted allocation, budget-preserving rebalance), cluster authoring (name+narrative+tuned strengths), portable JSON cluster-definition export/import. **miStudio-only this increment**; MILLM import + unified MCP + Open WebUI captured as future_considerations for a follow-on BRD. Locked decisions: two-BRDs split, UI-only rename, sim-weighted allocation, marketplace=vision.
 - **Deferred (separate initiative, awaiting user sign-off):** CI/CD → miLLM-style selective rebuilds + ArgoCD Image Updater (plan at `0xcc/plans/CICD-ArgoCD-ImageUpdater-Migration.md`, open decisions in §5 — NOT started, do not interleave with feature work)
 - **Completed:**
   - Feature 011 IMPLEMENTED & DEPLOYED (2026-07-15): Steering UX — Blended|Compare segmented toggle (combinedMode boolean; /combined vs /compare), up to 20 features (was 4; backend max_length 4→20 both paths + color Literal widened 4→20 + dropped compare unique-color validator), 20-color purge-safe palette, frequency auto-baseline `S=clamp(2.9−2.6·freq,1,3)` with default-10 fallback + auto/default badge (`computeBaselineStrength` util), applyAutoBaseline + "Auto" apply-to-all preset, compact SelectedFeatureCard tiles (p-3→p-2, one-line header, additional-strengths behind expander), SAEFeatureSummary.activation_frequency, Feature Groups selection-map widened to carry stats through the hand-off. Commits 53f2245 (docs+caps) + e959ce5 (impl). CI green, k8s-deployed, Playwright E2E-verified (3/20 header, toggle, default badges, Auto preset — `0xcc/caps/miStudio_Steering_Panel-CompactTiles_20260715.png`). Doc chain 011_FPRD/FTDD/FTID/FTASKS + PPRD v3.5 (row 12 ✅, §3.12) + PADR v2.8 (IDL-27) ✅
@@ -337,6 +338,17 @@ pgrep -f celery  # Celery worker should be running
 ### Project Level Documents
 - ✅ 0xcc/prds/000_PPRD|miStudio.md (Project PRD - Completed 2025-10-05)
 - ✅ 0xcc/adrs/000_PADR|miStudio.md (Architecture Decision Record - Completed 2025-10-05)
+- ✅ 0xcc/prds/BRD-MIS-CLUSTERS-001.md (Incremental BRD — Feature Clusters & portable combined-strength steering, 2026-07-15)
+- ✅ PPRD v3.6 (rows 13–15, §3.13–3.15) + PADR v2.9 (IDL-28 Clusters terminology/labeling, IDL-29 cluster strength budget model, IDL-30 portable cluster definitions) — 2026-07-16
+
+### Feature 012 — Clusters UX & Trustworthy Blended Results (Planned)
+- ✅ 0xcc/prds/012_FPRD|Clusters_UX.md · ✅ 0xcc/tdds/012_FTDD|Clusters_UX.md · ✅ 0xcc/tids/012_FTID|Clusters_UX.md · ✅ 0xcc/tasks/012_FTASKS|Clusters_UX.md
+
+### Feature 013 — Cluster Strength Budget Model (Planned)
+- ✅ 0xcc/prds/013_FPRD|Cluster_Strength_Model.md · ✅ 0xcc/tdds/013_FTDD|Cluster_Strength_Model.md · ✅ 0xcc/tids/013_FTID|Cluster_Strength_Model.md · ✅ 0xcc/tasks/013_FTASKS|Cluster_Strength_Model.md
+
+### Feature 014 — Cluster Authoring & Portable Definitions (Planned)
+- ✅ 0xcc/prds/014_FPRD|Cluster_Definitions.md · ✅ 0xcc/tdds/014_FTDD|Cluster_Definitions.md · ✅ 0xcc/tids/014_FTID|Cluster_Definitions.md · ✅ 0xcc/tasks/014_FTASKS|Cluster_Definitions.md
 
 ### Feature Documents
 *[Add as features are identified and developed]*

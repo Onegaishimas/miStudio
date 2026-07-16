@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 2.8 (Steering UX Enhancements)
+**Version:** 2.9 (Feature Clusters increment — IDL-28/29/30)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -3008,12 +3008,72 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-28: "Clusters" terminology (UI-only) & trustworthy blended-result labeling
+
+**Date:** 2026-07-16
+
+**Context:** BRD-MIS-CLUSTERS-001 elevates co-firing feature sets to the product's primary steering primitive and renames them **Clusters** in the user experience. Two trust problems motivated it: (a) "Feature Groups" reads as mere organization; (b) combined-steering results are titled by a single top feature's label/index (`ComparisonResults.tsx` steered-output titles fall back to `matchingFeature?.label || "Feature #idx"`), which makes users doubt all members were applied. Feature status: **Planned** (doc chain 012).
+
+**Decision:**
+1. **UI-only rename.** All user-facing copy says "Clusters" (nav `Sidebar.tsx:30`, `FeatureGroupsPanel`, `GroupList`, `ComputeIndexBanner`, manual pages). Backend/API/data identifiers (`feature_groups` tables, `feature-groups` routes, store/type names, MCP tool names) are **unchanged** — a deliberate vocabulary split, documented, with the full rename recorded as future work. Rationale: zero migration risk for a purely linguistic change; the API contract is consumed by MCP agents and the manual.
+2. **Disambiguation:** the pre-existing per-feature NLP section titled "Semantic Clusters" (`NLPAnalysisView.tsx:384`) is relabeled ("Semantic Token Clusters (analysis)") so "Cluster" unambiguously means the cross-feature steering primitive.
+3. **Cluster identity flows through the hand-off:** when a steering selection originates from one cluster (every selected member belongs to the expanded group), the hand-off carries `{group_id, display_token}` into the steering store; mixed or manual selections carry none.
+4. **Label fallback chain** for combined results: authored profile name (IDL-30) → cluster `display_token` → "Blended (N features)". The applied-features summary (`CombinedSteeringResponse.features_applied`, which already exists) is surfaced on the result so every member's contribution is visible — verification by inspection, not trust.
+
+**Tradeoffs:** the UI↔backend vocabulary split is developer-facing debt (accepted, documented); relabeling the NLP section slightly renames an existing concept users may know.
+
+---
+
+### IDL-29: Cluster strength budget model (frequency-derived budget, similarity-weighted allocation, resultant-norm gain)
+
+**Date:** 2026-07-16
+
+**Context:** Steering a cluster needs a principled starting allocation — BRD-MIS-CLUSTERS-001 BR-004/005/006 requires: total budget = function of aggregate member activation frequency; per-member share = function of member similarity relative to aggregate similarity (equal sims ⇒ equal strengths); grounded in steering outcome, never a guessed starting point; manual edits preserve the total. The design was pressure-tested against the hook mechanics (`v = Σ strengthᵢ·dᵢ`, unit-norm decoder columns, per-layer hooks) before adoption. Feature status: **Planned** (doc chain 013).
+
+**Decision — the formula set** (members i=1..N; sim sᵢ; freq fᵢ; sign σᵢ∈{±1} default +1; single layer; constants (a,b,m,M)=(2.9,2.6,1.0,3.0) from IDL-27's fitted solo law, stored in per-SAE-namespaced config):
+1. Weights: s̃ᵢ = sᵢ (missing ⇒ mean of present sims; all missing ⇒ 1); `wᵢ = s̃ᵢ/Σs̃ⱼ`.
+2. Effective frequency: `f_eff = Σwᵢfᵢ/Σwᵢ` over known-f members (none ⇒ B_dir = 2.0, source `default`).
+3. Direction budget: `B_dir = clamp(a − b·f_eff, m, M)`.
+4. Gain: `G = ‖Σσᵢwᵢdᵢ‖₂` — **exact resultant norm, server-side only** (~N dot products with the loaded SAE decoder). Decoder unavailable ⇒ `G = 1` (constant-budget conservative fallback; errs weak). The ρ≈mean-similarity offline approximation was **rejected**: identifying context similarity with decoder cosine is unprincipled.
+5. Total budget: `B = min( B_dir/max(G, 0.05), Σ b*(fᵢ) )`, b*(missing f)=2.0. Note small G does not inflate ‖v‖ (by construction ‖v‖=B_dir) — it degrades direction *quality* to cancellation residue; hence the guards are a coherence gate, not a magnitude cap.
+6. Allocation: `strengthᵢ = σᵢ·B·wᵢ`, rounded 0.1.
+7. Coherence flags: warn when `G < 1/√N` with all σᵢ=+1 (net opposition; report min-pairwise-cosine pair); gate the model on group `cohesion` — incoherent clusters fall back to per-feature solo baselines with a notice. Caveat recorded: b(f) was fit along decoder directions; a loose cluster's v̂ extrapolates — the gate covers it.
+8. Rebalance: editing pins a member; `R = B − Σ_P|strength|`; R<0 ⇒ warn + unpinned→0; else redistribute by renormalized wᵢ. B/G recomputed only on membership/sign changes.
+9. Master intensity dial λ∈[0,2] (default 1), applied post-rebalance — the future Open WebUI dial semantic; exported with the profile.
+10. N=1 routes through the Feature-011 solo path verbatim (incl. its DEFAULT_STRENGTH=10 fallback — one documented divergence from the cluster 2.0 default).
+
+**Sanity anchors:** identical members ⇒ G=1, B=B_dir, B_dir/N each — reproduces the MCP agent's independently-discovered constant-budget heuristic (~2.1 regardless of N). Orthogonal members ⇒ B=B_dir·√N (energy adds in quadrature). N=1 ⇒ b(f) exactly.
+
+**Architecture:** ONE server-side allocation endpoint returns `{B, B_dir, G, weights, strengths, flags}`; the frontend owns only budget-preserving rebalance arithmetic; `steeringStrength.ts` remains the solo path. **v1 restriction:** single-layer clusters only (the grouping pipeline cannot produce mixed-layer sets; hand-built/imported ones ⇒ refuse + solo baselines + notice).
+
+**Validation ("grounded, not guessed"):** MCP-driven sweeps on ≥3 real clusters (varying N, coherence) + one low-cohesion cluster (gate test) + one sim-proportional-vs-uniform comparison. Acceptance: predicted B within ±30% of empirical optimum AND non-degenerate output (hard gate). Constants config: `{default:{a,b,m,M}, per_sae:{<sae_id>:{...}}}` — resolves IDL-27's "SAE-local treated as global" caveat without schema migration.
+
+**Tradeoffs:** sim-proportional allocation biases toward cluster-central members (intended: "steer toward the cluster's meaning"; sims live in [~0.35,1] so ratios stay ≤~3:1 — no winner-take-all); the G computation adds one backend round-trip at selection time (trivial: N≤20 dot products); the per-SAE constants remain SAE-family-local until calibrated.
+
+---
+
+### IDL-30: Portable cluster definitions (`mistudio.cluster-definition/v1`) & cluster profiles storage
+
+**Date:** 2026-07-16
+
+**Context:** A tuned cluster (members + strengths + name + narrative) must be a first-class, *mobile* artifact — exportable JSON that later increments carry into MILLM, a unified MCP server, and Open WebUI (separate BRD; no MILLM requirements here). The grouping index is **recomputable** (recompute drops/rebuilds `feature_groups`), so tuned human work must not live in it. The group entity has no name/description fields (`feature_grouping.py:99-124`). Feature status: **Planned** (doc chain 014).
+
+**Decision:**
+1. **New `cluster_profiles` table**, decoupled from the recomputable grouping tables: `id, sae_id, model_id, extraction_id (nullable), source_group_id (nullable, non-FK reference), name, narrative, display_token, members JSONB [{feature_idx, label, similarity, activation_frequency, max_activation, strength, pinned, sign}], budget JSONB {B, B_dir, G, f_eff, formula_id, constants, intensity, intensity_range}, schema_version, created_at, updated_at`. Recompute of the grouping index can never destroy a profile; `source_group_id` is a soft reference.
+2. **Interchange format** `kind: "mistudio.cluster-definition/v1"` — versioned, self-describing, consumer-neutral: profile fields above + model/SAE references (HF ids + local ids + layer/hook/n_features/d_model) + provenance (created_at, miStudio version). Multi-cluster export uses `kind: "mistudio.cluster-bundle/v1"` wrapping definitions. The **formula id + constants travel with the definition** so any consumer can rescale or recompute rather than trusting opaque numbers.
+3. **Round-trip requirement:** export → import reproduces the identical steering configuration (member set, strengths, intensity). Import validates schema version and warns (not blocks) on SAE/model mismatch (n_features differ ⇒ block; model name differs ⇒ warn).
+4. This contract is the integration seam for the future arc (MILLM import, unified MCP, Open WebUI, marketplace) — designed consumer-neutral now precisely so that arc needs no breaking redesign.
+
+**Tradeoffs:** JSONB members denormalize feature stats (accepted — the profile is a snapshot artifact, not a live join; staleness is a feature: it records what the user tuned against); a soft `source_group_id` cannot enforce referential integrity (intended — groups are ephemeral).
+
+---
+
 ## Document Control
 
-**Version:** 2.8
+**Version:** 2.9
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-07-12
+**Last Updated:** 2026-07-16
 **Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
@@ -3040,6 +3100,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.6 | 2026-07-12 | IDL-26: MCP Server architecture & cross-feature grouping (separate container, official `mcp` SDK, streamable HTTP, bearer-token auth, tool-category gating, grouping REST endpoints + 4 new tables, `mcp_agent` provenance, steering approval mode) — Planned, from BRD-MIS-MCP-001 |
 | 2.7 | 2026-07-15 | IDL-27: Steering UX — frequency-based auto-baseline strength (unit-norm-decoder rationale), Blended vs Compare toggle, 20-feature limit + palette — Planned |
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
+| 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
 
 ---
 

@@ -1,8 +1,8 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.5 (Steering UX Enhancements — implemented & deployed)
-**Last Updated:** 2026-07-12
+**Version:** 3.6 (Feature Clusters, Cluster Strength Model, Portable Cluster Definitions — planned)
+**Last Updated:** 2026-07-16
 **Status:** Active
 
 ---
@@ -75,6 +75,9 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 10 | Multi-GPU Scalability | Per-GPU monitoring, job routing, aggregated/per-GPU views | Partially Complete (DDP training planned) |
 | 11 | MCP Server & Feature Groups | MCP tools for agentic analysis/steering + cross-feature grouping (API/UI) | Complete |
 | 12 | Steering UX Enhancements | Blended/Compare toggle, up to 20 features, frequency-based auto-baseline strength, compact tiles | ✅ Complete |
+| 13 | Clusters UX & Trustworthy Blended Results | "Feature Groups" → "Clusters" (UI), cluster-labeled steering results, visible all-members-applied verification | Planned |
+| 14 | Cluster Strength Budget Model | Principled combined-strength model: frequency-derived budget, similarity-weighted allocation, resultant-norm gain, pin+rebalance, intensity dial | Planned |
+| 15 | Cluster Authoring & Portable Definitions | Named/narrated cluster profiles with tuned strengths; standardized JSON export/import (the mobile artifact for the MILLM/MCP/Open WebUI arc) | Planned |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -490,6 +493,74 @@ starting strengths, and a usable layout for many features.
 
 ---
 
+### 3.13 Clusters UX & Trustworthy Blended Results (Planned)
+
+**Purpose:** Establish *clusters* — sets of features that fire together and share a meaning — as the
+product's primary steering primitive, and make combined ("Blended") steering results trustworthy.
+From BRD-MIS-CLUSTERS-001 (BR-001, BR-002, BR-003, BR-011).
+
+**Capabilities:**
+- **Terminology:** the user-facing term becomes **Clusters** everywhere (nav, panels, copy); "Feature
+  Groups" no longer appears in the UI. Backend/API/data names (`feature_groups` et al.) are unchanged this
+  increment (recorded as future work). The pre-existing per-feature NLP "Semantic Clusters" section is
+  relabeled to avoid collision.
+- **Cluster identity through the hand-off:** steering selections that originate from a single cluster carry
+  the cluster's identity (display token, group id) into the steering configuration.
+- **Trustworthy result labels:** combined-steering outputs are titled by the cluster (authored name →
+  display token → "Blended (N features)"), never by a lone top-feature index.
+- **Verifiable combination:** the result surface shows the full applied-features summary
+  (`features_applied` already returned by the combined endpoint) so users can confirm every member
+  contributed its assigned strength.
+
+**Docs:** `012_FPRD|Clusters_UX.md` → FTDD → FTID → FTASKS. ADR: IDL-28.
+
+---
+
+### 3.14 Cluster Strength Budget Model (Planned)
+
+**Purpose:** Replace guessed starting strengths for cluster steering with a principled, outcome-grounded
+model — the user must never start from a useless point. From BRD-MIS-CLUSTERS-001 (BR-004, BR-005, BR-006).
+
+**Capabilities:**
+- **Total influence budget** derived from the cluster's aggregate activation frequency via the empirically
+  fit solo law (`B_dir = clamp(a − b·f_eff, m, M)`, f_eff = similarity-weighted mean member frequency).
+- **Similarity-weighted allocation** (`wᵢ = sᵢ/Σsⱼ`): equal similarity ⇒ equal strengths; members most
+  representative of the cluster's meaning carry more of the budget.
+- **Exact resultant-norm gain** `G = ‖Σσᵢwᵢdᵢ‖` (server-side, from the SAE decoder) scales the budget so
+  the *injected vector* — not the naive sum — matches the validated solo magnitude; coherence flags warn on
+  near-cancellation, and low-cohesion clusters fall back to per-feature solo baselines.
+- **Budget-preserving rebalance:** manually editing one member pins it and redistributes the remainder.
+- **Master cluster-intensity dial** (λ ∈ [0,2]) scaling the whole cluster — the dial semantics that Open
+  WebUI inherits in the future integration arc.
+- **Empirical validation protocol:** MCP-driven sweeps on real clusters gate the formula constants
+  (per-SAE-namespaced config) before the model is trusted.
+
+**Docs:** `013_FPRD|Cluster_Strength_Model.md` → FTDD → FTID → FTASKS. ADR: IDL-29.
+
+---
+
+### 3.15 Cluster Authoring & Portable Definitions (Planned)
+
+**Purpose:** Capture a tuned cluster as a first-class, mobile artifact — named, narrated, strength-tuned —
+exportable as standardized JSON that later travels across the miStudio↔MILLM ecosystem (MILLM import,
+unified MCP server, Open WebUI dial — all future scope, separate BRD). From BRD-MIS-CLUSTERS-001 (BR-007
+through BR-010).
+
+**Capabilities:**
+- **Cluster profiles:** name + narrative + persisted per-member tuned strengths, stored decoupled from the
+  recomputable grouping index (recompute never destroys tuned profiles).
+- **Portable JSON cluster definitions** (`mistudio.cluster-definition/v1`): versioned, self-describing,
+  consumer-neutral — members, strengths, budget + formula parameters, intensity range, model/SAE references,
+  provenance. Single-cluster and multi-cluster bundles.
+- **Round-trip fidelity:** export → import reproduces the identical steering configuration.
+- **Future arc (vision, not this increment):** MILLM imports the same definition for live-chat steering; a
+  single MCP server spans both products with health-gated tool sets; Open WebUI exposes the cluster
+  intensity dial in real chat sessions; a marketplace for trading cluster definitions.
+
+**Docs:** `014_FPRD|Cluster_Definitions.md` → FTDD → FTID → FTASKS. ADR: IDL-30.
+
+---
+
 ## 4. Technology Stack
 
 ### 4.1 Backend
@@ -696,6 +767,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 3.3 | 2026-07-12 | Feature 11 implemented: MCP server (33 tools, bearer auth, approval mode), cross-feature grouping (index + REST + Feature Groups UI), mcp_agent provenance, deployment (compose profile + k8s) |
 | 3.4 | 2026-07-15 | Added Feature 12: Steering UX Enhancements (Planned) — §3.12, doc chain 011_FPRD/FTDD/FTID/FTASKS |
 | 3.5 | 2026-07-15 | Feature 12 implemented & deployed: Blended\|Compare toggle, up to 20 features, frequency auto-baseline (default fallback), compact tiles, 20-color palette. K8s-deployed + E2E-verified. |
+| 3.6 | 2026-07-16 | Added Features 13–15 from BRD-MIS-CLUSTERS-001 (Planned): Clusters UX & trustworthy blended results (§3.13), cluster strength budget model (§3.14), cluster authoring & portable JSON definitions (§3.15). MILLM/unified-MCP/Open WebUI integration recorded as future arc (separate BRD). |
 
 ---
 
