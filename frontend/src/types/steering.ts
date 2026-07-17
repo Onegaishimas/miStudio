@@ -156,6 +156,9 @@ export interface SelectedFeature {
   strengthSource?: StrengthSource; // 'auto' | 'default' | 'manual' | 'cluster'
   /** Feature 013: manually-edited member in cluster mode — excluded from rebalance. */
   pinned?: boolean;
+  /** Author-provided display metadata (contract rev 2026-07-17) — carried
+   * through load->save so re-exports keep the original author's words */
+  meta?: Record<string, unknown> | null;
 }
 
 /**

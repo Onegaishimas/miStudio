@@ -733,7 +733,11 @@ export const useSteeringStore = create<SteeringState>()(
         if (profile.sae_id && profile.sae_id !== selectedSAE.id) return false;
         if (!profile.sae_id) {
           const n = selectedSAE.n_features ?? 0;
-          if (n > 0 && profile.members.some((m) => m.feature_idx >= n)) {
+          // Unknown feature space -> REFUSE: binding unchecked would let a
+          // 65k profile load into a 16k SAE and index-error mid-generation
+          // (contract-rev review #4)
+          if (n <= 0) return false;
+          if (profile.members.some((m) => m.feature_idx >= n)) {
             return false; // feature space mismatch — cannot bind here
           }
         }
@@ -747,8 +751,12 @@ export const useSteeringStore = create<SteeringState>()(
             feature_idx: m.feature_idx,
             feature_id: null, // DB feature id unknown from a portable profile
             layer,
-            // Profile strengths are EXPLICIT tuned values — auto-baselines bypassed.
-            strength: m.strength,
+            // Profile strengths are EXPLICIT tuned values — auto-baselines
+            // bypassed. Sign rule (contract-rev review): a negative strength
+            // is already directional; a non-negative one takes its direction
+            // from the sign field (external magnitude+sign files flipped
+            // direction silently before).
+            strength: m.strength < 0 ? m.strength : (m.sign ?? 1) * m.strength,
             strengthSource: 'manual' as const,
             pinned: m.pinned ?? false,
             label: m.label ?? null,
@@ -756,6 +764,10 @@ export const useSteeringStore = create<SteeringState>()(
             max_activation: m.max_activation ?? null,
             activation_frequency: m.activation_frequency ?? null,
             similarity: m.similarity ?? null,
+            // Author meta travels with the selection so a load->save
+            // round-trip re-exports the ORIGINAL author's words instead of
+            // re-synthesizing from local features (contract-rev review #5)
+            meta: (m as { meta?: Record<string, unknown> | null }).meta ?? null,
           }));
 
           // Budget snapshot (013): weights reconstructed from |strength| shares —
