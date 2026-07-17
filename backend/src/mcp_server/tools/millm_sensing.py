@@ -30,7 +30,9 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         """Co-activation events newest-first. Each row carries the span,
         fired members with peak activations, score, human summary, the
         ±K token context window (context_text/context_token_ids) when the
-        cluster captures context, and ambient_fired_count — the
+        cluster captures context, context_parts {before, span, after} —
+        the window pre-split at the fired span so you can quote the prime
+        token without re-deriving offsets — and ambient_fired_count, the
         alone-vs-within signal (how many features across the WHOLE SAE
         fired; null when full-width monitoring wasn't co-running — never
         estimated). `since` (ISO-8601 timestamp) time-bounds
@@ -73,6 +75,9 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         if min_k is None and not reset:
             return {"error": "provide `min_k`, or `reset=true` to restore "
                              "the default quorum"}
+        if min_k is not None and reset:
+            return {"error": "`min_k` and `reset=true` are contradictory — "
+                             "pass exactly one"}
         return await millm.put(f"/api/sensing/{profile_id}/config",
                                json_body={"min_k": None if reset else min_k})
 
