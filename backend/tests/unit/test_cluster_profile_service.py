@@ -372,3 +372,30 @@ class TestEnrichmentResilience:
             db, [ProfileMember(feature_idx=3169, strength=0.2)], "sae_x", None)
         assert out[0].label == "free_newsletter"  # label survives
         # meta enrichment failed quietly — no exception escaped
+
+    @pytest.mark.asyncio
+    async def test_export_of_bound_profile_carries_label_and_meta(self):
+        """Review #11: the EXPORTED definition (to_definition), not just the
+        helper, must backfill label+meta — this is what miLLM tiles consume."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.services.cluster_profile_service import ClusterProfileService
+
+        profile = ClusterProfileService.from_definition(
+            _definition(sae=DefinitionSAERef()), bind_sae_id="sae_x")
+        profile.created_at = datetime(2026, 7, 16)
+        profile.members[0]["feature_idx"] = 3169
+
+        db = MagicMock()
+        sae_lookup = MagicMock()
+        sae_lookup.scalar_one_or_none.return_value = None  # SAE row gone; export still enriches
+        feature_lookup = MagicMock()
+        feature_lookup.scalars.return_value.all.return_value = [
+            TestMemberEnrichment._feature()]
+        db.execute = AsyncMock(side_effect=[sae_lookup, feature_lookup])
+
+        definition = await ClusterProfileService.to_definition(db, profile)
+        exported = {m.feature_idx: m for m in definition.members}
+        assert exported[3169].label == "free_newsletter"
+        assert exported[3169].meta is not None
+        assert exported[3169].meta.description is not None
