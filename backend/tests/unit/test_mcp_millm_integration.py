@@ -608,3 +608,32 @@ class TestRound3Fixes:
         tool = mcp._tool_manager._tools["millm_status"]  # noqa: SLF001
         result = anyio.run(lambda: tool.run({}))
         assert "unavailable" in str(result)
+
+
+class TestSensingConfigTool:
+    """Enh R2: millm_sensing_config pins (was unpinned; clear-on-omit)."""
+
+    def test_set_min_k_routes(self):
+        from src.mcp_server.tools import millm_sensing
+
+        tool, millm = _register_and_get(millm_sensing, "millm_sensing_config")
+        anyio.run(lambda: tool.run({"profile_id": "prof_x", "min_k": 2}))
+        millm.put.assert_awaited_once_with(
+            "/api/sensing/prof_x/config", json_body={"min_k": 2})
+
+    def test_omitting_min_k_refused_not_cleared(self):
+        """Calling without min_k must NOT silently wipe the override."""
+        from src.mcp_server.tools import millm_sensing
+
+        tool, millm = _register_and_get(millm_sensing, "millm_sensing_config")
+        result = anyio.run(lambda: tool.run({"profile_id": "prof_x"}))
+        assert "provide" in str(result)
+        millm.put.assert_not_called()
+
+    def test_explicit_reset_clears(self):
+        from src.mcp_server.tools import millm_sensing
+
+        tool, millm = _register_and_get(millm_sensing, "millm_sensing_config")
+        anyio.run(lambda: tool.run({"profile_id": "prof_x", "reset": True}))
+        millm.put.assert_awaited_once_with(
+            "/api/sensing/prof_x/config", json_body={"min_k": None})

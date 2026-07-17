@@ -62,13 +62,19 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     @mcp.tool()
     @gated(gate, "millm")
     async def millm_sensing_config(profile_id: str,
-                                   min_k: Optional[int] = None) -> Any:
-        """Adjust a cluster's sensing quorum (members that must co-fire
-        for an event). min_k=null restores the default: ALL members with
-        usable thresholds. Validated server-side against the sensable
-        ceiling. Useful when the all-members default records nothing."""
+                                   min_k: Optional[int] = None,
+                                   reset: bool = False) -> Any:
+        """SET a cluster's sensing quorum (members that must co-fire for an
+        event) — this tool WRITES config; use millm_sensing_status to read.
+        Provide min_k, OR reset=true to restore the default (ALL members
+        with usable thresholds). Calling with neither is refused — omitting
+        min_k must not silently wipe an operator's tuned quorum (enh R2).
+        Validated server-side against the sensable ceiling."""
+        if min_k is None and not reset:
+            return {"error": "provide `min_k`, or `reset=true` to restore "
+                             "the default quorum"}
         return await millm.put(f"/api/sensing/{profile_id}/config",
-                               json_body={"min_k": min_k})
+                               json_body={"min_k": None if reset else min_k})
 
     @mcp.tool()
     @gated(gate, "millm")
