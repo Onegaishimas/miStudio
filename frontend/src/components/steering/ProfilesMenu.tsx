@@ -53,15 +53,23 @@ export function ProfilesMenu() {
 
   const handleLoad = (profile: ClusterProfile) => {
     const ok = loadProfileIntoSteering(profile);
-    setNotice(
-      ok
-        ? profile.sae_id
-          ? `Loaded “${profile.name}” (${profile.members.length} members)`
-          : `Loaded “${profile.name}” against ${selectedSAE.name ?? selectedSAE.id} (unbound profile — bound at load)`
-        : profile.sae_id
-          ? 'Profile is bound to a different SAE — switch the SAE selector to load it'
-          : 'Profile does not fit this SAE\'s feature space — select the matching SAE',
-    );
+    let notice: string;
+    if (ok) {
+      notice = profile.sae_id
+        ? `Loaded “${profile.name}” (${profile.members.length} members)`
+        : `Loaded “${profile.name}” against ${selectedSAE.name ?? selectedSAE.id} (unbound profile — bound at load)`;
+    } else if (!profile.members || profile.members.length === 0) {
+      notice = 'Profile has no members to load';
+    } else if (profile.members.length > 20) {
+      notice = `Profile has ${profile.members.length} members — the steering panel holds at most 20`;
+    } else if (profile.sae_id) {
+      notice = 'Profile is bound to a different SAE — switch the SAE selector to load it';
+    } else if (!selectedSAE.n_features) {
+      notice = 'Cannot verify fit: the selected SAE has no recorded feature count';
+    } else {
+      notice = "Profile does not fit this SAE's feature space — select the matching SAE";
+    }
+    setNotice(notice);
   };
 
   const handleImportFile = async (file: File) => {

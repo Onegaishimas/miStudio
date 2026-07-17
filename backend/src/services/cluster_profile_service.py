@@ -131,7 +131,6 @@ class ClusterProfileService:
     """DB-facing CRUD + serialization for cluster profiles."""
 
     @staticmethod
-    @staticmethod
     async def _enrich_members(
         db: AsyncSession,
         members: List[ProfileMember],
@@ -156,10 +155,15 @@ class ClusterProfileService:
             q = q.where(Feature.external_sae_id == sae_id)
         rows = (await db.execute(q)).scalars().all()
         by_idx: Dict[int, Any] = {}
-        for row in rows:  # newest extraction wins on duplicates
+        for row in rows:  # newest extraction wins; None timestamps lose
             existing = by_idx.get(row.neuron_index)
-            if existing is None or (row.created_at and existing.created_at
-                                    and row.created_at > existing.created_at):
+            if existing is None:
+                by_idx[row.neuron_index] = row
+                continue
+            row_ts = row.created_at
+            existing_ts = existing.created_at
+            if existing_ts is None or (row_ts is not None
+                                       and row_ts > existing_ts):
                 by_idx[row.neuron_index] = row
         enriched: List[ProfileMember] = []
         for member in members:
@@ -171,6 +175,7 @@ class ClusterProfileService:
             if member.label is None and feature.name:
                 update["label"] = feature.name
             if member.meta is None:
+              try:
                 nlp = feature.nlp_analysis or {}
                 top_tokens = None
                 dist = ((nlp.get("prime_token_analysis") or {})
@@ -189,14 +194,29 @@ class ClusterProfileService:
                 label_source = feature.label_source
                 if hasattr(label_source, "value"):
                     label_source = label_source.value
+                score = feature.interpretability_score
+                if score is not None:
+                    score = max(0.0, min(1.0, float(score)))
+                # Truncate to the contract's field caps: DB columns are wider
+                # (category String(255), description unbounded Text) and a
+                # best-effort enrichment must NEVER 500 a save/export
+                # (contract-rev review #1)
                 update["meta"] = MemberMeta(
-                    description=(feature.description or None),
-                    category=(feature.category or None),
-                    label_source=label_source or None,
-                    interpretability=feature.interpretability_score,
+                    description=(feature.description or None)
+                    and feature.description[:1000],
+                    category=(feature.category or None)
+                    and feature.category[:50],
+                    label_source=(label_source or None)
+                    and str(label_source)[:50],
+                    interpretability=score,
                     mean_activation=feature.mean_activation,
                     top_tokens=top_tokens,
                     signature=signature,
+                )
+              except Exception:
+                logger.warning(
+                    "member_meta_enrichment_failed",
+                    extra={"feature_idx": member.feature_idx},
                 )
             enriched.append(member.model_copy(update=update) if update
                             else member)
@@ -261,7 +281,10 @@ class ClusterProfileService:
             profile.narrative = data.narrative
         if data.members is not None:
             await ClusterProfileService._validate_bounds(db, profile.sae_id, data.members)
-            profile.members = [m.model_dump() for m in data.members]
+            enriched = await ClusterProfileService._enrich_members(
+                db, data.members, profile.sae_id, profile.extraction_id
+            )
+            profile.members = [m.model_dump() for m in enriched]
         if data.budget is not None:
             profile.budget = data.budget.model_dump()
         profile.updated_at = datetime.utcnow()

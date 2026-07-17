@@ -64,6 +64,9 @@ export function SaveProfileDialog() {
         strength: f.strength,
         sign: f.strength < 0 ? -1 : 1,
         pinned: f.pinned ?? false,
+        // Author meta round-trips (contract-rev review #5); backend
+        // enrichment fills gaps but never overwrites these
+        meta: f.meta ?? null,
       }));
       const profile = await saveProfile({
         sae_id: selectedSAE.id,

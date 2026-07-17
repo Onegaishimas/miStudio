@@ -324,3 +324,51 @@ class TestMemberEnrichment:
             {"description": "d", "future_field": {"x": 1}})
         assert meta.model_dump()["future_field"] == {"x": 1}  # extra=allow
         assert MemberMeta().model_dump(exclude_none=True) == {}  # all optional
+
+
+class TestEnrichmentResilience:
+    """Contract-rev review #1: best-effort enrichment must NEVER 500."""
+
+    @pytest.mark.asyncio
+    async def test_oversized_db_values_truncate_not_raise(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.schemas.cluster_profile import ProfileMember
+        from src.services.cluster_profile_service import ClusterProfileService
+
+        f = TestMemberEnrichment._feature()
+        f.category = "x" * 300          # DB String(255) > schema cap 50
+        f.description = "d" * 5000      # unbounded Text > cap 1000
+        f.interpretability_score = 1.7  # legacy out-of-range
+
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [f]
+        db.execute = AsyncMock(return_value=result)
+
+        out = await ClusterProfileService._enrich_members(
+            db, [ProfileMember(feature_idx=3169, strength=0.2)], "sae_x", None)
+        assert out[0].meta is not None
+        assert len(out[0].meta.category) == 50
+        assert len(out[0].meta.description) == 1000
+        assert out[0].meta.interpretability == 1.0
+
+    @pytest.mark.asyncio
+    async def test_pathological_feature_row_degrades_to_label_only(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.schemas.cluster_profile import ProfileMember
+        from src.services.cluster_profile_service import ClusterProfileService
+
+        f = TestMemberEnrichment._feature()
+        f.nlp_analysis = {"context_patterns": {"prefix_trigrams": object()}}
+
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [f]
+        db.execute = AsyncMock(return_value=result)
+
+        out = await ClusterProfileService._enrich_members(
+            db, [ProfileMember(feature_idx=3169, strength=0.2)], "sae_x", None)
+        assert out[0].label == "free_newsletter"  # label survives
+        # meta enrichment failed quietly — no exception escaped
