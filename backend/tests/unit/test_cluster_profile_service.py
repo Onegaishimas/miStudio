@@ -230,3 +230,97 @@ def test_from_definition_records_import_provenance():
     assert profile.sae_id == "sae_a"
     assert profile.imported_from["kind"] == DEFINITION_KIND
     assert profile.imported_from["source_sae_id"] == "sae_a"
+
+
+class TestMemberEnrichment:
+    """Contract rev 2026-07-17: label + meta populated from Feature records."""
+
+    @staticmethod
+    def _feature(idx=3169, **over):
+        from unittest.mock import MagicMock
+
+        f = MagicMock()
+        f.neuron_index = idx
+        f.name = over.get("name", "free_newsletter")
+        f.description = over.get("description", "Fires on: free newsletters.")
+        f.category = "semantic"
+        f.label_source = "openai"
+        f.interpretability_score = 0.78
+        f.mean_activation = 1.96
+        f.created_at = over.get("created_at")
+        f.nlp_analysis = over.get("nlp_analysis", {
+            "prime_token_analysis": {
+                "word_lowercase_distribution": {"free": 12, "the": 15, "in": 7},
+            },
+            "context_patterns": {
+                "prefix_trigrams": [{"tokens": ["subscribe", "to", "our"]}],
+                "suffix_bigrams": [{"tokens": ["news", "letters"]}],
+            },
+        })
+        return f
+
+    @pytest.mark.asyncio
+    async def test_enriches_label_and_meta(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.schemas.cluster_profile import ProfileMember
+        from src.services.cluster_profile_service import ClusterProfileService
+
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [self._feature()]
+        db.execute = AsyncMock(return_value=result)
+
+        members = [ProfileMember(feature_idx=3169, strength=0.2)]
+        out = await ClusterProfileService._enrich_members(
+            db, members, "sae_x", None)
+        assert out[0].label == "free_newsletter"
+        assert out[0].meta.description == "Fires on: free newsletters."
+        assert out[0].meta.top_tokens[0] == "the"  # freq-sorted
+        assert "___" in out[0].meta.signature
+        assert out[0].meta.interpretability == 0.78
+
+    @pytest.mark.asyncio
+    async def test_never_overwrites_existing_values(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.schemas.cluster_profile import MemberMeta, ProfileMember
+        from src.services.cluster_profile_service import ClusterProfileService
+
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [self._feature()]
+        db.execute = AsyncMock(return_value=result)
+
+        members = [ProfileMember(
+            feature_idx=3169, strength=0.2, label="author_label",
+            meta=MemberMeta(description="author words"))]
+        out = await ClusterProfileService._enrich_members(
+            db, members, "sae_x", None)
+        assert out[0].label == "author_label"
+        assert out[0].meta.description == "author words"
+
+    @pytest.mark.asyncio
+    async def test_no_feature_row_leaves_member_unchanged(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.schemas.cluster_profile import ProfileMember
+        from src.services.cluster_profile_service import ClusterProfileService
+
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+
+        members = [ProfileMember(feature_idx=42, strength=0.1)]
+        out = await ClusterProfileService._enrich_members(
+            db, members, "sae_x", None)
+        assert out[0].label is None and out[0].meta is None
+
+    def test_meta_is_extensible_and_optional(self):
+        from src.schemas.cluster_profile import MemberMeta
+
+        meta = MemberMeta.model_validate(
+            {"description": "d", "future_field": {"x": 1}})
+        assert meta.model_dump()["future_field"] == {"x": 1}  # extra=allow
+        assert MemberMeta().model_dump(exclude_none=True) == {}  # all optional

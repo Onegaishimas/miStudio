@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.cluster_profile import ClusterProfile
 from ..models.external_sae import ExternalSAE
+from ..models.feature import Feature
 from ..schemas.cluster_profile import (
+    MemberMeta,
     BUNDLE_KIND,
     DEFINITION_KIND,
     SCHEMA_VERSION,
@@ -129,9 +131,84 @@ class ClusterProfileService:
     """DB-facing CRUD + serialization for cluster profiles."""
 
     @staticmethod
+    @staticmethod
+    async def _enrich_members(
+        db: AsyncSession,
+        members: List[ProfileMember],
+        sae_id: Optional[str],
+        extraction_id: Optional[str],
+    ) -> List[ProfileMember]:
+        """Fill member.label + member.meta from the Feature records
+        (contract rev 2026-07-17): the group index carries no labels, so
+        saves/exports were shipping label=null while features had rich
+        names/descriptions. Enrichment is best-effort and NEVER overwrites
+        values already present (imported definitions keep their authors'
+        words). Display-only — steering math never reads meta."""
+        need = [m for m in members if m.label is None or m.meta is None]
+        if not need or (not sae_id and not extraction_id):
+            return members
+        q = select(Feature).where(
+            Feature.neuron_index.in_([m.feature_idx for m in need])
+        )
+        if extraction_id:
+            q = q.where(Feature.extraction_job_id == extraction_id)
+        else:
+            q = q.where(Feature.external_sae_id == sae_id)
+        rows = (await db.execute(q)).scalars().all()
+        by_idx: Dict[int, Any] = {}
+        for row in rows:  # newest extraction wins on duplicates
+            existing = by_idx.get(row.neuron_index)
+            if existing is None or (row.created_at and existing.created_at
+                                    and row.created_at > existing.created_at):
+                by_idx[row.neuron_index] = row
+        enriched: List[ProfileMember] = []
+        for member in members:
+            feature = by_idx.get(member.feature_idx)
+            if feature is None:
+                enriched.append(member)
+                continue
+            update: Dict[str, Any] = {}
+            if member.label is None and feature.name:
+                update["label"] = feature.name
+            if member.meta is None:
+                nlp = feature.nlp_analysis or {}
+                top_tokens = None
+                dist = ((nlp.get("prime_token_analysis") or {})
+                        .get("word_lowercase_distribution") or {})
+                if dist:
+                    top_tokens = [w for w, _ in sorted(
+                        dist.items(), key=lambda kv: -kv[1])[:5]]
+                signature = None
+                patterns = nlp.get("context_patterns") or {}
+                prefixes = patterns.get("prefix_trigrams") or []
+                suffixes = patterns.get("suffix_bigrams") or []
+                if prefixes and suffixes:
+                    signature = (" ".join(prefixes[0].get("tokens", []))
+                                 + " ___ "
+                                 + " ".join(suffixes[0].get("tokens", [])))[:200]
+                label_source = feature.label_source
+                if hasattr(label_source, "value"):
+                    label_source = label_source.value
+                update["meta"] = MemberMeta(
+                    description=(feature.description or None),
+                    category=(feature.category or None),
+                    label_source=label_source or None,
+                    interpretability=feature.interpretability_score,
+                    mean_activation=feature.mean_activation,
+                    top_tokens=top_tokens,
+                    signature=signature,
+                )
+            enriched.append(member.model_copy(update=update) if update
+                            else member)
+        return enriched
+
+    @staticmethod
     async def create(db: AsyncSession, data: ClusterProfileCreate) -> ClusterProfile:
         """Create a profile; validates member bounds against the bound SAE."""
         await ClusterProfileService._validate_bounds(db, data.sae_id, data.members)
+        data.members = await ClusterProfileService._enrich_members(
+            db, data.members, data.sae_id, data.extraction_id
+        )
         profile = ClusterProfile(
             sae_id=data.sae_id,
             model_id=data.model_id,
@@ -246,13 +323,19 @@ class ClusterProfileService:
                 model_ref = DefinitionModelRef(
                     hf_id=sae.model_name, mistudio_model_id=profile.model_id or sae.model_id
                 )
+        members = await ClusterProfileService._enrich_members(
+            db,
+            [ProfileMember(**m) for m in profile.members],
+            profile.sae_id,
+            profile.extraction_id,
+        )
         return ClusterDefinitionV1(
             name=profile.name,
             narrative=profile.narrative,
             display_token=profile.display_token,
             model=model_ref,
             sae=sae_ref,
-            members=[ProfileMember(**m) for m in profile.members],
+            members=members,
             budget=ProfileBudget(**profile.budget) if profile.budget else None,
             provenance=DefinitionProvenance(
                 created_at=profile.created_at,

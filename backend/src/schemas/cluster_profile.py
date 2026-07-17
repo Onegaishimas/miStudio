@@ -26,6 +26,46 @@ MAX_NARRATIVE = 10_000
 
 # ── Shared member shape ─────────────────────────────────────────────────────
 
+class MemberExample(BaseModel):
+    """One representative activating snippet (span = the prime token)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    text: Optional[str] = Field(None, max_length=500)
+    span: Optional[str] = Field(None, max_length=100)
+
+
+class MemberMeta(BaseModel):
+    """Optional display/interpretability metadata for a member — additive
+    contract revision 2026-07-17 (standardized so importing apps can render
+    feature tiles without a miStudio round-trip).
+
+    EVERY field is optional and unknown keys are preserved (extra="allow"):
+    consumers render what they understand and pass the rest through. Nothing
+    here may be load-bearing for steering math — it is display/reference
+    data only."""
+
+    model_config = ConfigDict(extra="allow")
+
+    description: Optional[str] = Field(None, max_length=1000)
+    category: Optional[str] = Field(None, max_length=50)
+    label_source: Optional[str] = Field(None, max_length=50)
+    interpretability: Optional[float] = Field(None, ge=0.0, le=1.0)
+    mean_activation: Optional[float] = None
+    top_tokens: Optional[List[str]] = Field(None, max_length=10)
+    signature: Optional[str] = Field(None, max_length=200)
+    example: Optional[MemberExample] = None
+    neuronpedia: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("neuronpedia")
+    @classmethod
+    def http_only(cls, v: Optional[str]) -> Optional[str]:
+        """Portable references only — never filesystem paths."""
+        if v and not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("neuronpedia must be an http(s) URL")
+        return v
+
+
 class ProfileMember(BaseModel):
     """A cluster member snapshot with its tuned strength."""
 
@@ -37,6 +77,7 @@ class ProfileMember(BaseModel):
     strength: float = Field(..., ge=-300.0, le=300.0)
     sign: Literal[1, -1] = 1
     pinned: bool = False
+    meta: Optional[MemberMeta] = None
 
 
 class ProfileBudget(BaseModel):

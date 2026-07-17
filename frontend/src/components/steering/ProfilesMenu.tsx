@@ -55,10 +55,12 @@ export function ProfilesMenu() {
     const ok = loadProfileIntoSteering(profile);
     setNotice(
       ok
-        ? `Loaded “${profile.name}” (${profile.members.length} members)`
+        ? profile.sae_id
+          ? `Loaded “${profile.name}” (${profile.members.length} members)`
+          : `Loaded “${profile.name}” against ${selectedSAE.name ?? selectedSAE.id} (unbound profile — bound at load)`
         : profile.sae_id
-          ? 'Profile is bound to a different SAE'
-          : 'Profile is unbound — re-import it with an SAE binding to steer',
+          ? 'Profile is bound to a different SAE — switch the SAE selector to load it'
+          : 'Profile does not fit this SAE\'s feature space — select the matching SAE',
     );
   };
 
