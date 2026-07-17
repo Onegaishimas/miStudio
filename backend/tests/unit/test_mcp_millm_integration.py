@@ -637,3 +637,14 @@ class TestSensingConfigTool:
         anyio.run(lambda: tool.run({"profile_id": "prof_x", "reset": True}))
         millm.put.assert_awaited_once_with(
             "/api/sensing/prof_x/config", json_body={"min_k": None})
+
+
+    def test_min_k_plus_reset_refused(self):
+        """R3 #9: the contradictory combination must not silently reset."""
+        from src.mcp_server.tools import millm_sensing
+
+        tool, millm = _register_and_get(millm_sensing, "millm_sensing_config")
+        result = anyio.run(lambda: tool.run({"profile_id": "p", "min_k": 3,
+                                             "reset": True}))
+        assert "contradictory" in str(result)
+        millm.put.assert_not_called()
