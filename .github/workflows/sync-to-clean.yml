@@ -31,7 +31,11 @@ jobs:
           rm -rf .claude/
           rm -f CLAUDE.md
           rm -rf backups/
-          rm -rf docs/
+          # docs/ is dev-internal EXCEPT the vendored interchange contract:
+          # docs/schemas/cluster-definition-v1.json is the frozen public
+          # schema — the mirror's schema-sync test requires it, and
+          # consumers of the public repo need it, so preserve it.
+          find docs/ -mindepth 1 -maxdepth 1 ! -name schemas -exec rm -rf {} +
           rm -rf scripts/
           rm -rf .understand-anything/
           echo "Removed excluded files"
