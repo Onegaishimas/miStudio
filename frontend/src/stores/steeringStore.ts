@@ -723,9 +723,20 @@ export const useSteeringStore = create<SteeringState>()(
       loadProfileIntoSteering: (profile) => {
         const { selectedSAE } = get();
         if (!profile.members || profile.members.length === 0) return false;
-        // Unbound profiles can't steer; bound profiles must match the panel's SAE
-        // (ProfilesMenu lists per-SAE, so this only trips on stale UI state).
-        if (!profile.sae_id || !selectedSAE || profile.sae_id !== selectedSAE.id) return false;
+        if (!selectedSAE) return false;
+        // Bound profiles must match the panel's SAE (ProfilesMenu lists
+        // per-SAE, so this only trips on stale UI state). UNBOUND (imported)
+        // profiles bind AT LOAD against the selected SAE — mirroring
+        // miLLM's activation-binds semantics — provided every member fits
+        // the feature space; refusing them entirely was a dead end (the
+        // only prior remedy was re-importing the file).
+        if (profile.sae_id && profile.sae_id !== selectedSAE.id) return false;
+        if (!profile.sae_id) {
+          const n = selectedSAE.n_features ?? 0;
+          if (n > 0 && profile.members.some((m) => m.feature_idx >= n)) {
+            return false; // feature space mismatch — cannot bind here
+          }
+        }
         if (profile.members.length > MAX_SELECTED_FEATURES) return false;
 
         set({ isHydratingProfile: true });

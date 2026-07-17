@@ -1570,13 +1570,29 @@ describe('steeringStore', () => {
       expect(result.current.activeProfile).toEqual({ id: 'clp_1', name: 'Fear response' });
     });
 
-    it('loadProfileIntoSteering refuses unbound and SAE-mismatched profiles', () => {
+    it('loadProfileIntoSteering binds UNBOUND profiles at load when they fit (2026-07-17 fix: refusal was a dead end)', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      act(() => result.current.selectSAE(mockSAE));
+      let ok = false;
+      act(() => { ok = result.current.loadProfileIntoSteering({ ...mockProfile, sae_id: null } as any); });
+      expect(ok).toBe(true);
+      expect(result.current.selectedFeatures.length).toBeGreaterThan(0);
+      expect(result.current.combinedMode).toBe(true);
+    });
+
+    it('loadProfileIntoSteering still refuses SAE-mismatched and oversized-space profiles', () => {
       const { result } = renderHook(() => useSteeringStore());
       act(() => result.current.selectSAE(mockSAE));
       let ok = true;
-      act(() => { ok = result.current.loadProfileIntoSteering({ ...mockProfile, sae_id: null } as any); });
-      expect(ok).toBe(false);
       act(() => { ok = result.current.loadProfileIntoSteering({ ...mockProfile, sae_id: 'sae-other' } as any); });
+      expect(ok).toBe(false);
+      // unbound but a member exceeds the SAE's feature space -> cannot bind
+      const oversized = {
+        ...mockProfile,
+        sae_id: null,
+        members: [{ feature_idx: 10_000_000, strength: 0.2, sign: 1 }],
+      };
+      act(() => { ok = result.current.loadProfileIntoSteering(oversized as any); });
       expect(ok).toBe(false);
       expect(result.current.selectedFeatures).toHaveLength(0);
     });
