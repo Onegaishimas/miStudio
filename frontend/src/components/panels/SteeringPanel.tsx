@@ -686,8 +686,11 @@ export function SteeringPanel() {
           </div>
         </div>
 
-        {/* Everything below the prompts scrolls in its own container */}
-        <div className="flex-1 overflow-y-auto min-h-0 w-full">
+        {/* Everything below the prompts scrolls in its own container.
+            scrollbar-gutter both-edges keeps the centered column on the same
+            axis as the pinned prompts card — a right-only scrollbar shifted
+            it half a scrollbar-width left. */}
+        <div className="flex-1 overflow-y-auto min-h-0 w-full [scrollbar-gutter:stable_both-edges]">
           <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
           {selectedSAE && (
             <>
