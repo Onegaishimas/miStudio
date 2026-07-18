@@ -329,9 +329,12 @@ export function SteeringPanel() {
         )}
       </button>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+      {/* Main content — split into a PINNED top (header/status/prompts) and
+          an independently scrolling bottom (preview/config/results), so the
+          prompts stay visible while browsing results (user request 2026-07-18). */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div className="shrink-0 w-full">
+          <div className="max-w-4xl mx-auto px-6 pt-6 space-y-6">
           {/* Pending MCP-agent approval requests (Feature 010) */}
           <ApprovalsBanner />
 
@@ -675,7 +678,16 @@ export function SteeringPanel() {
                   </div>
                 </div>
               </div>
+            </>
+          )}
+          </div>
+        </div>
 
+        {/* Everything below the prompts scrolls in its own container */}
+        <div className="flex-1 overflow-y-auto min-h-0 w-full">
+          <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+          {selectedSAE && (
+            <>
               {/* Comparison preview cards */}
               {selectedFeatures.length > 0 && (
                 <div className={`${COMPONENTS.card.base} p-4`}>
@@ -828,6 +840,7 @@ export function SteeringPanel() {
               )}
             </>
           )}
+          </div>
         </div>
       </div>
 

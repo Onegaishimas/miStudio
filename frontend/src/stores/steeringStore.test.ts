@@ -1568,6 +1568,8 @@ describe('steeringStore', () => {
       // Label tier 1: the authored profile NAME titles blended results
       expect(result.current.clusterContext?.display_token).toBe('Fear response');
       expect(result.current.activeProfile).toEqual({ id: 'clp_1', name: 'Fear response' });
+      // Tile meta (2026-07-18): every member carries its source profile name
+      expect(feats.every((f) => f.sourceProfileName === 'Fear response')).toBe(true);
     });
 
     it('loadProfileIntoSteering binds UNBOUND profiles at load when they fit (2026-07-17 fix: refusal was a dead end)', () => {

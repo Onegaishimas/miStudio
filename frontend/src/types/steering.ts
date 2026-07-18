@@ -159,6 +159,8 @@ export interface SelectedFeature {
   /** Author-provided display metadata (contract rev 2026-07-17) — carried
    * through load->save so re-exports keep the original author's words */
   meta?: Record<string, unknown> | null;
+  /** Name of the cluster profile this feature was loaded from (display only). */
+  sourceProfileName?: string | null;
 }
 
 /**
