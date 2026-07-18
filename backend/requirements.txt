@@ -31,7 +31,7 @@
 accelerate==1.12.0
 aiofiles==23.2.1
 aiohappyeyeballs==2.6.1
-aiohttp==3.13.4
+aiohttp==3.14.1
 aiosignal==1.4.0
 alembic==1.17.2
 amqp==5.3.1
@@ -51,20 +51,20 @@ certifi==2025.11.12
 cffi==2.0.0
 charset-normalizer==3.4.4
 cleo==2.1.0
-click==8.3.1
+click==8.4.2
 click-didyoumean==0.3.1
 click-plugins==1.1.1.2
 click-repl==0.3.0
 coverage==7.13.0
 crashtest==0.4.1
-cryptography==46.0.7
+cryptography==48.0.1
 datasets==2.21.0
 decorator==5.2.1
 dill==0.3.8
 distlib==0.4.0
-dulwich==1.1.0
+dulwich==1.2.5
 executing==2.2.1
-fastapi>=0.115.0
+fastapi>=0.139.2
 fastjsonschema==2.21.2
 filelock==3.20.3
 findpython==0.7.1
@@ -72,12 +72,12 @@ frozenlist==1.8.0
 fsspec==2024.6.1
 greenlet==3.3.0
 h11==0.16.0
-hf-xet==1.4.3
+hf-xet==1.5.2
 httpcore==1.0.9
 httptools==0.7.1
 httpx>=0.27.0
-huggingface-hub==1.3.7
-idna==3.11
+huggingface-hub==1.24.0
+idna==3.15
 iniconfig==2.3.0
 installer==0.7.0
 ipdb==0.13.13
@@ -95,7 +95,7 @@ MarkupSafe==3.0.3
 matplotlib-inline==0.1.7
 more-itertools==10.8.0
 mpmath==1.3.0
-msgpack==1.1.2
+msgpack==1.2.1
 multidict==6.7.0
 multiprocess==0.70.16
 mypy==1.19.1
@@ -124,13 +124,13 @@ pynvml>=11.5.0
 psycopg2-binary==2.9.11
 ptyprocess==0.7.0
 pure_eval==0.2.3
-pyarrow==21.0.0
+pyarrow==23.0.1
 pycparser==2.23
 pydantic==2.12.5
-pydantic-settings==2.12.0
+pydantic-settings==2.14.2
 pydantic_core==2.41.5
 Pygments==2.20.0
-PyJWT==2.12.0
+PyJWT==2.13.0
 pyproject_hooks==1.2.0
 pytest==9.0.3
 pytest-asyncio==1.3.0
@@ -138,10 +138,10 @@ pytest-cov==7.1.0
 pytest-mock==3.15.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
-python-engineio==4.12.3
+python-engineio==4.13.2
 python-json-logger==2.0.7
-python-multipart>=0.0.18
-python-socketio==5.15.0
+python-multipart>=0.0.31
+python-socketio==5.16.2
 pytz==2025.2
 PyYAML==6.0.3
 RapidFuzz==3.14.3
@@ -159,15 +159,20 @@ six==1.17.0
 sniffio==1.3.1
 SQLAlchemy==2.0.45
 stack-data==0.6.3
-starlette>=0.40.0
+starlette>=1.3.1
 sympy==1.14.0
 tenacity==8.5.0
 tokenizers==0.22.2  # 0.22.0 pinned huggingface-hub<1.0; 0.22.2 allows <2.0
 tomlkit==0.13.3
 torch==2.9.1
 tqdm==4.67.1
+typer==0.27.0  # transformers 5.5 CLI dep (pulls rich/annotated-doc)
+annotated-doc==0.0.4
+rich==15.0.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
 traitlets==5.14.3
-transformers==5.0.0  # Upgraded from 4.57.6; LFM2 requires >=4.55.0
+transformers==5.5.4  # Upgraded from 4.57.6; LFM2 requires >=4.55.0
 triton==3.5.1
 trove-classifiers==2025.9.11.17
 types-aiofiles==23.2.0.20240623
