@@ -4,6 +4,7 @@ MechInterp Studio (miStudio) - FastAPI Application
 Main application entry point for the backend API.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -162,3 +163,42 @@ async def emit_websocket_event(
     await ws_manager.emit_event(channel=channel, event=event, data=data)
 
     return {"status": "ok"}
+
+
+@app.post("/api/internal/steering/reconcile-worker")
+async def reconcile_steering_worker(
+    x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token"),
+):
+    """Respawn the steering worker when tasks are stranded without one.
+
+    Called by the steering_worker_reconcile beat task. The dedicated
+    steering worker exits after each generation task (solo pool ignores
+    max-tasks-per-child), and any death mode — self-exit, crash, kill —
+    can leave queued/restored messages with no consumer. This closes that
+    gap: steering queue non-empty + no live worker => spawn one.
+    Same auth/exposure model as /api/internal/ws/emit.
+    """
+    if x_internal_token is None or not hmac.compare_digest(x_internal_token, settings.internal_api_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    from .api.v1.endpoints.steering import (
+        _ensure_steering_worker_running,
+        _is_steering_worker_running,
+        _steering_queue_depth,
+    )
+
+    depth = await _steering_queue_depth()
+    if depth <= 0:
+        return {"status": "ok", "action": "none", "queue_depth": depth}
+
+    is_active, pid = await asyncio.to_thread(_is_steering_worker_running)
+    if is_active:
+        return {"status": "ok", "action": "none", "queue_depth": depth, "worker_pid": pid}
+
+    ok, new_pid = await _ensure_steering_worker_running()
+    return {
+        "status": "ok" if ok else "error",
+        "action": "spawned" if ok else "spawn_failed",
+        "queue_depth": depth,
+        "worker_pid": new_pid,
+    }
