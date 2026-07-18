@@ -236,11 +236,31 @@ export function SelectedFeatureCard({
         </button>
       </div>
 
-      {/* Label if available — single line, truncated */}
-      {feature.label && (
-        <p className="text-xs text-slate-400 mt-1 truncate" title={feature.label}>
-          {feature.label}
-        </p>
+      {/* Meta line: source cluster-profile + feature label (member meta rev).
+          The description tooltip surfaces the enriched meta when present. */}
+      {(feature.label || feature.sourceProfileName) && (
+        <div className="flex items-center gap-1.5 mt-1 min-w-0">
+          {feature.sourceProfileName && (
+            <span
+              className="shrink-0 max-w-[130px] truncate text-[10px] font-medium text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded px-1 py-px"
+              title={`Member of cluster profile "${feature.sourceProfileName}"`}
+            >
+              {feature.sourceProfileName}
+            </span>
+          )}
+          {feature.label && (
+            <p
+              className="text-xs text-slate-400 truncate min-w-0"
+              title={
+                typeof feature.meta?.['description'] === 'string'
+                  ? (feature.meta['description'] as string)
+                  : feature.label
+              }
+            >
+              {feature.label}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Primary Strength slider */}

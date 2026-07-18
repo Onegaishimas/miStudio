@@ -768,6 +768,7 @@ export const useSteeringStore = create<SteeringState>()(
             // round-trip re-exports the ORIGINAL author's words instead of
             // re-synthesizing from local features (contract-rev review #5)
             meta: (m as { meta?: Record<string, unknown> | null }).meta ?? null,
+            sourceProfileName: profile.name,
           }));
 
           // Budget snapshot (013): weights reconstructed from |strength| shares —
