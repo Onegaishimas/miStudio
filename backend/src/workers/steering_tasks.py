@@ -79,13 +79,32 @@ def _schedule_self_exit(delay_seconds: float = 2.0) -> None:
     threading.Thread(target=_terminate, daemon=True, name="steering-self-exit").start()
 
 
-from celery.signals import task_postrun
+from celery.signals import task_postrun, task_prerun
+
+from . import steering_worker_state as _worker_state
+
+_STEERING_TASK_PREFIX = "steering."
+
+
+@task_prerun.connect
+def _steering_task_prerun(sender=None, task_id=None, **kwargs):
+    # Busy marker: tells the SIGTERM handler to defer (mid-task SystemExit
+    # crashed the solo pool) and tells the API's ensure-worker not to
+    # SIGKILL a live generation (which stranded its acks_late message).
+    if sender is not None and sender.name.startswith(_STEERING_TASK_PREFIX) \
+            and _pidfile_is_ours():
+        _worker_state.write_busy_marker(task_id or sender.name)
 
 
 @task_postrun.connect
 def _steering_task_postrun(sender=None, **kwargs):
-    if sender is not None and sender.name in _SELF_EXIT_TASKS and _pidfile_is_ours():
-        _schedule_self_exit()
+    if sender is None or not _pidfile_is_ours():
+        return
+    if sender.name.startswith(_STEERING_TASK_PREFIX):
+        deferred = _worker_state.shutdown_deferred
+        _worker_state.clear_busy_marker()
+        if sender.name in _SELF_EXIT_TASKS or deferred:
+            _schedule_self_exit()
 
 logger = logging.getLogger(__name__)
 

@@ -120,8 +120,29 @@ def _signal_handler(signum, frame):
     Signal handler for SIGTERM and SIGINT.
 
     Runs emergency GPU cleanup before allowing the process to terminate.
+
+    COOPERATIVE when a steering task is executing: raising SystemExit inside
+    a running task (the self-exit SIGTERM landing after the next task already
+    started) crashed celery's solo pool with the unrecoverable "cannot unpack
+    non-iterable ExceptionInfo" TypeError and stranded the in-flight message.
+    Instead we defer: mark shutdown_deferred and return; task_postrun in
+    steering_tasks.py completes the shutdown once the task has finished.
     """
     sig_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+
+    try:
+        from ..workers import steering_worker_state as worker_state
+    except Exception:
+        worker_state = None
+
+    if worker_state is not None and worker_state.busy_task_id is not None:
+        worker_state.shutdown_deferred = True
+        logger.warning(
+            f"[Signal Handler] Received {sig_name} mid-task "
+            f"{worker_state.busy_task_id} — deferring shutdown to task end"
+        )
+        return
+
     logger.warning(f"[Signal Handler] Received {sig_name}, running GPU cleanup...")
     _emergency_gpu_cleanup()
 

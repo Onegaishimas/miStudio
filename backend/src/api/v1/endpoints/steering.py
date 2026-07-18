@@ -281,6 +281,26 @@ def _get_gpu_memory_mb() -> Optional[int]:
     return None
 
 
+async def _steering_queue_depth() -> int:
+    """Ready (not yet delivered) messages on the steering queue.
+
+    Celery's redis transport keeps each queue as a list named after it.
+    Used by the reconcile endpoint; errors report 0 (no spawn) rather than
+    failing the beat cycle.
+    """
+    try:
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(str(settings.redis_url))
+        try:
+            return int(await client.llen("steering"))
+        finally:
+            await client.aclose()
+    except Exception:
+        logger.exception("Could not read steering queue depth")
+        return 0
+
+
 def _is_steering_worker_running() -> tuple[bool, Optional[int]]:
     """Check if steering worker is running. Returns (is_running, pid)."""
     import os
@@ -321,17 +341,33 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
     Returns (success, pid) - success=True if worker is running,
     pid is the worker PID if known.
 
-    IMPORTANT: This function ALWAYS kills any existing worker before starting
-    a new one. This ensures each task gets a completely fresh Python/CUDA
-    environment, avoiding state corruption issues with --pool=solo.
+    Kills any existing IDLE worker before starting a new one, so each task
+    gets a completely fresh Python/CUDA environment (--pool=solo state
+    corruption). A worker that is MID-GENERATION is left alone: SIGKILLing
+    it stranded the in-flight acks_late message for the 12h visibility
+    timeout (zombie "started 0%" tasks + leaked guardrail slots). The
+    submitted task simply queues behind the running one; the post-task
+    self-exit + reconcile loop give it a fresh worker afterwards.
     """
     import subprocess
     import os
     import signal
 
-    # ALWAYS kill existing worker to ensure fresh state
+    from ....workers.steering_worker_state import read_busy_marker
+
     is_active, existing_pid = await asyncio.to_thread(_is_steering_worker_running)
     if is_active and existing_pid:
+        busy = await asyncio.to_thread(read_busy_marker)
+        # Honor the marker only when it was written by the live worker —
+        # a killed worker's leftover marker must not shield its successor.
+        # (Unreadable markers report pid -1 and are honored: fail busy-safe.)
+        if busy is not None and busy.get("pid") in (existing_pid, -1):
+            logger.info(
+                "Steering worker PID %s is mid-task %s — not killing; "
+                "new task will queue behind it",
+                existing_pid, busy.get("task_id"),
+            )
+            return True, existing_pid
         logger.info(f"Killing existing steering worker PID {existing_pid} for fresh start")
         try:
             os.kill(existing_pid, signal.SIGKILL)
@@ -352,12 +388,18 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
         # Wait for process to fully terminate
         await asyncio.sleep(1)
 
-    # Clean up stale PID file
+    # Clean up stale PID file + any leftover busy marker from the old worker
     if os.path.exists(PID_FILE):
         try:
             os.remove(PID_FILE)
         except Exception:
             pass
+    try:
+        from ....workers.steering_worker_state import _marker_path
+
+        _marker_path().unlink(missing_ok=True)
+    except Exception:
+        pass
 
     # Start new steering worker
     # Use settings.backend_dir which defaults to /app in containers

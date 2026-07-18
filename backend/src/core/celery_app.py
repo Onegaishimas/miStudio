@@ -281,6 +281,15 @@ celery_app.conf.update(
                 "queue": "low_priority",
             },
         },
+        # Steering worker reconcile — respawns the (self-exiting) steering
+        # worker when tasks are stranded on its queue with no consumer.
+        "steering-worker-reconcile": {
+            "task": "steering_worker_reconcile",
+            "schedule": 30.0,
+            "options": {
+                "queue": "low_priority",
+            },
+        },
     },
 
     # Worker settings
@@ -316,6 +325,7 @@ celery_app.autodiscover_tasks(
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes
+        "src.workers.steering_reconcile_task",  # Respawn steering worker for stranded queue
         "src.workers.sae_tasks",
         "src.workers.neuronpedia_tasks",
         "src.workers.neuronpedia_push_tasks",  # Push to local Neuronpedia
