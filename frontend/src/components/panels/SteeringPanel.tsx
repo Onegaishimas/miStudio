@@ -306,7 +306,10 @@ export function SteeringPanel() {
   };
 
   return (
-    <div className="h-full flex">
+    // Viewport-bound (100vh minus the sticky h-14 header): App's <main> has no
+    // height constraint, so h-full resolved to auto and BOTH columns fell back
+    // to document scrolling — the split-scroll regions never engaged.
+    <div className="h-[calc(100vh-3.5rem)] flex">
       {/* Sidebar */}
       <div
         className={`transition-all duration-300 ${
