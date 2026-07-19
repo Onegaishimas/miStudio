@@ -225,37 +225,37 @@ Clone the repository (run from the machine with kubectl access):
 ```bash
 git clone https://github.com/Onegaishimas/miStudio.git
 cd miStudio
-cp k8s/mistudio-deployment.yaml k8s/mistudio-deployment.local.yaml
+cp k8s/mistudio-deployment.yaml k8s/mistudio-deployment.yaml
 ```
 
 Work with `mistudio-deployment.local.yaml` for all edits. Apply the following substitutions:
 
 **Node selector:**
 ```bash
-sed -i "s/mcs-lnxgpu01/$GPU_NODE/g" k8s/mistudio-deployment.local.yaml
+sed -i "s/mcs-lnxgpu01/$GPU_NODE/g" k8s/mistudio-deployment.yaml
 ```
 
 **Host IP and domain:**
 ```bash
-sed -i "s/192\.168\.244\.61/$GPU_NODE_IP/g" k8s/mistudio-deployment.local.yaml
-sed -i "s/k8s-mistudio\.mcslab\.io/$DOMAIN/g" k8s/mistudio-deployment.local.yaml
-sed -i "s/k8s-mistudio\.hitsai\.net/$DOMAIN/g" k8s/mistudio-deployment.local.yaml
+sed -i "s/192\.168\.244\.61/$GPU_NODE_IP/g" k8s/mistudio-deployment.yaml
+sed -i "s/k8s-mistudio\.hitsai\.local/$DOMAIN/g" k8s/mistudio-deployment.yaml
+sed -i "s/k8s-mistudio\.hitsai\.net/$DOMAIN/g" k8s/mistudio-deployment.yaml
 ```
 
 **PostgreSQL password** (update both `POSTGRES_PASSWORD` value and all `DATABASE_URL` / `DATABASE_URL_SYNC` values):
 ```bash
-sed -i "s/value: mistudio$/value: $POSTGRES_PASSWORD/g" k8s/mistudio-deployment.local.yaml
-sed -i "s|mistudio:mistudio@postgres|mistudio:$POSTGRES_PASSWORD@postgres|g" k8s/mistudio-deployment.local.yaml
+sed -i "s/value: mistudio$/value: $POSTGRES_PASSWORD/g" k8s/mistudio-deployment.yaml
+sed -i "s|mistudio:mistudio@postgres|mistudio:$POSTGRES_PASSWORD@postgres|g" k8s/mistudio-deployment.yaml
 ```
 
 **SECRET_KEY:**
 ```bash
-sed -i "s/mistudio-secret-key-change-in-production/$SECRET_KEY/g" k8s/mistudio-deployment.local.yaml
+sed -i "s/mistudio-secret-key-change-in-production/$SECRET_KEY/g" k8s/mistudio-deployment.yaml
 ```
 
 Verify the substitutions look correct before applying:
 ```bash
-grep -E "hostname|SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL|host:" k8s/mistudio-deployment.local.yaml
+grep -E "hostname|SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL|host:" k8s/mistudio-deployment.yaml
 ```
 
 ---
@@ -265,7 +265,7 @@ grep -E "hostname|SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL|host:" k8s/mistudio-
 ### Step 1 — Apply the manifest
 
 ```bash
-kubectl apply -f k8s/mistudio-deployment.local.yaml
+kubectl apply -f k8s/mistudio-deployment.yaml
 ```
 
 Expected output:

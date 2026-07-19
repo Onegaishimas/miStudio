@@ -259,10 +259,10 @@ EOF
 If `DOMAIN` differs from `mistudio.hitsai.local`, update nginx config and compose env vars:
 ```bash
 # Update nginx config
-sed -i "s/dev-mistudio\.mcslab\.io/$DOMAIN/g" nginx/nginx.docker.conf
+sed -i "s/dkr-mistudio\.hitsai\.local/$DOMAIN/g" nginx/nginx.docker.conf
 
 # Update backend environment in docker-compose.yml
-sed -i "s|http://dev-mistudio\.mcslab\.io|http://$DOMAIN|g" docker-compose.yml
+sed -i "s|http://dev-mistudio\.hitsai\.local|http://$DOMAIN|g" docker-compose.yml
 ```
 
 ### Step 4 — Pull images
