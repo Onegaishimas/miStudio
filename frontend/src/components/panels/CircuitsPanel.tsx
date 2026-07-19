@@ -11,8 +11,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   GitBranch, ArrowUpRight, ArrowDownRight, Trash2, Download, Layers,
-  Pencil, Check, X as XIcon, FileDown,
+  Pencil, Check, X as XIcon, FileDown, Upload,
 } from 'lucide-react';
+import { useRef } from 'react';
 import { circuitsApi } from '../../api/circuits';
 import type { Circuit, CircuitSummary, CircuitEdge } from '../../types/circuits';
 import { RungChip } from '../circuits/RungChip';
@@ -36,11 +37,13 @@ function EdgeRow({ edge }: { edge: CircuitEdge }) {
       </td>
       <td className="py-1 pr-3 font-mono text-slate-400">R{edge.rung}</td>
       <td className="py-1 pr-3 text-slate-400">
-        {edge.coactivation?.pmi != null && `PMI ${edge.coactivation.pmi.toFixed(2)} `}
-        {edge.coactivation?.support != null && `· n=${edge.coactivation.support} `}
-        {edge.attribution?.score != null && `· attr ${edge.attribution.score.toFixed(2)}`}
-        {edge.weight_prior != null && ` · prior ${edge.weight_prior.toFixed(2)}`}
-        {edge.effect_size != null && ` · ES ${edge.effect_size.toFixed(2)}`}
+        {[
+          edge.coactivation?.pmi != null ? `PMI ${edge.coactivation.pmi.toFixed(2)}` : null,
+          edge.coactivation?.support != null ? `n=${edge.coactivation.support}` : null,
+          edge.attribution?.score != null ? `attr ${edge.attribution.score.toFixed(2)}` : null,
+          edge.weight_prior != null ? `prior ${edge.weight_prior.toFixed(2)}` : null,
+          edge.effect_size != null ? `ES ${edge.effect_size.toFixed(2)}` : null,
+        ].filter(Boolean).join(' · ')}
       </td>
       <td className="py-1 text-slate-500">
         {edge.validation_manifest_ref && (
@@ -55,7 +58,8 @@ function EdgeRow({ edge }: { edge: CircuitEdge }) {
 
 function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [circuit, setCircuit] = useState<Circuit | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);       // load failures only
+  const [saveError, setSaveError] = useState<string | null>(null); // keeps the draft alive (R2 B4)
   const [showPersistence, setShowPersistence] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState('');
@@ -65,16 +69,17 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
     circuitsApi.get(id).then(setCircuit).catch((e) => setError(String(e.message ?? e)));
   }, [id]);
 
-  if (error) return <p className="text-xs text-red-300 mt-2">{error}</p>;
+  if (error && !circuit) return <p className="text-xs text-red-300 mt-2">{error}</p>;
   if (!circuit) return <p className="text-xs text-slate-500 mt-2">Loading evidence…</p>;
 
   const edges = circuit.edges.filter((e) => showPersistence || e.type !== 'persistence');
   const hiddenCount = circuit.edges.length - edges.length;
 
   const saveEdit = () => {
+    setSaveError(null);
     circuitsApi.update(circuit.id, { name: draftName, narrative: draftNarrative })
       .then((updated) => { setCircuit(updated); setEditing(false); onChanged(); })
-      .catch((e) => setError(String(e.message ?? e)));
+      .catch((e) => setSaveError(String(e.message ?? e))); // draft survives (R2 B4)
   };
 
   return (
@@ -95,6 +100,9 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
             placeholder="Narrative (markdown)"
             aria-label="Circuit narrative"
           />
+          {saveError && (
+            <p className="text-xs text-red-300">{saveError}</p>
+          )}
           <div className="flex gap-2">
             <button onClick={saveEdit}
               className="flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-xs text-white">
@@ -110,8 +118,28 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             {circuit.narrative ? (
-              <div className="prose prose-invert prose-sm max-w-none text-slate-400">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{circuit.narrative}</ReactMarkdown>
+              <div className="text-sm text-slate-400">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    // House dark-theme markdown mapping (no typography plugin — R2 B10)
+                    p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
+                    strong: ({ children }) => <strong className="font-semibold text-slate-200">{children}</strong>,
+                    ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
+                    li: ({ children }) => <li className="text-slate-300">{children}</li>,
+                    code: ({ children }) => <code className="px-1 py-0.5 rounded bg-slate-900 text-slate-200 font-mono text-xs">{children}</code>,
+                    table: ({ children }) => (
+                      <div className="my-2 overflow-x-auto">
+                        <table className="text-xs border border-slate-700 border-collapse">{children}</table>
+                      </div>
+                    ),
+                    th: ({ children }) => <th className="px-2 py-1 border border-slate-700 text-slate-200">{children}</th>,
+                    td: ({ children }) => <td className="px-2 py-1 border border-slate-800 text-slate-300">{children}</td>,
+                  }}
+                >
+                  {circuit.narrative}
+                </ReactMarkdown>
               </div>
             ) : (
               <p className="text-xs text-slate-500 italic">No narrative yet.</p>
@@ -217,22 +245,51 @@ export function CircuitsPanel() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${name.toLowerCase().replace(/[^a-z0-9-_]+/g, '-')}.slices.json`;
+      const safe = name.toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/^-+|-+$/g, '') || 'circuit';
+      a.download = `${safe}.slices.json`;
       a.click();
       URL.revokeObjectURL(url);
     }).catch((e) => setError(String(e.message ?? e)));
 
+  const fileInput = useRef<HTMLInputElement>(null);
+  const onImportFile = (file: File) => {
+    file.text()
+      .then((text) => circuitsApi.importDefinition(JSON.parse(text)))
+      .then(refresh)
+      .catch((e) => setError(`Import failed: ${String(e.message ?? e)}`));
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-100 flex items-center gap-2">
-          <GitBranch className="w-5 h-5 text-violet-400" />
-          Circuits
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Cross-layer feature circuits with graded evidence. Every artifact shows its rung —
-          discovery results are Tier-1 (same-token) associations until validated.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-100 flex items-center gap-2">
+            <GitBranch className="w-5 h-5 text-violet-400" />
+            Circuits
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Cross-layer feature circuits with graded evidence. Every artifact shows its rung —
+            discovery results are Tier-1 (same-token) associations until validated.
+          </p>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onImportFile(f);
+            e.target.value = '';
+          }}
+        />
+        <button
+          onClick={() => fileInput.current?.click()}
+          className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-200 shrink-0"
+          title="Import a mistudio.circuit-definition/v1 file"
+        >
+          <Upload className="w-3.5 h-3.5" /> Import
+        </button>
       </div>
 
       {error && (

@@ -75,3 +75,22 @@ class TestAuditFixture:
         for c in cases:
             if c["expected"] == "attention_mediated":
                 assert run(c) == "attention_mediated"
+
+
+class TestDistinctnessPins:
+    """R2-T3: pin the R1-fixed ranking semantics so the exact regression
+    (lone strong signal de-ranking a computed edge) can never silently return."""
+
+    def test_lone_strong_prior_keeps_computed_distinctness_at_one(self):
+        r = classify_edge(weight_prior=0.99, up_top_tokens=["alpha"],
+                          down_top_tokens=["omega"], up_label="a", down_label="b")
+        assert r["type"] == "computed"
+        assert r["signals"]["distinctness"] == 1.0
+
+    def test_persistence_vote_counts_are_distinguishable(self):
+        two = classify_edge(weight_prior=0.95, up_top_tokens=["x"], down_top_tokens=["y"],
+                            up_label="same_thing", down_label="same_thing")
+        three = classify_edge(weight_prior=0.95, up_top_tokens=["x"], down_top_tokens=["x"],
+                              up_label="same_thing", down_label="same_thing")
+        assert two["type"] == three["type"] == "persistence"
+        assert three["signals"]["echo_confidence"] > two["signals"]["echo_confidence"]

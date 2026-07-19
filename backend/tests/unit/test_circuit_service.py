@@ -54,7 +54,7 @@ class TestCRUD:
     async def test_promote_is_badge_not_gate(self, db):
         c = await CircuitService.create(db, _payload())
         assert c.rung < 2  # NOT causally validated…
-        c = await CircuitService.promote(db, c)  # …and promotion still succeeds
+        c = await CircuitService.set_promoted(db, c, True)  # …and promotion still succeeds
         assert c.promoted is True
 
     @pytest.mark.asyncio
@@ -79,7 +79,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     async def test_list_filters(self, db):
         a = await CircuitService.create(db, _payload(name="A"))
-        await CircuitService.promote(db, a)
+        await CircuitService.set_promoted(db, a, True)
         await CircuitService.create(db, _payload(name="B"))
         promoted = await CircuitService.list(db, promoted=True)
         assert [x.name for x in promoted] == ["A"]

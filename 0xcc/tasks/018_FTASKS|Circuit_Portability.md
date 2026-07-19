@@ -1,10 +1,25 @@
 # Task List: Circuit Review, Evidence Ladder & Portability
 
 **Document ID:** 018_FTASKS|Circuit_Portability
-**Version:** 1.0
-**Status:** Planned
+**Version:** 1.1
+**Status:** ⏳ IMPLEMENTED (core) — 2 review rounds done (49+26 findings; R1: 21 fixed, R2: 15 fixed); R3 pending
 **Source:** 018_FPRD · 018_FTDD · 018_FTID · IDL-33, IDL-35 · CIRCUITS-002 A.1/A.9 normative
 **Sequencing:** Phases 1–2 GATE the increment — land before 016/017 implementation begins (002 order: d → b → c → a-hazards).
+
+**Progress (2026-07-19):** Phases 1–5 core SHIPPED (commits ccf6bf8, 9532bc4, f1be274 + R2 wave):
+ladder + TS mirror + grep-guard; contract + vendored schema + projection; circuits table (2 migrations,
+up/down/up verified) + service (contract-backed validation); classifier + audit fixture (O_HI calibrated,
+recorded in FTDD); REST (incl. IMPORT — BR-013 round-trip real-stack-tested lossless incl. model ref/
+granularity/created_at) + 9 MCP tools + Review UI (rung chips, markdown narrative, persistence toggle,
+caps meter, edit name/narrative, import/export/slices buttons, reversible promotion). 121 circuit pins.
+
+**Recorded deferrals (review R2-P1):**
+- `from_candidates` assembly seam → Feature 016 FTASKS (its discovery runs are the caller).
+- Member-level editing UI + list filter CONTROLS (API supports; UI renders none) → with 016's Review-tab expansion.
+- SteeringPanel rung chip on circuit-titled results → Feature 015 (its titling work).
+- Optimistic-concurrency precondition on PATCH/edge-writes → MUST land with 017's writer (R2-Q2: 3-writer world).
+- SQL-side pagination/edge_type filtering → with 016 (mass-created circuits make it real; R2 B8).
+- typed type_signals model at v1 freeze (R2-A2) + Phase 6 E2E/screenshot/manual → close-out session.
 
 | Phase | Tasks | Status |
 |-------|-------|--------|

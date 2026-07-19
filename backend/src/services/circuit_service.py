@@ -20,7 +20,11 @@ from ..schemas.circuit_definition import (
     CircuitDefinitionV1,
     to_layer_slice,
 )
-from ..schemas.cluster_profile import ClusterDefinitionV1, DefinitionProvenance
+from ..schemas.cluster_profile import (
+    ClusterDefinitionV1,
+    DefinitionModelRef,
+    DefinitionProvenance,
+)
 from ..schemas.evidence_ladder import EvidenceRung, circuit_rung
 
 logger = logging.getLogger(__name__)
@@ -81,6 +85,10 @@ class CircuitService:
             discovery_run_id=data.get("discovery_run_id"),
             model_id=data.get("model_id"),
         )
+        # Import faithfulness (R2 B1): a definition's authored created_at is
+        # evidence provenance — keep it instead of stamping DB-insert time.
+        if data.get("created_at") is not None:
+            circuit.created_at = data["created_at"]
         db.add(circuit)
         await db.commit()
         await db.refresh(circuit)
@@ -122,6 +130,8 @@ class CircuitService:
             merged["members"], merged["edges"], merged["budget"],
             merged["faithfulness"],
         )
+        if "granularity" in data and data["granularity"] is not None:
+            circuit.granularity = data["granularity"]
         circuit.name = defn.name
         circuit.narrative = defn.narrative
         circuit.saes = [s.model_dump(mode="json") for s in defn.saes]
@@ -150,10 +160,6 @@ class CircuitService:
         await db.refresh(circuit)
         return circuit
 
-    # Back-compat alias (tests/tools may call promote()).
-    @staticmethod
-    async def promote(db: AsyncSession, circuit: Circuit) -> Circuit:
-        return await CircuitService.set_promoted(db, circuit, True)
 
     # ── rung maintenance (017 writes validation results, then calls this) ──
 
@@ -164,7 +170,9 @@ class CircuitService:
         def _safe(e):
             try:
                 return EvidenceRung(max(0, min(3, int(e.get("rung", 0)))))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, AttributeError):
+                # AttributeError: a non-dict edge entry — exactly the malformed
+                # stored data this clamp exists to survive (R2 B9).
                 return EvidenceRung.MINED
         rungs = [_safe(e) for e in (circuit.edges or [])]
         circuit.rung = int(circuit_rung(rungs))
@@ -181,6 +189,7 @@ class CircuitService:
             circuit.edges, circuit.budget, circuit.faithfulness,
             getattr(circuit, "discovery", None),
         )
+        defn.model = DefinitionModelRef(mistudio_model_id=circuit.model_id)
         defn.provenance = DefinitionProvenance(
             created_at=circuit.created_at,
             exported_at=datetime.utcnow(),

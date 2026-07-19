@@ -1,5 +1,8 @@
 """circuits discovery column + timestamp server defaults
 
+NOTE: downgrade DROPS the discovery column — discovery provenance is lost on
+downgrade (inherent; re-import definitions to restore).
+
 Revision ID: 3e9c439d9085
 Revises: 9a7da58fcd50
 Create Date: 2026-07-19 21:16:18.372818
