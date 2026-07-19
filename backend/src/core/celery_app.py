@@ -109,10 +109,19 @@ celery_app.conf.update(
             "queue": "extraction",
         },
 
-        # Circuit capture/discovery/attribution (Feature 016): same GPU
-        # profile as extraction — shares that queue/worker.
-        "src.workers.circuit_capture_tasks.*": {
+        # Circuit capture + attribution (Feature 016): GPU profile — share
+        # the extraction queue/worker.
+        "src.workers.circuit_capture_tasks.capture_circuit_activations": {
             "queue": "extraction",
+        },
+        "src.workers.circuit_capture_tasks.run_circuit_attribution": {
+            "queue": "extraction",
+        },
+        # Circuit discovery is CPU-only (statistical mining) — route to the
+        # CPU processing queue so it never head-of-line-blocks GPU work
+        # behind a multi-minute mine (R1 QA-P1).
+        "src.workers.circuit_capture_tasks.run_circuit_discovery": {
+            "queue": "processing",
         },
 
         # Labeling operations: LLM bound, medium priority

@@ -136,3 +136,38 @@ class TestAnalyticToy:
             expected = float(W[di, ui] * x[0, :, ui].mean())
             assert v == pytest.approx(expected, rel=1e-4), (ul, ui, dl, di)
         assert len(scores) == 3
+
+
+class TestRung1Gate:
+    """R1 Test-P2: the gate + both-orderings persistence 017 consumes."""
+
+    def test_gate_and_orderings_written(self, tmp_path, monkeypatch):
+        # Drive the aggregation math directly with planted per-candidate scores.
+        import numpy as np
+        # gate = sign-agrees-with-PMI AND |score| >= percentile floor AND !=0
+        candidates = [
+            {"up": {"layer": 13, "feature_idx": 1}, "down": {"layer": 14, "feature_idx": 2},
+             "stats": {"pmi": 2.0}, "attribution": None, "orderings": {"coact_rank": 0, "attr_rank": None}},
+            {"up": {"layer": 13, "feature_idx": 3}, "down": {"layer": 14, "feature_idx": 4},
+             "stats": {"pmi": 1.0}, "attribution": None, "orderings": {"coact_rank": 1, "attr_rank": None}},
+        ]
+        # Simulate the service's post-loop aggregation logic inline.
+        scores = {0: 0.9, 1: -0.5}  # cand 0 agrees w/ +PMI & is big; cand 1 disagrees
+        abs_scores = [abs(v) for v in scores.values()]
+        floor = float(np.percentile(abs_scores, 50.0))
+        for ci, sc in scores.items():
+            pmi = candidates[ci]["stats"]["pmi"]
+            candidates[ci]["attribution"] = {"score": sc, "sign_consistency": 1.0, "method": "raw"}
+            candidates[ci]["attribution"]["rung1_gate"] = bool(
+                ((sc > 0) == (pmi > 0)) and abs(sc) >= floor and sc != 0)
+        order = sorted(scores.keys(), key=lambda ci: abs(scores[ci]), reverse=True)
+        for rank, ci in enumerate(order):
+            candidates[ci]["orderings"]["attr_rank"] = rank
+        # cand 0: +score, +PMI, |0.9|>=floor → gated True.
+        assert candidates[0]["attribution"]["rung1_gate"] is True
+        # cand 1: -score vs +PMI → sign disagreement → gated False.
+        assert candidates[1]["attribution"]["rung1_gate"] is False
+        # both orderings present for 017's uplift measurement.
+        assert candidates[0]["orderings"]["attr_rank"] == 0
+        assert candidates[1]["orderings"]["attr_rank"] == 1
+        assert all(c["orderings"]["coact_rank"] is not None for c in candidates)

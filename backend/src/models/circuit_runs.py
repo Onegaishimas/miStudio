@@ -83,6 +83,14 @@ class CircuitDiscoveryRun(Base):
     #   orderings: {coact_rank, attr_rank}}] — cap 2000, truncation noted.
     candidates = Column(JSONB, nullable=True)
 
+    # Attribution is a SEPARATE lifecycle on the same run (R1 QA-P2): a failed
+    # or cancelled attribution pass must not make the completed DISCOVERY
+    # present as failed. null until an attribution pass is launched.
+    attribution_status = Column(String(16), nullable=True)
+    # pending | running | completed | failed | cancelled
+    attribution_progress = Column(Float, nullable=True)
+    attribution_error = Column(Text, nullable=True)
+
     celery_task_id = Column(String(155), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

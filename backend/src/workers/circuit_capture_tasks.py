@@ -21,18 +21,24 @@ from .websocket_emitter import (
 logger = logging.getLogger(__name__)
 
 
-def _cancel_checker(db, model_cls, run_id):
-    """Throttled DB-status poll — returns a callable for the service loop."""
+def _cancel_checker(db, model_cls, run_id, status_field="status"):
+    """Throttled DB-status poll — returns a callable for the service loop.
+
+    Polls every 5th call but INCLUDING the first (R1 CR#8 — the old `% 5`
+    skipped the first four, so short runs never checked). `status_field`
+    lets attribution poll its own `attribution_status` (R1 QA-P2)."""
     state = {"count": 0}
 
     def check() -> bool:
+        # 1, 6, 11, … — first call polls, then every 5th.
+        should_poll = state["count"] % 5 == 0
         state["count"] += 1
-        if state["count"] % 5:
+        if not should_poll:
             return False
         row = db.query(model_cls).filter(model_cls.id == run_id).first()
         if row is not None:
             db.refresh(row)
-            return row.status == "cancelled"
+            return getattr(row, status_field) == "cancelled"
         return False
 
     return check
@@ -111,7 +117,8 @@ def run_circuit_attribution(self, run_id: str,
         try:
             result = CircuitAttributionService.run(
                 db, run_id, prompt_limit=prompt_limit,
-                cancel_check=_cancel_checker(db, CircuitDiscoveryRun, run_id),
+                cancel_check=_cancel_checker(db, CircuitDiscoveryRun, run_id,
+                                             status_field="attribution_status"),
                 progress_cb=lambda pct: emit_circuit_run_progress(
                     "attribution", run_id, pct),
             )
@@ -122,8 +129,10 @@ def run_circuit_attribution(self, run_id: str,
             run = db.query(CircuitDiscoveryRun).filter(
                 CircuitDiscoveryRun.id == run_id).first()
             if run is not None:
-                run.status = "failed"
-                run.error_message = str(e)[:2000]
+                # Attribution's OWN lifecycle — the completed discovery's
+                # status/report/candidates are untouched (R1 QA-P2).
+                run.attribution_status = "failed"
+                run.attribution_error = str(e)[:2000]
                 db.commit()
             emit_circuit_run_failed("attribution", run_id, str(e)[:500])
             raise

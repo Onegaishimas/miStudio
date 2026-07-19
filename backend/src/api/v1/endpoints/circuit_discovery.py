@@ -11,7 +11,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,11 +50,28 @@ class CaptureCreate(BaseModel):
                            "true → full capture")
 
 
+class DiscoverySeedRef(BaseModel):
+    """A seed reference: exactly one of feature_idx / cluster_profile_id.
+
+    Typed so a malformed ref (feature_idx null/NaN) is rejected with a 422 at
+    submit, not an int(None) TypeError deep in the worker (R1 CR#3)."""
+    layer: int = Field(..., ge=0)
+    feature_idx: Optional[int] = Field(None, ge=0)
+    cluster_profile_id: Optional[str] = Field(None, max_length=64)
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "DiscoverySeedRef":
+        if (self.feature_idx is None) == (self.cluster_profile_id is None):
+            raise ValueError(
+                "seed ref needs exactly one of feature_idx / cluster_profile_id")
+        return self
+
+
 class DiscoveryCreate(BaseModel):
     capture_run_id: str = Field(..., max_length=36)
     granularity: str = Field("feature", pattern="^(feature|cluster)$")
     mode: str = Field("open", pattern="^(seeded|open)$")
-    seed_refs: Optional[List[Dict[str, Any]]] = Field(
+    seed_refs: Optional[List[DiscoverySeedRef]] = Field(
         None, max_length=200,
         description="[{layer, feature_idx}|{layer, cluster_profile_id}]")
     s_min: int = Field(20, ge=1)
@@ -98,6 +115,11 @@ def _discovery_out(run: CircuitDiscoveryRun, *, include_candidates: bool) -> Dic
         "error_message": run.error_message, "params": run.params,
         "report": run.report,
         "candidate_count": len(run.candidates or []),
+        # Attribution's own lifecycle (R1 QA-P2) — the discovery status above
+        # stays 'completed' regardless of an attribution pass's outcome.
+        "attribution_status": run.attribution_status,
+        "attribution_progress": run.attribution_progress,
+        "attribution_error": run.attribution_error,
         "created_at": run.created_at, "updated_at": run.updated_at,
     }
     if include_candidates:
@@ -128,16 +150,22 @@ async def create_capture(body: CaptureCreate, db: AsyncSession = Depends(get_db)
     """Create a capture run. confirm=false runs the probe and stops at the
     cost estimate; POST /{id}/confirm launches the full capture."""
     from ....services.circuit_capture_service import (
-        CaptureConfigError, CircuitCaptureService)
+        CaptureConfigError, CaptureConflictError, CircuitCaptureService)
     from ....workers.circuit_capture_tasks import capture_circuit_activations
 
     def _create(sync_db):
+        # 409-on-concurrent in the SAME transaction as the insert, so two
+        # simultaneous requests can't both pass the check (R1 QA-P1).
+        if body.confirm:
+            CircuitCaptureService.assert_no_active_gpu_run(sync_db)
         return CircuitCaptureService.create_run(sync_db, body.model_dump())
 
     try:
         run = await _run_sync(db, _create)
     except CaptureConfigError as e:
         raise HTTPException(422, str(e))
+    except CaptureConflictError as e:
+        raise HTTPException(409, str(e))
     task = capture_circuit_activations.delay(run.id, confirmed=body.confirm)
     await db.execute(
         CircuitCaptureRun.__table__.update()
@@ -151,12 +179,22 @@ async def create_capture(body: CaptureCreate, db: AsyncSession = Depends(get_db)
 @router.post("/circuit-capture/{run_id}/confirm", status_code=202)
 async def confirm_capture(run_id: str, db: AsyncSession = Depends(get_db)):
     """Launch the full capture for an 'estimated' run."""
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
     from ....workers.circuit_capture_tasks import capture_circuit_activations
 
     run = await _capture_or_404(db, run_id)
     if run.status not in ("estimated", "failed"):
         raise HTTPException(409, f"Run is {run.status} — confirm applies to "
                                  f"'estimated' (or retryable 'failed') runs")
+
+    def _guard(sync_db):
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+
+    try:
+        await _run_sync(db, _guard)
+    except CaptureConflictError as e:
+        raise HTTPException(409, str(e))
     task = capture_circuit_activations.delay(run.id, confirmed=True)
     run.celery_task_id = task.id
     run.status = "pending"
@@ -220,7 +258,7 @@ async def delete_capture(run_id: str, db: AsyncSession = Depends(get_db)):
 async def create_discovery(body: DiscoveryCreate,
                            db: AsyncSession = Depends(get_db)):
     from ....services.circuit_discovery_service import (
-        CircuitDiscoveryService, DiscoveryConfigError)
+        CircuitDiscoveryService, DiscoveryConfigError, DiscoveryConflictError)
     from ....workers.circuit_capture_tasks import run_circuit_discovery
 
     def _create(sync_db):
@@ -230,6 +268,8 @@ async def create_discovery(body: DiscoveryCreate,
         run = await _run_sync(db, _create)
     except DiscoveryConfigError as e:
         raise HTTPException(422, str(e))
+    except DiscoveryConflictError as e:
+        raise HTTPException(409, str(e))
     task = run_circuit_discovery.delay(run.id)
     await db.execute(
         CircuitDiscoveryRun.__table__.update()
@@ -300,8 +340,13 @@ async def start_attribution(run_id: str, body: AttributionCreate,
                                  f"attribution needs a completed run")
     if not run.candidates:
         raise HTTPException(409, "Run has no candidates to attribute")
-    run.status = "running"  # attribution reuses the run row's status/progress
-    run.progress = 0.0
+    # Separate attribution lifecycle (R1 QA-P2): never overwrite the completed
+    # discovery's status. 409 if an attribution pass is already in flight.
+    if run.attribution_status in ("pending", "running"):
+        raise HTTPException(409, "An attribution pass is already in flight")
+    run.attribution_status = "pending"
+    run.attribution_progress = 0.0
+    run.attribution_error = None
     await db.commit()
     task = run_circuit_attribution.delay(run.id, prompt_limit=body.prompt_limit)
     run.celery_task_id = task.id
