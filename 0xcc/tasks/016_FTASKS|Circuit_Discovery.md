@@ -23,7 +23,7 @@ Recorded by 018 reviews R1–R3 (records in `.claude/context/sessions/review_fea
 016 executes from this file, so they live here, not just in 018's FTASKS.
 
 ### Task 0.1: Encoder-weight orientation pins (R2-A4 — GATES the IDL-32 weight prior, Phase 3/4)
-- [ ] Unit tests for `resolve_encoder_weight` covering BOTH SAE formats (community_standard + internal orientation), mirroring the `resolve_decoder_weight` conventions. The cosine prior `W_dec(Lᵢ) @ W_enc(Lⱼ)` is silently wrong if orientation flips — pin before any prior computation lands.
+- [x] DONE (e990573: test_weight_resolvers.py — all 3 SAE formats + tied self-cosine identity) Unit tests for `resolve_encoder_weight` covering BOTH SAE formats (community_standard + internal orientation), mirroring the `resolve_decoder_weight` conventions. The cosine prior `W_dec(Lᵢ) @ W_enc(Lⱼ)` is silently wrong if orientation flips — pin before any prior computation lands.
 
 ### Task 0.2: `from_candidates` seam on CircuitService (R1 deferral)
 - [ ] `CircuitService.from_candidates(discovery_run, selection) -> Circuit` — the discovery→circuit promotion path 018 stubbed out; discovery provenance + run id threading pinned.
@@ -40,48 +40,48 @@ Recorded by 018 reviews R1–R3 (records in `.claude/context/sessions/review_fea
 ## Phase 1: Store IO
 
 ### Task 1.1: circuit_capture_store.py
-- [ ] EventWriter/Reader (sorted memmap + per-feature index) · ErrNormWriter/Reader · optional AttnTopKWriter/Reader · u16 bounds asserts · unit round-trips ×3 artifact kinds
+- [x] DONE (e990573) EventWriter/Reader (sorted memmap + per-feature index) · ErrNormWriter/Reader · optional AttnTopKWriter/Reader · u16 bounds asserts · unit round-trips ×3 artifact kinds
 
 ## Phase 2: Capture
 
 ### Task 2.1: Tables + migration
-- [ ] `circuit_capture_runs` (manifest incl. per-document 80/20 split + sae_fingerprints) + `circuit_discovery_runs` (params, report, candidates w/ BOTH orderings) · Alembic single-head check, up+down
+- [x] DONE (e990573: migration c3d4e5f6a7b8 up/down/up) `circuit_capture_runs` (manifest incl. per-document 80/20 split + sae_fingerprints) + `circuit_discovery_runs` (params, report, candidates w/ BOTH orderings) · Alembic single-head check, up+down
 
 ### Task 2.2: Capture service + task
-- [ ] Probe→estimate · ONE-forward-pass-per-batch multi-layer capture → encode → `max(θ_floor, ε·max_act)` threshold (floor-only when max_act missing) → events + errnorms (+ attention top-k opt-in) · progress/cancel · split drawn at capture (seeded, disjointness unit-tested) · stale-flag on SAE update
+- [x] DONE (b495620: probe/estimate/confirm, atomic manifest, stale-flag, containment delete) Probe→estimate · ONE-forward-pass-per-batch multi-layer capture → encode → `max(θ_floor, ε·max_act)` threshold (floor-only when max_act missing) → events + errnorms (+ attention top-k opt-in) · progress/cancel · split drawn at capture (seeded, disjointness unit-tested) · stale-flag on SAE update
 
 ### Task 2.3: Endpoints + WS
-- [ ] Estimate/confirm gate · list/delete · WS `capture/{id}` · hostile-config tests
+- [x] DONE (b495620: circuit_discovery.py — 202/409/cancel/delete; WS circuit-capture/{id}) Estimate/confirm gate · list/delete · WS `capture/{id}` · hostile-config tests
 
 ## Phase 3: Statistics + discovery
 
 ### Task 3.1: circuit_stats_service.py
-- [ ] PMI/lift/Spearman via (doc,pos) merge-join · support floor · **circular-shift null (within-document; marginal-rate preservation PINNED; whole-corpus permutation unreachable)** · BH-FDR q=0.05 · held-out replication on the capture-time split · synthetic-store tests: planted edges rank, planted high-base-rate pairs DON'T surface
+- [x] DONE (e990573: PMI/null/FDR/replication; planted-world pins). NOTE: FDR uses POOLED-standardized p (per-pair floor 1/(K+1) unreachable by BH — spec deviation recorded in FTDD) PMI/lift/Spearman via (doc,pos) merge-join · support floor · **circular-shift null (within-document; marginal-rate preservation PINNED; whole-corpus permutation unreachable)** · BH-FDR q=0.05 · held-out replication on the capture-time split · synthetic-store tests: planted edges rank, planted high-base-rate pairs DON'T surface
 
 ### Task 3.2: Granularities
-- [ ] Supernode units from cluster profiles: `A_C(t)=max` (mean alt recorded) · cohesion-floor eligibility · cluster_ref candidates · drill-down (same stats restricted to two clusters' members) · Cluster default for seeded mode
+- [x] DONE (b495620: supernode A_C=max, cohesion floor from budget.G, seeds survive unit cap). Drill-down (member-pair restriction) → deferred to review polish Supernode units from cluster profiles: `A_C(t)=max` (mean alt recorded) · cohesion-floor eligibility · cluster_ref candidates · drill-down (same stats restricted to two clusters' members) · Cluster default for seeded mode
 
 ### Task 3.3: Discovery service + endpoints
-- [ ] Orchestration + report assembly (null summary, FDR discipline, replication rate, stage counts) · candidate cap w/ both-orderings-preserving truncation · uncovered-seed-members report · stale refusal + force · WS + tests
+- [x] DONE (b495620: report + no-silent-caps + uncovered-seeds + stale refusal/force; E2E pinned) Orchestration + report assembly (null summary, FDR discipline, replication rate, stage counts) · candidate cap w/ both-orderings-preserving truncation · uncovered-seed-members report · stale refusal + force · WS + tests
 
 ## Phase 4: Attribution
 
 ### Task 4.1: Pass-through + scores
-- [ ] SAE pass-through module (`x := x̂ + ε`, frozen weights) — **numerical-identity test vs clean model (the ε guard)** · backward batched BY DOWNSTREAM unit · `attr = Σ g·a` (IG-lite flag) · supernode subgradient-to-argmax documented · toy-model analytic test
+- [x] DONE (b495620: ε-identity pinned on LOSSY SAE, analytic toy-model gradient check, one-backward-per-downstream). IG-lite flag → deferred (raw default disclosed) SAE pass-through module (`x := x̂ + ε`, frozen weights) — **numerical-identity test vs clean model (the ε guard)** · backward batched BY DOWNSTREAM unit · `attr = Σ g·a` (IG-lite flag) · supernode subgradient-to-argmax documented · toy-model analytic test
 
 ### Task 4.2: Attribution task + endpoint
-- [ ] `POST /circuit-discovery/{id}/attribution` · rung-1 gate (sign agreement + percentile floor) recorded per candidate · both orderings persisted for 017's uplift · gradient checkpointing + layer-subset fallback · wall-clock + peak-VRAM in report (envelope ≤1.5× capture)
+- [x] DONE (b495620: rung-1 gate, both orderings, VRAM/wall-clock envelope). Gradient-checkpointing/layer-subset fallback → deferred to GPU-integration hardening `POST /circuit-discovery/{id}/attribution` · rung-1 gate (sign agreement + percentile floor) recorded per candidate · both orderings persisted for 017's uplift · gradient checkpointing + layer-subset fallback · wall-clock + peak-VRAM in report (envelope ≤1.5× capture)
 
 ## Phase 5: MCP + frontend + docs
 
 ### Task 5.1: MCP circuits tools
-- [ ] 5 tools (capture start/list, discovery run/get, attribution run) · new `circuits` category via gating + compose/k8s env defaults + mcp-server.md · lag-0 disclosure in docstrings
+- [x] DONE (618f14f: 5 tools in circuits category, lag-0 discipline in docstrings) 5 tools (capture start/list, discovery run/get, attribution run) · new `circuits` category via gating + compose/k8s env defaults + mcp-server.md · lag-0 disclosure in docstrings
 
 ### Task 5.2: CircuitsPanel
 - [ ] Capture tab (config + attention toggle → estimate → confirm; runs list w/ split + stale) · Discovery tab (granularity toggle w/ Cluster-seeded default, floors, candidate table w/ PMI/support/null-pct/attr/replicated, run-report card pinned, lag-0 notice, attribution action)
 
 ### Task 5.3: Docs deliverables
-- [ ] `0xcc/docs/tier-2.5-attention-mediated-mining.md` (A.8 expanded — BR-023 deliverable) · manual `circuits.md` (capture→mine→attribute; honesty framing) · mcp-server.md category
+- [x] DONE (618f14f: tier-2.5 design doc + manual circuits.md + concepts/evidence-ladder + concepts/tier-2.5; build green) `0xcc/docs/tier-2.5-attention-mediated-mining.md` (A.8 expanded — BR-023 deliverable) · manual `circuits.md` (capture→mine→attribute; honesty framing) · mcp-server.md category
 
 ## Phase 6: Verification + acceptance
 
