@@ -20,7 +20,7 @@ class TestConfig:
         cats = make_settings().enabled_categories()
         assert "admin" not in cats
         assert {"read", "groups", "steering", "labeling", "experiments",
-                "profiles", "jobs"} == cats
+                "profiles", "circuits", "jobs"} == cats
         # Unified MCP categories are opt-in only
         assert not any(c.startswith("millm_") for c in cats)
 
