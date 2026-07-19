@@ -177,7 +177,7 @@ export interface DiscoveryReport {
     tested: number;
     passed: number;
   };
-  replication: { tested: number; replicated: number; rate: number };
+  replication: { tested: number; replicated: number; rate: number | null };
   counts_by_stage: {
     pairs_considered: number;
     post_support: number;

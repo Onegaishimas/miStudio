@@ -43,11 +43,17 @@ DEFAULT_EPSILON = 0.1
 DEFAULT_THETA_FLOOR = 0.01
 DEFAULT_SPLIT_RATIO = 0.8
 DEFAULT_SAMPLE_CAP = 2000
-EVENT_BYTES = 10  # sizeof EVENT_DTYPE row
+EVENT_BYTES = 12  # sizeof EVENT_DTYPE row (u32 feature_idx widened it from 10)
+STORE_SIZE_MULTIPLIER = 5.0   # abort a capture exceeding 5× its own estimate
+MIN_FREE_DISK_BYTES = 5 * 2**30  # refuse/abort if <5 GB free on the data volume
 
 
 class CaptureConfigError(ValueError):
     """Invalid capture configuration — surfaces as a 422."""
+
+
+class CaptureConflictError(RuntimeError):
+    """A GPU circuit task is already active — surfaces as a 409."""
 
 
 def captures_dir() -> Path:
@@ -55,6 +61,21 @@ def captures_dir() -> Path:
 
 
 class CircuitCaptureService:
+    # ── concurrency guard ────────────────────────────────────────────────
+
+    @staticmethod
+    def assert_no_active_gpu_run(db) -> None:
+        """One GPU circuit task at a time on the single 3090 (R1 QA-P1 — the
+        endpoint docstring promised 409-on-concurrent). Capture is GPU;
+        attribution is GPU too but runs on the discovery row, checked there."""
+        active = db.query(CircuitCaptureRun).filter(
+            CircuitCaptureRun.status.in_(
+                ("pending", "estimating", "running"))).first()
+        if active is not None:
+            raise CaptureConflictError(
+                f"Capture {active.id} is already {active.status} — one GPU "
+                f"circuit capture runs at a time; wait or cancel it first")
+
     # ── run creation / validation (called from the endpoint) ─────────────
 
     @staticmethod
@@ -94,6 +115,18 @@ class CircuitCaptureService:
             saes[entry["sae_id"]] = sae
             if model_id is None:
                 model_id = sae.model_id
+            # Wide-SAE bound: feature_idx is u32, but assert d_sae fits so a
+            # broken SAE record surfaces at config time, not mid-capture.
+            if sae.n_features is not None and sae.n_features > 2**32:
+                raise CaptureConfigError(
+                    f"SAE {sae.id} has {sae.n_features} features — exceeds u32")
+
+        # model_id must resolve, else the tokenization filter matches NULL and
+        # fails confusingly (R1 CR#4).
+        if model_id is None:
+            raise CaptureConfigError(
+                "model_id could not be resolved — pass it explicitly or use "
+                "SAEs whose model_id is set")
 
         tokenization = db.query(DatasetTokenization).filter(
             DatasetTokenization.dataset_id == dataset_id,
@@ -240,7 +273,7 @@ class CircuitCaptureService:
             layer_indices = sorted(saes.keys())
             attn_cfg = manifest.get("attention_capture") or None
 
-            run.status = "running"
+            run.status = "estimating"
             run.progress = 0.0
             db.commit()
 
@@ -267,9 +300,22 @@ class CircuitCaptureService:
                 db.commit()
                 return {"status": "estimated", "estimate": estimate}
 
+            run.status = "running"
+            db.commit()
+
             # ── full capture ─────────────────────────────────────────────
             store_dir = captures_dir() / run.id
             store_dir.mkdir(parents=True, exist_ok=True)
+            # Store-size guardrail (R1 QA-P1): abort if the true event rate
+            # blows past the probe estimate, or the volume runs low on space.
+            size_ceiling = max(events_est * EVENT_BYTES * STORE_SIZE_MULTIPLIER,
+                               64 * 2**20)
+            if shutil.disk_usage(store_dir).free < MIN_FREE_DISK_BYTES:
+                run.status = "failed"
+                run.error_message = "Insufficient free disk on the data volume"
+                db.commit()
+                shutil.rmtree(store_dir, ignore_errors=True)
+                return {"status": "failed", "reason": "disk"}
             writers = {L: open_writers(store_dir, L,
                                        attention=bool(attn_cfg and L in
                                                       (attn_cfg.get("layers") or [])))
@@ -298,6 +344,18 @@ class CircuitCaptureService:
                     floor_by_layer={e["layer"]: e["theta_floor"]
                                     for e in manifest["layers"]},
                     probe_max=probe_max, attn_cfg=attn_cfg)
+                # Running byte estimate from buffered events (u32 idx + u16
+                # pos + u32 doc + f16 act ≈ EVENT_BYTES/event, plus errnorm).
+                buffered = sum(ev.count for ev, _en, _at in writers.values())
+                if buffered * EVENT_BYTES > size_ceiling:
+                    run.status = "failed"
+                    run.error_message = (
+                        f"Capture exceeded {STORE_SIZE_MULTIPLIER}× its size "
+                        f"estimate ({buffered} events) — aborted to protect "
+                        f"the data volume; lower sample_cap or raise epsilon")
+                    db.commit()
+                    shutil.rmtree(store_dir, ignore_errors=True)
+                    return {"status": "failed", "reason": "size_ceiling"}
                 pct = min(99.0, (batch_start + batch_size) / n_docs * 100.0)
                 run.progress = pct
                 db.commit()
@@ -327,6 +385,12 @@ class CircuitCaptureService:
 
             _write_manifest_atomic(store_dir / "manifest.json", manifest)
 
+            # Last-writer race: a cancel between the final cancel-check and here
+            # must NOT be clobbered by 'completed' (R1 CR#6). Re-read status.
+            db.refresh(run)
+            if run.status == "cancelled":
+                shutil.rmtree(store_dir, ignore_errors=True)
+                return {"status": "cancelled"}
             run.manifest = manifest
             run.store_path = str(store_dir)
             run.events_total = events_total

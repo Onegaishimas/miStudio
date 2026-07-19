@@ -28,12 +28,15 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-U16_MAX = 65_536  # u16 columns (token_pos, feature_idx) hard bound — asserted at write
+U16_MAX = 65_536  # token positions are u16 (docs ≤512 tokens) — asserted at write
 
 EVENT_DTYPE = np.dtype([
     ("doc_id", np.uint32),
     ("token_pos", np.uint16),
-    ("feature_idx", np.uint16),
+    # u32: wide SAEs (Gemma Scope 16k–131k latents) exceed u16 (R1 CR#2 —
+    # a 65k+ feature index used to abort the whole capture). The merge-join
+    # keys pack only doc_id<<16|token_pos, so feature width is independent.
+    ("feature_idx", np.uint32),
     ("act", np.float16),
 ])
 
@@ -118,14 +121,13 @@ class EventWriter(_BufferedWriter):
                feature_idx: np.ndarray, acts: np.ndarray) -> None:
         feature_idx = np.asarray(feature_idx)
         token_pos = np.asarray(token_pos)
-        if len(feature_idx) and int(feature_idx.max()) >= U16_MAX:
-            raise ValueError(f"feature_idx >= {U16_MAX} does not fit u16")
+        # token_pos is u16 (docs are ≤512 tokens); feature_idx is u32 (wide SAEs).
         if len(token_pos) and int(token_pos.max()) >= U16_MAX:
             raise ValueError(f"token_pos >= {U16_MAX} does not fit u16")
         arr = np.empty(len(feature_idx), dtype=EVENT_DTYPE)
         arr["doc_id"] = np.asarray(doc_ids, dtype=np.uint32)
         arr["token_pos"] = token_pos.astype(np.uint16)
-        arr["feature_idx"] = feature_idx.astype(np.uint16)
+        arr["feature_idx"] = feature_idx.astype(np.uint32)
         arr["act"] = np.asarray(acts, dtype=np.float16)
         self._append(arr)
 

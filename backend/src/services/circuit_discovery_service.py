@@ -40,6 +40,10 @@ class DiscoveryConfigError(ValueError):
     """Invalid discovery configuration — surfaces as a 422."""
 
 
+class DiscoveryConflictError(RuntimeError):
+    """A discovery is already active on this store — surfaces as a 409."""
+
+
 class CircuitDiscoveryService:
     @staticmethod
     def create_run(db, config: Dict[str, Any]) -> CircuitDiscoveryRun:
@@ -63,6 +67,15 @@ class CircuitDiscoveryService:
             raise DiscoveryConfigError(f"Unknown mode {mode!r}")
         if mode == "seeded" and not config.get("seed_refs"):
             raise DiscoveryConfigError("seeded mode requires seed_refs")
+        # 409-on-concurrent: don't race two mines on the same store's readers
+        # (R1 QA-P1). Same transaction as the insert below.
+        active = db.query(CircuitDiscoveryRun).filter(
+            CircuitDiscoveryRun.capture_run_id == capture.id,
+            CircuitDiscoveryRun.status.in_(("pending", "running"))).first()
+        if active is not None:
+            raise DiscoveryConflictError(
+                f"Discovery {active.id} is already {active.status} on this "
+                f"capture store — wait or cancel it")
         params = {
             "capture_run_id": capture.id,
             "granularity": granularity,
@@ -195,6 +208,12 @@ class CircuitDiscoveryService:
         # ── null + FDR ───────────────────────────────────────────────────
         null_results = []
         for j, cand in enumerate(tested):
+            # The null loop is the dominant cost — poll cancellation here too,
+            # not only in pair-generation (R1 CR#5).
+            if cancel_check is not None and j % 25 == 0 and cancel_check():
+                run.status = "cancelled"
+                db.commit()
+                return {"status": "cancelled"}
             null_results.append(stats.null_test(
                 cand["up"]["keys"], cand["down"]["keys"], doc_lengths,
                 k_shuffles=p["null_shuffles"],
@@ -283,6 +302,11 @@ class CircuitDiscoveryService:
             "echo_filter": None,        # 018 classifier feeds counts back
             "wall_clock_seconds": round(time.monotonic() - t0, 1),
         }
+        # Last-writer race: don't clobber a cancel that landed during the
+        # final stages (R1 CR#6).
+        db.refresh(run)
+        if run.status == "cancelled":
+            return {"status": "cancelled"}
         run.candidates = candidates
         run.report = report
         run.status = "completed"

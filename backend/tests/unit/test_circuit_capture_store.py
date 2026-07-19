@@ -55,11 +55,19 @@ class TestEventRoundTrip:
         keys = EventReader(store, 13).feature_token_keys(5)
         assert keys.tolist() == [(1 << 16) | 3, (1 << 16) | 4]
 
-    def test_u16_bounds_asserted(self, store):
+    def test_wide_feature_idx_is_u32(self, store):
+        # Gemma Scope SAEs have 16k–131k latents — feature_idx must not be
+        # capped at u16 (R1 CR#2). token_pos stays u16 (docs ≤512 tokens).
         ev, _, _ = open_writers(store, 13)
-        with pytest.raises(ValueError, match="feature_idx"):
-            ev.append(np.array([0]), np.array([0]),
-                      np.array([70_000]), np.array([1.0]))
+        ev.append(np.array([0, 0]), np.array([1, 2]),
+                  np.array([70_000, 131_071]), np.array([1.0, 2.0]))
+        ev.finalize()
+        r = EventReader(store, 13)
+        assert set(r.feature_ids) == {70_000, 131_071}
+        assert r.feature_events(131_071)["act"].astype(float).tolist() == [2.0]
+
+    def test_token_pos_u16_bound_asserted(self, store):
+        ev, _, _ = open_writers(store, 13)
         with pytest.raises(ValueError, match="token_pos"):
             ev.append(np.array([0]), np.array([70_000]),
                       np.array([1]), np.array([1.0]))

@@ -441,6 +441,9 @@ function CaptureTab() {
   const [error, setError] = useState<string | null>(null);
 
   const [captures, setCaptures] = useState<CircuitCapture[]>([]);
+  // Guards the recursive estimate poll against firing after unmount (R1 CR#9).
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   useEffect(() => {
     if (datasets.length === 0) fetchDatasets();
@@ -496,11 +499,15 @@ function CaptureTab() {
 
   // After an estimate POST, poll the run until it reaches 'estimated' to show the card.
   const pollCapture = (id: string) => {
-    const tick = () => circuitsApi.getCapture(id).then((run) => {
-      setEstimateFor(run);
-      refreshCaptures();
-      if (isActive(run.status)) setTimeout(tick, 2000);
-    }).catch((e) => setError(String(e.message ?? e)));
+    const tick = () => {
+      if (!mountedRef.current) return;
+      circuitsApi.getCapture(id).then((run) => {
+        if (!mountedRef.current) return;
+        setEstimateFor(run);
+        refreshCaptures();
+        if (isActive(run.status)) setTimeout(tick, 2000);
+      }).catch((e) => { if (mountedRef.current) setError(String(e.message ?? e)); });
+    };
     tick();
   };
 
@@ -729,10 +736,14 @@ function RunReportCard({ report }: { report: DiscoveryReport }) {
       <div className="flex items-baseline gap-3">
         <div>
           <div className="text-2xl font-semibold text-emerald-300">
-            {(report.replication.rate * 100).toFixed(0)}%
+            {report.replication.rate == null
+              ? 'n/a'
+              : `${(report.replication.rate * 100).toFixed(0)}%`}
           </div>
           <div className="text-[11px] text-slate-500">
-            replication rate ({report.replication.replicated}/{report.replication.tested} held-out)
+            {report.replication.rate == null
+              ? 'replication rate — no held-out candidates tested'
+              : `replication rate (${report.replication.replicated}/${report.replication.tested} held-out)`}
           </div>
         </div>
         <div className="flex-1" />

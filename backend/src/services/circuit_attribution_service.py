@@ -191,12 +191,15 @@ class CircuitAttributionService:
                 layer_modules[L] = get_hookable_module(
                     structure.layers_module[L], "residual", structure)
 
-            run.status = "running"
+            # Attribution's OWN lifecycle fields — the completed discovery's
+            # status/report/candidates stay intact (R1 QA-P2).
+            run.attribution_status = "running"
+            run.attribution_progress = 0.0
             db.commit()
 
             for di in range(len(dataset)):
                 if cancel_check is not None and cancel_check():
-                    run.status = "cancelled"
+                    run.attribution_status = "cancelled"
                     db.commit()
                     return {"status": "cancelled"}
                 batch = dataset[di:di + 1]
@@ -216,8 +219,9 @@ class CircuitAttributionService:
                     totals[k] = totals.get(k, 0.0) + v
                     sign_counts.setdefault(k, []).append(
                         1 if v > 0 else (-1 if v < 0 else 0))
+                run.attribution_progress = (di + 1) / len(dataset) * 100.0
                 if progress_cb is not None:
-                    progress_cb((di + 1) / len(dataset) * 100.0)
+                    progress_cb(run.attribution_progress)
 
             # ── aggregate per candidate ─────────────────────────────────
             cand_scores: List[float] = []
@@ -269,8 +273,9 @@ class CircuitAttributionService:
             }
             run.candidates = candidates
             run.report = report
-            run.status = "completed"
-            run.progress = 100.0
+            # Discovery stays 'completed'; attribution has its own terminal.
+            run.attribution_status = "completed"
+            run.attribution_progress = 100.0
             db.commit()
             return {"status": "completed",
                     "attributed": len(expanded),

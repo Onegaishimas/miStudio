@@ -155,3 +155,28 @@ class TestDiscoveryEndToEnd:
         with pytest.raises(DiscoveryConfigError, match="seed_refs"):
             CircuitDiscoveryService.create_run(sync_db, {
                 "capture_run_id": cap.id, "mode": "seeded"})
+
+
+class TestCancellation:
+    """R1 Test-P2 / CR#5/#6: a cancel actually stops the mine and is not
+    clobbered by a 'completed' write."""
+
+    def test_cancel_during_run_stops_and_persists_cancelled(self, sync_db, tmp_path):
+        _build_store(tmp_path)
+        cap = _capture_row(sync_db, tmp_path)
+        run = CircuitDiscoveryService.create_run(sync_db, {
+            "capture_run_id": cap.id, "granularity": "feature",
+            "mode": "open", "s_min": 20, "null_shuffles": 50})
+
+        calls = {"n": 0}
+
+        def cancel_after_two():
+            calls["n"] += 1
+            return calls["n"] >= 2
+
+        result = CircuitDiscoveryService.run(
+            sync_db, run.id, cancel_check=cancel_after_two)
+        assert result["status"] == "cancelled"
+        sync_db.refresh(run)
+        assert run.status == "cancelled"
+        assert run.candidates is None  # never wrote 'completed' results

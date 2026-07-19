@@ -148,3 +148,26 @@ class TestPooledNull:
 
     def test_pooled_empty(self):
         assert pooled_null_pvalues([]).tolist() == []
+
+
+class TestPooledNullEdges:
+    """R1 Test-P3: the FDR-making fix must not silently return 0 or all."""
+
+    def test_zero_variance_null(self):
+        # A pair whose null never varies (sd==0): observed>mu → z=inf (kept),
+        # observed==mu → z=0. Must not raise / NaN.
+        from src.services.circuit_stats_service import NullResult
+        nr_hit = NullResult(observed_n_ud=10, null_n_ud=np.zeros(20),
+                            null_percentile=100.0, p_value=1/21, threshold_n_ud=0.0)
+        nr_flat = NullResult(observed_n_ud=0, null_n_ud=np.zeros(20),
+                             null_percentile=0.0, p_value=1.0, threshold_n_ud=0.0)
+        p = pooled_null_pvalues([nr_hit, nr_flat])
+        assert 0.0 <= p[0] <= 1.0 and 0.0 <= p[1] <= 1.0
+        assert p[0] < p[1]  # the hit is more significant than the flat pair
+
+    def test_single_pair_pool(self):
+        from src.services.circuit_stats_service import NullResult
+        nr = NullResult(observed_n_ud=50, null_n_ud=np.arange(20).astype(float),
+                        null_percentile=100.0, p_value=1/21, threshold_n_ud=19.0)
+        p = pooled_null_pvalues([nr])
+        assert len(p) == 1 and 0.0 <= p[0] <= 1.0
