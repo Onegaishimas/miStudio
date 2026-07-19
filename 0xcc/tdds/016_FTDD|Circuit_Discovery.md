@@ -43,7 +43,13 @@ mine(store, granularity, mode):
   support filter: n_ud ≥ s_min (20)
   null: K shuffles (default 100) of within-document CIRCULAR SHIFTS per unit → null PMI distribution
         → threshold = percentile (default 99th)   # naive whole-corpus permutation FORBIDDEN (pinned)
-  FDR: Benjamini–Hochberg q=0.05 on empirical p-values vs null; discipline recorded in report
+  FDR: Benjamini–Hochberg q=0.05 on POOLED STANDARDIZED empirical p-values; discipline recorded in report
+       # SPEC DEVIATION (implementation, 2026-07-19): per-pair empirical p-values floor at 1/(K+1);
+       # with K=100 and m~2000 pairs BH's rank-1 threshold (q/m≈2.5e-5) is unreachable — the FDR
+       # stage would reject EVERYTHING. Remedy: standardize each pair's observed n_ud against its
+       # own null (z), pool all pairs' standardized null draws into one reference distribution,
+       # p from the pool (resolution 1/(K·m+1)). Exchangeability assumption disclosed in the report;
+       # pinned by TestPooledNull.
   held-out: recompute PMI + null on HELDOUT docs; replicated = exceeds held-out threshold, same sign
   report: {null_summary, fdr, replication_rate, counts_by_stage, granularity, params}
 ```

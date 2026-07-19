@@ -184,6 +184,36 @@ def _intersect_count(a: np.ndarray, b_sorted: np.ndarray) -> int:
     return int((b_sorted[idx] == a).sum())
 
 
+def pooled_null_pvalues(null_results: Sequence[NullResult]) -> np.ndarray:
+    """Pooled standardized empirical p-values across pairs.
+
+    Per-pair empirical p-values floor at 1/(K+1); with K=100 shuffles and
+    m~2000 pairs, BH's rank-1 threshold (q/m ≈ 2.5e-5) is unreachable and
+    the FDR stage would reject EVERYTHING. The standard remedy (pooled
+    empirical null): standardize each pair's observed count against its own
+    null (z = (obs − μ_null)/σ_null), pool ALL pairs' standardized null
+    draws into one reference distribution, and compute each pair's p there —
+    resolution improves to 1/(K·m + 1). Assumes post-support pairs' nulls
+    are exchangeable after standardization (disclosed in the run report).
+    """
+    if not null_results:
+        return np.zeros(0, dtype=np.float64)
+    z_obs = np.empty(len(null_results))
+    pool: List[np.ndarray] = []
+    for i, nr in enumerate(null_results):
+        mu = float(nr.null_n_ud.mean())
+        sd = float(nr.null_n_ud.std())
+        if sd == 0:
+            z_obs[i] = np.inf if nr.observed_n_ud > mu else 0.0
+            pool.append(np.zeros(len(nr.null_n_ud)))
+        else:
+            z_obs[i] = (nr.observed_n_ud - mu) / sd
+            pool.append((nr.null_n_ud - mu) / sd)
+    pooled = np.concatenate(pool)
+    n = len(pooled)
+    return np.array([(1 + int((pooled >= z).sum())) / (n + 1) for z in z_obs])
+
+
 def bh_fdr(p_values: Sequence[float], q: float = DEFAULT_FDR_Q) -> np.ndarray:
     """Benjamini–Hochberg: boolean keep-mask over the pair list."""
     p = np.asarray(p_values, dtype=np.float64)

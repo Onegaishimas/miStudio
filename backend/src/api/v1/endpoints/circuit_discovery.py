@@ -1,0 +1,328 @@
+"""
+Circuit capture + discovery + attribution endpoints (Feature 016).
+
+Capture: POST estimate/launch (202) → WS circuit-capture/{id} → list/get/
+cancel/delete. Discovery: POST run (202) → WS circuit-discovery/{id} →
+get run incl. the first-class report. Attribution: POST sub-route (202).
+House conventions: 202 + task id, 409 on concurrent, DB-status cancel.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ....core.database import get_db
+from ....models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["circuit-discovery"])
+
+
+# ── schemas ──────────────────────────────────────────────────────────────
+
+class CaptureLayerEntry(BaseModel):
+    layer: int = Field(..., ge=0)
+    sae_id: str = Field(..., max_length=255)
+
+
+class AttentionCaptureConfig(BaseModel):
+    layers: List[int] = Field(default_factory=list)
+    heads: Optional[List[int]] = None  # None = all heads
+    top_k: int = Field(4, ge=1, le=32)
+
+
+class CaptureCreate(BaseModel):
+    dataset_id: str = Field(..., max_length=255)
+    model_id: Optional[str] = Field(None, max_length=255)
+    layers: List[CaptureLayerEntry] = Field(..., min_length=1, max_length=8)
+    epsilon: float = Field(0.1, ge=0.0, lt=1.0)
+    theta_floor: float = Field(0.01, ge=0.0)
+    sample_cap: int = Field(2000, ge=32, le=100_000)
+    split_seed: int = 42
+    attention_capture: Optional[AttentionCaptureConfig] = None
+    confirm: bool = Field(
+        False, description="false → probe + estimate only (status 'estimated'); "
+                           "true → full capture")
+
+
+class DiscoveryCreate(BaseModel):
+    capture_run_id: str = Field(..., max_length=36)
+    granularity: str = Field("feature", pattern="^(feature|cluster)$")
+    mode: str = Field("open", pattern="^(seeded|open)$")
+    seed_refs: Optional[List[Dict[str, Any]]] = Field(
+        None, max_length=200,
+        description="[{layer, feature_idx}|{layer, cluster_profile_id}]")
+    s_min: int = Field(20, ge=1)
+    null_shuffles: int = Field(100, ge=10, le=1000)
+    null_percentile: float = Field(99.0, ge=50.0, le=100.0)
+    fdr_q: float = Field(0.05, gt=0.0, le=0.5)
+    cohesion_floor: float = Field(0.3, ge=0.0, le=1.0)
+    seed: int = 0
+    force: bool = Field(False, description="mine a STALE store anyway")
+
+
+class AttributionCreate(BaseModel):
+    prompt_limit: Optional[int] = Field(None, ge=1, le=256)
+
+
+# ── serializers ──────────────────────────────────────────────────────────
+
+def _capture_out(run: CircuitCaptureRun) -> Dict[str, Any]:
+    m = run.manifest or {}
+    return {
+        "id": run.id, "status": run.status, "progress": run.progress,
+        "error_message": run.error_message,
+        "corpus": m.get("corpus"), "model_id": m.get("model_id"),
+        "layers": m.get("layers"),
+        "split": {k: v for k, v in (m.get("split") or {}).items()
+                  if k != "heldout_docs"} | {
+                      "heldout_count": len((m.get("split") or {})
+                                           .get("heldout_docs", []))},
+        "estimate": m.get("estimate"),
+        "attention_capture": m.get("attention_capture"),
+        "counts": m.get("counts"), "bytes": run.bytes_total,
+        "events_total": run.events_total, "stale": run.stale,
+        "created_at": run.created_at, "updated_at": run.updated_at,
+    }
+
+
+def _discovery_out(run: CircuitDiscoveryRun, *, include_candidates: bool) -> Dict[str, Any]:
+    out = {
+        "id": run.id, "capture_run_id": run.capture_run_id,
+        "status": run.status, "progress": run.progress,
+        "error_message": run.error_message, "params": run.params,
+        "report": run.report,
+        "candidate_count": len(run.candidates or []),
+        "created_at": run.created_at, "updated_at": run.updated_at,
+    }
+    if include_candidates:
+        out["candidates"] = run.candidates or []
+    return out
+
+
+async def _capture_or_404(db, run_id) -> CircuitCaptureRun:
+    run = (await db.execute(select(CircuitCaptureRun).where(
+        CircuitCaptureRun.id == run_id))).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(404, f"Capture run {run_id} not found")
+    return run
+
+
+async def _discovery_or_404(db, run_id) -> CircuitDiscoveryRun:
+    run = (await db.execute(select(CircuitDiscoveryRun).where(
+        CircuitDiscoveryRun.id == run_id))).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(404, f"Discovery run {run_id} not found")
+    return run
+
+
+# ── capture ──────────────────────────────────────────────────────────────
+
+@router.post("/circuit-capture", status_code=202)
+async def create_capture(body: CaptureCreate, db: AsyncSession = Depends(get_db)):
+    """Create a capture run. confirm=false runs the probe and stops at the
+    cost estimate; POST /{id}/confirm launches the full capture."""
+    from ....services.circuit_capture_service import (
+        CaptureConfigError, CircuitCaptureService)
+    from ....workers.circuit_capture_tasks import capture_circuit_activations
+
+    def _create(sync_db):
+        return CircuitCaptureService.create_run(sync_db, body.model_dump())
+
+    try:
+        run = await _run_sync(db, _create)
+    except CaptureConfigError as e:
+        raise HTTPException(422, str(e))
+    task = capture_circuit_activations.delay(run.id, confirmed=body.confirm)
+    await db.execute(
+        CircuitCaptureRun.__table__.update()
+        .where(CircuitCaptureRun.id == run.id)
+        .values(celery_task_id=task.id))
+    await db.commit()
+    return {"id": run.id, "task_id": task.id, "status": "queued",
+            "confirmed": body.confirm}
+
+
+@router.post("/circuit-capture/{run_id}/confirm", status_code=202)
+async def confirm_capture(run_id: str, db: AsyncSession = Depends(get_db)):
+    """Launch the full capture for an 'estimated' run."""
+    from ....workers.circuit_capture_tasks import capture_circuit_activations
+
+    run = await _capture_or_404(db, run_id)
+    if run.status not in ("estimated", "failed"):
+        raise HTTPException(409, f"Run is {run.status} — confirm applies to "
+                                 f"'estimated' (or retryable 'failed') runs")
+    task = capture_circuit_activations.delay(run.id, confirmed=True)
+    run.celery_task_id = task.id
+    run.status = "pending"
+    await db.commit()
+    return {"id": run.id, "task_id": task.id, "status": "queued"}
+
+
+@router.get("/circuit-capture")
+async def list_captures(limit: int = Query(50, ge=1, le=200),
+                        offset: int = Query(0, ge=0),
+                        db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(
+        select(CircuitCaptureRun)
+        .order_by(CircuitCaptureRun.created_at.desc())
+        .limit(limit).offset(offset))).scalars().all()
+    return {"captures": [_capture_out(r) for r in rows],
+            "limit": limit, "offset": offset}
+
+
+@router.get("/circuit-capture/{run_id}")
+async def get_capture(run_id: str, db: AsyncSession = Depends(get_db)):
+    return _capture_out(await _capture_or_404(db, run_id))
+
+
+@router.post("/circuit-capture/{run_id}/cancel")
+async def cancel_capture(run_id: str, db: AsyncSession = Depends(get_db)):
+    from ....core.celery_app import revoke_task
+
+    run = await _capture_or_404(db, run_id)
+    if run.status not in ("pending", "running", "estimating"):
+        raise HTTPException(409, f"Run is {run.status} — nothing to cancel")
+    run.status = "cancelled"
+    await db.commit()
+    if run.celery_task_id:
+        revoke_task(run.celery_task_id)
+    return {"id": run.id, "status": "cancelled"}
+
+
+@router.delete("/circuit-capture/{run_id}")
+async def delete_capture(run_id: str, db: AsyncSession = Depends(get_db)):
+    from ....services.circuit_capture_service import (
+        CaptureConfigError, CircuitCaptureService)
+
+    run = await _capture_or_404(db, run_id)
+
+    def _delete(sync_db):
+        row = sync_db.query(CircuitCaptureRun).filter(
+            CircuitCaptureRun.id == run_id).first()
+        CircuitCaptureService.delete_run(sync_db, row)
+
+    try:
+        await _run_sync(db, _delete)
+    except CaptureConfigError as e:
+        raise HTTPException(409, str(e))
+    return {"deleted": run_id}
+
+
+# ── discovery ────────────────────────────────────────────────────────────
+
+@router.post("/circuit-discovery", status_code=202)
+async def create_discovery(body: DiscoveryCreate,
+                           db: AsyncSession = Depends(get_db)):
+    from ....services.circuit_discovery_service import (
+        CircuitDiscoveryService, DiscoveryConfigError)
+    from ....workers.circuit_capture_tasks import run_circuit_discovery
+
+    def _create(sync_db):
+        return CircuitDiscoveryService.create_run(sync_db, body.model_dump())
+
+    try:
+        run = await _run_sync(db, _create)
+    except DiscoveryConfigError as e:
+        raise HTTPException(422, str(e))
+    task = run_circuit_discovery.delay(run.id)
+    await db.execute(
+        CircuitDiscoveryRun.__table__.update()
+        .where(CircuitDiscoveryRun.id == run.id)
+        .values(celery_task_id=task.id))
+    await db.commit()
+    return {"id": run.id, "task_id": task.id, "status": "queued"}
+
+
+@router.get("/circuit-discovery")
+async def list_discoveries(capture_run_id: Optional[str] = Query(None),
+                           limit: int = Query(50, ge=1, le=200),
+                           offset: int = Query(0, ge=0),
+                           db: AsyncSession = Depends(get_db)):
+    q = select(CircuitDiscoveryRun).order_by(
+        CircuitDiscoveryRun.created_at.desc())
+    if capture_run_id:
+        q = q.where(CircuitDiscoveryRun.capture_run_id == capture_run_id)
+    rows = (await db.execute(q.limit(limit).offset(offset))).scalars().all()
+    return {"discoveries": [_discovery_out(r, include_candidates=False)
+                            for r in rows],
+            "limit": limit, "offset": offset}
+
+
+@router.get("/circuit-discovery/{run_id}")
+async def get_discovery(run_id: str,
+                        include_candidates: bool = Query(True),
+                        db: AsyncSession = Depends(get_db)):
+    """Run + report (+ candidates). The report is the trust surface: null
+    method, FDR discipline, replication rate, caps — all first-class."""
+    return _discovery_out(await _discovery_or_404(db, run_id),
+                          include_candidates=include_candidates)
+
+
+@router.post("/circuit-discovery/{run_id}/cancel")
+async def cancel_discovery(run_id: str, db: AsyncSession = Depends(get_db)):
+    from ....core.celery_app import revoke_task
+
+    run = await _discovery_or_404(db, run_id)
+    if run.status not in ("pending", "running"):
+        raise HTTPException(409, f"Run is {run.status} — nothing to cancel")
+    run.status = "cancelled"
+    await db.commit()
+    if run.celery_task_id:
+        revoke_task(run.celery_task_id)
+    return {"id": run.id, "status": "cancelled"}
+
+
+@router.delete("/circuit-discovery/{run_id}")
+async def delete_discovery(run_id: str, db: AsyncSession = Depends(get_db)):
+    run = await _discovery_or_404(db, run_id)
+    if run.status == "running":
+        raise HTTPException(409, "Cancel the run before deleting it")
+    await db.delete(run)
+    await db.commit()
+    return {"deleted": run_id}
+
+
+@router.post("/circuit-discovery/{run_id}/attribution", status_code=202)
+async def start_attribution(run_id: str, body: AttributionCreate,
+                            db: AsyncSession = Depends(get_db)):
+    """Tier-2 gradient attribution pass over the run's candidates (IDL-36)."""
+    from ....workers.circuit_capture_tasks import run_circuit_attribution
+
+    run = await _discovery_or_404(db, run_id)
+    if run.status != "completed":
+        raise HTTPException(409, f"Discovery run is {run.status} — "
+                                 f"attribution needs a completed run")
+    if not run.candidates:
+        raise HTTPException(409, "Run has no candidates to attribute")
+    run.status = "running"  # attribution reuses the run row's status/progress
+    run.progress = 0.0
+    await db.commit()
+    task = run_circuit_attribution.delay(run.id, prompt_limit=body.prompt_limit)
+    run.celery_task_id = task.id
+    await db.commit()
+    return {"id": run.id, "task_id": task.id, "status": "queued"}
+
+
+# ── sync bridge (create_run/delete_run are worker-shared sync code) ──────
+
+async def _run_sync(db: AsyncSession, fn):
+    """Run a sync-session service function via the sync engine in a thread."""
+    import anyio
+
+    from ....core.database import get_sync_db
+
+    def _call():
+        gen = get_sync_db()
+        sync_db = next(gen)
+        try:
+            return fn(sync_db)
+        finally:
+            gen.close()
+
+    return await anyio.to_thread.run_sync(_call)

@@ -1533,6 +1533,42 @@ def emit_enhanced_labeling_failed(job_id: str, error: str) -> bool:
 
 
 # Export public API
+
+
+# ── Circuit capture / discovery / attribution (Feature 016) ──────────────
+
+def emit_circuit_run_progress(kind: str, run_id: str, progress: float,
+                              status: str = "running",
+                              message: Optional[str] = None) -> bool:
+    """kind ∈ {capture, discovery, attribution} → channel circuit-{kind}/{id},
+    event circuit_{kind}:progress (house namespaced-event convention)."""
+    return emit_progress(
+        f"circuit-{kind}/{run_id}",
+        f"circuit_{kind}:progress",
+        {"run_id": run_id, "progress": progress, "status": status,
+         "message": message},
+    )
+
+
+def emit_circuit_run_completed(kind: str, run_id: str,
+                               summary: Optional[Dict[str, Any]] = None) -> bool:
+    return emit_progress(
+        f"circuit-{kind}/{run_id}",
+        f"circuit_{kind}:completed",
+        {"run_id": run_id, "status": "completed", "summary": summary or {}},
+        retries=3,
+    )
+
+
+def emit_circuit_run_failed(kind: str, run_id: str, error: str) -> bool:
+    return emit_progress(
+        f"circuit-{kind}/{run_id}",
+        f"circuit_{kind}:failed",
+        {"run_id": run_id, "status": "failed", "error": error},
+        retries=3,
+    )
+
+
 __all__ = [
     "emit_progress",
     "emit_dataset_progress",
@@ -1571,4 +1607,8 @@ __all__ = [
     "emit_enhanced_labeling_progress",
     "emit_enhanced_labeling_completed",
     "emit_enhanced_labeling_failed",
+    # Circuit runs (Feature 016)
+    "emit_circuit_run_progress",
+    "emit_circuit_run_completed",
+    "emit_circuit_run_failed",
 ]
