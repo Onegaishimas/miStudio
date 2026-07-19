@@ -170,6 +170,7 @@ class TestRealWiring:
             "edges": [{"up": {"layer": 13, "feature_idx": 1},
                        "down": {"layer": 14, "feature_idx": 2}, "rung": 1}],
             "discovery": {"mode": "seeded", "granularity": "feature"},
+            "model_id": "m_lfm25",
         }
         created = wired_client.post("/api/v1/circuits", json=payload)
         assert created.status_code == 201, created.text
@@ -193,10 +194,15 @@ class TestRealWiring:
         exported = wired_client.get(f"/api/v1/circuits/{cid}/export")
         assert exported.json()["discovery"]["mode"] == "seeded"  # lossless
 
+        # Lossless round-trip (R2 B1): model ref, granularity, created_at.
+        assert exported.json()["model"]["mistudio_model_id"] == "m_lfm25"
         reimported = wired_client.post("/api/v1/circuits/import",
                                        json=exported.json())
         assert reimported.status_code == 201, reimported.text
         assert reimported.json()["edges"][0]["rung"] == 1
+        assert reimported.json()["model_id"] == "m_lfm25"
+        assert reimported.json()["granularity"] == "feature"
+        assert reimported.json()["created_at"] == created.json()["created_at"]
 
         deleted = wired_client.delete(f"/api/v1/circuits/{cid}")
         assert deleted.json()["deleted"] == cid

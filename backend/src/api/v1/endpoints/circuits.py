@@ -9,7 +9,7 @@ Every response carries the rung AND the server-rendered rung_language string
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,13 +137,21 @@ async def create_circuit(body: CircuitCreate, db: AsyncSession = Depends(get_db)
     return _out(circuit)
 
 
+MAX_IMPORT_BYTES = 1_048_576  # house cap (cluster_profiles precedent): near this is hostile
+
+
 @router.post("/import", status_code=201)
-async def import_circuit(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+async def import_circuit(payload: Dict[str, Any], request: Request,
+                         db: AsyncSession = Depends(get_db)):
     """Import a mistudio.circuit-definition/v1 file (BR-013 round-trip).
 
-    Kind-keyed: unknown kinds/major versions are rejected with an explicit
-    message — never guessed at.
+    Kind-keyed: unknown kinds/major versions are rejected explicitly. Payloads
+    over the house 1 MB cap are rejected (R2 B3).
     """
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413,
+                            detail=f"Import exceeds the {MAX_IMPORT_BYTES // 1024} KB cap")
     kind = payload.get("kind")
     if kind != "mistudio.circuit-definition":
         raise HTTPException(
@@ -152,11 +160,25 @@ async def import_circuit(payload: Dict[str, Any], db: AsyncSession = Depends(get
     try:
         defn = CircuitDefinitionV1.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid circuit definition: {e.error_count()} error(s): {e.errors()[0].get('msg', '')}")
+        first = e.errors()[0]
+        loc = ".".join(str(part) for part in first.get("loc", []))
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Invalid circuit definition: {e.error_count()} error(s); "
+                    f"first at '{loc}': {first.get('msg', '')}"))
+    # Lossless import (R2 B1/B7): model ref, granularity, and the authored
+    # created_at all survive the round-trip.
+    granularity = "cluster" if any(
+        m.member_kind == "cluster_ref" for m in defn.members
+    ) else (defn.discovery.granularity if defn.discovery and defn.discovery.granularity
+            else "feature")
     try:
         circuit = await CircuitService.create(db, {
             "name": defn.name,
             "narrative": defn.narrative,
+            "granularity": granularity,
+            "model_id": defn.model.mistudio_model_id,
+            "created_at": defn.provenance.created_at,
             "saes": [s.model_dump(mode="json") for s in defn.saes],
             "members": [m.model_dump(mode="json") for m in defn.members],
             "edges": [e.model_dump(mode="json") for e in defn.edges],

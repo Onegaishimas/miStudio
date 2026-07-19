@@ -10,9 +10,13 @@ import type { Circuit, CircuitSummary } from '../types/circuits';
 
 export const circuitsApi = {
   list: (params?: { promoted?: boolean; min_rung?: number; edge_type?: string;
-                    limit?: number; offset?: number }) =>
-    fetchAPI<{ circuits: CircuitSummary[]; total: number }>(
-      `/circuits${buildQueryString(params ?? {})}`),
+                    limit?: number; offset?: number }) => {
+    // buildQueryString returns WITHOUT a leading '?' (R2 B2 — a bare concat
+    // produced /circuitspromoted=true and 404'd the first filtered call).
+    const qs = buildQueryString(params ?? {});
+    return fetchAPI<{ circuits: CircuitSummary[]; total: number }>(
+      `/circuits${qs ? `?${qs}` : ''}`);
+  },
 
   get: (id: string) => fetchAPI<Circuit>(`/circuits/${id}`),
 
