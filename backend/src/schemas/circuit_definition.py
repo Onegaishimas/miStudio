@@ -14,7 +14,7 @@ Amendments land INSIDE v1 pre-freeze (CIRCUITS-002). Vendored JSON schema:
 docs/schemas/circuit-definition-v1.json (sync-tested).
 """
 
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -90,7 +90,10 @@ class CircuitEdge(BaseModel):
     up: CircuitNodeRef
     down: CircuitNodeRef
     type: Literal["computed", "persistence", "attention_mediated"] = "computed"
-    type_signals: Optional[Dict[str, float]] = None  # classifier disclosure (BR-021)
+    # Classifier disclosure (BR-021): numeric signals PLUS method strings,
+    # threshold maps and vote maps — deliberately open-typed so the
+    # classifier's full disclosure always fits (review R1 finding #1).
+    type_signals: Optional[Dict[str, Any]] = None
     rung: EvidenceRung = EvidenceRung.MINED
     tested_and_failed: List[EvidenceRung] = Field(default_factory=list)
     coactivation: Optional[EdgeCoactivation] = None
@@ -208,11 +211,24 @@ class CircuitDefinitionV1(BaseModel):
         # and every member's layer must have an SAE ref.
         by_layer: Dict[int, int] = {}
         node_keys = set()
+        seen_features: set = set()
         for m in self.members:
             if m.layer not in sae_layers:
                 raise ValueError(f"member at layer {m.layer} has no SAE ref")
             weight = len(m.expanded_members) if m.member_kind == "cluster_ref" else 1
             by_layer[m.layer] = by_layer.get(m.layer, 0) + weight
+            # A feature may appear once per layer — as a feature_ref OR inside
+            # one cluster expansion. Duplicates would double-steer the feature
+            # in every slice/profile consumer (review R1 finding #7).
+            for key in m.node_keys():
+                if key[1] != "feature":
+                    continue
+                if key in seen_features:
+                    raise ValueError(
+                        f"feature {key[2]} at layer {key[0]} appears more than once "
+                        "(as a member or inside a cluster expansion)"
+                    )
+                seen_features.add(key)
             node_keys.update(m.node_keys())
         for layer, count in by_layer.items():
             if count > MAX_MEMBERS:
@@ -275,8 +291,10 @@ def to_layer_slice(defn: CircuitDefinitionV1, layer: int) -> ClusterDefinitionV1
         f"projection_of={defn.name!r} circuit; parent_rung={parent_rung}; "
         f"partial_rendering=true — a slice is NOT the circuit"
     )
+    suffix = f" [L{layer} slice]"
+    base = defn.name[: MAX_NAME - len(suffix)]
     return ClusterDefinitionV1(
-        name=f"{defn.name} [L{layer} slice]"[:MAX_NAME],
+        name=f"{base}{suffix}",
         narrative=defn.narrative,
         display_token=None,
         model=defn.model,

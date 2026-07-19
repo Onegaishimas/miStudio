@@ -36,8 +36,12 @@ class EdgeEvidence(BaseModel):
 classify(edge, signals) -> {type, signals_disclosed}
   persistence iff ≥2 of:
     weight_prior ≥ P_hi (default 0.9)
-    token_identity_overlap(top contexts) ≥ O_hi (default 0.8)
-    label_embedding_sim ≥ S_hi (default 0.85)   # embeddings via existing labeling stack
+    token_identity_overlap(top contexts) ≥ O_hi (default 0.5 — CALIBRATED on the
+      audit fixture 2026-07-19: real echo pairs share ~half their top-token union;
+      the original 0.8 dropped persistence recall to 75%. Recorded spec deviation.)
+    label_similarity ≥ S_hi (default 0.85)   # v1 method: token_set overlap of the
+      labels themselves (no embedding stack wired yet) — disclosed as the weaker
+      'token_set' method in every edge's signals; counts only as POSITIVE evidence
   attention_mediated iff Tier-2.5 evidence present (mediating_heads non-null)  # future data
   else computed
 ```

@@ -32,8 +32,22 @@ export interface CircuitMember {
   expanded_members?: { feature_idx: number; label?: string | null; strength: number }[] | null;
 }
 
-export interface Circuit {
+export interface CircuitSummary {
   id: string;
+  name: string;
+  granularity: 'feature' | 'cluster';
+  layers: number[];
+  member_count: number;
+  edge_count: number;
+  rung: EvidenceRung;
+  rung_language: string;
+  rung_next_step: string;
+  promoted: boolean;
+  model_id: string | null;
+  updated_at: string;
+}
+
+export interface Circuit extends CircuitSummary {
   name: string;
   narrative: string | null;
   granularity: 'feature' | 'cluster';
@@ -42,10 +56,6 @@ export interface Circuit {
   edges: CircuitEdge[];
   budget: Record<string, unknown> | null;
   faithfulness: { necessity?: number; sufficiency?: number } | null;
-  rung: EvidenceRung;
-  rung_language: string;
-  rung_next_step: string;
-  promoted: boolean;
+  discovery: Record<string, unknown> | null;
   created_at: string;
-  updated_at: string;
 }

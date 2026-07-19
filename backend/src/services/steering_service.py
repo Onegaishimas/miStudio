@@ -341,6 +341,9 @@ def resolve_encoder_weight(sae_model) -> Optional["torch.Tensor"]:
     if hasattr(sae_model, 'tied_weights') and sae_model.tied_weights:
         return sae_model.encoder.weight  # [d_sae, d_model] (Linear convention)
     if hasattr(sae_model, 'encoder_weight') and not isinstance(getattr(sae_model, 'encoder', None), nn.Linear):
+        # Defensive branch: no current SAE class defines encoder_weight (JumpReLU
+        # resolves via the encoder-compat property below). If a future format adds
+        # one, VERIFY its orientation is [d_sae, d_model] before trusting it here.
         return sae_model.encoder_weight
     if hasattr(sae_model, 'encoder') and sae_model.encoder is not None:
         if hasattr(sae_model.encoder, 'weight'):

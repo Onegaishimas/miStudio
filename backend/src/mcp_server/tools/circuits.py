@@ -53,6 +53,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         budget: Optional[dict] = None,
         granularity: str = "feature",
         discovery_run_id: Optional[str] = None,
+        discovery: Optional[dict] = None,
+        faithfulness: Optional[dict] = None,
     ) -> Any:
         """Create a circuit from discovery candidates or hand assembly.
         Contract rules enforced server-side: per-layer member caps (20 PER
@@ -62,6 +64,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "name": name, "saes": saes, "members": members,
             "edges": edges or [], "narrative": narrative, "budget": budget,
             "granularity": granularity, "discovery_run_id": discovery_run_id,
+            "discovery": discovery, "faithfulness": faithfulness,
         })
 
     @mcp.tool()
@@ -70,6 +73,35 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         Promotion is a BADGE, not a gate — unvalidated circuits promote and
         carry their rung visibly everywhere."""
         return await client.post(f"/circuits/{circuit_id}/promote")
+
+    @mcp.tool()
+    async def update_circuit(
+        circuit_id: str,
+        name: Optional[str] = None,
+        narrative: Optional[str] = None,
+        members: Optional[list] = None,
+        edges: Optional[list] = None,
+        budget: Optional[dict] = None,
+    ) -> Any:
+        """Edit a circuit (rename, fix a narrative, drop a bad edge, adjust
+        members) — the agent review loop is not create-only. Structural
+        contract rules re-validate on every update."""
+        body = {k: v for k, v in {
+            "name": name, "narrative": narrative, "members": members,
+            "edges": edges, "budget": budget}.items() if v is not None}
+        return await client.patch(f"/circuits/{circuit_id}", json_body=body)
+
+    @mcp.tool()
+    async def delete_circuit(circuit_id: str) -> Any:
+        """Delete a circuit permanently (its manifests survive — they are
+        first-class records)."""
+        return await client.delete(f"/circuits/{circuit_id}")
+
+    @mcp.tool()
+    async def import_circuit_definition(definition: dict) -> Any:
+        """Import a mistudio.circuit-definition/v1 document (the BR-013
+        round-trip). Unknown kinds are rejected explicitly."""
+        return await client.post("/circuits/import", json_body=definition)
 
     @mcp.tool()
     async def export_circuit_definition(circuit_id: str) -> Any:

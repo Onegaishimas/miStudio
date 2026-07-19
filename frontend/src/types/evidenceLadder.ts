@@ -21,8 +21,6 @@ export interface EdgeEvidence {
   tested_and_failed: EvidenceRung[];
 }
 
-/** Circuit displayed rung = min over member edges; edge-less circuits are rung 0. */
-export function circuitRung(edgeRungs: EvidenceRung[]): EvidenceRung {
-  if (edgeRungs.length === 0) return EvidenceRung.MINED;
-  return Math.min(...edgeRungs) as EvidenceRung;
-}
+// NOTE deliberately NO client-side rung computation here: the server computes
+// and serves rungs + language (IDL-35). A client recomputation invited drift
+// (review R1 finding #13) and was removed.

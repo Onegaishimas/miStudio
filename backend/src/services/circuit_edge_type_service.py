@@ -97,11 +97,17 @@ def classify_edge(
     else:
         edge_type = "computed"
 
-    # Ranking never consumes the prior directly (BR-020): distinctness is the
-    # only ranking-facing output — 1 when clearly computed, 0 when clearly echo.
-    echo_confidence = min(1.0, sum(votes.values()) / 2.0) if edge_type == "persistence" else (
-        max(prior / p_hi, overlap / o_hi, label_sim / s_hi) / 2.0
-    )
+    # Ranking never consumes the prior directly (BR-020): distinctness is
+    # the only ranking-facing output. COMPUTED edges are never penalized —
+    # distinctness is 1.0 by definition (a lone strong signal, including a
+    # high prior, must not de-rank a computed edge; review R1 finding #3).
+    # PERSISTENCE edges grade by vote count (2-of-3 → 1/3 left, 3-of-3 → 0),
+    # so stronger echoes de-rank harder and 2- vs 3-vote echoes are
+    # distinguishable.
+    if edge_type == "persistence":
+        echo_confidence = sum(votes.values()) / 3.0
+    else:
+        echo_confidence = 0.0
     signals["echo_confidence"] = round(min(1.0, echo_confidence), 4)
     signals["distinctness"] = round(1.0 - signals["echo_confidence"], 4)
 

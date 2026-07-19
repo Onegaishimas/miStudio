@@ -25,7 +25,8 @@ from ..schemas.evidence_ladder import EvidenceRung, circuit_rung
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "0.5.0"
+# Single source: reuse the profile service constant (review R1 — version drift).
+from .cluster_profile_service import APP_VERSION  # noqa: E402
 
 
 class CircuitValidationError(ValueError):
@@ -74,6 +75,8 @@ class CircuitService:
             budget=defn.budget.model_dump(mode="json") if defn.budget else None,
             faithfulness=(defn.faithfulness.model_dump(mode="json")
                           if defn.faithfulness else None),
+            discovery=(defn.discovery.model_dump(mode="json")
+                       if defn.discovery else None),
             rung=int(defn.displayed_rung()),
             discovery_run_id=data.get("discovery_run_id"),
             model_id=data.get("model_id"),
@@ -138,18 +141,32 @@ class CircuitService:
         await db.commit()
 
     @staticmethod
-    async def promote(db: AsyncSession, circuit: Circuit) -> Circuit:
-        """Badge, not gate (BR-012): promotion never requires any rung."""
-        circuit.promoted = True
+    async def set_promoted(db: AsyncSession, circuit: Circuit,
+                           promoted: bool = True) -> Circuit:
+        """Badge, not gate (BR-012) — and reversible: a badge you can pin
+        is a badge you can unpin (review R1 finding #7)."""
+        circuit.promoted = promoted
         await db.commit()
         await db.refresh(circuit)
         return circuit
+
+    # Back-compat alias (tests/tools may call promote()).
+    @staticmethod
+    async def promote(db: AsyncSession, circuit: Circuit) -> Circuit:
+        return await CircuitService.set_promoted(db, circuit, True)
 
     # ── rung maintenance (017 writes validation results, then calls this) ──
 
     @staticmethod
     async def recompute_rung(db: AsyncSession, circuit: Circuit) -> Circuit:
-        rungs = [EvidenceRung(e.get("rung", 0)) for e in (circuit.edges or [])]
+        # Tolerate malformed stored rungs (017 writes here): clamp into 0..3
+        # instead of crashing the write path (review R1 QA-4).
+        def _safe(e):
+            try:
+                return EvidenceRung(max(0, min(3, int(e.get("rung", 0)))))
+            except (TypeError, ValueError):
+                return EvidenceRung.MINED
+        rungs = [_safe(e) for e in (circuit.edges or [])]
         circuit.rung = int(circuit_rung(rungs))
         await db.commit()
         await db.refresh(circuit)
@@ -162,6 +179,7 @@ class CircuitService:
         defn = CircuitService._validate(
             circuit.name, circuit.narrative, circuit.saes, circuit.members,
             circuit.edges, circuit.budget, circuit.faithfulness,
+            getattr(circuit, "discovery", None),
         )
         defn.provenance = DefinitionProvenance(
             created_at=circuit.created_at,
@@ -171,8 +189,12 @@ class CircuitService:
         return defn
 
     @staticmethod
-    def to_slices(circuit: Circuit) -> List[ClusterDefinitionV1]:
-        """BR-014: one valid v1 slice per member-bearing layer."""
-        defn = CircuitService.to_definition(circuit)
+    def slices_of(defn: CircuitDefinitionV1) -> List[ClusterDefinitionV1]:
+        """BR-014: one valid v1 slice per member-bearing layer (definition-first
+        so callers compute the parent rung ONCE from the same object)."""
         layers = sorted({m.layer for m in defn.members})
         return [to_layer_slice(defn, layer) for layer in layers]
+
+    @staticmethod
+    def to_slices(circuit: Circuit) -> List[ClusterDefinitionV1]:
+        return CircuitService.slices_of(CircuitService.to_definition(circuit))
