@@ -2,7 +2,7 @@
 
 **Document ID:** 018_FTASKS|Circuit_Portability
 **Version:** 1.1
-**Status:** ⏳ IMPLEMENTED (core) — 2 review rounds done (49+26 findings; R1: 21 fixed, R2: 15 fixed); R3 pending
+**Status:** ✅ COMPLETE — 3 review rounds done (49+26+12 findings; R1: 21 fixed, R2: 15 fixed, R3: all 3 must-fix + 6 ride-alongs fixed). R3 verdict: **GO for 016** (record: `.claude/context/sessions/review_feature018_R3_2026-07-19.md`). Deferred items live in 016/017 FTASKS Phase 0 / Task 3.0. Phase 6 E2E/manual at close-out.
 **Source:** 018_FPRD · 018_FTDD · 018_FTID · IDL-33, IDL-35 · CIRCUITS-002 A.1/A.9 normative
 **Sequencing:** Phases 1–2 GATE the increment — land before 016/017 implementation begins (002 order: d → b → c → a-hazards).
 

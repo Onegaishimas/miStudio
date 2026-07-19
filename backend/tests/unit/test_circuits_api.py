@@ -139,24 +139,25 @@ class TestR1Fixes:
         assert "cannot be null" in r.json()["detail"]
 
 
+@pytest.fixture
+def wired_client(async_engine):
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from src.core.database import get_db
+
+    maker = async_sessionmaker(async_engine, class_=AsyncSession,
+                               expire_on_commit=False)
+
+    async def _override():
+        async with maker() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _override
+    yield TestClient(app, raise_server_exceptions=False)
+    app.dependency_overrides.pop(get_db, None)
+
+
 class TestRealWiring:
     """R1 TE-1: exercise the REAL service+DB path (no CircuitService mocks)."""
-
-    @pytest.fixture
-    def wired_client(self, async_engine):
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-        from src.core.database import get_db
-
-        maker = async_sessionmaker(async_engine, class_=AsyncSession,
-                                   expire_on_commit=False)
-
-        async def _override():
-            async with maker() as session:
-                yield session
-
-        app.dependency_overrides[get_db] = _override
-        yield TestClient(app, raise_server_exceptions=False)
-        app.dependency_overrides.pop(get_db, None)
 
     def test_full_lifecycle_through_real_stack(self, wired_client):
         payload = {
@@ -206,3 +207,99 @@ class TestRealWiring:
 
         deleted = wired_client.delete(f"/api/v1/circuits/{cid}")
         assert deleted.json()["deleted"] == cid
+
+
+def _minimal_definition(**overrides):
+    """A minimal valid mistudio.circuit-definition/v1 document."""
+    doc = {
+        "kind": "mistudio.circuit-definition",
+        "schema_version": "1",
+        "name": "Foreign circuit",
+        "saes": [{"mistudio_sae_id": "sae_l13", "layer": 13, "n_features": 8192}],
+        "members": [{"layer": 13, "member_kind": "feature_ref",
+                     "feature": {"feature_idx": 1, "strength": 0.5}}],
+        "edges": [],
+    }
+    doc.update(overrides)
+    return doc
+
+
+class TestR3Fixes:
+    """Pins for the R3 fix wave + the four unpinned R2 fixes (R3-B3)."""
+
+    def test_tz_aware_created_at_imports_cleanly(self, wired_client):
+        # R3-B1: "…Z" is the normal foreign-export form; used to 500 in asyncpg.
+        doc = _minimal_definition(
+            provenance={"created_at": "2026-07-19T10:00:00Z"})
+        r = wired_client.post("/api/v1/circuits/import", json=doc)
+        assert r.status_code == 201, r.text
+        # Stored naive-UTC: same instant, no offset suffix.
+        assert r.json()["created_at"].startswith("2026-07-19T10:00:00")
+        assert "+" not in r.json()["created_at"]
+
+    def test_hf_id_survives_import_and_reexport(self, wired_client):
+        # R3-B2: hf_id is the cross-instance-stable identifier — a foreign
+        # file typically has hf_id set and mistudio_model_id null.
+        doc = _minimal_definition(
+            model={"hf_id": "LiquidAI/LFM2-2.6B", "mistudio_model_id": None})
+        r = wired_client.post("/api/v1/circuits/import", json=doc)
+        assert r.status_code == 201, r.text
+        cid = r.json()["id"]
+        assert r.json()["model_hf_id"] == "LiquidAI/LFM2-2.6B"
+        exported = wired_client.get(f"/api/v1/circuits/{cid}/export")
+        assert exported.json()["model"]["hf_id"] == "LiquidAI/LFM2-2.6B"
+        wired_client.delete(f"/api/v1/circuits/{cid}")
+
+    def test_cluster_ref_member_derives_cluster_granularity(self, wired_client):
+        # R2 B7 derivation branch, previously unpinned (default masked it).
+        doc = _minimal_definition(members=[
+            {"layer": 13, "member_kind": "cluster_ref",
+             "cluster_profile_id": "clp_x",
+             "expanded_members": [{"feature_idx": 1, "strength": 0.5}]},
+        ])
+        r = wired_client.post("/api/v1/circuits/import", json=doc)
+        assert r.status_code == 201, r.text
+        assert r.json()["granularity"] == "cluster"
+        wired_client.delete(f"/api/v1/circuits/{r.json()['id']}")
+
+    def test_patch_granularity_persists(self, wired_client):
+        # R2 B6 fix, previously unpinned.
+        created = wired_client.post("/api/v1/circuits", json={
+            "name": "Gran", "saes": _minimal_definition()["saes"],
+            "members": _minimal_definition()["members"]})
+        cid = created.json()["id"]
+        patched = wired_client.patch(f"/api/v1/circuits/{cid}",
+                                     json={"granularity": "cluster"})
+        assert patched.json()["granularity"] == "cluster"
+        assert wired_client.get(
+            f"/api/v1/circuits/{cid}").json()["granularity"] == "cluster"
+        wired_client.delete(f"/api/v1/circuits/{cid}")
+
+    def test_import_413_over_cap(self, client):
+        r = client.post("/api/v1/circuits/import", json={"kind": "x"},
+                        headers={"Content-Length": str(2_000_000)})
+        assert r.status_code == 413
+
+    def test_import_malformed_content_length_is_400(self):
+        # R3-B4: int("abc") used to 500. ASGITransport is async-only.
+        import asyncio
+        import httpx
+
+        async def _run():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport,
+                                         base_url="http://test") as c:
+                return await c.post(
+                    "/api/v1/circuits/import", content=b"{}",
+                    headers={"Content-Length": "abc",
+                             "Content-Type": "application/json"})
+
+        r = asyncio.run(_run())
+        assert r.status_code == 400
+
+    def test_import_422_names_the_failing_field(self, client):
+        doc = _minimal_definition()
+        doc["members"] = [{"layer": 13, "member_kind": "feature_ref"}]  # no feature
+        r = client.post("/api/v1/circuits/import", json=doc)
+        assert r.status_code == 422
+        assert "first at '" in r.json()["detail"]

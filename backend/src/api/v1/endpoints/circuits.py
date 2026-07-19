@@ -39,6 +39,7 @@ class CircuitCreate(BaseModel):
     discovery: Optional[Dict[str, Any]] = None
     discovery_run_id: Optional[str] = Field(None, max_length=36)
     model_id: Optional[str] = Field(None, max_length=255)
+    model_hf_id: Optional[str] = Field(None, max_length=500)
 
 
 class CircuitUpdate(BaseModel):
@@ -88,6 +89,7 @@ def _out(circuit: Circuit) -> Dict[str, Any]:
         "faithfulness": circuit.faithfulness,
         "discovery": getattr(circuit, "discovery", None),
         "discovery_run_id": circuit.discovery_run_id,
+        "model_hf_id": getattr(circuit, "model_hf_id", None),
         "created_at": circuit.created_at,
     }
 
@@ -149,9 +151,14 @@ async def import_circuit(payload: Dict[str, Any], request: Request,
     over the house 1 MB cap are rejected (R2 B3).
     """
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > MAX_IMPORT_BYTES:
-        raise HTTPException(status_code=413,
-                            detail=f"Import exceeds the {MAX_IMPORT_BYTES // 1024} KB cap")
+    if content_length:
+        try:
+            declared = int(content_length)
+        except ValueError:  # malformed header must be a 400, not a 500 (R3-B4)
+            raise HTTPException(status_code=400, detail="Malformed Content-Length header")
+        if declared > MAX_IMPORT_BYTES:
+            raise HTTPException(status_code=413,
+                                detail=f"Import exceeds the {MAX_IMPORT_BYTES // 1024} KB cap")
     kind = payload.get("kind")
     if kind != "mistudio.circuit-definition":
         raise HTTPException(
@@ -178,6 +185,7 @@ async def import_circuit(payload: Dict[str, Any], request: Request,
             "narrative": defn.narrative,
             "granularity": granularity,
             "model_id": defn.model.mistudio_model_id,
+            "model_hf_id": defn.model.hf_id,
             "created_at": defn.provenance.created_at,
             "saes": [s.model_dump(mode="json") for s in defn.saes],
             "members": [m.model_dump(mode="json") for m in defn.members],

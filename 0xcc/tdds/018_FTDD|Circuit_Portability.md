@@ -52,6 +52,8 @@ classify(edge, signals) -> {type, signals_disclosed}
 - Audit fixture: `backend/tests/fixtures/edge_type_audit.json` — hand-labeled echoes + computed edges
   (seeded from known L13→L14 persistence pairs + validated computed edges); regression-gated
   (≥90%/≤10%).
+- UI policy (R2-P3): persistence edges are HIDDEN by default in the circuit detail view (a show/hide
+  toggle reveals them) — residual echoes are bookkeeping, not findings; computed edges are the story.
 
 ## 3. Circuit storage
 

@@ -9,7 +9,7 @@ the service never re-implements them.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -69,6 +69,16 @@ class CircuitService:
             data.get("members", []), data.get("edges", []), data.get("budget"),
             data.get("faithfulness"), data.get("discovery"),
         )
+        # hf_id is the cross-instance-stable model identifier (R3-B2). When
+        # the caller didn't supply one but referenced a local model, fill it
+        # from the models table so our own exports carry it too.
+        model_hf_id = data.get("model_hf_id")
+        if model_hf_id is None and data.get("model_id"):
+            from ..models.model import Model
+            model_hf_id = (
+                await db.execute(
+                    select(Model.repo_id).where(Model.id == data["model_id"]))
+            ).scalar_one_or_none()
         circuit = Circuit(
             name=defn.name,
             narrative=defn.narrative,
@@ -84,11 +94,18 @@ class CircuitService:
             rung=int(defn.displayed_rung()),
             discovery_run_id=data.get("discovery_run_id"),
             model_id=data.get("model_id"),
+            model_hf_id=model_hf_id,
         )
         # Import faithfulness (R2 B1): a definition's authored created_at is
         # evidence provenance — keep it instead of stamping DB-insert time.
+        # Normalize tz-aware values ("…Z" — the normal foreign-export form) to
+        # naive UTC: the column is timestamp-without-tz and asyncpg raises a
+        # DataError on aware datetimes (R3-B1, live-reproduced 500).
         if data.get("created_at") is not None:
-            circuit.created_at = data["created_at"]
+            authored = data["created_at"]
+            if authored.tzinfo is not None:
+                authored = authored.astimezone(timezone.utc).replace(tzinfo=None)
+            circuit.created_at = authored
         db.add(circuit)
         await db.commit()
         await db.refresh(circuit)
@@ -189,7 +206,10 @@ class CircuitService:
             circuit.edges, circuit.budget, circuit.faithfulness,
             getattr(circuit, "discovery", None),
         )
-        defn.model = DefinitionModelRef(mistudio_model_id=circuit.model_id)
+        defn.model = DefinitionModelRef(
+            mistudio_model_id=circuit.model_id,
+            hf_id=getattr(circuit, "model_hf_id", None),
+        )
         defn.provenance = DefinitionProvenance(
             created_at=circuit.created_at,
             exported_at=datetime.utcnow(),

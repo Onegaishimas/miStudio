@@ -31,6 +31,10 @@
 
 ## Phase 3: Edge validation
 
+### Task 3.0: 018 hand-off preconditions for the circuit writer (MUST land before 3.1/3.2 write results — escalates to P1 once the writer exists; 018 R2-Q2/R2-A5, R3-B5)
+- [ ] **Optimistic concurrency on circuit writes:** add a version/updated_at precondition to `CircuitService.update` + PATCH (reject stale writes with 409) — 017's validation writer and a user editing in the panel will race without it.
+- [ ] **`update()`-only edge-write rule:** validation results write edges exclusively through `CircuitService.update` (never raw JSONB mutation) so contract validators + rung recompute always run; document in the service docstring and pin with a test that a validation write triggers rung recomputation.
+
 ### Task 3.1: Intervention service + task
 - [ ] Prompt windows from 016 store + SAME tokenization (id asserted) · matched greedy passes (fixed seeds) · Δ_p over clean-fire tokens · ES = mean/σ_d (σ_d from the SAME store) · shuffled-NON-edge support-matched null · sign-consistency gate (default 8/10, config) · tested_and_failed recording (rung history via 018's shared enum — import, never redefine)
 

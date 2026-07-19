@@ -12,8 +12,10 @@ import {
 import { fetchAPI, buildQueryString } from './client';
 
 export const clusterProfilesApi = {
-  list: (params?: { sae_id?: string; search?: string }): Promise<ClusterProfileListResponse> =>
-    fetchAPI<ClusterProfileListResponse>(`/cluster-profiles${buildQueryString(params ?? {})}`),
+  list: (params?: { sae_id?: string; search?: string }): Promise<ClusterProfileListResponse> => {
+    const qs = buildQueryString(params ?? {});
+    return fetchAPI<ClusterProfileListResponse>(`/cluster-profiles${qs ? `?${qs}` : ''}`);
+  },
 
   get: (id: string): Promise<ClusterProfile> => fetchAPI<ClusterProfile>(`/cluster-profiles/${id}`),
 

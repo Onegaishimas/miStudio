@@ -6,14 +6,13 @@
  * Discovery/validation tabs (016/017) join this panel as they land.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   GitBranch, ArrowUpRight, ArrowDownRight, Trash2, Download, Layers,
   Pencil, Check, X as XIcon, FileDown, Upload,
 } from 'lucide-react';
-import { useRef } from 'react';
 import { circuitsApi } from '../../api/circuits';
 import type { Circuit, CircuitSummary, CircuitEdge } from '../../types/circuits';
 import { RungChip } from '../circuits/RungChip';
@@ -241,7 +240,9 @@ export function CircuitsPanel() {
 
   const downloadSlices = (id: string, name: string) =>
     circuitsApi.exportSlices(id).then((r) => {
-      const blob = new Blob([JSON.stringify(r.slices, null, 2)], { type: 'application/json' });
+      // Save the full response — the parent_rung wrapper travels in the file
+      // so the human-readable evidence context isn't dropped (R3-B9).
+      const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

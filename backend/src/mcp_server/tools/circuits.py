@@ -55,24 +55,29 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         discovery_run_id: Optional[str] = None,
         discovery: Optional[dict] = None,
         faithfulness: Optional[dict] = None,
+        model_id: Optional[str] = None,
+        model_hf_id: Optional[str] = None,
     ) -> Any:
         """Create a circuit from discovery candidates or hand assembly.
         Contract rules enforced server-side: per-layer member caps (20 PER
         LAYER), edges must ascend layers and reference members. Rejections
-        return the exact violation."""
+        return the exact violation. model_hf_id (HF repo id) is the
+        cross-instance-stable model provenance carried by exports."""
         return await client.post("/circuits", json_body={
             "name": name, "saes": saes, "members": members,
             "edges": edges or [], "narrative": narrative, "budget": budget,
             "granularity": granularity, "discovery_run_id": discovery_run_id,
             "discovery": discovery, "faithfulness": faithfulness,
+            "model_id": model_id, "model_hf_id": model_hf_id,
         })
 
     @mcp.tool()
-    async def promote_circuit(circuit_id: str) -> Any:
-        """Promote a circuit into a loadable multi-layer steering profile.
-        Promotion is a BADGE, not a gate — unvalidated circuits promote and
-        carry their rung visibly everywhere."""
-        return await client.post(f"/circuits/{circuit_id}/promote")
+    async def promote_circuit(circuit_id: str, promoted: bool = True) -> Any:
+        """Promote a circuit into a loadable multi-layer steering profile —
+        or unpromote it (promoted=false). Promotion is a BADGE, not a gate —
+        unvalidated circuits promote and carry their rung visibly everywhere."""
+        return await client.post(f"/circuits/{circuit_id}/promote",
+                                 json_body={"promoted": promoted})
 
     @mcp.tool()
     async def update_circuit(
@@ -82,13 +87,15 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         members: Optional[list] = None,
         edges: Optional[list] = None,
         budget: Optional[dict] = None,
+        granularity: Optional[str] = None,
     ) -> Any:
         """Edit a circuit (rename, fix a narrative, drop a bad edge, adjust
-        members) — the agent review loop is not create-only. Structural
-        contract rules re-validate on every update."""
+        members, switch granularity) — the agent review loop is not
+        create-only. Structural contract rules re-validate on every update."""
         body = {k: v for k, v in {
             "name": name, "narrative": narrative, "members": members,
-            "edges": edges, "budget": budget}.items() if v is not None}
+            "edges": edges, "budget": budget,
+            "granularity": granularity}.items() if v is not None}
         return await client.patch(f"/circuits/{circuit_id}", json_body=body)
 
     @mcp.tool()
@@ -106,7 +113,9 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     @mcp.tool()
     async def export_circuit_definition(circuit_id: str) -> Any:
         """Export mistudio.circuit-definition/v1 JSON (lossless: rungs, edge
-        types, attribution, manifest refs, provenance all travel)."""
+        types, attribution, manifest refs, provenance all travel). This is
+        the raw contract document — for the human-readable rung_language
+        string, use get_circuit/list_circuits."""
         return await client.get(f"/circuits/{circuit_id}/export")
 
     @mcp.tool()
