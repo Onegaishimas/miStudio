@@ -328,6 +328,26 @@ def resolve_decoder_weight(sae_model) -> Optional["torch.Tensor"]:
     return None
 
 
+def resolve_encoder_weight(sae_model) -> Optional["torch.Tensor"]:
+    """
+    Resolve an SAE's encoder weight matrix as [d_sae, d_model].
+
+    Companion to resolve_decoder_weight — the single orientation source for
+    the cross-layer weight prior (IDL-32: cos(W_dec(Li)[:,i], W_enc(Lj)[j,:]))
+    and Feature 015's hazard detection. Handles the same format families:
+    tied weights, JumpReLU encoder_weight property, and nn.Linear encoders
+    (whose .weight is already [d_sae, d_model] by torch convention).
+    """
+    if hasattr(sae_model, 'tied_weights') and sae_model.tied_weights:
+        return sae_model.encoder.weight  # [d_sae, d_model] (Linear convention)
+    if hasattr(sae_model, 'encoder_weight') and not isinstance(getattr(sae_model, 'encoder', None), nn.Linear):
+        return sae_model.encoder_weight
+    if hasattr(sae_model, 'encoder') and sae_model.encoder is not None:
+        if hasattr(sae_model.encoder, 'weight'):
+            return sae_model.encoder.weight  # [d_sae, d_model]
+    return None
+
+
 @dataclass
 class LoadedSAE:
     """Container for a loaded SAE model and its metadata."""

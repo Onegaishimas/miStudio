@@ -7,6 +7,7 @@ it only when the module's category is enabled via ``MCP_TOOL_CATEGORIES``.
 
 from . import (
     admin,
+    circuits,
     discovery,
     experiments,
     features,
@@ -27,6 +28,7 @@ CATEGORY_MODULES = {
     "steering": [steering],
     "experiments": [experiments],
     "profiles": [profiles],
+    "circuits": [circuits],
     "labeling": [labeling],
     "jobs": [jobs],
     "admin": [admin],

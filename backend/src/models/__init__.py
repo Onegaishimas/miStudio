@@ -35,6 +35,7 @@ from .feature_grouping import (
     GroupingRunStatus,
 )
 from .cluster_profile import ClusterProfile
+from .circuit import Circuit
 from .agent_approval import AgentApprovalRequest, ApprovalStatus
 
 __all__ = [

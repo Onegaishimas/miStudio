@@ -13,13 +13,14 @@ import {
   ChevronRight,
   BookOpen,
   Boxes,
+  GitBranch,
 } from 'lucide-react';
 import logoSvg from '../../assets/logo.svg';
 import { useUIStore } from '../../stores/uiStore';
 
 const APP_VERSION = '0.5.0';
 
-type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'feature-groups' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
+type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'feature-groups' | 'circuits' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
 
 const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'models', label: 'Models', icon: Server },
@@ -28,6 +29,7 @@ const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'extractions', label: 'Extractions', icon: Layers },
   { id: 'labeling', label: 'Labeling', icon: Tags },
   { id: 'feature-groups', label: 'Clusters', icon: Boxes },
+  { id: 'circuits', label: 'Circuits', icon: GitBranch },
   { id: 'saes', label: 'SAEs', icon: Network },
   { id: 'steering', label: 'Steering', icon: Sliders },
   { id: 'templates', label: 'Templates', icon: FileText },
