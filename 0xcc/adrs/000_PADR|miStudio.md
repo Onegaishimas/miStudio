@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 2.9 (Feature Clusters increment — IDL-28/29/30)
+**Version:** 3.0 (Feature Clusters increment — IDL-28/29/30)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -3068,9 +3068,114 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-31: Multi-SAE cross-layer steering (per-layer SAE application, per-layer budgets, hazard detection v2)
+
+**Date:** 2026-07-18 (hazards amended 2026-07-19 per BRD-MIS-CIRCUITS-002 BR-024)
+
+**Context:** BRD-MIS-CIRCUITS-001 BR-001..004 + CIRCUITS-002 BR-024. `_register_steering_hooks` (`steering_service.py:1090`) already groups features by `layer` and registers one hook per layer — but every hook shares the single `LoadedSAE`, so cross-layer steering is an unreachable illusion. Feature status: **Planned** (doc chain 015).
+
+**Decision:**
+1. **Per-(SAE, layer) hook binding.** Requests gain optional per-feature `sae_id`; the service loads every referenced SAE, groups by `(sae_id, layer)`, and passes each group ITS OWN `LoadedSAE` to the hook factory (which already takes `sae` per hook). Layer≠SAE-trained-layer ⇒ **rejected 422**, never silently served (BR-001).
+2. **VRAM discipline:** load only referenced SAEs; exit-mode frees all; envelope documented.
+3. **Budget composition:** IDL-29 runs INDEPENDENTLY per layer (each layer's B/B_dir/G from its own decoder); one global λ∈[0,2]; formula id `freq-budget/sim-alloc/per-layer@1`. Joint cross-layer calibration explicitly NOT promised (recorded future empirical work).
+4. **Hazard detection v2 (BR-024):** the PRIMARY signal is **measured validated edge effect sizes** (IDL-34 manifests): co-steered members joined by a validated positive edge ⇒ compounding warning quantifying the expected double-counting from the measured ES; negative edges ⇒ cancellation analog. Where no validated edge exists, the weight-prior heuristic remains permitted but every heuristic-sourced warning is **labeled `heuristic`** per the evidence-ladder language rules (IDL-35). Warnings surface; they never mutate the configuration.
+5. **Trust surface:** `features_applied` gains `sae_id`; applied summaries group by layer; result titling per IDL-28 chain.
+
+**Tradeoffs:** per-layer-independent budgets ignore cross-layer interaction by design (honest v1 — the hazard warnings carry the caveat); hazard-v2 depends on 017's validation data, so 015 ships with heuristic-labeled hazards first and upgrades when validated edges exist (sequencing recorded in the FTASKS).
+
+---
+
+### IDL-32: Position-carrying sparse capture & statistically sound mining (feature + supernode granularities)
+
+**Date:** 2026-07-19
+
+**Context:** CIRCUITS-001 BR-005..008 as amended by CIRCUITS-002 BR-015 (statistics), BR-016 (granularity), BR-020/021 (weight-prior role — classifier input, not ranking booster), BR-023 (Tier-2.5 capture readiness). Extraction discards per-token codes; naive lag-0 mining ranked by a residual weight prior surfaces base-rate noise and echoes. Normative math: CIRCUITS-002 Appendix A.3/A.4/A.9. Feature status: **Planned** (doc chain 016).
+
+**Decision:**
+1. **Capture store:** sparse above-threshold events `(doc/sample_id, token_pos, layer, feature_idx, act f16)` in per-layer columnar memmap files + per-feature index; **token position is a first-class column** (Tier-2.5 join key); per-(layer, token) **SAE reconstruction-error norms** stored by default (full residuals optional per run); optional per-head attention artifacts (top-k keys per query) as a capture add-on. Manifest records corpus/layers/thresholds/SAE fingerprints/**discovery-vs-held-out document split (default 80/20, per-document)**. Cost estimate before launch; managed GPU task; stale-flagged on SAE change.
+2. **Statistics (A.3):** binarized firings at the capture threshold; association = **PMI/lift** (never raw counts); minimum support `n_ud ≥ s_min` (default 20); **null model = within-document circular shift per feature** (preserves marginal rate + burstiness; naive whole-corpus permutation is forbidden); significance = high percentile of the null (default 99th); **Benjamini–Hochberg FDR** (q=0.05) over surviving pairs; **held-out replication rate reported first-class** per run (replicates = held-out PMI over held-out null, same sign).
+3. **Granularities (A.4):** FEATURE-level and **CLUSTER-level supernodes** — `A_C(t) = max over members` (mean recorded as alternative), cohesion-floor eligibility, cluster-refs resolvable to members; supernode search collapses the candidate space to (~clusters)² and is the **recommended default for seeded mode**; review drill-down refines cluster edges to member pairs.
+4. **Weight prior role (A.9, BR-020):** `cos(W_dec(Li)[:,i], W_enc(Lj)[j,:])` is an **echo-detector input to the edge-type classifier** (IDL-33) and participates in ranking ONLY combined with distinctness signals; low prior + high association = computed-edge signature, never down-ranked for the low prior.
+5. **Tractability:** support floors + null thresholds + supernode default + top-M per upstream; never exhaustive.
+
+**Tradeoffs:** lag-0 remains the Tier-1 signal (disclosed limitation everywhere results appear — BR-023); positions/error-norms grow the store within the sparse budget philosophy (index columns + norms, not dense tensors); the discovery/held-out split halves neither capture nor mining cost but is non-negotiable for replication honesty.
+
+---
+
+### IDL-33: Circuit definitions (`mistudio.circuit-definition/v1`) — rung/type/position-carrying contract, storage & per-layer projection
+
+**Date:** 2026-07-18 (amended pre-freeze 2026-07-19 per CIRCUITS-002)
+
+**Context:** CIRCUITS-001 BR-011..014 as amended by CIRCUITS-002 BR-020/021 (edge typing), BR-025 (per-layer caps), BR-026 (rung fields), BR-023 (position/attention fields), BR-017/019 (manifest/faithfulness references). The contract is NOT yet frozen — all amendments land inside v1 before freeze. Additive-only family rule holds: a NEW kind, never a mutation of cluster-definition/v1. Feature status: **Planned** (doc chain 018).
+
+**Decision:**
+1. **Kind:** `mistudio.circuit-definition/v1` — `saes[]` (per-layer refs, v1 `sae` shape), `members[]` (v1 member shape + required `layer`; `member_kind: feature_ref | cluster_ref` with cluster refs resolvable to membership), `edges[]`:
+   `{up, down, type: computed|persistence|attention_mediated, rung: 0..3, tested_and_failed: [...], coactivation: {pmi, lift, support, null_percentile, replicated_heldout}, weight_prior, attribution: {score, sign_consistency, method}, validation_manifest_ref, position: {source_role?, target_role?, mediating_heads?[]}}` — position/attention fields nullable from day one (Tier-2.5 lands with no migration), `budget` (per-layer + global λ, IDL-31 formula id), `faithfulness: {necessity?, sufficiency?, k?, metric, manifest_ref} | null`, `provenance` + `discovery: {mode, granularity, corpus, split, thresholds, dates}`.
+2. **Per-layer member caps (BR-025):** the 20-member cap applies PER LAYER; contract validators and UX enforce/display per layer.
+3. **Storage:** `circuits` table (`crc_` ids, JSONB members/edges/budget/faithfulness, schema_version); a promoted circuit IS the loadable steering profile (no dual entity); validation manifests stored as first-class rows referenced by id (reproducibility per IDL-34).
+4. **Badge, not gate — rung-aware:** promotion/steering/export never require any rung; every surface renders the rung per IDL-35.
+5. **Projection (BR-014):** per-layer cluster-definition/v1 slices, valid against the shipped v1 schema, carrying display-only `meta` markers `{projection_of, parent_rung, partial_rendering: true}` — single-SAE consumers work unchanged and cannot mistake a slice for a validated whole.
+6. Vendored JSON schema published beside the v1 schema with the same pydantic-sync discipline; reviewed against the anticipated miLLM circuits runtime BEFORE freeze (CLUSTERS-001 discipline).
+
+**Tradeoffs:** edges denormalize evidence snapshots (snapshot-by-design, as IDL-30); nullable Tier-2.5 fields risk "schema theater" (accepted: cheap, and the A.8 design doc is a 016 deliverable so the fast-follow starts specified).
+
+---
+
+### IDL-34: Intervention semantics v2, edge-validation criterion, circuit faithfulness & heuristic remediation
+
+**Date:** 2026-07-18 (specified 2026-07-19 per CIRCUITS-002 BR-017/018/019)
+
+**Context:** CIRCUITS-001 BR-009 required real intervention; CIRCUITS-002 specifies it (Appendix A.5/A.7) and resolves the edge-validation open question. The existing ablation surface fabricates numbers with no forward pass. Feature status: **Planned** (doc chain 017).
+
+**Decision:**
+1. **Directional subtraction (default intervention):** `x'(t) = x(t) − (a_u(t) − a_base)·W_dec[:,i]` at the hook point — the SAE reconstruction-error term `ε` is untouched by construction (never re-decode; dropping ε measures SAE artifact, not mechanism — the canonical implementation mistake, pinned by test). Baseline `a_base` = 0 default | corpus-mean option, a recorded run parameter. Any reconstruction-swap variant MUST re-add ε.
+2. **Measurement:** matched greedy forward passes (same prompts/seeds), Δ_p over tokens where the clean pass fired upstream; **standardized effect size** `ES = mean_p(Δ_p)/σ_d` with σ_d from the capture store (no extra passes).
+3. **Validated (rung 2) iff** |ES| exceeds the shuffled-NON-edge-pair null ES threshold AND sign consistency ≥ configured fraction (proposal 8/10) — BR-018. Failures recorded `tested_and_failed`, never dropped.
+4. **Validation manifests:** every causal number persists {intervention type, baseline, prompts, seeds, thresholds, null summary, measured values} sufficient to REPRODUCE the result; a manifest-reproduction test is part of acceptance.
+5. **Circuit faithfulness (A.7, BR-019):** at promotion — necessity = normalized behavior loss under simultaneous member ablation; sufficiency ≈ behavior retention under top-k non-member ablation at circuit layers (k disclosed, default 256/layer); necessity-only runs allowed with sufficiency marked untested; behavior metric default = compare-workflow output-shift measures (open question recorded). Badge, not gate.
+6. **Heuristic remediation:** the statistical ablation surface is relabeled "impact estimate (statistical — no model inference)" everywhere (API `method` field, UI retitle, MCP docstring) in the same increment; the word "causal" is forbidden below rung 2 (IDL-35 language rules).
+
+**Tradeoffs:** all-positions v1 suppression (position-restricted arrives with Tier-2.5); greedy measurement passes trade sampling realism for reproducibility (manifests record it); repeat-run noise floors cost bounded extra passes on sampled top-K only.
+
+---
+
+### IDL-35: The evidence ladder as the product-wide claims model
+
+**Date:** 2026-07-19
+
+**Context:** CIRCUITS-002 BR-026 (locked decision 1): as capability tiers accumulate (mined → attribution → intervention → faithfulness), claim inflation is the product's biggest credibility risk. One vocabulary must govern UI, MCP, contract, and docs. Feature status: **Planned** (doc chain 018; consumed by 015/016/017).
+
+**Decision:**
+1. **One shared enum** (single backend model consumed by UI, MCP, and contract code — divergence between surfaces is a defect class): rung 0 `mined`, 1 `attribution_supported`, 2 `causally_validated`, 3 `faithfulness_tested`.
+2. **Rung semantics:** an edge's rung = highest rung PASSED; failed tests record `tested_and_failed` at that rung without demoting lower rungs. A circuit's displayed rung = MIN over member edges' rungs; faithfulness status displays separately.
+3. **Language mapping (enforced in copy + MCP descriptions + exports):** rung 0–1 → "associated/suggested"; rung 2 → "causally validated (edge)"; rung 3 → "faithfulness-tested (circuit)". **The word "causal" is forbidden below rung 2** — a copy-audit test enforces it.
+4. Rungs are machine-readable in the contract (IDL-33), rendered in every UI surface, returned by every MCP tool that returns circuits/edges, and included in exports and projections (parent rung on slices).
+5. This subsumes CIRCUITS-001's "unvalidated" badge.
+
+**Tradeoffs:** a four-rung vocabulary is more to teach than one badge (mitigated: the manual's circuits page leads with the ladder; every rung label carries a tooltip stating what would move it up one rung).
+
+---
+
+### IDL-36: Tier-2 gradient-attribution architecture (stop-gradient SAE pass-through, re-ranking placement)
+
+**Date:** 2026-07-19
+
+**Context:** CIRCUITS-002 BR-022 (locked decision 2): gradient attribution was mis-costed in CIRCUITS-001 as heavy future infrastructure; it is one forward + one backward pass per prompt (attribution-patching cost model), and belongs BETWEEN mining and ablation so the expensive tier is spent on an enriched shortlist. Normative math: Appendix A.6 (sparse-feature-circuits recipe). Feature status: **Planned** (doc chain 016).
+
+**Decision:**
+1. **Pass-through forward:** at each captured layer rewrite the stream as `x = x̂ + ε` with SAE weights frozen (`requires_grad=False`) — numerically identical to the clean model; gradients flow to activations `f` and `ε` only.
+2. **Score:** `attr(u→d) = Σ_t (∂m/∂a_u)(t) · a_u(t)` with `m = mean_t a_d(t)`; raw grad×activation is the re-ranking default; IG-lite (2–4 interpolation points) available on demand (open question recorded).
+3. **Rung 1** requires sign agreement with the mined association + magnitude above the run's percentile floor; scores disclosed per candidate (third evidence signal) and carried in the contract.
+4. **Placement + economics:** attribution re-ranks BEFORE ablation sampling; cost is O(prompts × distinct downstream targets) — candidates sharing a downstream target share the backward pass. **Uplift reporting is mandatory:** every run reports ablation survival of the attribution-re-ranked tier vs co-activation-only ranking (a null result is a reportable finding).
+5. **Memory envelope (RSK-009):** activations-only gradients + frozen SAEs + gradient checkpointing over blocks; per-layer-subset attribution as the pressure valve; wall-clock envelope target ≤1.5× the capture pass.
+
+**Tradeoffs:** raw grad×activation is a linear approximation (weak on saturated features — IG-lite is the documented recourse); prompt-specificity means attribution reflects the evaluation prompt set (aggregation across corpora recorded as future).
+
+---
+
 ## Document Control
 
-**Version:** 2.9
+**Version:** 3.0
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
 **Last Updated:** 2026-07-16
@@ -3100,6 +3205,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.6 | 2026-07-12 | IDL-26: MCP Server architecture & cross-feature grouping (separate container, official `mcp` SDK, streamable HTTP, bearer-token auth, tool-category gating, grouping REST endpoints + 4 new tables, `mcp_agent` provenance, steering approval mode) — Planned, from BRD-MIS-MCP-001 |
 | 2.7 | 2026-07-15 | IDL-27: Steering UX — frequency-based auto-baseline strength (unit-norm-decoder rationale), Blended vs Compare toggle, 20-feature limit + palette — Planned |
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
+| 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
 
 ---

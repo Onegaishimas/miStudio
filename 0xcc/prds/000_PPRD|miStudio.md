@@ -1,8 +1,8 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.7 (Features 13–15 COMPLETE — Clusters arc shipped, validated, deployed)
-**Last Updated:** 2026-07-16
+**Version:** 3.9 (Features 16–19 — Circuits arc from BRD-MIS-CIRCUITS-001 + BRD-MIS-CIRCUITS-002, Planned)
+**Last Updated:** 2026-07-19
 **Status:** Active
 
 ---
@@ -78,6 +78,10 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 13 | Clusters UX & Trustworthy Blended Results | "Feature Groups" → "Clusters" (UI), cluster-labeled steering results, visible all-members-applied verification | ✅ Complete |
 | 14 | Cluster Strength Budget Model | Principled combined-strength model: frequency-derived budget, similarity-weighted allocation, resultant-norm gain, pin+rebalance, intensity dial | ✅ Complete |
 | 15 | Cluster Authoring & Portable Definitions | Named/narrated cluster profiles with tuned strengths; standardized JSON export/import (the mobile artifact for the MILLM/MCP/Open WebUI arc) | ✅ Complete |
+| 16 | Multi-SAE Cross-Layer Steering | Features steered through their OWN layer's SAE; per-layer budgets + global λ; hazard detection v2 (validated-effect-size-driven) | Planned |
+| 17 | Capture, Statistical Mining & Attribution | Position-carrying sparse capture; PMI/null-model/held-out statistics; feature- AND cluster-level (supernode) mining; Tier-2 gradient-attribution re-ranking; Tier-2.5 readiness | Planned |
+| 18 | Intervention, Validation & Faithfulness | Directional-subtraction intervention (error-preserving); effect-size-vs-null edge validation with manifests; circuit-level faithfulness; heuristic-ablation remediation | Planned |
+| 19 | Circuit Review, Ladder & Portability | Evidence-ladder claims discipline; edge typing (computed/persistence/attention-mediated); review/promotion; `mistudio.circuit-definition/v1` + per-layer v1 projection | Planned |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -561,6 +565,113 @@ through BR-010).
 
 ---
 
+### 3.16 Multi-SAE Cross-Layer Steering (Planned)
+
+**Purpose:** Make cross-layer combined steering real. Hooks already register per-layer, but every hook
+shares the single loaded SAE's decoder — features placed on other layers would be steered with directions
+from the wrong layer's basis. From BRD-MIS-CIRCUITS-001 (BR-001..004) as amended by BRD-MIS-CIRCUITS-002
+(BR-024 hazard grounding).
+
+**Capabilities:**
+- **Per-layer SAE application:** a combined generation loads every SAE referenced by the configuration and
+  steers each feature through the SAE trained on its own layer; configurations spanning layers are never
+  silently served through one decoder.
+- **Per-layer budgets + global λ:** the established strength model (IDL-29) runs independently per layer;
+  one global intensity dial; formula id `freq-budget/sim-alloc/per-layer@1`. Joint cross-layer calibration
+  explicitly deferred.
+- **Hazard detection v2 (BR-024):** compounding/cancellation warnings consume **measured validated edge
+  effect sizes** as the primary signal (quantifying expected double-counting); where no validated edge
+  exists, heuristic signals remain but are labeled `heuristic` per the evidence-ladder discipline. Warnings
+  surface, never silently correct.
+- **Trust across layers:** member-contribution verification and circuit-titled results extend IDL-28's
+  guarantees to multi-layer runs.
+
+**Docs:** `015_FPRD|MultiSAE_Steering.md` → FTDD → FTID → FTASKS. ADR: IDL-31.
+
+---
+
+### 3.17 Capture, Statistical Mining & Attribution (Planned)
+
+**Purpose:** Build the evidence base and mine it soundly. Extraction discards the per-token SAE code
+matrix; naive lag-0 co-activation ranked by a residual weight prior would surface base-rate noise and
+echoes. From BRD-MIS-CIRCUITS-001 (BR-005..008) as amended by BRD-MIS-CIRCUITS-002 (BR-015, BR-016,
+BR-022, BR-023).
+
+**Capabilities:**
+- **Position-carrying sparse capture:** per-token, multi-layer, above-threshold feature activations with
+  token positions, SAE reconstruction-error norms, and optional per-head attention artifacts (top-k keys)
+  — Tier-2.5-ready by construction; cost-estimated before launch; managed GPU task.
+- **Statistically sound mining (BR-015):** PMI/lift with base-rate correction; minimum support; a
+  within-document circular-shift null model; Benjamini–Hochberg FDR; per-document 80/20 discovery/held-out
+  split with the **held-out replication rate reported first-class** per run.
+- **Two granularities (BR-016):** feature-level and **cluster-level (supernode)** mining — curated cluster
+  profiles as units (max-over-members activation, cohesion-gated), the recommended default for seeded mode;
+  drill-down refines a cluster edge to member pairs.
+- **Tier-2 gradient attribution (BR-022):** one forward + one backward per prompt with stop-gradient
+  through the SAE reconstruction error; re-ranks candidates before ablation sampling; the **survival-rate
+  uplift vs co-activation-only ranking is a measured, reported number**.
+- **Tier-2.5 readiness (BR-023):** lag-0 disclosed as the deliberately-limited Tier-1 signal; the
+  attention-mediated cross-position mining design (Appendix A.8) is a named deliverable; no schema
+  migration will be needed to enable it.
+
+**Docs:** `016_FPRD|Circuit_Discovery.md` → FTDD → FTID → FTASKS. ADR: IDL-32, IDL-36.
+
+---
+
+### 3.18 Intervention, Validation & Faithfulness (Planned)
+
+**Purpose:** Make "causally validated" mean what the interpretability literature expects. The prior
+ablation surface fabricated its numbers; CIRCUITS-001 required real intervention; CIRCUITS-002 specifies
+it. From BRD-MIS-CIRCUITS-001 (BR-009) as amended by BRD-MIS-CIRCUITS-002 (BR-017, BR-018, BR-019).
+
+**Capabilities:**
+- **Intervention engine v2 (BR-017):** directional subtraction — remove the feature's realized
+  contribution `(a_u − a_base)·W_dec[:,i]` from the residual stream, **preserving the SAE reconstruction
+  error term**; zero vs corpus-mean baseline as a recorded parameter; every run persists a reproducible
+  **validation manifest**.
+- **Edge validation criterion (BR-018):** standardized effect size vs a shuffled-pair null + sign
+  consistency across evaluation prompts; failures recorded as tested-and-failed, never silently dropped.
+- **Circuit-level faithfulness (BR-019):** at promotion — necessity (whole-circuit ablation) and a
+  tractable sufficiency approximation (top-k non-member ablation); scores displayed and carried in the
+  contract. Badge, not gate.
+- **Heuristic remediation:** the fabricated-ablation surface is relabeled "impact estimate (statistical —
+  no inference)" or removed; no surface presents a fabricated number as causal.
+
+**Docs:** `017_FPRD|Circuit_Validation.md` → FTDD → FTID → FTASKS. ADR: IDL-34.
+
+---
+
+### 3.19 Circuit Review, Evidence Ladder & Portability (Planned)
+
+**Purpose:** Turn discovered circuits into first-class, honestly-labeled, portable artifacts. From
+BRD-MIS-CIRCUITS-001 (BR-010..014) as amended by BRD-MIS-CIRCUITS-002 (BR-020, BR-021, BR-025, BR-026).
+
+**Capabilities:**
+- **Evidence ladder (BR-026):** one shared rung model — mined → attribution-supported → causally
+  validated → faithfulness-tested — machine-readable in the contract, rendered in every UI surface,
+  returned by every MCP tool; a circuit's rung = min over member edges; causal language forbidden below
+  rung 2. Subsumes the "unvalidated" badge.
+- **Edge typing (BR-020, BR-021):** every edge is typed `computed` | `persistence` | `attention_mediated`
+  (schema-ready); the weight prior becomes an **echo detector** inside the classifier — never a standalone
+  ranking booster; persistence edges are de-ranked from default views but queryable, steerable, always
+  typed; low prior + high association is recognized as the computed-edge signature.
+- **Review & promotion:** evidence-rich review (statistics, attribution, validation status, manifests);
+  edit/name/narrate; promotion to loadable multi-layer steering profiles (badge, not gate); **per-layer
+  member caps (BR-025)**.
+- **Portable contract:** `mistudio.circuit-definition/v1` — NEW kind; per-layer SAE refs; members keyed to
+  layers (feature refs or cluster refs); `edges[]` with type, rung, evidence, attribution scores, and
+  manifest references; position/attention fields present from day one; discovery provenance; lossless
+  round-trip. Amendments land **before freeze**.
+- **Projection to today's runtime (BR-014):** per-layer cluster-definition/v1 slices carrying the parent's
+  rung and a partial-rendering marker — current single-SAE consumers (miLLM) work unchanged.
+- **Future arc (vision, separate BRDs):** miLLM circuits runtime (BRD-MILLM-CIRCUITS-001); Tier-2.5
+  mining fast-follow; Tier-3 attribution graphs; substrate pilot (CIRCUITS-002 Addendum B — research
+  track, no PPRD row) seeding BRD-MIS-SUBSTRATE-001 on GO.
+
+**Docs:** `018_FPRD|Circuit_Portability.md` → FTDD → FTID → FTASKS. ADR: IDL-33, IDL-35.
+
+---
+
 ## 4. Technology Stack
 
 ### 4.1 Backend
@@ -767,6 +878,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 3.3 | 2026-07-12 | Feature 11 implemented: MCP server (33 tools, bearer auth, approval mode), cross-feature grouping (index + REST + Feature Groups UI), mcp_agent provenance, deployment (compose profile + k8s) |
 | 3.4 | 2026-07-15 | Added Feature 12: Steering UX Enhancements (Planned) — §3.12, doc chain 011_FPRD/FTDD/FTID/FTASKS |
 | 3.5 | 2026-07-15 | Feature 12 implemented & deployed: Blended\|Compare toggle, up to 20 features, frequency auto-baseline (default fallback), compact tiles, 20-color palette. K8s-deployed + E2E-verified. |
+| 3.9 | 2026-07-19 | Circuits arc re-planned against BRD-MIS-CIRCUITS-001 + BRD-MIS-CIRCUITS-002 consumed as one unit (002 amends 001; conflicts resolve to 002). Four features (16–19, §3.16–3.19): multi-SAE steering w/ hazard-v2; capture + sound statistics (PMI/null/FDR/held-out) + cluster-level supernode mining + Tier-2 attribution + Tier-2.5 readiness; intervention engine v2 + effect-size-vs-null validation + faithfulness; evidence ladder + edge typing + contract (pre-freeze amendments) + projection. Substrate pilot (002 Addendum B) recorded as research track — no PPRD row (seed: BRD-MIS-SUBSTRATE-001.seed.md). |
 | 3.7 | 2026-07-16 | Features 13–15 COMPLETE: implemented, 3× review iterations each (28/28/15 findings), deployed via GitOps, Playwright E2E-verified (profile-titled Blended results, applied-features count, budget bar/λ dial, low-cohesion gate, profile save/load/import/export). 013 empirical validation EXECUTED — hard gate PASSED after fitting gain exponent γ=0 (the 1/G boost overdrove ~2×; `0xcc/docs/cluster-strength-validation.md`). IDL-29 step-5 amendment: B = B_dir/max(G,floor)^γ, default γ=0. HF-as-marketplace research recorded (`0xcc/docs/hf-marketplace-cluster-definitions-research.md`) for the follow-on BRD. |
 | 3.6 | 2026-07-16 | Added Features 13–15 from BRD-MIS-CLUSTERS-001 (Planned): Clusters UX & trustworthy blended results (§3.13), cluster strength budget model (§3.14), cluster authoring & portable JSON definitions (§3.15). MILLM/unified-MCP/Open WebUI integration recorded as future arc (separate BRD). |
 
