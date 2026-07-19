@@ -53,6 +53,9 @@ class Circuit(Base):
     promoted = Column(Boolean, nullable=False, default=False)
     discovery_run_id = Column(String(36), nullable=True)  # SOFT ref — runs are prunable
     model_id = Column(String(255), nullable=True)
+    # HF repo id — the CROSS-INSTANCE-stable model identifier (model_id is
+    # instance-local); 015's model-mismatch check compares against this.
+    model_hf_id = Column(String(500), nullable=True)
     schema_version = Column(String(8), nullable=False, default="1")
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

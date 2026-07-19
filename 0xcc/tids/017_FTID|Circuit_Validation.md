@@ -44,6 +44,11 @@
   batch result and 016's discovery-run report (fills the placeholder).
 - Results write into discovery-run candidates (`validation` field + rung history) and, when the edge
   belongs to a promoted circuit, into 018's circuit edges.
+- **Circuit-write discipline (018 hand-off, R2-Q2/R2-A5 — FTASKS Task 3.0):** edge writes go
+  EXCLUSIVELY through `CircuitService.update` (contract validators + rung recompute always run —
+  never mutate the JSONB column directly), and the writer must land AFTER the optimistic-concurrency
+  precondition (version/updated_at check → 409 on stale) is added to update/PATCH, else it races the
+  panel's inline edits.
 
 ### 2.5 `backend/src/services/circuit_faithfulness_service.py` (NEW) + task
 - Member expansion (cluster_ref → features via profile membership); simultaneous multi-feature

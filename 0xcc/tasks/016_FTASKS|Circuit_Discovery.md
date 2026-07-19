@@ -13,8 +13,29 @@
 | Phase 4: Attribution | 2 tasks | ⏳ |
 | Phase 5: MCP + frontend + docs | 3 tasks | ⏳ |
 | Phase 6: Verification + acceptance | 2 tasks | ⏳ |
+| Phase 0: 018 hand-off preconditions | 5 tasks | ⏳ |
 
 ---
+
+## Phase 0: 018 hand-off preconditions (deferred findings — do FIRST or alongside Phase 1)
+
+Recorded by 018 reviews R1–R3 (records in `.claude/context/sessions/review_feature018_*_2026-07-19.md`);
+016 executes from this file, so they live here, not just in 018's FTASKS.
+
+### Task 0.1: Encoder-weight orientation pins (R2-A4 — GATES the IDL-32 weight prior, Phase 3/4)
+- [ ] Unit tests for `resolve_encoder_weight` covering BOTH SAE formats (community_standard + internal orientation), mirroring the `resolve_decoder_weight` conventions. The cosine prior `W_dec(Lᵢ) @ W_enc(Lⱼ)` is silently wrong if orientation flips — pin before any prior computation lands.
+
+### Task 0.2: `from_candidates` seam on CircuitService (R1 deferral)
+- [ ] `CircuitService.from_candidates(discovery_run, selection) -> Circuit` — the discovery→circuit promotion path 018 stubbed out; discovery provenance + run id threading pinned.
+
+### Task 0.3: Circuits store extraction + frontend test bundle (R1/R2 deferral)
+- [ ] Extract CircuitsPanel fetch/state into `circuitsStore.ts` (house Zustand pattern) as member-edit UI + list filter controls land; add the panel/store vitest bundle (018 shipped with tsc/ESLint gates only).
+
+### Task 0.4: SQL-side list pagination + filtering (R1 deferral)
+- [ ] Move `edge_type` filter + limit/offset into the query in `CircuitService.list` (in-memory slice today; fine at N<200, wrong once discovery mints circuits in bulk).
+
+### Task 0.5: Import/body cap hardening + MCP smoke (R3-B4/B6 ride-alongs)
+- [ ] Extend the 1 MB cap to POST /circuits + PATCH (import-only today); consider actual-body enforcement (chunked requests bypass the Content-Length guard); bound per-edge `type_signals` size; fix `docker/nginx.gcp.conf` `client_max_body_size 0` (global exposure). Add first MCP circuit-tool smoke tests (9 tools, zero invocations today); `list_circuits` MCP tool: expose `edge_type`/`limit`/`offset`.
 
 ## Phase 1: Store IO
 
@@ -82,7 +103,7 @@
 | `backend/src/workers/circuit_*_tasks.py` (NEW) | managed tasks |
 | `backend/src/api/v1/endpoints/circuit_*.py` (NEW) | REST + WS |
 | `backend/src/mcp_server/tools/circuits.py` (NEW) + gating | MCP |
-| `frontend/src/components/panels/CircuitsPanel.tsx` (NEW) + store/types/api | UI |
+| `frontend/src/components/panels/CircuitsPanel.tsx` (EXISTS — shipped by 018; 016 adds discovery/review affordances + store extraction per Task 0.3) | UI |
 | `0xcc/docs/tier-2.5-attention-mediated-mining.md` (NEW) · `manual/docs/**` | docs |
 
 ## Coverage audit (instruct 007)
