@@ -109,6 +109,12 @@ celery_app.conf.update(
             "queue": "extraction",
         },
 
+        # Circuit capture/discovery/attribution (Feature 016): same GPU
+        # profile as extraction — shares that queue/worker.
+        "src.workers.circuit_capture_tasks.*": {
+            "queue": "extraction",
+        },
+
         # Labeling operations: LLM bound, medium priority
         "src.workers.labeling_tasks.*": {
             "queue": "processing",
@@ -333,6 +339,7 @@ celery_app.autodiscover_tasks(
         "src.workers.feature_grouping_tasks",  # Cross-feature grouping precompute (Feature 010)
         "src.workers.steering_tasks",  # Steering operations in dedicated GPU worker
         "src.workers.enhanced_labeling_tasks",  # Enhanced per-feature two-pass labeling
+        "src.workers.circuit_capture_tasks",  # Circuit capture/discovery/attribution (Feature 016)
     ],
     force=True,
 )

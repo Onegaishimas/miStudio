@@ -10,6 +10,7 @@ import pytest
 
 from src.services.circuit_stats_service import (
     bh_fdr,
+    pooled_null_pvalues,
     circular_shift_keys,
     doc_of,
     heldout_replication,
@@ -129,3 +130,21 @@ class TestSupernode:
 
     def test_empty(self):
         assert len(supernode_keys([])) == 0
+
+
+class TestPooledNull:
+    def test_pooled_p_beats_the_per_pair_floor(self):
+        """The reason pooling exists: per-pair empirical p floors at 1/(K+1),
+        which BH over m pairs can never clear. Pooled resolution = 1/(K·m+1)."""
+        a, b, x, y, doc_lengths, _ = _synthetic_corpus()
+        results = [null_test(a, b, doc_lengths, k_shuffles=50, seed=3),
+                   null_test(x, y, doc_lengths, k_shuffles=50, seed=4)]
+        pooled = pooled_null_pvalues(results)
+        per_pair_floor = 1 / 51
+        assert pooled[0] < per_pair_floor          # planted: finer than the floor
+        assert pooled[1] > 0.05                     # independent: still rejected
+        keep = bh_fdr(pooled, q=0.05)
+        assert keep.tolist() == [True, False]
+
+    def test_pooled_empty(self):
+        assert pooled_null_pvalues([]).tolist() == []
