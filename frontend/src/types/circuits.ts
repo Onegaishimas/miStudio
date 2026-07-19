@@ -59,3 +59,154 @@ export interface Circuit extends CircuitSummary {
   discovery: Record<string, unknown> | null;
   created_at: string;
 }
+
+// ── Feature 016: Capture ──────────────────────────────────────────────────
+
+/** A cost estimate returned by a probe run (confirm=false). */
+export interface CaptureEstimate {
+  events?: number;
+  bytes?: number;
+  minutes?: number;
+  [k: string]: unknown;
+}
+
+export interface CaptureAttentionConfig {
+  layers: number[];
+  heads?: number[] | null;
+  top_k: number;
+}
+
+export interface CircuitCapture {
+  id: string;
+  status: string;
+  progress: number | null;
+  error_message?: string | null;
+  corpus: unknown;
+  model_id: string | null;
+  layers: { layer: number; sae_id: string }[] | null;
+  split: { heldout_count: number; [k: string]: unknown } | null;
+  estimate: CaptureEstimate | null;
+  attention_capture: CaptureAttentionConfig | null;
+  counts: Record<string, unknown> | null;
+  bytes: number | null;
+  events_total: number | null;
+  stale: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CircuitCaptureCreate {
+  dataset_id: string;
+  model_id?: string;
+  layers: { layer: number; sae_id: string }[];
+  epsilon?: number;
+  theta_floor?: number;
+  sample_cap?: number;
+  split_seed?: number;
+  attention_capture?: CaptureAttentionConfig;
+  confirm: boolean;
+}
+
+// ── Feature 016: Discovery ────────────────────────────────────────────────
+
+export type DiscoveryGranularity = 'feature' | 'cluster';
+export type DiscoveryMode = 'seeded' | 'open';
+
+/** A seed reference — either a feature index or a cluster profile, per layer. */
+export interface DiscoverySeedRef {
+  layer: number;
+  feature_idx?: number;
+  cluster_profile_id?: string;
+}
+
+export interface DiscoveryCreate {
+  capture_run_id: string;
+  granularity: DiscoveryGranularity;
+  mode: DiscoveryMode;
+  seed_refs?: DiscoverySeedRef[];
+  s_min?: number;
+  null_shuffles?: number;
+  null_percentile?: number;
+  fdr_q?: number;
+  cohesion_floor?: number;
+  seed?: number;
+  force?: boolean;
+}
+
+/** A candidate node ref — feature index or cluster profile. */
+export interface DiscoveryNodeRef {
+  layer: number;
+  feature_idx?: number;
+  cluster_profile_id?: string;
+  cluster_name?: string;
+}
+
+export interface DiscoveryCandidate {
+  up: DiscoveryNodeRef;
+  down: DiscoveryNodeRef;
+  granularity: DiscoveryGranularity;
+  stats: {
+    pmi?: number;
+    lift?: number;
+    support?: number;
+    spearman?: number;
+    null_pct?: number;
+    p_value?: number;
+    pooled_p?: number;
+  };
+  replicated_heldout: boolean;
+  attribution?: {
+    score?: number;
+    sign_consistency?: number;
+    method?: string;
+    rung1_gate?: boolean;
+  } | null;
+  orderings?: { coact_rank?: number; attr_rank?: number } | null;
+}
+
+export interface DiscoveryReport {
+  granularity: DiscoveryGranularity;
+  mode: DiscoveryMode;
+  supernode_activation?: string;
+  lag0_disclosure: string;
+  null_summary: { method: string; shuffles: number; percentile: number };
+  fdr: {
+    discipline: string;
+    p_source: string;
+    q: number;
+    tested: number;
+    passed: number;
+  };
+  replication: { tested: number; replicated: number; rate: number };
+  counts_by_stage: {
+    pairs_considered: number;
+    post_support: number;
+    null_tested: number;
+    post_fdr: number;
+    candidates_persisted: number;
+  };
+  caps: {
+    candidates_truncated: boolean;
+    unit_cap_hit_layers: number[];
+    null_cap_hit: boolean;
+    [k: string]: unknown;
+  };
+  uncovered_seeds: { layer: number; ref: unknown; reason: string }[];
+  attribution: Record<string, unknown> | null;
+  uplift: null;
+  wall_clock_seconds?: number;
+}
+
+export interface DiscoveryRun {
+  id: string;
+  capture_run_id: string;
+  status: string;
+  progress: number | null;
+  error_message?: string | null;
+  params: Record<string, unknown> | null;
+  report: DiscoveryReport | null;
+  candidate_count: number;
+  candidates?: DiscoveryCandidate[];
+  created_at: string;
+  updated_at: string;
+}
