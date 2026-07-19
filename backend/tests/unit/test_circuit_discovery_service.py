@@ -5,8 +5,6 @@ high-base-rate pair does not; seeded mode covers/uncovers correctly.
 Uses a real on-disk synthetic store + a real sync session against the test
 DB (the service is worker-facing/sync)."""
 
-import os
-
 import numpy as np
 import pytest
 from sqlalchemy import create_engine
@@ -19,18 +17,27 @@ from src.services.circuit_discovery_service import (
     DiscoveryConfigError,
 )
 
-SYNC_URL = os.environ.get(
-    "DATABASE_URL_SYNC",
-    "postgresql://postgres:devpassword@localhost:5432/mistudio",
-).replace("/mistudio", "/mistudio_test")
-
 
 @pytest.fixture
-def sync_db(async_engine):  # async_engine fixture creates the tables
-    engine = create_engine(SYNC_URL)
+def sync_db(async_engine):
+    """A SYNC session (the discovery service is worker-facing/sync) against
+    the SAME test DB the async_engine fixture just built the tables in.
+
+    The sync URL is derived from `async_engine.url` — NOT from a separate
+    DATABASE_URL_SYNC env var, whose credentials can differ in CI and cause
+    an auth failure (the test DB user/password must match what conftest
+    actually connected with)."""
+    # async_engine.url already points at the _test database (conftest swapped
+    # it) with the credentials that actually connected — reuse both, only
+    # swapping the async driver for the sync one.
+    sync_url = async_engine.url.set(
+        drivername=async_engine.url.drivername.replace("+asyncpg", "")
+                                              .replace("+psycopg", ""))
+    engine = create_engine(sync_url)
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
+    session.rollback()
     session.query(CircuitDiscoveryRun).delete()
     session.query(CircuitCaptureRun).delete()
     session.commit()

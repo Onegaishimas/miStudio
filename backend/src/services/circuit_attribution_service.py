@@ -181,7 +181,15 @@ class CircuitAttributionService:
                 for p in sae.parameters():
                     p.requires_grad_(False)
                 saes[L] = sae
-                layer_modules[L] = get_hookable_module(L, "residual", structure)
+                # get_hookable_module expects the layer MODULE, not the int
+                # index (HookManager passes structure.layers_module[idx] —
+                # R1 code-review #1: passing L crashed every attribution pass).
+                if L >= len(structure.layers_module):
+                    raise ValueError(
+                        f"Layer {L} exceeds model depth "
+                        f"{len(structure.layers_module)}")
+                layer_modules[L] = get_hookable_module(
+                    structure.layers_module[L], "residual", structure)
 
             run.status = "running"
             db.commit()
