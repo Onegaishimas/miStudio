@@ -125,3 +125,80 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         parent rung travels in the response and in each slice's provenance;
         never present a slice as the validated whole."""
         return await client.post(f"/circuits/{circuit_id}/export-slices")
+
+    # ── Feature 016: capture → discovery → attribution ───────────────────
+
+    @mcp.tool()
+    async def start_circuit_capture(
+        dataset_id: str,
+        layers: list,
+        model_id: Optional[str] = None,
+        epsilon: float = 0.1,
+        sample_cap: int = 2000,
+        attention_capture: Optional[dict] = None,
+        confirm: bool = False,
+    ) -> Any:
+        """Start a circuit-capture run (per-token multi-layer SAE activations
+        with FIRST-CLASS positions + error norms). layers = [{layer, sae_id}].
+        confirm=false returns a cost ESTIMATE only (probe); call again with
+        confirm=true — or start_circuit_capture_confirm — to launch the full
+        capture. Managed GPU task: poll get_task_status."""
+        return await client.post("/circuit-capture", json_body={
+            "dataset_id": dataset_id, "model_id": model_id, "layers": layers,
+            "epsilon": epsilon, "sample_cap": sample_cap,
+            "attention_capture": attention_capture, "confirm": confirm,
+        })
+
+    @mcp.tool()
+    async def list_circuit_captures() -> Any:
+        """List capture runs (status, corpus, layers, split, size, stale flag)."""
+        return await client.get("/circuit-capture")
+
+    @mcp.tool()
+    async def run_circuit_discovery(
+        capture_run_id: str,
+        granularity: str = "feature",
+        mode: str = "open",
+        seed_refs: Optional[list] = None,
+        s_min: int = 20,
+        null_shuffles: int = 100,
+        fdr_q: float = 0.05,
+        force: bool = False,
+    ) -> Any:
+        """Mine a completed capture store for candidate cross-layer edges.
+        granularity: feature | cluster (supernodes over curated profiles —
+        recommended for seeded mode). mode: seeded (seed_refs = [{layer,
+        feature_idx}|{layer, cluster_profile_id}]) | open. Statistically
+        disciplined: PMI over raw counts, within-document circular-shift null,
+        pooled-standardized BH-FDR, held-out replication. ALL co-activation is
+        lag-0 (same token position) — attention-mediated structure is not
+        found here (Tier-2.5). Returns a run id; get_discovery_results carries
+        the first-class report."""
+        return await client.post("/circuit-discovery", json_body={
+            "capture_run_id": capture_run_id, "granularity": granularity,
+            "mode": mode, "seed_refs": seed_refs, "s_min": s_min,
+            "null_shuffles": null_shuffles, "fdr_q": fdr_q, "force": force,
+        })
+
+    @mcp.tool()
+    async def get_discovery_results(run_id: str,
+                                    include_candidates: bool = True) -> Any:
+        """A discovery run + its report (null-model summary, FDR discipline,
+        held-out replication RATE, stage counts, caps, uncovered seeds, lag-0
+        disclosure) + ranked candidates (PMI, support, null percentile,
+        attribution when the pass has run, both orderings). The report is the
+        trust surface — read it before trusting the list."""
+        return await client.get(f"/circuit-discovery/{run_id}",
+                                include_candidates=include_candidates)
+
+    @mcp.tool()
+    async def run_attribution_pass(run_id: str,
+                                   prompt_limit: Optional[int] = None) -> Any:
+        """Tier-2 gradient-attribution pass over a discovery run's candidates:
+        re-ranks the shortlist before 017's causal validation and gates rung-1
+        (attribution_supported) by sign-agreement + magnitude. This is
+        attribution, NOT causal proof — rung stays ≤1 until 017 intervenes.
+        Both orderings are preserved so 017 can report survival-rate uplift.
+        GPU task: poll get_task_status, then get_discovery_results."""
+        return await client.post(f"/circuit-discovery/{run_id}/attribution",
+                                 json_body={"prompt_limit": prompt_limit})
