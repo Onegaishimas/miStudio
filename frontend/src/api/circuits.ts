@@ -1,33 +1,46 @@
-/** Circuits API client (Feature 018). */
+/**
+ * Circuits API client (Feature 018) — through the shared fetchAPI client
+ * (auth header, base URL, typed APIError; review R1 fix #1).
+ *
+ * List rows are SLIM summaries; full members/edges arrive on detail fetch.
+ */
 
-import type { Circuit } from '../types/circuits';
-
-const BASE = '/api/v1/circuits';
-
-async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
+import { fetchAPI, buildQueryString, API_V1_BASE } from './client';
+import type { Circuit, CircuitSummary } from '../types/circuits';
 
 export const circuitsApi = {
-  list: (params?: { promoted?: boolean; min_rung?: number }) => {
-    const qs = new URLSearchParams();
-    if (params?.promoted !== undefined) qs.set('promoted', String(params.promoted));
-    if (params?.min_rung !== undefined) qs.set('min_rung', String(params.min_rung));
-    const q = qs.toString();
-    return fetch(`${BASE}${q ? `?${q}` : ''}`).then((r) =>
-      json<{ circuits: Circuit[]; total: number }>(r));
-  },
-  get: (id: string) => fetch(`${BASE}/${id}`).then((r) => json<Circuit>(r)),
-  promote: (id: string) =>
-    fetch(`${BASE}/${id}/promote`, { method: 'POST' }).then((r) => json<Circuit>(r)),
+  list: (params?: { promoted?: boolean; min_rung?: number; edge_type?: string;
+                    limit?: number; offset?: number }) =>
+    fetchAPI<{ circuits: CircuitSummary[]; total: number }>(
+      `/circuits${buildQueryString(params ?? {})}`),
+
+  get: (id: string) => fetchAPI<Circuit>(`/circuits/${id}`),
+
+  update: (id: string, body: { name?: string; narrative?: string }) =>
+    fetchAPI<Circuit>(`/circuits/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  setPromoted: (id: string, promoted: boolean) =>
+    fetchAPI<Circuit>(`/circuits/${id}/promote`, {
+      method: 'POST',
+      body: JSON.stringify({ promoted }),
+    }),
+
   remove: (id: string) =>
-    fetch(`${BASE}/${id}`, { method: 'DELETE' }).then((r) => json<{ deleted: string }>(r)),
-  exportUrl: (id: string) => `${BASE}/${id}/export`,
+    fetchAPI<{ deleted: string }>(`/circuits/${id}`, { method: 'DELETE' }),
+
+  /** Browser-navigable export URL (Content-Disposition download). */
+  exportUrl: (id: string) => `${API_V1_BASE}/circuits/${id}/export`,
+
   exportSlices: (id: string) =>
-    fetch(`${BASE}/${id}/export-slices`, { method: 'POST' }).then((r) =>
-      json<{ parent_rung: number; parent_rung_language: string; slices: unknown[] }>(r)),
+    fetchAPI<{ parent_rung: number; parent_rung_language: string; slices: unknown[] }>(
+      `/circuits/${id}/export-slices`, { method: 'POST' }),
+
+  importDefinition: (definition: unknown) =>
+    fetchAPI<Circuit>('/circuits/import', {
+      method: 'POST',
+      body: JSON.stringify(definition),
+    }),
 };

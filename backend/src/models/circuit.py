@@ -45,6 +45,7 @@ class Circuit(Base):
     edges = Column(JSONB, nullable=False, default=list)     # [CircuitEdge]
     budget = Column(JSONB, nullable=True)                    # CircuitBudget
     faithfulness = Column(JSONB, nullable=True)              # CircuitFaithfulness
+    discovery = Column(JSONB, nullable=True)                 # CircuitDiscoveryProvenance
 
     # Denormalized display rung (min over edges; recomputed on every write).
     rung = Column(Integer, nullable=False, default=0)
