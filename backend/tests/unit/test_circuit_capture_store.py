@@ -1,0 +1,107 @@
+"""Round-trip pins for the circuit capture store (016 Task 1.1, FTDD §1):
+events+index, errnorm, and attention sidecar; u16 bounds; sort order;
+merge-join key currency."""
+
+import numpy as np
+import pytest
+
+from src.services.circuit_capture_store import (
+    ATTN_DTYPE,
+    ERRNORM_DTYPE,
+    EVENT_DTYPE,
+    AttnTopKReader,
+    AttnTopKWriter,
+    ErrNormReader,
+    ErrNormWriter,
+    EventReader,
+    EventWriter,
+    layer_files_exist,
+    open_writers,
+)
+
+
+@pytest.fixture
+def store(tmp_path):
+    return tmp_path
+
+
+class TestEventRoundTrip:
+    def test_round_trip_sorted_and_indexed(self, store):
+        ev, en, at = open_writers(store, 13)
+        # Append DELIBERATELY out of order across two batches.
+        ev.append(np.array([2, 1]), np.array([5, 3]),
+                  np.array([7, 7]), np.array([0.5, 0.25]))
+        ev.append(np.array([1, 3]), np.array([0, 9]),
+                  np.array([2, 7]), np.array([1.5, 0.75]))
+        n = ev.finalize()
+        assert n == 4
+        assert layer_files_exist(store, 13)
+
+        r = EventReader(store, 13)
+        assert len(r) == 4
+        assert r.feature_ids == [2, 7]
+        f7 = r.feature_events(7)
+        # Sorted by (doc_id, token_pos) within the feature.
+        assert f7["doc_id"].tolist() == [1, 2, 3]
+        assert f7["token_pos"].tolist() == [3, 5, 9]
+        assert f7["act"].astype(float).tolist() == [0.25, 0.5, 0.75]
+        assert len(r.feature_events(999)) == 0
+
+    def test_merge_join_keys(self, store):
+        ev, _, _ = open_writers(store, 13)
+        ev.append(np.array([1, 1]), np.array([3, 4]),
+                  np.array([5, 5]), np.array([1.0, 1.0]))
+        ev.finalize()
+        keys = EventReader(store, 13).feature_token_keys(5)
+        assert keys.tolist() == [(1 << 16) | 3, (1 << 16) | 4]
+
+    def test_u16_bounds_asserted(self, store):
+        ev, _, _ = open_writers(store, 13)
+        with pytest.raises(ValueError, match="feature_idx"):
+            ev.append(np.array([0]), np.array([0]),
+                      np.array([70_000]), np.array([1.0]))
+        with pytest.raises(ValueError, match="token_pos"):
+            ev.append(np.array([0]), np.array([70_000]),
+                      np.array([1]), np.array([1.0]))
+
+    def test_empty_store_valid(self, store):
+        ev, _, _ = open_writers(store, 14)
+        assert ev.finalize() == 0
+        r = EventReader(store, 14)
+        assert len(r) == 0 and r.feature_ids == []
+
+    def test_double_finalize_rejected(self, store):
+        ev, _, _ = open_writers(store, 13)
+        ev.finalize()
+        with pytest.raises(RuntimeError):
+            ev.finalize()
+
+
+class TestErrNormRoundTrip:
+    def test_round_trip(self, store):
+        _, en, _ = open_writers(store, 13)
+        en.append(np.array([2, 1, 1]), np.array([0, 1, 0]),
+                  np.array([0.5, 0.125, 0.25]))
+        en.finalize()
+        r = ErrNormReader(store, 13)
+        assert len(r) == 3
+        d1 = r.doc_norms(1)
+        assert d1["token_pos"].tolist() == [0, 1]  # sorted within doc
+        assert d1["norm"].astype(float).tolist() == [0.25, 0.125]
+        assert len(r.doc_norms(99)) == 0
+
+
+class TestAttnSidecar:
+    def test_round_trip(self, store):
+        _, _, at = open_writers(store, 12, attention=True)
+        at.append(np.array([1, 1]), np.array([5, 5]), np.array([0, 1]),
+                  np.array([2, 3]), np.array([0.5, 0.25]))
+        at.finalize()
+        r = AttnTopKReader(store, 12)
+        rows = r.query_rows(1, 5)
+        assert len(rows) == 2
+        assert rows["t_k"].tolist() == [2, 3]
+
+    def test_disabled_by_default(self, store):
+        _, _, at = open_writers(store, 12)
+        assert at is None
