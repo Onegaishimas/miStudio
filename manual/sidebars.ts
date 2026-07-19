@@ -28,6 +28,8 @@ const sidebars: SidebarsConfig = {
         'concepts/architecture',
         'concepts/interpretability-primer',
         'concepts/extraction-pipeline',
+        'concepts/evidence-ladder',
+        'concepts/tier-2.5',
       ],
     },
     {
@@ -43,6 +45,7 @@ const sidebars: SidebarsConfig = {
         'core-workflow/auto-labeling',
         'core-workflow/enhanced-labeling',
         'core-workflow/steering',
+        'core-workflow/circuits',
       ],
     },
     {
