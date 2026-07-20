@@ -97,3 +97,56 @@ class TestExport:
         slices = CircuitService.to_slices(c)
         assert [s.sae.layer for s in slices] == [13, 14]
         assert all("partial_rendering=true" in s.provenance.source_note for s in slices)
+
+
+class TestOptimisticConcurrency:
+    """017 Task 3.0: version-based optimistic concurrency + the update()-only
+    edge-write rule (018 R2-Q2/R2-A5)."""
+
+    @pytest.mark.asyncio
+    async def test_version_starts_at_one_and_bumps_on_update(self, db):
+        c = await CircuitService.create(db, _payload())
+        assert c.version == 1
+        await CircuitService.update(db, c, {"narrative": "edited"})
+        assert c.version == 2
+
+    @pytest.mark.asyncio
+    async def test_stale_expected_version_409s(self, db):
+        from src.services.circuit_service import CircuitConcurrencyError
+        c = await CircuitService.create(db, _payload())
+        # a writer holding version 1 while another already bumped to 2
+        await CircuitService.update(db, c, {"narrative": "first"})  # → v2
+        with pytest.raises(CircuitConcurrencyError):
+            await CircuitService.update(db, c, {"narrative": "stale"},
+                                        expected_version=1)
+
+    @pytest.mark.asyncio
+    async def test_matching_version_succeeds(self, db):
+        c = await CircuitService.create(db, _payload())
+        updated = await CircuitService.update(
+            db, c, {"narrative": "ok"}, expected_version=1)
+        assert updated.version == 2
+
+    @pytest.mark.asyncio
+    async def test_write_edge_validation_recomputes_rung_via_update(self, db):
+        """The edge-write path routes through update() so rung recompute runs
+        (018 R2-A5) — writing a rung-2 validation result lifts the circuit."""
+        c = await CircuitService.create(db, _payload())
+        assert c.rung == 1  # the single edge is mined-rung-1
+        updated = await CircuitService.write_edge_validation(
+            db, c,
+            {(13, 712, 14, 231): {"rung": 2, "effect_size": 0.8,
+                                  "validation_manifest_ref": "vman_x"}})
+        assert updated.rung == 2  # recomputed from the lifted edge
+        assert updated.edges[0]["effect_size"] == 0.8
+        assert updated.edges[0]["validation_manifest_ref"] == "vman_x"
+        assert updated.version == 2  # bumped through update()
+
+    @pytest.mark.asyncio
+    async def test_write_edge_validation_respects_version(self, db):
+        from src.services.circuit_service import CircuitConcurrencyError
+        c = await CircuitService.create(db, _payload())
+        await CircuitService.update(db, c, {"narrative": "bump"})  # → v2
+        with pytest.raises(CircuitConcurrencyError):
+            await CircuitService.write_edge_validation(
+                db, c, {(13, 712, 14, 231): {"rung": 2}}, expected_version=1)

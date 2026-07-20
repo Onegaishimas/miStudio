@@ -44,6 +44,7 @@ export interface CircuitSummary {
   rung_next_step: string;
   promoted: boolean;
   model_id: string | null;
+  version: number;  // optimistic-concurrency token (017 Task 3.0)
   updated_at: string;
 }
 

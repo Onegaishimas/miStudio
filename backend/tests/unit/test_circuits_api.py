@@ -303,3 +303,32 @@ class TestR3Fixes:
         r = client.post("/api/v1/circuits/import", json=doc)
         assert r.status_code == 422
         assert "first at '" in r.json()["detail"]
+
+
+class TestOptimisticConcurrencyAPI:
+    """017 Task 3.0: PATCH threads expected_version → 409 on stale."""
+
+    def test_patch_stale_version_409(self, wired_client):
+        created = wired_client.post("/api/v1/circuits", json={
+            "name": "Concur", "saes": _minimal_definition()["saes"],
+            "members": _minimal_definition()["members"]})
+        cid = created.json()["id"]
+        assert created.json()["version"] == 1
+        # first edit → version 2
+        wired_client.patch(f"/api/v1/circuits/{cid}", json={"narrative": "a"})
+        # stale writer still holding version 1
+        r = wired_client.patch(f"/api/v1/circuits/{cid}",
+                               json={"narrative": "b", "expected_version": 1})
+        assert r.status_code == 409
+        wired_client.delete(f"/api/v1/circuits/{cid}")
+
+    def test_patch_matching_version_ok(self, wired_client):
+        created = wired_client.post("/api/v1/circuits", json={
+            "name": "Concur2", "saes": _minimal_definition()["saes"],
+            "members": _minimal_definition()["members"]})
+        cid = created.json()["id"]
+        r = wired_client.patch(f"/api/v1/circuits/{cid}",
+                               json={"narrative": "ok", "expected_version": 1})
+        assert r.status_code == 200
+        assert r.json()["version"] == 2
+        wired_client.delete(f"/api/v1/circuits/{cid}")

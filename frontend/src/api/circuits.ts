@@ -24,7 +24,9 @@ export const circuitsApi = {
 
   get: (id: string) => fetchAPI<Circuit>(`/circuits/${id}`),
 
-  update: (id: string, body: { name?: string; narrative?: string }) =>
+  update: (id: string, body: {
+    name?: string; narrative?: string; expected_version?: number;
+  }) =>
     fetchAPI<Circuit>(`/circuits/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
