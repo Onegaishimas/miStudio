@@ -178,22 +178,22 @@ class TestCpuWeightLoader:
     load — the endpoint's try/except then degrades to approximate G=1."""
 
     def test_loads_real_weights_on_cpu(self, tmp_path):
-        import torch
-        from src.ml.community_format import save_sae_community_format
+        from pathlib import Path
+
+        from src.ml.community_format import (CommunityStandardConfig,
+                                             save_sae_community_format)
         from src.ml.sparse_autoencoder import create_sae
         from src.services.steering_service import load_sae_weights_cpu
 
         d_model, d_sae = 16, 64
         sae = create_sae("standard", hidden_dim=d_model, latent_dim=d_sae)
-        # persist via the community format (what load_sae_auto_detect reads)
-        try:
-            save_sae_community_format(sae, str(tmp_path))
-        except Exception:
-            import pytest
-            pytest.skip("community save helper unavailable in this build")
+        cfg = CommunityStandardConfig(
+            model_name="toy", hook_point="blocks.0.hook_resid_pre",
+            hook_point_layer=0, d_in=d_model, d_sae=d_sae)
+        save_sae_community_format(sae, cfg, Path(tmp_path))
         dw, ew = load_sae_weights_cpu(tmp_path, d_model=d_model,
                                       n_features=d_sae, architecture="standard")
         assert dw is not None and ew is not None
-        assert tuple(dw.shape) == (d_model, d_sae)
-        assert tuple(ew.shape) == (d_sae, d_model)
+        assert tuple(dw.shape) == (d_model, d_sae)   # [d_model, d_sae]
+        assert tuple(ew.shape) == (d_sae, d_model)   # [d_sae, d_model]
         assert dw.device.type == "cpu" and ew.device.type == "cpu"

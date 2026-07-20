@@ -118,7 +118,7 @@ class CircuitService:
                     "feature": {"feature_idx": ref["feature_idx"],
                                 "strength": 0.0}})
             stats = c.get("stats") or {}
-            edges.append({
+            edge = {
                 "up": {"layer": c["up"]["layer"],
                        "feature_idx": c["up"].get("feature_idx")},
                 "down": {"layer": c["down"]["layer"],
@@ -130,7 +130,18 @@ class CircuitService:
                                  "support": stats.get("support"),
                                  "null_percentile": stats.get("null_pct"),
                                  "replicated_heldout": c.get("replicated_heldout")},
-            })
+            }
+            # Carry the VALIDATED effect size onto the edge (R3 arc-closure): a
+            # circuit built AFTER validation (validate→promote ordering) must
+            # ship the rung-2 ES so 015 quantifies the hazard, not just the
+            # heuristic. Written by 017's validation write-back onto the
+            # candidate's `validation` field.
+            val = c.get("validation") or {}
+            if val.get("effect_size") is not None:
+                edge["effect_size"] = val["effect_size"]
+            if val.get("manifest_id"):
+                edge["validation_manifest_ref"] = val["manifest_id"]
+            edges.append(edge)
         layers = sorted({m["layer"] for m in members_by_key.values()})
         sae_by_layer = {e["layer"]: e for e in manifest.get("layers", [])}
         saes = [{"mistudio_sae_id": sae_by_layer.get(L, {}).get("sae_id"),

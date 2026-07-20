@@ -384,13 +384,19 @@ def load_sae_weights_cpu(sae_path, *, d_model=None, n_features=None,
     # mismatch raises → the endpoint's try/except degrades to approximate-G,
     # which is honest, rather than a plausible-looking wrong number.
     missing, unexpected = sae.load_state_dict(state_dict, strict=False)
-    # The two tensors we actually use MUST have loaded — verify orientation,
-    # else treat as unavailable (approximate) rather than trusting init noise.
+    # A key-name mismatch (wrong arch class) leaves a weight at its RANDOM INIT
+    # while keeping the right SHAPE — so a shape check alone passes on garbage.
+    # Reject when ANY weight-bearing param didn't load (missing_keys), which is
+    # the actual signal of an arch/format mismatch → the endpoint degrades to
+    # approximate-G rather than trusting init noise (R3).
+    weighty_missing = [k for k in missing if k.endswith((".weight", "_weight"))
+                       or k in ("W_enc", "W_dec")]
     dw = resolve_decoder_weight(sae)
     ew = resolve_encoder_weight(sae)
-    if dw is None or ew is None or dw.shape[0] != d_in or ew.shape[1] != d_in:
+    if weighty_missing or dw is None or ew is None \
+            or dw.shape[0] != d_in or ew.shape[1] != d_in:
         raise ValueError(
-            f"SAE weights failed to load cleanly (missing={list(missing)[:3]}, "
+            f"SAE weights failed to load cleanly (missing={weighty_missing[:3]}, "
             f"unexpected={list(unexpected)[:3]}) — refusing garbage decoder/encoder")
     sae.eval()  # CPU, fp32 — never .to(cuda), never .half()
     return dw.detach(), ew.detach()

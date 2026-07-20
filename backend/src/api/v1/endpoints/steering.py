@@ -1647,11 +1647,13 @@ async def _compute_multi_layer_allocation_response(
     if request.circuit_id:
         circuit_edges = await _load_circuit_edges(db, request.circuit_id)
 
-    # ml.strengths is returned in request-member order (R2 F8: assert it, so a
-    # future allocation-partitioning refactor can't silently mis-pair strengths
-    # to members for hazard sign detection).
-    assert len(ml.strengths) == len(request.members), \
-        "allocation strengths must be 1:1 with request members (order-preserving)"
+    # ml.strengths is returned in request-member order (R2 F8: a REAL runtime
+    # check — not an assert, which `python -O` strips — so a future allocation-
+    # partitioning refactor can't silently mis-pair strengths to members for
+    # hazard sign detection).
+    if len(ml.strengths) != len(request.members):
+        raise HTTPException(
+            500, "allocation strengths are not 1:1 with request members")
     steered = [
         {"layer": m.layer, "feature_idx": m.feature_idx, "strength": s}
         for m, s in zip(request.members, ml.strengths)
