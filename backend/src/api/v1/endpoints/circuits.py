@@ -18,7 +18,8 @@ from ....core.database import get_db
 from ....models.circuit import Circuit
 from ....schemas.circuit_definition import CircuitDefinitionV1
 from ....schemas.evidence_ladder import EvidenceRung, RUNG_NEXT_STEP, rung_language
-from ....services.circuit_service import CircuitService, CircuitValidationError
+from ....services.circuit_service import (
+    CircuitConcurrencyError, CircuitService, CircuitValidationError)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ class CircuitUpdate(BaseModel):
     edges: Optional[List[Dict[str, Any]]] = None
     budget: Optional[Dict[str, Any]] = None
     faithfulness: Optional[Dict[str, Any]] = None
+    # Optimistic concurrency (017 Task 3.0): when set, a stale value 409s so a
+    # panel edit can't silently clobber a validation write. Omitted → no check
+    # (back-compatible for callers that don't participate).
+    expected_version: Optional[int] = None
 
 
 class PromoteBody(BaseModel):
@@ -73,6 +78,7 @@ def _summary(circuit: Circuit) -> Dict[str, Any]:
         "rung_next_step": RUNG_NEXT_STEP[rung],
         "promoted": circuit.promoted,
         "model_id": circuit.model_id,
+        "version": circuit.version,  # optimistic-concurrency token (017 Task 3.0)
         "updated_at": circuit.updated_at,
     }
 
@@ -211,6 +217,7 @@ async def update_circuit(circuit_id: str, body: CircuitUpdate,
                          db: AsyncSession = Depends(get_db)):
     circuit = await _get_or_404(db, circuit_id)
     data = body.model_dump(exclude_unset=True)
+    expected_version = data.pop("expected_version", None)
     # Structural fields cannot be nulled — reject explicitly rather than
     # surfacing a raw pydantic error (review R1 finding #12).
     for field in ("name", "saes", "members", "edges"):
@@ -218,9 +225,12 @@ async def update_circuit(circuit_id: str, body: CircuitUpdate,
             raise HTTPException(status_code=422,
                                 detail=f"'{field}' cannot be null")
     try:
-        circuit = await CircuitService.update(db, circuit, data)
+        circuit = await CircuitService.update(
+            db, circuit, data, expected_version=expected_version)
     except CircuitValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except CircuitConcurrencyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return _out(circuit)
 
 

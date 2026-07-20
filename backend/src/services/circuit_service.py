@@ -37,6 +37,10 @@ class CircuitValidationError(ValueError):
     """Structural validation failure — surfaces as a 422."""
 
 
+class CircuitConcurrencyError(RuntimeError):
+    """A stale optimistic-concurrency version — surfaces as a 409 (017 Task 3.0)."""
+
+
 class CircuitService:
     # ── validation ──────────────────────────────────────────────────────
 
@@ -132,7 +136,18 @@ class CircuitService:
 
     @staticmethod
     async def update(db: AsyncSession, circuit: Circuit,
-                     data: Dict[str, Any]) -> Circuit:
+                     data: Dict[str, Any],
+                     expected_version: Optional[int] = None) -> Circuit:
+        """The ONE write path for a circuit's structure (017 Task 3.0 rule):
+        every edge/member write goes through here so the contract validators
+        and rung recompute always run — callers MUST NOT mutate the JSONB
+        columns directly. `expected_version`, when given, enforces optimistic
+        concurrency: a stale value 409s instead of clobbering a concurrent
+        edit (017's validation writer vs a user editing in the panel)."""
+        if expected_version is not None and circuit.version != expected_version:
+            raise CircuitConcurrencyError(
+                f"Circuit {circuit.id} was modified concurrently "
+                f"(expected version {expected_version}, current {circuit.version})")
         merged = {
             "name": data.get("name", circuit.name),
             "narrative": data.get("narrative", circuit.narrative),
@@ -158,9 +173,32 @@ class CircuitService:
         circuit.faithfulness = (defn.faithfulness.model_dump(mode="json")
                                 if defn.faithfulness else None)
         circuit.rung = int(defn.displayed_rung())
+        circuit.version = (circuit.version or 1) + 1  # optimistic-lock bump
         await db.commit()
         await db.refresh(circuit)
         return circuit
+
+    @staticmethod
+    async def write_edge_validation(
+            db: AsyncSession, circuit: Circuit,
+            edge_updates: Dict[tuple, Dict[str, Any]],
+            expected_version: Optional[int] = None) -> Circuit:
+        """017's edge-validation writer — the ONLY way validation results
+        reach a circuit's edges (018 R2-A5 `update()`-only rule). Merges
+        per-edge validation fields (rung, effect_size, validation_manifest_ref,
+        tested_and_failed history) into the matching edges by (up, down)
+        endpoint key, then routes through update() so contract validators +
+        rung recompute run and the version bumps. `edge_updates` is keyed by
+        (up_layer, up_idx, down_layer, down_idx)."""
+        edges = [dict(e) for e in (circuit.edges or [])]
+        for e in edges:
+            up, down = e.get("up", {}), e.get("down", {})
+            key = (up.get("layer"), up.get("feature_idx"),
+                   down.get("layer"), down.get("feature_idx"))
+            if key in edge_updates:
+                e.update(edge_updates[key])
+        return await CircuitService.update(
+            db, circuit, {"edges": edges}, expected_version=expected_version)
 
     @staticmethod
     async def delete(db: AsyncSession, circuit: Circuit) -> None:

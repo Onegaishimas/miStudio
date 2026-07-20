@@ -112,9 +112,18 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
 
   const saveEdit = () => {
     setSaveError(null);
-    circuitsApi.update(circuit.id, { name: draftName, narrative: draftNarrative })
+    // Send the version we loaded (017 Task 3.0): if a validation pass bumped
+    // the circuit meanwhile, this 409s instead of silently clobbering it.
+    circuitsApi.update(circuit.id, {
+      name: draftName, narrative: draftNarrative,
+      expected_version: circuit.version,
+    })
       .then((updated) => { setCircuit(updated); setEditing(false); onChanged(); })
-      .catch((e) => setSaveError(String(e.message ?? e))); // draft survives (R2 B4)
+      .catch((e) => setSaveError(
+        // 409 → the draft is preserved and the user is told to reload (R2 B4).
+        String(e.message ?? e).includes('409')
+          ? 'This circuit changed since you opened it (a validation pass may have run). Reload and re-apply your edit.'
+          : String(e.message ?? e)));
   };
 
   return (

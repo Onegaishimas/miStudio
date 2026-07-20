@@ -51,6 +51,10 @@ class Circuit(Base):
     rung = Column(Integer, nullable=False, default=0)
 
     promoted = Column(Boolean, nullable=False, default=False)
+    # Optimistic-concurrency version (017 Task 3.0): increments on every
+    # update() so a validation writer and a user editing in the panel can't
+    # silently clobber each other — a stale write 409s.
+    version = Column(Integer, nullable=False, default=1)
     discovery_run_id = Column(String(36), nullable=True)  # SOFT ref — runs are prunable
     model_id = Column(String(255), nullable=True)
     # HF repo id — the CROSS-INSTANCE-stable model identifier (model_id is
