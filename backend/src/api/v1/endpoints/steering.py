@@ -1442,21 +1442,15 @@ async def compute_cluster_strength_allocation(
     try:
         sae_path = settings.resolve_data_path(sae.local_path)
         if sae_path.exists():
-            service = get_steering_service()
-            loaded = await service.load_sae(
-                sae_path,
-                request.sae_id,
-                layer=sae.layer,
-                d_model=sae.d_model,
-                n_features=sae.n_features,
-                architecture=sae.architecture,
-            )
-            dw = resolve_decoder_weight(loaded.model)
+            # CPU weight-only load — this read-only allocation endpoint must NOT
+            # resident-load the SAE onto the GPU (R2 F5: 015's "Steer this
+            # circuit" button makes this a one-click browser action; the
+            # multi-layer path was already CPU-only, so make single-layer match).
+            dw, _ew = load_sae_weights_cpu(
+                sae_path, d_model=sae.d_model,
+                n_features=sae.n_features, architecture=sae.architecture)
             if dw is not None:
-                # Pass the tensor as-is: compute_allocation slices the N≤20
-                # member columns before any dtype/device work. Copying the full
-                # [d_model, d_sae] matrix to CPU here cost ~GBs per request.
-                decoder = dw.detach()
+                decoder = dw
     except Exception as e:
         logger.warning(f"[ClusterAllocation] Decoder unavailable, using approximate G=1: {e}")
 
@@ -1556,7 +1550,7 @@ async def _compute_multi_layer_allocation_response(
     decoders: dict = {}
     encoders: dict = {}
     offenders: list = []
-    constants_by_sae: dict = {}
+    constants_by_layer: dict = {}
 
     for layer, sid in layer_sae_id.items():
         rec = await SAEManagerService.get_sae(db, sid)
@@ -1589,7 +1583,7 @@ async def _compute_multi_layer_allocation_response(
                     f"Feature indices out of bounds for SAE {sid} ({rec.n_features} features): {bad}",
                 )
 
-        constants_by_sae[layer] = resolve_constants(
+        constants_by_layer[layer] = resolve_constants(
             settings.steering_cluster_constants_json, sid)
 
         # Load ONLY the decoder (gain) + encoder (hazard prior) weight tensors
@@ -1641,7 +1635,7 @@ async def _compute_multi_layer_allocation_response(
             ml_members,
             decoders=decoders,
             constants=constants,
-            constants_by_layer=constants_by_sae,  # per-SAE overrides (R1 ARCH-4)
+            constants_by_layer=constants_by_layer,  # per-SAE overrides (R1 ARCH-4)
             group_cohesion=request.group_cohesion,
         )
     except ValueError as e:
@@ -1653,6 +1647,11 @@ async def _compute_multi_layer_allocation_response(
     if request.circuit_id:
         circuit_edges = await _load_circuit_edges(db, request.circuit_id)
 
+    # ml.strengths is returned in request-member order (R2 F8: assert it, so a
+    # future allocation-partitioning refactor can't silently mis-pair strengths
+    # to members for hazard sign detection).
+    assert len(ml.strengths) == len(request.members), \
+        "allocation strengths must be 1:1 with request members (order-preserving)"
     steered = [
         {"layer": m.layer, "feature_idx": m.feature_idx, "strength": s}
         for m, s in zip(request.members, ml.strengths)

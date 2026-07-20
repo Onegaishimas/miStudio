@@ -379,12 +379,21 @@ def load_sae_weights_cpu(sae_path, *, d_model=None, n_features=None,
         normalize = "constant_norm_rescale"
     sae = create_sae(architecture_type=arch, hidden_dim=d_in, latent_dim=d_sae,
                      l1_alpha=0.001, normalize_activations=normalize)
-    sae.load_state_dict(state_dict, strict=False)
-    sae.eval()  # CPU, fp32 — never .to(cuda), never .half()
+    # STRICT load (matches load_sae): a key mismatch would otherwise leave the
+    # decoder at its random init and produce GARBAGE G/prior silently (R2). A
+    # mismatch raises → the endpoint's try/except degrades to approximate-G,
+    # which is honest, rather than a plausible-looking wrong number.
+    missing, unexpected = sae.load_state_dict(state_dict, strict=False)
+    # The two tensors we actually use MUST have loaded — verify orientation,
+    # else treat as unavailable (approximate) rather than trusting init noise.
     dw = resolve_decoder_weight(sae)
     ew = resolve_encoder_weight(sae)
-    return (dw.detach() if dw is not None else None,
-            ew.detach() if ew is not None else None)
+    if dw is None or ew is None or dw.shape[0] != d_in or ew.shape[1] != d_in:
+        raise ValueError(
+            f"SAE weights failed to load cleanly (missing={list(missing)[:3]}, "
+            f"unexpected={list(unexpected)[:3]}) — refusing garbage decoder/encoder")
+    sae.eval()  # CPU, fp32 — never .to(cuda), never .half()
+    return dw.detach(), ew.detach()
 
 
 @dataclass
