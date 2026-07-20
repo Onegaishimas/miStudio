@@ -2,7 +2,7 @@
 
 **Document ID:** 015_FTASKS|MultiSAE_Steering
 **Version:** 1.0
-**Status:** ⏳ IMPLEMENTED (backend d724dec + MCP/docs 8782643 + frontend d1de02b) — Ph1-5 done; 3-round review next; Ph6 GPU-E2E at close-out
+**Status:** ✅ COMPLETE — 3 review rounds (21+22+verify findings; R3 GOAL/ARC COMPLETE, 0 must-fix). Records: `.claude/context/sessions/review_feature015_R{1,2,3}_2026-07-20.md`. Ph6 two-SAE GPU run at close-out. Was: IMPLEMENTED (backend d724dec + MCP/docs 8782643 + frontend d1de02b) — Ph1-5 done; 3-round review next; Ph6 GPU-E2E at close-out
 **Source:** 015_FPRD · 015_FTDD · 015_FTID · IDL-31, IDL-35 (hazard labels) · BR-024 via CIRCUITS-002
 
 | Phase | Tasks | Status |

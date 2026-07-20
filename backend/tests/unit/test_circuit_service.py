@@ -219,3 +219,35 @@ class TestFromCandidates:
         with pytest.raises(CircuitValidationError, match="No matching"):
             await CircuitService.from_candidates(
                 db, discovery_run_id="dsc_e", name="x", candidate_keys=[(1, 2, 3, 4)])
+
+
+class TestFromCandidatesCarriesValidatedES:
+    """R3 arc-closure: a circuit built AFTER validation (validate→promote) must
+    carry the rung-2 effect_size onto the edge so 015 quantifies the hazard."""
+
+    @pytest.mark.asyncio
+    async def test_validated_candidate_edge_has_effect_size(self, db):
+        from src.models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+        cap = CircuitCaptureRun(
+            id="cap_es", status="completed", store_path="/x",
+            manifest={"model_id": "m", "layers": [
+                {"layer": 13, "sae_id": "s13"}, {"layer": 14, "sae_id": "s14"}]})
+        run = CircuitDiscoveryRun(
+            id="dsc_es", capture_run_id="cap_es", status="completed",
+            params={"granularity": "feature", "mode": "seeded"},
+            candidates=[{
+                "up": {"layer": 13, "feature_idx": 1},
+                "down": {"layer": 14, "feature_idx": 2},
+                "stats": {"pmi": 2.0, "support": 30},
+                "validated_rung": 2,
+                "validation": {"effect_size": 0.85, "passed": True,
+                               "manifest_id": "vman_es"}}])
+        db.add(cap); db.add(run)
+        await db.commit()
+        circuit = await CircuitService.from_candidates(
+            db, discovery_run_id="dsc_es", name="Validated circuit",
+            candidate_keys=[(13, 1, 14, 2)])
+        edge = circuit.edges[0]
+        assert edge["rung"] == 2
+        assert edge["effect_size"] == 0.85            # ES carried (arc closure)
+        assert edge["validation_manifest_ref"] == "vman_es"
