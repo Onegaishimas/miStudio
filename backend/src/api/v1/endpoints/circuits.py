@@ -93,6 +93,7 @@ def _out(circuit: Circuit) -> Dict[str, Any]:
         "edges": circuit.edges,
         "budget": circuit.budget,
         "faithfulness": circuit.faithfulness,
+        "faithfulness_status": getattr(circuit, "faithfulness_status", None),
         "discovery": getattr(circuit, "discovery", None),
         "discovery_run_id": circuit.discovery_run_id,
         "model_hf_id": getattr(circuit, "model_hf_id", None),
@@ -287,18 +288,29 @@ async def start_faithfulness(circuit_id: str, body: FaithfulnessBody,
     except FaithfulnessConfigError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # Faithfulness loads a model — respect the single-GPU guard, asserted in one
-    # advisory-locked sync transaction (like start_validation).
+    if circuit.faithfulness_status in ("pending", "running"):
+        raise HTTPException(status_code=409,
+                            detail="A faithfulness pass is already in flight")
+    # Faithfulness loads a model — respect the single-GPU guard AND mark it
+    # in-flight in ONE advisory-locked sync transaction so the guard sees it and
+    # two runs can't race (R2 B-5), like start_validation does for validation.
     from ....api.v1.endpoints.circuit_discovery import _run_sync
 
-    def _guard(sync_db):
+    def _guard_and_mark(sync_db):
         CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        row = sync_db.query(Circuit).filter(Circuit.id == circuit_id).first()
+        row.faithfulness_status = "pending"
+        sync_db.commit()
 
     try:
-        await _run_sync(db, _guard)
+        await _run_sync(db, _guard_and_mark)
     except CaptureConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
     task = run_circuit_faithfulness.delay(circuit_id, config)
+    await db.execute(
+        Circuit.__table__.update().where(Circuit.id == circuit_id)
+        .values(faithfulness_task_id=task.id))
+    await db.commit()
     return {"circuit_id": circuit_id, "task_id": task.id, "status": "queued"}
 
 

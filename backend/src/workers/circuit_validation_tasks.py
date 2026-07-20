@@ -75,9 +75,23 @@ def run_circuit_faithfulness(self, circuit_id: str,
                                        summary=result)
             return result
         except _FaithfulnessCancelled:
+            _set_faithfulness_status(db, circuit_id, "cancelled")
             emit_circuit_run_failed("faithfulness", circuit_id, "cancelled")
             return {"status": "cancelled", "circuit_id": circuit_id}
         except Exception as e:
             logger.exception("Circuit faithfulness %s failed", circuit_id)
+            # Clear the in-flight marker so the GPU guard isn't wedged (R2 B-5).
+            _set_faithfulness_status(db, circuit_id, "failed")
             emit_circuit_run_failed("faithfulness", circuit_id, str(e)[:500])
             raise
+
+
+def _set_faithfulness_status(db, circuit_id, status):
+    from ..models.circuit import Circuit
+    try:
+        row = db.query(Circuit).filter(Circuit.id == circuit_id).first()
+        if row is not None:
+            row.faithfulness_status = status
+            db.commit()
+    except Exception:
+        logger.exception("Could not set faithfulness_status for %s", circuit_id)

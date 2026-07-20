@@ -170,6 +170,8 @@ class CircuitFaithfulnessService:
             raise FaithfulnessRunError(f"Circuit {circuit_id} not found")
         if not circuit.members:
             raise FaithfulnessRunError("Circuit has no members")
+        circuit.faithfulness_status = "running"  # in-flight marker (R2 B-5)
+        db.commit()
 
         # Resolve cluster_ref members via ClusterProfile.members (feature_idx).
         def _resolve_cluster(profile_id):
@@ -352,10 +354,12 @@ class CircuitFaithfulnessService:
             ev = down_reader.feature_events(int(f))
             if len(ev) == 0:
                 continue
-            docs = ev["doc_id"]
-            acts = ev["act"]
-            for j in range(len(ev)):
-                by_doc[int(docs[j])] = by_doc.get(int(docs[j]), 0.0) + float(acts[j])
+            # Vectorized per-doc sum (R2 B-7) — no per-event Python loop.
+            docs = np.asarray(ev["doc_id"], dtype=np.int64)
+            acts = np.asarray(ev["act"], dtype=np.float64)
+            sums = np.bincount(docs, weights=acts)
+            for d in np.nonzero(sums)[0]:
+                by_doc[int(d)] = by_doc.get(int(d), 0.0) + float(sums[d])
         if not by_doc:
             return []
         rng = np.random.default_rng(seed)
@@ -369,30 +373,19 @@ class CircuitFaithfulnessService:
     @staticmethod
     def _top_features(reader, n: int) -> List[int]:
         """Top-N features at a layer by total captured activation mass — the
-        per-layer 'ablate all' proxy (N is recorded in the manifest)."""
-        scored = []
-        for f in reader.feature_ids:
-            ev = reader.feature_events(int(f))
-            if len(ev) == 0:
-                continue
-            scored.append((float(np.asarray(ev["act"]).sum()), int(f)))
-        scored.sort(reverse=True)
-        return [f for _s, f in scored[:n]]
+        per-layer 'ablate all' proxy (N recorded in the manifest). ONE
+        vectorized pass over the events array (R2 B-6)."""
+        mass = reader.feature_activation_mass()
+        return [f for f, _s in sorted(mass.items(), key=lambda kv: kv[1],
+                                      reverse=True)[:n]]
 
     @staticmethod
     def _top_nonmembers(reader, members: set, k: int) -> List[int]:
-        """Top-k features that are NOT circuit members (sufficiency probe)."""
-        scored = []
-        for f in reader.feature_ids:
-            fi = int(f)
-            if fi in members:
-                continue
-            ev = reader.feature_events(fi)
-            if len(ev) == 0:
-                continue
-            scored.append((float(np.asarray(ev["act"]).sum()), fi))
-        scored.sort(reverse=True)
-        return [f for _s, f in scored[:k]]
+        """Top-k NON-member features (sufficiency probe). Vectorized (R2 B-7)."""
+        mass = reader.feature_activation_mass()
+        ranked = sorted(((f, s) for f, s in mass.items() if f not in members),
+                        key=lambda kv: kv[1], reverse=True)
+        return [f for f, _s in ranked[:k]]
 
     # ── behavior measurement (one forward per prompt, optional suppression) ─
 
@@ -409,7 +402,10 @@ class CircuitFaithfulnessService:
 
         from .circuit_intervention_hooks import suppress_feature_list
 
-        down_module = structure.layers_module[down_layer]
+        # Read the downstream activation at the SAME residual submodule the SAE
+        # was trained on (R2 B-2) — not the whole-layer output.
+        down_module = get_hookable_module(
+            structure.layers_module[down_layer], "residual", structure)
         # pre-resolve decoder weights + per-layer suppression hook modules
         hook_layers = {L: get_hookable_module(structure.layers_module[L],
                                               "residual", structure)
@@ -552,6 +548,7 @@ class CircuitFaithfulnessService:
             return
         circuit.faithfulness = defn.faithfulness.model_dump(mode="json")
         circuit.version = (circuit.version or 1) + 1
+        circuit.faithfulness_status = "completed"  # clears the in-flight marker (R2 B-5)
         db.commit()
 
 

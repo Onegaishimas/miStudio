@@ -60,6 +60,11 @@ class Circuit(Base):
     # HF repo id — the CROSS-INSTANCE-stable model identifier (model_id is
     # instance-local); 015's model-mismatch check compares against this.
     model_hf_id = Column(String(500), nullable=True)
+    # Faithfulness (rung 3) runs on the CIRCUIT (not a discovery run), so its
+    # in-flight lifecycle lives here (R2 B-5): the single-GPU guard checks it,
+    # cleanup reclaims a stuck one, and two runs can't race.
+    faithfulness_status = Column(String(16), nullable=True)  # pending|running|completed|failed
+    faithfulness_task_id = Column(String(155), nullable=True)
     schema_version = Column(String(8), nullable=False, default="1")
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

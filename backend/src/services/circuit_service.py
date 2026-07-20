@@ -64,6 +64,92 @@ class CircuitService:
         except Exception as e:  # pydantic ValidationError → domain error
             raise CircuitValidationError(str(e)) from e
 
+    # ── discovery → circuit producer (016/017 seam) ─────────────────────
+
+    @staticmethod
+    async def from_candidates(db: AsyncSession, *, discovery_run_id: str,
+                              name: str, candidate_keys: List[tuple],
+                              narrative: Optional[str] = None) -> Circuit:
+        """Build a circuit from selected candidates of a discovery run — the
+        MISSING producer (R2): without this, no circuit carries a
+        `discovery_run_id`, so a validation pass's rung-2 ES never propagates
+        onto a promoted circuit (nothing to write to) and 015 reads no ES.
+
+        `candidate_keys` = list of (up_layer, up_idx, down_layer, down_idx)
+        selecting which of the run's candidates become edges. The circuit's
+        members are the union of the selected candidates' endpoints; SAE refs
+        come from the capture manifest. The circuit is created UNPROMOTED at
+        the min rung its candidates carry (mined/attribution-supported) —
+        promotion is a separate act, and validation later lifts it to rung 2.
+        """
+        from ..models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+
+        run = (await db.execute(select(CircuitDiscoveryRun).where(
+            CircuitDiscoveryRun.id == discovery_run_id))).scalar_one_or_none()
+        if run is None:
+            raise CircuitValidationError(
+                f"Discovery run {discovery_run_id} not found")
+        capture = (await db.execute(select(CircuitCaptureRun).where(
+            CircuitCaptureRun.id == run.capture_run_id))).scalar_one_or_none()
+        manifest = (capture.manifest or {}) if capture else {}
+        wanted = set(candidate_keys)
+        cands = run.candidates or []
+
+        def _ckey(c):
+            u, d = c["up"], c["down"]
+            return (u.get("layer"), u.get("feature_idx"),
+                    d.get("layer"), d.get("feature_idx"))
+
+        selected = [c for c in cands if _ckey(c) in wanted] if wanted else cands
+        if not selected:
+            raise CircuitValidationError(
+                "No matching candidates selected for the circuit")
+
+        # members = union of endpoint features; edges = the selected candidates
+        members_by_key = {}
+        edges = []
+        for c in selected:
+            for ref in (c["up"], c["down"]):
+                if ref.get("feature_idx") is None:
+                    continue
+                k = (ref["layer"], ref["feature_idx"])
+                members_by_key.setdefault(k, {
+                    "layer": ref["layer"], "member_kind": "feature_ref",
+                    "feature": {"feature_idx": ref["feature_idx"],
+                                "strength": 0.0}})
+            stats = c.get("stats") or {}
+            edges.append({
+                "up": {"layer": c["up"]["layer"],
+                       "feature_idx": c["up"].get("feature_idx")},
+                "down": {"layer": c["down"]["layer"],
+                         "feature_idx": c["down"].get("feature_idx")},
+                "rung": 2 if c.get("validated_rung") == 2
+                        else (1 if (c.get("attribution") or {}).get("rung1_gate")
+                              else 0),
+                "coactivation": {"pmi": stats.get("pmi"),
+                                 "support": stats.get("support"),
+                                 "null_percentile": stats.get("null_pct"),
+                                 "replicated_heldout": c.get("replicated_heldout")},
+            })
+        layers = sorted({m["layer"] for m in members_by_key.values()})
+        sae_by_layer = {e["layer"]: e for e in manifest.get("layers", [])}
+        saes = [{"mistudio_sae_id": sae_by_layer.get(L, {}).get("sae_id"),
+                 "layer": L} for L in layers]
+
+        return await CircuitService.create(db, {
+            "name": name, "narrative": narrative,
+            "granularity": run.params.get("granularity", "feature")
+            if run.params else "feature",
+            "saes": saes,
+            "members": list(members_by_key.values()),
+            "edges": edges,
+            "discovery_run_id": discovery_run_id,
+            "model_id": manifest.get("model_id"),
+            "discovery": {"mode": (run.params or {}).get("mode"),
+                          "granularity": (run.params or {}).get("granularity"),
+                          "discovery_run_id": discovery_run_id},
+        })
+
     # ── CRUD ────────────────────────────────────────────────────────────
 
     @staticmethod

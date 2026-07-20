@@ -74,6 +74,14 @@ def cleanup_stuck_circuit_runs_task(self):
                 run.validation_status = "failed"
                 run.validation_error = "Stuck validation reclaimed by cleanup"
                 cleaned += 1
+        # ── faithfulness (runs on a circuit, not a discovery run) — R2 B-5 ──
+        from src.models.circuit import Circuit
+        for circuit in db.query(Circuit).filter(
+                Circuit.faithfulness_status.in_(("pending", "running")),
+                Circuit.updated_at < threshold).all():
+            if not _task_is_active(circuit.faithfulness_task_id):
+                circuit.faithfulness_status = "failed"
+                cleaned += 1
         if cleaned:
             db.commit()
             logger.info("Reclaimed %d stuck circuit run(s)", cleaned)

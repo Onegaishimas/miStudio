@@ -213,12 +213,24 @@ class CircuitInterventionService:
                 CircuitInterventionService._write_back(
                     run, edge_results, scope["ordering"],
                     manifest_row_id=manifest_row)
-                # AND propagate rung-2 ES onto any PROMOTED circuit built from
-                # this discovery run (R1 A1/#2) — this is what 015 reads for
-                # hazard quantification. The discovery candidates are ephemeral;
-                # the promoted circuit's edges are the durable record.
-                CircuitInterventionService._write_promoted_circuit_edges(
-                    db, run_id, edge_results, manifest_row)
+                # Commit the run's own results (candidates + manifest) FIRST so
+                # the promoted-circuit propagation below is a separate, best-
+                # effort transaction — a hiccup there must NOT lose the
+                # validation or mark the run failed (R2 pre-empt).
+                db.commit()
+                # Propagate rung-2 ES onto any PROMOTED circuit built from this
+                # discovery run (R1 A1/#2) — what 015 reads for hazard
+                # quantification. Best-effort: its own commit; failure logged.
+                try:
+                    CircuitInterventionService._write_promoted_circuit_edges(
+                        db, run_id, edge_results, manifest_row)
+                except Exception:
+                    logger.exception(
+                        "Validation %s: propagating rung-2 to promoted circuits "
+                        "failed (validation itself succeeded + persisted)", run_id)
+                    db.rollback()
+                run = db.query(CircuitDiscoveryRun).filter(
+                    CircuitDiscoveryRun.id == run_id).first()
 
             # Last-writer race: a cancel that landed during the pass must not be
             # clobbered by 'completed' (R1 #9).
@@ -281,7 +293,12 @@ class CircuitInterventionService:
 
         up_module = get_hookable_module(structure.layers_module[up_L],
                                         "residual", structure)
-        down_module = structure.layers_module[down_L]
+        # Capture the DOWNSTREAM activation at the SAME residual submodule the
+        # SAE was trained on (R2 B-2) — the whole-layer output differs from the
+        # residual-norm output by the MLP+residual add, so encoding it fed the
+        # SAE an input it was never fit to and corrupted every ES.
+        down_module = get_hookable_module(
+            structure.layers_module[down_L], "residual", structure)
         W_dec_up = resolve_decoder_weight(saes[up_L])
 
         # a_base
@@ -337,6 +354,9 @@ class CircuitInterventionService:
             "effect_size": round(verdict.effect_size, 5),
             "sign_consistency": round(verdict.sign_consistency, 3),
             "sigma_d": round(sigma_d, 5),
+            # thin-support ES is less trustworthy (σ_d from few firings) — record
+            # the count so a reviewer can discount it (R2 B-8).
+            "n_down_firings": int(len(down_reader.feature_events(down_i))),
             "n_prompts": len(deltas),
             "null_percentile_value": round(verdict.null_percentile_value, 5),
             "verdict": {"passed": verdict.passed, "reason": verdict.reason},
@@ -411,13 +431,29 @@ class CircuitInterventionService:
                            replace=False)
         up_module = get_hookable_module(structure.layers_module[up_L],
                                         "residual", structure)
-        down_module = structure.layers_module[down_L]
+        # Capture the DOWNSTREAM activation at the SAME residual submodule the
+        # SAE was trained on (R2 B-2) — the whole-layer output differs from the
+        # residual-norm output by the MLP+residual add, so encoding it fed the
+        # SAE an input it was never fit to and corrupted every ES.
+        down_module = get_hookable_module(
+            structure.layers_module[down_L], "residual", structure)
         W_dec_up = resolve_decoder_weight(saes[up_L])
+        prompts_per_null = max(2, min(scope.get("prompts_per_edge", 8), 4))
         null = []
         for uprime in picks:
             ev = up_reader.feature_events(int(uprime))
+            if len(ev) == 0:
+                continue
+            # Probe u'’s OWN strongest-firing docs (its natural support) — R2
+            # B-3: reusing u's top docs almost never contained u'’s firings, so
+            # the null systematically under-realized (<10 samples) and every
+            # edge failed "underpowered". A null feature must be measured where
+            # IT fires, exactly as the real edge is measured where u fires.
+            order = np.argsort(ev["act"])[::-1]
+            u_docs = list(dict.fromkeys(int(ev["doc_id"][j]) for j in order))
+            u_docs = u_docs[:prompts_per_null]
             deltas = []
-            for doc_id in doc_ids[:2]:  # cheap: 2 prompts per null sample
+            for doc_id in u_docs:
                 if doc_id >= len(dataset):
                     continue
                 batch = dataset[doc_id:doc_id + 1]
@@ -495,8 +531,10 @@ class CircuitInterventionService:
                     failed = upd.pop("_tested_and_failed", None)
                     if failed is not None:
                         hist = list(e.get("tested_and_failed") or [])
-                        # record the rung it was tested at (2) as history
-                        hist.append(2)
+                        # Set-like: record rung 2 ONCE (R2 B-4 — re-validating
+                        # both orderings appended [2,2,2…] each pass).
+                        if 2 not in hist:
+                            hist.append(2)
                         e["tested_and_failed"] = hist
                     e.update(upd)
                     changed = True

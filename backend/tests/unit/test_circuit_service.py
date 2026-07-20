@@ -169,3 +169,53 @@ class TestPromotedCircuitValidationWriteBack:
         assert updated.edges[0]["effect_size"] == 0.9
         assert updated.edges[0]["validation_manifest_ref"] == "vman_z"
         assert updated.version == v_before + 1
+
+
+class TestFromCandidates:
+    """R2: the discovery→circuit producer — without it, no circuit carries a
+    discovery_run_id so validated ES never reaches a promoted circuit."""
+
+    @pytest.mark.asyncio
+    async def test_builds_circuit_carrying_discovery_run_id(self, db):
+        from src.models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+        cap = CircuitCaptureRun(
+            id="cap_fc", status="completed", store_path="/x",
+            manifest={"model_id": "m1", "layers": [
+                {"layer": 13, "sae_id": "sae_l13"},
+                {"layer": 14, "sae_id": "sae_l14"}]})
+        run = CircuitDiscoveryRun(
+            id="dsc_fc", capture_run_id="cap_fc", status="completed",
+            params={"granularity": "feature", "mode": "seeded"},
+            candidates=[{
+                "up": {"layer": 13, "feature_idx": 712},
+                "down": {"layer": 14, "feature_idx": 231},
+                "stats": {"pmi": 2.0, "support": 30, "null_pct": 99.0},
+                "replicated_heldout": True,
+                "attribution": {"rung1_gate": True},
+                "orderings": {"coact_rank": 0, "attr_rank": 0}}])
+        db.add(cap)
+        db.add(run)
+        await db.commit()
+        circuit = await CircuitService.from_candidates(
+            db, discovery_run_id="dsc_fc", name="Built circuit",
+            candidate_keys=[(13, 712, 14, 231)])
+        assert circuit.discovery_run_id == "dsc_fc"
+        assert circuit.promoted is False  # promotion is a separate act
+        assert len(circuit.members) == 2  # both endpoints
+        assert circuit.edges[0]["rung"] == 1  # attribution-supported
+        assert circuit.edges[0]["up"]["feature_idx"] == 712
+        # SAE refs came from the capture manifest
+        assert {s["layer"] for s in circuit.saes} == {13, 14}
+
+    @pytest.mark.asyncio
+    async def test_empty_selection_raises(self, db):
+        from src.models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+        from src.services.circuit_service import CircuitValidationError
+        db.add(CircuitCaptureRun(id="cap_e", status="completed",
+                                 manifest={"layers": []}))
+        db.add(CircuitDiscoveryRun(id="dsc_e", capture_run_id="cap_e",
+                                   status="completed", params={}, candidates=[]))
+        await db.commit()
+        with pytest.raises(CircuitValidationError, match="No matching"):
+            await CircuitService.from_candidates(
+                db, discovery_run_id="dsc_e", name="x", candidate_keys=[(1, 2, 3, 4)])

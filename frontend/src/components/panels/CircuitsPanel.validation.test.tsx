@@ -79,6 +79,46 @@ describe('ValidationResults (copy discipline)', () => {
     expect(screen.getByText(/1\/2 edges causally validated/)).toBeInTheDocument();
   });
 
+  it('renders both-orderings survival and the attribution re-ranking uplift', () => {
+    const run = makeRun(
+      [makeCandidate({
+        validation: { ordering: 'attr', effect_size: 0.42, passed: true, manifest_id: 'man-attr' },
+        validated_rung: 2,
+      })],
+      {
+        validation: {
+          ordering: 'attr', k: 4, survival: 0.75, passed: 3, manifest_id: 'man-attr',
+          by_ordering: {
+            coact: { survival: 0.5, passed: 2, k: 4, manifest_id: 'man-coact' },
+            attr: { survival: 0.75, passed: 3, k: 4, manifest_id: 'man-attr' },
+          },
+          uplift: 0.25,
+        },
+      } as unknown as DiscoveryRun['report'],
+    );
+    render(<ValidationResults run={run} onOpenManifest={() => {}} />);
+    // both survival rates + the uplift number appear prominently
+    expect(screen.getByText(/attribution re-ranking uplift: \+25%/)).toBeInTheDocument();
+    expect(screen.getByText(/raised the causal survival rate/)).toBeInTheDocument();
+  });
+
+  it('hints to validate the other ordering when only one exists', () => {
+    const run = makeRun(
+      [makeCandidate({
+        validation: { ordering: 'coact', effect_size: 0.42, passed: true, manifest_id: 'man-coact' },
+        validated_rung: 2,
+      })],
+      {
+        validation: {
+          ordering: 'coact', k: 4, survival: 0.5, passed: 2, manifest_id: 'man-coact',
+          by_ordering: { coact: { survival: 0.5, passed: 2, k: 4, manifest_id: 'man-coact' } },
+        },
+      } as unknown as DiscoveryRun['report'],
+    );
+    render(<ValidationResults run={run} onOpenManifest={() => {}} />);
+    expect(screen.getByText(/Validate the attribution ordering too/)).toBeInTheDocument();
+  });
+
   it('renders "tested, did not validate" and NO causal claim for a tested_and_failed edge', () => {
     const run = makeRun([
       makeCandidate({

@@ -113,6 +113,14 @@ class CircuitCaptureService:
             raise CaptureConflictError(
                 f"Validation pass on {val.id} is {val.validation_status} — "
                 f"one GPU circuit task runs at a time; wait or cancel it first")
+        # Faithfulness runs on a circuit and loads a model too (R2 B-5).
+        from ..models.circuit import Circuit
+        faith = db.query(Circuit).filter(
+            Circuit.faithfulness_status.in_(("pending", "running"))).first()
+        if faith is not None:
+            raise CaptureConflictError(
+                f"Faithfulness pass on {faith.id} is {faith.faithfulness_status} "
+                f"— one GPU circuit task runs at a time; wait or cancel it first")
 
     # ── run creation / validation (called from the endpoint) ─────────────
 

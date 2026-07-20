@@ -138,3 +138,24 @@ class TestSizeGuardrail:
         assert size_ceiling_bytes(10) == 64 * 2**20
         # A modest real capture under the floor is NOT aborted.
         assert not exceeds_size_ceiling(1_000_000, 10)
+
+
+class TestActivationMass:
+    """R2 B-6/B-7: vectorized per-feature activation mass (replaces 131k-wide
+    Python loops)."""
+
+    def test_mass_matches_per_feature_sum(self, store):
+        ev, _, _ = open_writers(store, 13)
+        ev.append(np.array([0, 0, 1]), np.array([1, 2, 3]),
+                  np.array([5, 5, 7]), np.array([1.0, 2.0, 4.0]))
+        ev.finalize()
+        r = EventReader(store, 13)
+        mass = r.feature_activation_mass()
+        assert mass[5] == pytest.approx(3.0)   # 1.0 + 2.0
+        assert mass[7] == pytest.approx(4.0)
+        assert 999 not in mass
+
+    def test_empty_store(self, store):
+        ev, _, _ = open_writers(store, 13)
+        ev.finalize()
+        assert EventReader(store, 13).feature_activation_mass() == {}
