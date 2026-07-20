@@ -278,7 +278,13 @@ class CorrelationsResponse(BaseModel):
 
 
 class AblationResponse(BaseModel):
-    """Response schema for ablation analysis."""
+    """Response schema for ablation analysis.
+
+    NOTE (017 remediation): `method` discloses that this is a STATISTICAL
+    ESTIMATE from activation frequency/magnitude/consistency — NOT a model
+    forward pass. Real causal ablation lives in the circuit validation tier
+    (Feature 017, rung 2). Never present this as causal evidence.
+    """
     model_config = ConfigDict(from_attributes=True)
 
     perplexity_delta: float
@@ -286,6 +292,7 @@ class AblationResponse(BaseModel):
     baseline_perplexity: float
     ablated_perplexity: float
     computed_at: datetime
+    method: str = "statistical_estimate"
 
 
 class NLPAnalysisRequest(BaseModel):
