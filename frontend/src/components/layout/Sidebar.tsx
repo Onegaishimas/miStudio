@@ -25,14 +25,14 @@ type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labelin
 const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'models', label: 'Models', icon: Server },
   { id: 'datasets', label: 'Datasets', icon: Database },
+  { id: 'saes', label: 'SAEs', icon: Network },
+  { id: 'templates', label: 'Templates', icon: FileText },
   { id: 'training', label: 'Training', icon: GraduationCap },
   { id: 'extractions', label: 'Extractions', icon: Layers },
   { id: 'labeling', label: 'Labeling', icon: Tags },
   { id: 'feature-groups', label: 'Clusters', icon: Boxes },
   { id: 'circuits', label: 'Circuits', icon: GitBranch },
-  { id: 'saes', label: 'SAEs', icon: Network },
   { id: 'steering', label: 'Steering', icon: Sliders },
-  { id: 'templates', label: 'Templates', icon: FileText },
   { id: 'system', label: 'Monitor', icon: Activity },
 ];
 
