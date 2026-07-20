@@ -132,16 +132,32 @@ class TestFaithfulnessAPI:
         assert r.status_code == 422
 
     def test_dispatch_202(self, client):
+        # The happy path writes faithfulness_task_id via db.execute + commit
+        # (R2 B-5) — override get_db with an async-mock session so the write
+        # succeeds without a live DB (the endpoint's other db ops are mocked).
+        from src.core.database import get_db
+
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        session.commit = AsyncMock()
+
+        async def _override():
+            yield session
+
         task = MagicMock(id="task_f1")
-        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
-                   new=AsyncMock(return_value=_circuit())), \
-             patch("src.api.v1.endpoints.circuit_discovery._run_sync",
-                   new=AsyncMock(return_value=None)), \
-             patch("src.workers.circuit_validation_tasks."
-                   "run_circuit_faithfulness.delay", return_value=task):
-            r = client.post("/api/v1/circuits/crc_f1/faithfulness",
-                            json={"mode": "both"})
-        assert r.status_code == 202
+        app.dependency_overrides[get_db] = _override
+        try:
+            with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                       new=AsyncMock(return_value=_circuit())), \
+                 patch("src.api.v1.endpoints.circuit_discovery._run_sync",
+                       new=AsyncMock(return_value=None)), \
+                 patch("src.workers.circuit_validation_tasks."
+                       "run_circuit_faithfulness.delay", return_value=task):
+                r = client.post("/api/v1/circuits/crc_f1/faithfulness",
+                                json={"mode": "both"})
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+        assert r.status_code == 202, r.text
         body = r.json()
         assert body["task_id"] == "task_f1"
         assert body["circuit_id"] == "crc_f1"
