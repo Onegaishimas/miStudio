@@ -41,14 +41,25 @@ from ....schemas.steering import (
     CombinedSteeringResponse,
     ClusterAllocationRequest,
     ClusterAllocationResponse,
+    PerLayerAllocation,
+    MultiLayerAllocationResponse,
+    HazardModel,
+    AllocationResponseUnion,
 )
 from ....services.sae_manager_service import SAEManagerService
-from ....services.steering_service import get_steering_service, resolve_decoder_weight
+from ....services.steering_service import (
+    get_steering_service,
+    resolve_decoder_weight,
+    resolve_encoder_weight,
+)
 from ....services.cluster_allocation_service import (
     AllocationMember,
+    MultiLayerMember,
     compute_allocation,
+    compute_multi_layer_allocation,
     resolve_constants,
 )
+from ....services import steering_hazards
 from ....services.model_service import ModelService
 from ....services.steering_resilience import (
     get_circuit_breaker,
@@ -926,19 +937,83 @@ async def submit_async_combined_steering(
     if not sae_path.exists():
         raise HTTPException(400, f"SAE path does not exist: {sae.local_path}")
 
-    # Validate feature indices against SAE dimension
-    if sae.n_features:
-        invalid_features = [
-            f for f in request.selected_features
-            if f.feature_idx >= sae.n_features
-        ]
-        if invalid_features:
-            invalid_indices = [f.feature_idx for f in invalid_features]
-            raise HTTPException(
-                400,
-                f"Invalid feature indices: {invalid_indices}. "
-                f"SAE only has {sae.n_features} features."
-            )
+    # ── Feature 015: resolve EVERY distinct SAE the request references ──────────
+    # Each feature steers through the SAE trained on ITS layer (feature.sae_id ??
+    # request.sae_id). Validate — at SUBMIT time, never in the worker (which
+    # would burn a GPU slot to fail) — that each referenced SAE exists, is READY,
+    # and its layer matches every feature routed to it. Build a JSON-serializable
+    # SaeMeta map for the worker so it can load them all.
+    referenced_ids: list[str] = []
+    for f in request.selected_features:
+        sid = f.sae_id or request.sae_id
+        if sid not in referenced_ids:
+            referenced_ids.append(sid)
+
+    sae_records = {request.sae_id: sae}
+    for sid in referenced_ids:
+        if sid not in sae_records:
+            rec = await SAEManagerService.get_sae(db, sid)
+            if not rec:
+                raise HTTPException(404, f"SAE not found: {sid}")
+            if rec.status != SAEStatus.READY.value:
+                raise HTTPException(400, f"SAE is not ready: {sid} ({rec.status})")
+            if not rec.local_path:
+                raise HTTPException(400, f"SAE has no local path: {sid}")
+            sae_records[sid] = rec
+
+    # Per-feature layer/SAE mismatch → 422 listing offenders.
+    offenders = []
+    for f in request.selected_features:
+        sid = f.sae_id or request.sae_id
+        rec = sae_records[sid]
+        if rec.layer is not None and f.layer != rec.layer:
+            offenders.append({
+                "feature_idx": f.feature_idx,
+                "layer": f.layer,
+                "sae_id": sid,
+                "sae_layer": rec.layer,
+            })
+    if offenders:
+        raise HTTPException(
+            422,
+            {
+                "code": "sae_layer_mismatch",
+                "message": "One or more features are routed to an SAE trained on a different layer.",
+                "offenders": offenders,
+            },
+        )
+
+    # Validate feature indices against each routed SAE's dimension.
+    bad_by_sae: dict = {}
+    for f in request.selected_features:
+        sid = f.sae_id or request.sae_id
+        rec = sae_records[sid]
+        if rec.n_features and f.feature_idx >= rec.n_features:
+            bad_by_sae.setdefault(sid, []).append(f.feature_idx)
+    if bad_by_sae:
+        raise HTTPException(
+            400,
+            f"Invalid feature indices per SAE: {bad_by_sae}. "
+            "Each index must be within its SAE's feature count.",
+        )
+
+    # Build the SaeMeta map (JSON dicts) for the worker — one entry per
+    # referenced SAE. Single-SAE requests produce a one-entry map, keeping the
+    # worker on the byte-identical single-SAE codepath.
+    sae_meta_map: dict = {}
+    for sid in referenced_ids:
+        rec = sae_records[sid]
+        rec_path = settings.resolve_data_path(rec.local_path)
+        if not rec_path.exists():
+            raise HTTPException(400, f"SAE path does not exist: {rec.local_path}")
+        sae_meta_map[sid] = {
+            "sae_id": sid,
+            "sae_path": str(rec_path),
+            "layer": rec.layer,
+            "d_model": rec.d_model,
+            "n_features": rec.n_features,
+            "architecture": rec.architecture,
+        }
 
     # Determine model to use
     model_id = request.model_id
@@ -972,6 +1047,9 @@ async def submit_async_combined_steering(
             "sae_d_model": sae.d_model,
             "sae_n_features": sae.n_features,
             "sae_architecture": sae.architecture,
+            # Feature 015: load metadata for every referenced SAE (one entry for
+            # single-SAE requests → byte-identical worker behaviour).
+            "sae_meta_map": sae_meta_map,
         }
     )
 
@@ -1299,23 +1377,35 @@ async def delete_steering_experiments_batch(
         "message": f"Deleted {deleted_count} experiments",
     }
 
-@router.post("/cluster-allocation", response_model=ClusterAllocationResponse)
+@router.post("/cluster-allocation", response_model=AllocationResponseUnion)
 async def compute_cluster_strength_allocation(
     request: ClusterAllocationRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Compute a principled starting strength allocation for a cluster (Feature 013).
+    Compute a principled starting strength allocation for a cluster (Feature 013,
+    per-layer for a multi-layer circuit — Feature 015).
 
-    Loads only the SAE (through the shared steering cache — the same load any
+    Loads only the SAE(s) (through the shared steering cache — the same load any
     steering prep performs; no LLM load, no generation, no steering-mode
     requirement, no Celery). The formula is the single server-side source of
     truth (IDL-29); the frontend only performs budget-preserving rebalance on
     the returned values. Decoder columns are sliced in-place — no full-matrix
     copies.
-    """
-    import torch
 
+    Response shape (union, single-layer FIRST for 013 back-compat):
+      * single distinct layer  → the 013 ``ClusterAllocationResponse`` (unchanged).
+      * multiple layers        → ``MultiLayerAllocationResponse``: a per-layer
+        map (each entry the 013 allocation + its ``sae_id``), cross-layer
+        ``hazards``, and ``strengths`` flattened in request-member order.
+    """
+    distinct_layers = sorted({m.layer for m in request.members})
+
+    # ── Multi-layer branch (Feature 015) ───────────────────────────────────────
+    if len(distinct_layers) > 1:
+        return await _compute_multi_layer_allocation_response(request, db)
+
+    # ── Single-layer branch (Feature 013 — BYTE-IDENTICAL to pre-015) ──────────
     sae = await SAEManagerService.get_sae(db, request.sae_id)
     if not sae:
         raise HTTPException(404, f"SAE not found: {request.sae_id}")
@@ -1403,5 +1493,189 @@ async def compute_cluster_strength_allocation(
         constants_used=result.constants_used,
         formula_id=result.formula_id,
         approximate=result.approximate,
+    )
+
+
+async def _load_circuit_edges(db: AsyncSession, circuit_id: str) -> Optional[list]:
+    """Fetch a circuit's stored edges (JSONB list of edge dicts) for hazard-v2.
+
+    Returns None if the circuit is missing — hazards then fall back to the
+    labeled weight-prior heuristic. Never raises: an edge-fetch failure must not
+    fail the allocation.
+    """
+    try:
+        from ....models.circuit import Circuit
+        from sqlalchemy import select
+
+        row = (await db.execute(select(Circuit).where(Circuit.id == circuit_id))).scalar_one_or_none()
+        if row is None:
+            return None
+        return list(row.edges or [])
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[ClusterAllocation] Could not load circuit {circuit_id} edges: {e}")
+        return None
+
+
+async def _compute_multi_layer_allocation_response(
+    request: ClusterAllocationRequest,
+    db: AsyncSession,
+) -> MultiLayerAllocationResponse:
+    """Per-layer allocation for a multi-layer cluster (Feature 015, IDL-29 reuse).
+
+    Partitions members by layer, resolves each layer's SAE (per-member sae_id ??
+    request sae_id), loads its decoder (for the gain) and encoder (for the
+    hazard weight prior), runs the UNCHANGED per-layer ``compute_allocation``,
+    then detects cross-layer hazards.
+    """
+    # Resolve the SAE for each layer from the members (per-member sae_id first).
+    layer_sae_id: dict = {}
+    for m in request.members:
+        sid = getattr(m, "sae_id", None) or request.sae_id
+        prev = layer_sae_id.get(m.layer)
+        if prev is not None and prev != sid:
+            raise HTTPException(
+                422,
+                {
+                    "code": "mixed_sae_within_layer",
+                    "message": f"Layer {m.layer} members reference more than one SAE ({prev}, {sid}); one SAE per layer.",
+                },
+            )
+        layer_sae_id[m.layer] = sid
+
+    service = get_steering_service()
+    decoders: dict = {}
+    encoders: dict = {}
+    offenders: list = []
+    constants_by_sae: dict = {}
+
+    for layer, sid in layer_sae_id.items():
+        rec = await SAEManagerService.get_sae(db, sid)
+        if not rec:
+            raise HTTPException(404, f"SAE not found: {sid}")
+        if str(rec.status.value if hasattr(rec.status, "value") else rec.status) != "ready":
+            raise HTTPException(400, f"SAE is not ready: {sid} ({rec.status})")
+        if not rec.local_path:
+            raise HTTPException(400, f"SAE has no local path: {sid}")
+
+        # Layer/SAE mismatch → 422 (collect all offenders).
+        if rec.layer is not None and rec.layer != layer:
+            for m in request.members:
+                if m.layer == layer:
+                    offenders.append({
+                        "feature_idx": m.feature_idx,
+                        "layer": m.layer,
+                        "sae_id": sid,
+                        "sae_layer": rec.layer,
+                    })
+            continue
+
+        # Feature-index bounds against this SAE.
+        if rec.n_features:
+            bad = [m.feature_idx for m in request.members
+                   if m.layer == layer and m.feature_idx >= rec.n_features]
+            if bad:
+                raise HTTPException(
+                    400,
+                    f"Feature indices out of bounds for SAE {sid} ({rec.n_features} features): {bad}",
+                )
+
+        constants_by_sae[layer] = resolve_constants(
+            settings.steering_cluster_constants_json, sid)
+
+        # Load decoder (gain) + encoder (hazard prior). Failure degrades that
+        # layer to the approximate allocation and drops it from the prior source.
+        try:
+            rec_path = settings.resolve_data_path(rec.local_path)
+            if rec_path.exists():
+                loaded = await service.load_sae(
+                    rec_path, sid,
+                    layer=rec.layer, d_model=rec.d_model,
+                    n_features=rec.n_features, architecture=rec.architecture,
+                )
+                dw = resolve_decoder_weight(loaded.model)
+                if dw is not None:
+                    decoders[layer] = dw.detach()
+                ew = resolve_encoder_weight(loaded.model)
+                if ew is not None:
+                    encoders[layer] = ew.detach()
+        except Exception as e:
+            logger.warning(f"[ClusterAllocation] Layer {layer} SAE {sid} unavailable, approximate G=1: {e}")
+
+    if offenders:
+        raise HTTPException(
+            422,
+            {
+                "code": "sae_layer_mismatch",
+                "message": "One or more members are routed to an SAE trained on a different layer.",
+                "offenders": offenders,
+            },
+        )
+
+    # The IDL-29 constants are (currently) per-SAE identical across layers unless
+    # a per-SAE override exists; pass the request-level SAE's resolved constants
+    # as the shared set (the single-layer path uses request.sae_id likewise).
+    constants = resolve_constants(settings.steering_cluster_constants_json, request.sae_id)
+
+    ml_members = [
+        MultiLayerMember(
+            feature_idx=m.feature_idx,
+            layer=m.layer,
+            similarity=m.similarity,
+            activation_frequency=m.activation_frequency,
+            sign=m.sign,
+            sae_id=(getattr(m, "sae_id", None) or request.sae_id),
+        )
+        for m in request.members
+    ]
+
+    try:
+        ml = compute_multi_layer_allocation(
+            ml_members,
+            decoders=decoders,
+            constants=constants,
+            group_cohesion=request.group_cohesion,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Cross-layer hazards. PRIMARY = stored circuit edges at rung ≥2 (when a
+    # circuit_id is supplied); FALLBACK = the labeled weight-prior heuristic.
+    circuit_edges = None
+    if request.circuit_id:
+        circuit_edges = await _load_circuit_edges(db, request.circuit_id)
+
+    steered = [
+        {"layer": m.layer, "feature_idx": m.feature_idx, "strength": s}
+        for m, s in zip(request.members, ml.strengths)
+    ]
+    hazards = steering_hazards.detect_hazards(
+        steered,
+        circuit_edges=circuit_edges,
+        decoders=decoders or None,
+        encoders=encoders or None,
+        prior_threshold=settings.steering_hazard_prior_threshold,
+    )
+
+    layers_out: dict = {}
+    for layer, res in ml.layers.items():
+        layers_out[str(layer)] = PerLayerAllocation(
+            sae_id=ml.layer_sae_ids.get(layer),
+            B=res.B,
+            B_dir=res.B_dir,
+            G=res.G,
+            f_eff=res.f_eff,
+            weights=res.weights,
+            strengths=res.strengths,
+            flags=res.flags,
+            cancellation_pair=list(res.cancellation_pair) if res.cancellation_pair else None,
+            constants_used=res.constants_used,
+            approximate=res.approximate,
+        )
+
+    return MultiLayerAllocationResponse(
+        formula_id=ml.formula_id,
+        layers=layers_out,
+        hazards=[HazardModel(**h.to_dict()) for h in hazards],
+        strengths=ml.strengths,
     )
 
