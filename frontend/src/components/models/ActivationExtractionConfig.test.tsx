@@ -14,7 +14,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+// Component tree uses useWebSocketContext() (via useModelExtractionProgress),
+// so it must be wrapped in <WebSocketProvider>. renderWithProviders does that.
+import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { ActivationExtractionConfig } from './ActivationExtractionConfig';
 import { Model, ModelStatus, QuantizationFormat } from '../../types/model';
 import { useDatasetsStore } from '../../stores/datasetsStore';
@@ -72,15 +75,36 @@ describe('ActivationExtractionConfig', () => {
     },
   ];
 
+  // The component gates "Start Extraction" on the selected dataset having a
+  // READY tokenization for this model. The first ready dataset (ds_1) is
+  // auto-selected, so provide a matching ready tokenization keyed by dataset id.
+  const mockTokenizations = {
+    ds_1: [
+      {
+        id: 'tok_1',
+        dataset_id: 'ds_1',
+        model_id: 'm_test123',
+        max_length: 512,
+        tokenizer_repo_id: 'TinyLlama/TinyLlama-1.1B',
+        status: 'ready',
+        created_at: '2025-10-12T00:00:00Z',
+        updated_at: '2025-10-12T00:00:00Z',
+      },
+    ],
+  };
+
   beforeEach(() => {
     mockOnClose.mockClear();
     mockOnExtract.mockClear();
     mockFetchDatasets.mockClear();
 
-    // Default mock implementation
+    // Default mock implementation.
+    // Component destructures: datasets, fetchDatasets, tokenizations, fetchTokenizations.
     (useDatasetsStore as any).mockReturnValue({
       datasets: mockDatasets,
       fetchDatasets: mockFetchDatasets,
+      tokenizations: mockTokenizations,
+      fetchTokenizations: vi.fn(),
     });
   });
 
@@ -186,6 +210,8 @@ describe('ActivationExtractionConfig', () => {
       (useDatasetsStore as any).mockReturnValue({
         datasets: mixedDatasets,
         fetchDatasets: mockFetchDatasets,
+        tokenizations: mockTokenizations,
+        fetchTokenizations: vi.fn(),
       });
 
       render(
@@ -423,7 +449,8 @@ describe('ActivationExtractionConfig', () => {
 
       const maxSamplesInput = screen.getByLabelText('Max Samples') as HTMLInputElement;
       expect(maxSamplesInput).toBeInTheDocument();
-      expect(maxSamplesInput.value).toBe('1000');
+      // Component default is 100000 (useState(100000)).
+      expect(maxSamplesInput.value).toBe('100000');
     });
 
     it('should render top-K examples input with default value', () => {
@@ -499,7 +526,7 @@ describe('ActivationExtractionConfig', () => {
       expect(screen.getByText('Extraction Summary:')).toBeInTheDocument();
       expect(screen.getByText(/Will extract from 3 layer\(s\)/)).toBeInTheDocument();
       expect(screen.getByText(/Using 1 hook type\(s\): residual/)).toBeInTheDocument();
-      expect(screen.getByText(/Processing up to 1,000 samples/)).toBeInTheDocument();
+      expect(screen.getByText(/Processing up to 100,000 samples/)).toBeInTheDocument();
       expect(screen.getByText(/Batch size: 32/)).toBeInTheDocument();
     });
 
@@ -624,13 +651,14 @@ describe('ActivationExtractionConfig', () => {
       );
 
       const maxSamplesInput = screen.getByLabelText('Max Samples');
-      fireEvent.change(maxSamplesInput, { target: { value: '150000' } });
+      // Component limit is 1,000,000; use a value above it to trigger the error.
+      fireEvent.change(maxSamplesInput, { target: { value: '2000000' } });
 
       const extractButton = screen.getByText('Start Extraction');
       fireEvent.click(extractButton);
 
       await waitFor(() => {
-        expect(screen.getByText('Max samples must be between 1 and 100,000')).toBeInTheDocument();
+        expect(screen.getByText('Max samples must be between 1 and 1,000,000')).toBeInTheDocument();
       });
 
       expect(mockOnExtract).not.toHaveBeenCalled();
@@ -657,9 +685,11 @@ describe('ActivationExtractionConfig', () => {
           dataset_id: 'ds_1',
           layer_indices: [0, 5, 11],
           hook_types: ['residual'],
-          max_samples: 1000,
+          max_samples: 100000,
           batch_size: 32,
+          micro_batch_size: 8,
           top_k_examples: 10,
+          gpu_id: 0,
         });
       });
     });
@@ -692,7 +722,7 @@ describe('ActivationExtractionConfig', () => {
       expect(mockOnClose).not.toHaveBeenCalled();
     });
 
-    it('should not close modal after successful extraction', async () => {
+    it('should close modal after successful extraction starts', async () => {
       mockOnExtract.mockResolvedValue(undefined);
 
       render(
@@ -711,8 +741,11 @@ describe('ActivationExtractionConfig', () => {
         expect(mockOnExtract).toHaveBeenCalled();
       }, { timeout: 2000 });
 
-      // Modal should remain open so user can see progress
-      expect(mockOnClose).not.toHaveBeenCalled();
+      // Component closes the modal once extraction has started successfully so
+      // the user watches progress on the model card (see handleExtract).
+      await waitFor(() => {
+        expect(mockOnClose).toHaveBeenCalled();
+      });
     });
 
     it('should show error message on extraction failure', async () => {
@@ -794,9 +827,10 @@ describe('ActivationExtractionConfig', () => {
         expect(mockOnExtract).toHaveBeenCalled();
       });
 
-      // After extraction completes, close button should be enabled again
+      // On success the component closes the modal (onClose) rather than
+      // re-enabling the close button.
       await waitFor(() => {
-        expect(closeButton).not.toBeDisabled();
+        expect(mockOnClose).toHaveBeenCalled();
       });
     });
   });

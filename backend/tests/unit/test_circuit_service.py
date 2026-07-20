@@ -150,3 +150,22 @@ class TestOptimisticConcurrency:
         with pytest.raises(CircuitConcurrencyError):
             await CircuitService.write_edge_validation(
                 db, c, {(13, 712, 14, 231): {"rung": 2}}, expected_version=1)
+
+
+class TestPromotedCircuitValidationWriteBack:
+    """R1 A1/#2: rung-2 ES must reach a PROMOTED circuit's edges (what 015
+    reads). write_edge_validation is the contract-safe path."""
+
+    @pytest.mark.asyncio
+    async def test_validated_edge_lifts_promoted_circuit_rung(self, db):
+        c = await CircuitService.create(db, _payload(discovery_run_id="dsc_v"))
+        await CircuitService.set_promoted(db, c, True)
+        assert c.rung == 1
+        v_before = c.version
+        updated = await CircuitService.write_edge_validation(
+            db, c, {(13, 712, 14, 231): {"rung": 2, "effect_size": 0.9,
+                                         "validation_manifest_ref": "vman_z"}})
+        assert updated.rung == 2
+        assert updated.edges[0]["effect_size"] == 0.9
+        assert updated.edges[0]["validation_manifest_ref"] == "vman_z"
+        assert updated.version == v_before + 1

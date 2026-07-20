@@ -99,3 +99,17 @@ class TestReproductionWiring:
         v = ManifestService.reproduction_verdict(orig.payload, repro_payload)
         assert v["within_tolerance"] is True
         assert v["max_delta"] == pytest.approx(0.02, abs=1e-3)
+
+
+class TestReproductionEmptyOverlap:
+    def test_no_overlap_is_not_a_pass(self):
+        """R1 #14: comparing 0 edges must NOT report within_tolerance=True."""
+        orig = {"edges": [{"up": {"layer": 13, "feature_idx": 1},
+                           "down": {"layer": 14, "feature_idx": 2},
+                           "effect_size": 2.5}]}
+        repro = {"edges": [{"up": {"layer": 99, "feature_idx": 9},
+                            "down": {"layer": 98, "feature_idx": 8},
+                            "effect_size": 1.0}]}
+        v = ManifestService.reproduction_verdict(orig, repro)
+        assert v["within_tolerance"] is None
+        assert "no overlapping" in v["reason"]

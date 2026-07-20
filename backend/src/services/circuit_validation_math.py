@@ -18,6 +18,7 @@ import numpy as np
 
 DEFAULT_NULL_PERCENTILE = 95.0
 DEFAULT_SIGN_FRAC = 0.8   # 8/10 prompts must agree in sign
+MIN_NULL_SAMPLES = 10     # below this the null is underpowered → cannot validate
 
 
 @dataclass
@@ -59,7 +60,17 @@ def edge_verdict(delta_p: Sequence[float], sigma_d: float,
     es = effect_size(delta_p, sigma_d)
     sc = sign_consistency(delta_p)
     null = np.asarray(null_effect_sizes, dtype=np.float64)
-    thresh = float(np.percentile(np.abs(null), percentile)) if len(null) else 0.0
+    # Missing OR underpowered null ⇒ CANNOT validate (R1 #1 / Q1): a missing
+    # null used to give thresh=0.0, so any nonzero ES passed on ZERO evidence
+    # — a false-positive rung-2 (the worst possible failure in front of AI
+    # scientists). Too few null samples ⇒ an unreliable threshold that also
+    # lets real edges pass too easily. An unvalidatable edge FAILS.
+    if len(null) < MIN_NULL_SAMPLES:
+        return EdgeVerdict(
+            es, sc, 0.0, False,
+            f"null underpowered ({len(null)} < {MIN_NULL_SAMPLES} samples) — "
+            f"cannot validate this edge")
+    thresh = float(np.percentile(np.abs(null), percentile))
     if abs(es) <= thresh:
         return EdgeVerdict(es, sc, thresh, False,
                            f"|ES|={abs(es):.3f} ≤ null p{percentile}={thresh:.3f}")
@@ -92,7 +103,10 @@ def necessity(b_clean: float, b_ablate_m: float, b_ablate_all: float) -> Optiona
     """(B_clean − B_ablate_M) / (B_clean − B_ablate_all) — how much of the
     total ablatable behavior the circuit's members account for."""
     denom = b_clean - b_ablate_all
-    if denom == 0:
+    # denom <= 0 (ablating everything didn't lower behavior) ⇒ the ratio
+    # inverts sign / explodes — a nonsense "necessity = -3.2" (R1 #13). Not a
+    # score: return None.
+    if denom <= 0:
         return None
     return round((b_clean - b_ablate_m) / denom, 4)
 
@@ -102,6 +116,6 @@ def sufficiency(b_ablate_nonmembers: float, b_ablate_all: float,
     """(B_ablate_topk_nonmembers − B_ablate_all) / (B_clean − B_ablate_all) —
     how much behavior survives when ONLY non-members are ablated."""
     denom = b_clean - b_ablate_all
-    if denom == 0:
+    if denom <= 0:  # sign-inversion guard (R1 #13)
         return None
     return round((b_ablate_nonmembers - b_ablate_all) / denom, 4)

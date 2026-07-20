@@ -5,7 +5,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { screen, fireEvent, within, waitFor } from '@testing-library/react';
+// The Tokenization tab uses useWebSocketContext() via a progress hook, so the
+// modal must be wrapped in <WebSocketProvider>. renderWithProviders does that.
+import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { DatasetDetailModal } from './DatasetDetailModal';
 import { DatasetStatus } from '../../types/dataset';
 import type { Dataset } from '../../types/dataset';
@@ -42,6 +45,9 @@ vi.mock('../../hooks/useWebSocket', () => ({
 // Mock API base URL
 vi.mock('../../config/api', () => ({
   API_BASE_URL: 'http://localhost:8000',
+  // WebSocketProvider (pulled in via renderWithProviders) reads these.
+  WS_URL: '',
+  WS_PATH: '/ws/socket.io',
 }));
 
 // Mock fetch globally
@@ -107,7 +113,8 @@ describe('DatasetDetailModal', () => {
       const dataset = createMockDataset();
       render(<DatasetDetailModal dataset={dataset} onClose={mockOnClose} />);
 
-      const closeButton = screen.getByRole('button', { name: '' }); // X icon button
+      // The X-icon close button now has an accessible name via aria-label.
+      const closeButton = screen.getByRole('button', { name: 'Close' });
       expect(closeButton).toBeInTheDocument();
     });
   });
@@ -297,15 +304,24 @@ describe('DatasetDetailModal', () => {
     });
 
     it('should render Tokenization tab content when selected', () => {
+      // TokenizationsList fetches on mount; return an empty list so it settles.
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+
       const dataset = createMockDataset();
       render(<DatasetDetailModal dataset={dataset} onClose={mockOnClose} />);
 
       const tokenizationTab = screen.getByRole('button', { name: /Tokenization/i });
       fireEvent.click(tokenizationTab);
 
-      // Should show tokenization form
-      expect(screen.getByText(/Tokenize Dataset/i)).toBeInTheDocument();
-      expect(screen.getByText(/Tokenizer Model/i)).toBeInTheDocument();
+      // The tab now renders the Tokenizations manager (heading + description +
+      // TokenizationsList), replacing the old inline "Tokenize Dataset" form.
+      expect(screen.getByText('Tokenizations')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Manage different tokenizations of this dataset/i)
+      ).toBeInTheDocument();
     });
   });
 
@@ -391,6 +407,11 @@ describe('DatasetDetailModal', () => {
     });
 
     it('should handle dataset with tokenization metadata', () => {
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+
       const dataset = createMockDataset({
         metadata: {
           tokenization: {
@@ -408,12 +429,12 @@ describe('DatasetDetailModal', () => {
 
       render(<DatasetDetailModal dataset={dataset} onClose={mockOnClose} />);
 
-      // Switch to Tokenization tab
+      // Switch to Tokenization tab — it renders the Tokenizations manager
+      // (the redesigned tab no longer shows an "Already Tokenized" banner).
       const tokenizationTab = screen.getByRole('button', { name: /Tokenization/i });
       fireEvent.click(tokenizationTab);
 
-      // Should show "already tokenized" message
-      expect(screen.getByText(/Dataset Already Tokenized/i)).toBeInTheDocument();
+      expect(screen.getByText('Tokenizations')).toBeInTheDocument();
     });
 
     it('should handle very long dataset names with truncation', () => {
@@ -454,39 +475,56 @@ describe('DatasetDetailModal', () => {
   });
 
   describe('Statistics Tab States', () => {
-    it('should show "no statistics" message when no tokenization metadata', () => {
+    it('should show "no statistics" message when there are no ready tokenizations', async () => {
+      // The Statistics tab now fetches tokenizations from the API (async) rather
+      // than reading dataset.metadata. Return an empty list to trigger the
+      // "no statistics" empty state.
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+
       const dataset = createMockDataset({ metadata: undefined });
       render(<DatasetDetailModal dataset={dataset} onClose={mockOnClose} />);
 
       const statisticsTab = screen.getByRole('button', { name: /Statistics/i });
       fireEvent.click(statisticsTab);
 
-      expect(screen.getByText(/No tokenization statistics available/i)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/No tokenization statistics available/i)).toBeInTheDocument();
+      });
     });
 
-    it('should show statistics when tokenization metadata exists', () => {
-      const dataset = createMockDataset({
-        metadata: {
-          tokenization: {
-            tokenizer_name: 'gpt2',
-            text_column_used: 'text',
-            max_length: 512,
-            stride: 0,
-            num_tokens: 100000,
-            avg_seq_length: 250.5,
-            min_seq_length: 10,
-            max_seq_length: 512,
-          },
-        },
+    it('should show statistics when a ready tokenization exists', async () => {
+      // The Statistics tab fetches ready tokenizations from the API and renders
+      // stats from the selected one. Its effect re-runs when the selection is
+      // set, so use a persistent mock (not ...Once).
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: 'tok_1',
+              status: 'ready',
+              tokenizer_repo_id: 'gpt2',
+              num_tokens: 100000,
+              avg_seq_length: 250.5,
+              vocab_size: 50257,
+            },
+          ],
+        }),
       });
 
+      const dataset = createMockDataset();
       render(<DatasetDetailModal dataset={dataset} onClose={mockOnClose} />);
 
       const statisticsTab = screen.getByRole('button', { name: /Statistics/i });
       fireEvent.click(statisticsTab);
 
-      expect(screen.getByText(/Token Statistics/i)).toBeInTheDocument();
-      expect(screen.getByText(/Sequence Length Distribution/i)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/Token Statistics/i)).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Sequence Length/i)).toBeInTheDocument();
     });
   });
 

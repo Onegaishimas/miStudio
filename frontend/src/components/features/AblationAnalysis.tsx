@@ -166,24 +166,24 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
         )}
       </div>
 
-      {/* Perplexity Metrics */}
+      {/* Perplexity Metrics — PROJECTED (heuristic), not measured (R1 #11) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Baseline Perplexity */}
         <div className="bg-slate-800/30 rounded-lg p-4">
-          <div className="text-xs text-slate-400 mb-1">Baseline Perplexity</div>
+          <div className="text-xs text-slate-400 mb-1">Baseline Perplexity <span className="text-slate-500">(projected)</span></div>
           <div className="text-2xl font-bold text-emerald-400">
             {data.baseline_perplexity.toFixed(1)}
           </div>
-          <div className="text-xs text-slate-500 mt-1">Feature active</div>
+          <div className="text-xs text-slate-500 mt-1">Heuristic — not measured</div>
         </div>
 
         {/* Ablated Perplexity */}
         <div className="bg-slate-800/30 rounded-lg p-4">
-          <div className="text-xs text-slate-400 mb-1">Ablated Perplexity</div>
+          <div className="text-xs text-slate-400 mb-1">Ablated Perplexity <span className="text-slate-500">(projected)</span></div>
           <div className="text-2xl font-bold text-orange-400">
             {data.ablated_perplexity.toFixed(1)}
           </div>
-          <div className="text-xs text-slate-500 mt-1">Feature removed</div>
+          <div className="text-xs text-slate-500 mt-1">Heuristic — not measured</div>
         </div>
 
         {/* Perplexity Delta */}

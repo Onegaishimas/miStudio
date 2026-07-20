@@ -250,6 +250,58 @@ async def promote_circuit(circuit_id: str, body: Optional[PromoteBody] = None,
     return _out(await CircuitService.set_promoted(db, circuit, promoted))
 
 
+class FaithfulnessBody(BaseModel):
+    mode: Literal["necessity", "both"] = "both"
+    k_nonmembers: int = Field(256, ge=1, le=4096)
+    ablate_all_n: int = Field(1024, ge=1, le=16384)
+    n_prompts: int = Field(16, ge=1, le=256)
+    seed: int = 0
+
+
+@router.post("/{circuit_id}/faithfulness", status_code=202)
+async def start_faithfulness(circuit_id: str, body: FaithfulnessBody,
+                             db: AsyncSession = Depends(get_db)):
+    """Launch a faithfulness pass (rung 3) on a circuit: suppress its members
+    and measure the necessity/sufficiency of the behavior they drive vs an
+    ablate-all proxy. GPU-guarded (shares the single-GPU circuit guard). 404 if
+    the circuit is missing; 409 if it has no members. Result + a `faithfulness`
+    manifest are the record; circuit.faithfulness is written through the
+    contract. Poll get_task_status, then get_circuit for the scores."""
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
+    from ....services.circuit_faithfulness_service import FaithfulnessConfigError
+    from ....workers.circuit_validation_tasks import run_circuit_faithfulness
+
+    circuit = await _get_or_404(db, circuit_id)
+    if not circuit.members:
+        raise HTTPException(status_code=409, detail="Circuit has no members")
+    if not circuit.discovery_run_id:
+        raise HTTPException(
+            status_code=409,
+            detail="v1 faithfulness needs the circuit's discovery capture "
+                   "store for prompts (circuit has no discovery_run_id)")
+    try:
+        from ....services.circuit_faithfulness_service import (
+            CircuitFaithfulnessService)
+        config = CircuitFaithfulnessService.create_config(body.model_dump())
+    except FaithfulnessConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Faithfulness loads a model — respect the single-GPU guard, asserted in one
+    # advisory-locked sync transaction (like start_validation).
+    from ....api.v1.endpoints.circuit_discovery import _run_sync
+
+    def _guard(sync_db):
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+
+    try:
+        await _run_sync(db, _guard)
+    except CaptureConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    task = run_circuit_faithfulness.delay(circuit_id, config)
+    return {"circuit_id": circuit_id, "task_id": task.id, "status": "queued"}
+
+
 @router.get("/{circuit_id}/export")
 async def export_circuit(circuit_id: str, db: AsyncSession = Depends(get_db)):
     circuit = await _get_or_404(db, circuit_id)

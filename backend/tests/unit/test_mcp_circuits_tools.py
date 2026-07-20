@@ -78,6 +78,13 @@ class TestValidationToolSmoke:
         assert kwargs["json_body"]["ordering"] == "attr"
         assert kwargs["json_body"]["k"] == 10
 
+    def test_run_circuit_faithfulness(self):
+        tool, client = _register_and_get("run_circuit_faithfulness")
+        anyio.run(lambda: tool.run({"circuit_id": "crc_1", "mode": "both"}))
+        args, kwargs = client.post.call_args
+        assert args[0] == "/circuits/crc_1/faithfulness"
+        assert kwargs["json_body"]["mode"] == "both"
+
     def test_get_validation_manifest(self):
         tool, client = _register_and_get("get_validation_manifest")
         anyio.run(lambda: tool.run({"manifest_id": "vman_1"}))

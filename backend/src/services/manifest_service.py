@@ -103,6 +103,13 @@ class ManifestService:
             d = abs(float(e["effect_size"]) - float(o["effect_size"]))
             deltas.append({"edge": k, "delta": round(d, 5)})
             max_delta = max(max_delta, d)
+        if not deltas:
+            # Nothing was compared ⇒ NOT a pass (R1 #14): an empty overlap used
+            # to report within_tolerance=True ("reproduced") having compared 0
+            # edges. Reproducing nothing is not reproducing.
+            return {"deltas": [], "max_delta": None, "within_tolerance": None,
+                    "tolerance": tolerance,
+                    "reason": "no overlapping edges to compare"}
         return {"deltas": deltas, "max_delta": round(max_delta, 5),
                 "within_tolerance": max_delta <= tolerance,
                 "tolerance": tolerance}

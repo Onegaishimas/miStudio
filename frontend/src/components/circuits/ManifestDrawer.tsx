@@ -69,7 +69,8 @@ export function ManifestDrawer({
   };
 
   const payload = manifest?.payload;
-  const edges = payload?.edges ?? [];
+  // edge_batch carries payload.edges; a reproduction carries reproduced_edges.
+  const edges = payload?.edges ?? payload?.reproduced_edges ?? [];
   const config = (payload?.config ?? {}) as Record<string, unknown>;
   const cfg = (k: string) => (config[k] != null ? String(config[k]) : '—');
 
@@ -149,20 +150,28 @@ export function ManifestDrawer({
                 </div>
               )}
 
-              {/* reproduction manifests carry the tolerance verdict */}
-              {(manifest.kind === 'reproduction' || payload?.within_tolerance != null) && (
+              {/* reproduction manifests carry the tolerance verdict, nested
+                  under payload.verdict (R1 #3 — was read at top level and
+                  always showed "did not reproduce"). Three-state: true/false/
+                  null (nothing compared). */}
+              {manifest.kind === 'reproduction' && payload?.verdict && (
                 <div
                   className={`rounded border px-3 py-2 text-[11px] ${
-                    payload?.within_tolerance
+                    payload.verdict.within_tolerance === true
                       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                      : payload.verdict.within_tolerance === false
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                        : 'border-slate-600 bg-slate-700/40 text-slate-300'
                   }`}
                 >
                   <span className="font-medium">Reproduction verdict:</span>{' '}
-                  {payload?.within_tolerance
+                  {payload.verdict.within_tolerance === true
                     ? 'within tolerance — the manifest reproduced'
-                    : 'outside tolerance — the manifest did not reproduce'}
-                  {payload?.max_delta != null && ` (max Δ ${payload.max_delta})`}
+                    : payload.verdict.within_tolerance === false
+                      ? 'outside tolerance — the manifest did not reproduce'
+                      : (payload.verdict.reason ?? 'no verdict')}
+                  {payload.verdict.max_delta != null
+                    && ` (max Δ ${payload.verdict.max_delta})`}
                 </div>
               )}
 

@@ -1,5 +1,5 @@
 """API pins for circuit validation + manifests (017): 202/409/422, cancel,
-manifest retrieval, reproduce gating."""
+manifest retrieval, reproduce gating, faithfulness dispatch."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src.models.circuit import Circuit
 from src.models.circuit_runs import CircuitDiscoveryRun
 from src.models.validation_manifest import ValidationManifest
 
@@ -90,3 +91,57 @@ class TestManifestAPI:
                    new=AsyncMock(return_value=self._m(kind="faithfulness"))):
             r = client.post("/api/v1/validation-manifests/vman_1/reproduce")
         assert r.status_code == 409
+
+
+def _circuit(**kw):
+    from datetime import datetime
+    return Circuit(
+        id=kw.pop("id", "crc_f1"), name="Faith", granularity="feature",
+        saes=[{"mistudio_sae_id": "sae_l13", "layer": 13}],
+        members=kw.pop("members", [{"layer": 13, "member_kind": "feature_ref",
+                                    "feature": {"feature_idx": 1}}]),
+        edges=[], budget=None, faithfulness=None, rung=0, promoted=False,
+        discovery_run_id=kw.pop("discovery_run_id", "dsc1"),
+        created_at=datetime(2026, 7, 20), updated_at=datetime(2026, 7, 20), **kw)
+
+
+class TestFaithfulnessAPI:
+    def test_missing_circuit_404(self, client):
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=None)):
+            r = client.post("/api/v1/circuits/crc_x/faithfulness", json={})
+        assert r.status_code == 404
+
+    def test_no_members_409(self, client):
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=_circuit(members=[]))):
+            r = client.post("/api/v1/circuits/crc_f1/faithfulness", json={})
+        assert r.status_code == 409
+
+    def test_no_discovery_run_409(self, client):
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=_circuit(discovery_run_id=None))):
+            r = client.post("/api/v1/circuits/crc_f1/faithfulness", json={})
+        assert r.status_code == 409
+
+    def test_bad_mode_422(self, client):
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=_circuit())):
+            r = client.post("/api/v1/circuits/crc_f1/faithfulness",
+                            json={"mode": "bogus"})
+        assert r.status_code == 422
+
+    def test_dispatch_202(self, client):
+        task = MagicMock(id="task_f1")
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=_circuit())), \
+             patch("src.api.v1.endpoints.circuit_discovery._run_sync",
+                   new=AsyncMock(return_value=None)), \
+             patch("src.workers.circuit_validation_tasks."
+                   "run_circuit_faithfulness.delay", return_value=task):
+            r = client.post("/api/v1/circuits/crc_f1/faithfulness",
+                            json={"mode": "both"})
+        assert r.status_code == 202
+        body = r.json()
+        assert body["task_id"] == "task_f1"
+        assert body["circuit_id"] == "crc_f1"

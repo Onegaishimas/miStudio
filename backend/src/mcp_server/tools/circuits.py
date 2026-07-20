@@ -229,6 +229,34 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
                 "baseline": baseline})
 
     @mcp.tool()
+    async def run_circuit_faithfulness(
+        circuit_id: str,
+        mode: str = "both",
+        k_nonmembers: int = 256,
+        ablate_all_n: int = 1024,
+        n_prompts: int = 16,
+        seed: int = 0,
+    ) -> Any:
+        """Faithfulness-test a circuit (rung 3 — the HIGHEST tier): suppress
+        its members and measure how much of the behavior they drive is
+        NECESSARY (ablating them collapses it) and, with mode='both',
+        SUFFICIENT (ablating only non-members leaves it standing) — vs a
+        per-layer top-N 'ablate all' proxy (N recorded). Behavior metric v1 =
+        the summed activation of the circuit's downstream-most members over
+        prompts from the circuit's own capture store (SAME tokenization; never
+        re-decoded). mode='necessity' skips the sufficiency probe (marked
+        untested, never silently omitted). Rung 3 sits above rung 2 causal
+        validation, so the score is a real faithfulness measurement — the
+        manifest records the exact metric so the number is never trusted blind.
+        Returns a task
+        id; poll get_task_status then get_circuit for circuit.faithfulness."""
+        return await client.post(
+            f"/circuits/{circuit_id}/faithfulness", json_body={
+                "mode": mode, "k_nonmembers": k_nonmembers,
+                "ablate_all_n": ablate_all_n, "n_prompts": n_prompts,
+                "seed": seed})
+
+    @mcp.tool()
     async def get_validation_manifest(manifest_id: str) -> Any:
         """A validation manifest — the SELF-CONTAINED, reproducible record of a
         validation run (intervention config, baseline, prompts, seeds, null

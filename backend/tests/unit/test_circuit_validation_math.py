@@ -35,23 +35,37 @@ class TestSignConsistency:
 
 
 class TestEdgeVerdict:
+    # A real null needs >= MIN_NULL_SAMPLES (10) samples (R1 Q1) — a tight,
+    # adequately-sized null distribution.
+    _TIGHT_NULL = [0.1, -0.2, 0.15, -0.05, 0.08, -0.11, 0.05, -0.09, 0.12, -0.03, 0.07]
+    _BIG_NULL = [0.5, -0.6, 0.55, -0.5, 0.6, -0.55, 0.52, -0.58, 0.48, -0.62, 0.5]
+
     def test_strong_consistent_edge_passes(self):
-        # ES big vs a tight null, all prompts same sign
+        # ES big vs a tight (adequately-sized) null, all prompts same sign
         v = edge_verdict([3.0, 3.2, 2.8, 3.1], sigma_d=1.0,
-                         null_effect_sizes=[0.1, -0.2, 0.15, -0.05])
+                         null_effect_sizes=self._TIGHT_NULL)
         assert v.passed and v.effect_size > 2
         assert v.sign_consistency == 1.0
 
     def test_below_null_fails(self):
         v = edge_verdict([0.1, 0.1], sigma_d=1.0,
-                         null_effect_sizes=[0.5, -0.6, 0.55])
+                         null_effect_sizes=self._BIG_NULL)
         assert not v.passed and "null" in v.reason
 
     def test_sign_inconsistent_fails(self):
         # big magnitude but prompts disagree → not causal
         v = edge_verdict([3.0, -3.0, 3.0, -3.0, 0.1], sigma_d=1.0,
-                         null_effect_sizes=[0.01])
+                         null_effect_sizes=[0.01] * 11)
         assert not v.passed and "sign" in v.reason
+
+    def test_underpowered_null_cannot_validate(self):
+        # R1 Q1: too few null samples → CANNOT validate (not a silent pass).
+        v = edge_verdict([5.0, 5.0], sigma_d=1.0, null_effect_sizes=[0.01, 0.02])
+        assert not v.passed and "underpowered" in v.reason
+
+    def test_empty_null_cannot_validate(self):
+        v = edge_verdict([5.0, 5.0], sigma_d=1.0, null_effect_sizes=[])
+        assert not v.passed and "underpowered" in v.reason
 
 
 class TestSurvivalUplift:

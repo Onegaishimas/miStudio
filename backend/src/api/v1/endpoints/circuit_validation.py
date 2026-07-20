@@ -59,6 +59,13 @@ async def start_validation(run_id: str, body: ValidateBody,
         raise HTTPException(409, "Run has no candidates to validate")
     if run.validation_status in ("pending", "running"):
         raise HTTPException(409, "A validation pass is already in flight")
+    # attr ordering is meaningless without a completed attribution pass — else
+    # we'd validate the coact order under the "attr" label and the uplift story
+    # becomes garbage (R1 Q4).
+    if body.ordering == "attr" and run.attribution_status != "completed":
+        raise HTTPException(
+            409, "ordering='attr' needs a completed attribution pass first — "
+                 "run attribution, or validate with ordering='coact'")
     try:
         scope = CircuitInterventionService.create_scope(body.model_dump())
     except InterventionConfigError as e:
@@ -154,11 +161,29 @@ async def reproduce_manifest(manifest_id: str,
     run = await _run_or_404(db, m.discovery_run_id)
     if run.validation_status in ("pending", "running"):
         raise HTTPException(409, "A validation pass is already in flight")
+    # Reproduce is a full GPU pass — respect the single-GPU guard (R1 #6/Q6:
+    # it previously dispatched without the guard) and guard+mark atomically.
+    from ....api.v1.endpoints.circuit_discovery import _run_sync
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
+
+    def _guard_and_mark(sync_db):
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        row = sync_db.query(CircuitDiscoveryRun).filter(
+            CircuitDiscoveryRun.id == run.id).first()
+        row.validation_status = "pending"
+        row.validation_progress = 0.0
+        sync_db.commit()
+
+    try:
+        await _run_sync(db, _guard_and_mark)
+    except CaptureConflictError as e:
+        raise HTTPException(409, str(e))
     # Re-run with the SAME scope from the payload; the worker writes a fresh
-    # manifest, and the reproduction verdict is computed against this one.
+    # `reproduction` manifest and the verdict is computed against the original.
+    # The run's report/candidates are NOT stomped (the worker gates those
+    # behind `not reproduce_of` — R1 A4).
     scope = dict(m.payload.get("config") or {})
     scope["reproduce_of"] = manifest_id
-    run.validation_status = "pending"
-    await db.commit()
     task = validate_circuit_edges.delay(run.id, scope)
     return {"reproduce_of": manifest_id, "task_id": task.id, "status": "queued"}

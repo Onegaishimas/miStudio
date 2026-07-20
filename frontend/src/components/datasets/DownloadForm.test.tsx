@@ -50,7 +50,11 @@ describe('DownloadForm', () => {
 
       const input = screen.getByLabelText('Access Token (optional)');
       expect(input).toBeInTheDocument();
-      expect(input).toHaveAttribute('type', 'password');
+      // Token masking moved from type="password" to CSS WebkitTextSecurity
+      // (with a hold-to-reveal toggle) so browser password managers don't
+      // autofill it. The input is a text field that is visually masked.
+      expect(input).toHaveAttribute('type', 'text');
+      expect((input as HTMLInputElement).style.WebkitTextSecurity).toBe('disc');
       expect(input).toHaveAttribute('placeholder', 'hf_...');
       expect(input).not.toBeRequired();
     });

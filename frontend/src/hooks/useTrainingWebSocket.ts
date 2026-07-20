@@ -22,7 +22,7 @@
  *   // Updates are handled by trainingsStore.updateTrainingStatus()
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useMemo } from 'react';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { useTrainingsStore } from '../stores/trainingsStore';
 import { TrainingStatus } from '../types/training';
@@ -151,6 +151,14 @@ export const useTrainingWebSocket = (trainingIds: string[]) => {
     };
   }, [on, off, handleProgress, handleStatusChanged, handleCompleted, handleFailed, handleCheckpointCreated]);
 
+  // Stable, order-insensitive key for the subscription effect: the set of
+  // channels we subscribe to does not depend on the order of trainingIds, so
+  // reordering the same IDs must NOT trigger an unsubscribe/resubscribe cycle.
+  const trainingIdsKey = useMemo(
+    () => [...trainingIds].sort().join(','),
+    [trainingIds]
+  );
+
   // Subscribe to channels for trainings
   useEffect(() => {
     if (!isConnected) {
@@ -188,5 +196,5 @@ export const useTrainingWebSocket = (trainingIds: string[]) => {
         unsubscribe(channel);
       });
     };
-  }, [trainingIds.join(','), isConnected, subscribe, unsubscribe]);
+  }, [trainingIdsKey, isConnected, subscribe, unsubscribe]);
 };
