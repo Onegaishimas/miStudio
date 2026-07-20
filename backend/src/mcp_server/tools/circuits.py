@@ -202,3 +202,57 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         GPU task: poll get_task_status, then get_discovery_results."""
         return await client.post(f"/circuit-discovery/{run_id}/attribution",
                                  json_body={"prompt_limit": prompt_limit})
+
+    # ── Feature 017: validation + faithfulness + manifests ───────────────
+
+    @mcp.tool()
+    async def validate_circuit_edges(
+        run_id: str,
+        ordering: str = "coact",
+        k: int = 20,
+        prompts_per_edge: int = 8,
+        null_samples: int = 20,
+        sign_frac: float = 0.8,
+        baseline: str = "zero",
+    ) -> Any:
+        """Causally validate the top-K edges of a discovery run (rung 2):
+        suppress the upstream feature, run the model, measure the downstream
+        effect size vs a shuffled-non-edge null; rung-2 iff |ES| beats the null
+        percentile AND is sign-consistent. This is the REAL causal tier (rung
+        2) — the tier where causal language is earned. ordering: coact | attr
+        (attr needs an attribution pass first). Returns a run id; poll
+        get_task_status then get_discovery_results for the per-edge verdicts."""
+        return await client.post(
+            f"/circuit-discovery/{run_id}/validate", json_body={
+                "ordering": ordering, "k": k, "prompts_per_edge": prompts_per_edge,
+                "null_samples": null_samples, "sign_frac": sign_frac,
+                "baseline": baseline})
+
+    @mcp.tool()
+    async def get_validation_manifest(manifest_id: str) -> Any:
+        """A validation manifest — the SELF-CONTAINED, reproducible record of a
+        validation run (intervention config, baseline, prompts, seeds, null
+        summary, per-edge effect sizes). The evidence behind a rung-2 claim."""
+        return await client.get(f"/validation-manifests/{manifest_id}")
+
+    @mcp.tool()
+    async def list_validation_manifests(
+        discovery_run_id: Optional[str] = None,
+        circuit_id: Optional[str] = None,
+    ) -> Any:
+        """List validation manifests for a discovery run or a circuit."""
+        params: dict[str, Any] = {}
+        if discovery_run_id:
+            params["discovery_run_id"] = discovery_run_id
+        if circuit_id:
+            params["circuit_id"] = circuit_id
+        return await client.get("/validation-manifests", **params)
+
+    @mcp.tool()
+    async def reproduce_validation(manifest_id: str) -> Any:
+        """Re-execute an edge_batch manifest from its payload and compare —
+        the test that a rung-2 claim is reproducible, not a one-off. Returns a
+        task id; the reproduction manifest carries per-edge deltas + a
+        within-tolerance verdict."""
+        return await client.post(
+            f"/validation-manifests/{manifest_id}/reproduce")

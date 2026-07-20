@@ -65,3 +65,33 @@ class TestCircuitDiscoveryToolSmoke:
         anyio.run(lambda: tool.run({"run_id": "dsc1"}))
         args, _ = client.post.call_args
         assert args[0] == "/circuit-discovery/dsc1/attribution"
+
+
+class TestValidationToolSmoke:
+    """017 MCP tools (validation + manifests)."""
+
+    def test_validate_circuit_edges(self):
+        tool, client = _register_and_get("validate_circuit_edges")
+        anyio.run(lambda: tool.run({"run_id": "dsc1", "ordering": "attr", "k": 10}))
+        args, kwargs = client.post.call_args
+        assert args[0] == "/circuit-discovery/dsc1/validate"
+        assert kwargs["json_body"]["ordering"] == "attr"
+        assert kwargs["json_body"]["k"] == 10
+
+    def test_get_validation_manifest(self):
+        tool, client = _register_and_get("get_validation_manifest")
+        anyio.run(lambda: tool.run({"manifest_id": "vman_1"}))
+        client.get.assert_awaited_once_with("/validation-manifests/vman_1")
+
+    def test_reproduce_validation(self):
+        tool, client = _register_and_get("reproduce_validation")
+        anyio.run(lambda: tool.run({"manifest_id": "vman_1"}))
+        args, _ = client.post.call_args
+        assert args[0] == "/validation-manifests/vman_1/reproduce"
+
+    def test_list_validation_manifests_filters(self):
+        tool, client = _register_and_get("list_validation_manifests")
+        anyio.run(lambda: tool.run({"circuit_id": "crc_1"}))
+        args, kwargs = client.get.call_args
+        assert args[0] == "/validation-manifests"
+        assert kwargs.get("circuit_id") == "crc_1"

@@ -66,7 +66,12 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def get_feature_ablation(feature_id: str) -> Any:
-        """Ablation analysis for a feature."""
+        """STATISTICAL-ESTIMATE ablation impact for a feature (method=
+        "statistical_estimate" in the response) — scored from activation
+        frequency/magnitude/consistency, NOT a model forward pass. This is a
+        heuristic, NOT causal evidence. For a real causal measurement (suppress
+        the feature, run the model, measure the effect vs a null), use the
+        circuit validation tier (validate_circuit_edges — Feature 017, rung 2)."""
         return await client.get(f"/features/{feature_id}/ablation")
 
     @mcp.tool()

@@ -16,10 +16,15 @@ import pytest
 
 BACKEND = Path(__file__).resolve().parents[2] / "src"
 
-# 016 user-facing surfaces (report strings, MCP docstrings, service copy).
+# 016 + 017 user-facing surfaces (report strings, MCP docstrings, service
+# copy). 017's validation IS the rung-2 tier, so 'causal' is EARNED there —
+# but only inside validation/faithfulness contexts, which ALLOWED_CONTEXT
+# covers via 'causally validated'/'rung 2'/'017'.
 SURFACES = [
     BACKEND / "services" / "circuit_discovery_service.py",
     BACKEND / "services" / "circuit_attribution_service.py",
+    BACKEND / "services" / "circuit_intervention_service.py",
+    BACKEND / "services" / "circuit_faithfulness_service.py",
     BACKEND / "mcp_server" / "tools" / "circuits.py",
 ]
 
@@ -28,8 +33,9 @@ CAUSAL = re.compile(r"\bcausal(?:ly)?\b", re.IGNORECASE)
 # Qualifiers that make an occurrence legitimate.
 ALLOWED_CONTEXT = re.compile(
     r"(not\s+(?:a\s+)?causal|NOT\s+causal|never\s+describe.*causal|"
-    r"causally\s+validated|causal\s+validation|causal\s+tier|"
-    r"causal\s+proof|causal\s+words|causal\s+language|rung\s*2|017)",
+    r"causally\s+validate|causal\s+validation|causal\s+tier|"
+    r"causal\s+proof|causal\s+words|causal\s+language|causal\s+measurement|"
+    r"causal\s+evidence|causal\s+effect|real\s+causal|rung\s*2|017)",
     re.IGNORECASE)
 
 

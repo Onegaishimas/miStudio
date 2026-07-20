@@ -551,25 +551,30 @@ class AnalysisService:
         feature_id: str
     ) -> Optional[AblationResponse]:
         """
-        Calculate ablation impact.
+        Estimate ablation impact from activation STATISTICS (017 remediation).
 
-        Measures the feature's importance by comparing model performance
-        with the feature active vs. ablated (set to zero).
+        IMPORTANT: this is a STATISTICAL ESTIMATE, not a causal measurement —
+        it runs NO model inference. It scores importance from the feature's
+        activation frequency, magnitude, and consistency, and the response
+        carries `method="statistical_estimate"` to say so. The perplexity
+        numbers are a heuristic projection, not measured. Real causal ablation
+        (suppress the feature, run the model, measure the downstream effect vs
+        a null) is the circuit-validation tier — Feature 017, evidence rung 2.
+        Never present this estimate as causal evidence.
 
         Args:
             feature_id: Feature ID to analyze
 
         Returns:
-            AblationResponse with perplexity delta and impact score, or None if feature not found
+            AblationResponse (with method="statistical_estimate"), or None if
+            the feature is not found.
 
-        Process:
-            1. Check cache for recent result
-            2. Load evaluation samples from dataset
-            3. Run model inference with feature active (baseline)
-            4. Run model inference with feature ablated
-            5. Calculate perplexity for both runs
-            6. Compute delta and normalize to impact score (0-1)
-            7. Cache result for future requests
+        Process (statistical, no inference):
+            1. Check cache
+            2. Load stored activations for the feature
+            3. Score from frequency / magnitude / consistency
+            4. Project a heuristic perplexity delta (NOT measured)
+            5. Cache
         """
         # Check cache first
         cache_entry = await self._get_cached_analysis(feature_id, AnalysisType.ABLATION)
@@ -681,7 +686,8 @@ class AnalysisService:
                     "impact_score": float(impact_score),
                     "baseline_perplexity": float(baseline_perplexity),
                     "ablated_perplexity": float(ablated_perplexity),
-                    "computed_at": computed_at.isoformat()
+                    "computed_at": computed_at.isoformat(),
+                    "method": "statistical_estimate",
                 }
             )
 
@@ -690,7 +696,8 @@ class AnalysisService:
                 impact_score=impact_score,
                 baseline_perplexity=baseline_perplexity,
                 ablated_perplexity=ablated_perplexity,
-                computed_at=computed_at
+                computed_at=computed_at,
+                method="statistical_estimate",
             )
 
         except Exception as e:
