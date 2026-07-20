@@ -361,6 +361,7 @@ def compute_multi_layer_allocation(
     decoders: Optional[Dict[int, Any]] = None,
     constants: Optional[Dict[str, float]] = None,
     group_cohesion: Optional[float] = None,
+    constants_by_layer: Optional[Dict[int, Dict[str, float]]] = None,
 ) -> MultiLayerAllocationResult:
     """Allocate strengths across a MULTI-LAYER cluster (Feature 015).
 
@@ -425,10 +426,14 @@ def compute_multi_layer_allocation(
         # by construction: the endpoint validates one SAE per layer).
         layer_sae_ids[layer] = entries[0][1].sae_id
 
+        # Per-layer constants when a layer's SAE has its own override (015 R1
+        # ARCH-4 — the endpoint resolved constants_by_layer but passed only the
+        # request-level set, so a per-SAE override was silently ignored).
+        layer_constants = (constants_by_layer or {}).get(layer, constants)
         result = compute_allocation(
             part_members,
             decoder=decoders.get(layer),
-            constants=constants,
+            constants=layer_constants,
             group_cohesion=group_cohesion,
         )
         layers_out[layer] = result

@@ -19,6 +19,13 @@ const FLAG_COPY: Record<string, string> = {
   default_budget: 'No activation frequencies known — conservative default budget',
   cap_bound: 'Budget capped at the sum of solo optima',
   approximate: 'Decoder unavailable — constant-budget approximation (G=1)',
+  // 015 R1 #4: these were silently dropped. nonunit_decoder in particular
+  // means the budget law is EXTRAPOLATING and the user should know.
+  nonunit_decoder: 'Decoder columns are not unit-norm — the budget law extrapolates',
+  low_cohesion: 'Cluster failed the cohesion gate — strengths are unreliable',
+  grain_limited: 'Allocation limited by strength granularity',
+  uniform_weights: 'Similarity unavailable — equal weights across members',
+  inactive_member: 'A member rarely activates — its contribution is uncertain',
 };
 
 /**

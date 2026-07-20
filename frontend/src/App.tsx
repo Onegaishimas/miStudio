@@ -86,7 +86,7 @@ function AppContent() {
         {activePanel === 'labeling' && <LabelingPanel />}
         {activePanel === 'feature-groups' && <FeatureGroupsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'templates' && <TemplatesPanel />}
-        {activePanel === 'circuits' && <CircuitsPanel />}
+        {activePanel === 'circuits' && <CircuitsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'saes' && <SAEsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'steering' && <SteeringPanel />}
         {activePanel === 'system' && <SystemMonitor />}

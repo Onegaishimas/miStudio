@@ -26,6 +26,10 @@ export interface ClusterContext {
   group_id: string;
   /** The cluster's shared surface token — label tier 2 (tier 1 = authored profile name, Feature 014). */
   display_token: string;
+  /** Feature 015: when a promoted CIRCUIT is loaded into steering, its id —
+   *  threaded into the allocation request so cross-layer hazards are sourced
+   *  from the circuit's VALIDATED edges (quantified ES), not just the heuristic. */
+  circuit_id?: string;
 }
 
 /**

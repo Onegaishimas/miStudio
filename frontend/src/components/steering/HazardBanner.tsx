@@ -95,10 +95,10 @@ export function HazardBanner() {
                 <span className="font-mono text-amber-300">
                   L{h.down.layer} #{h.down.feature_idx}
                 </span>
-                <span className="ml-1.5 text-amber-200/80">{headline}</span>
-                <span className="ml-1.5 font-mono text-amber-400/40" title="Raw evidence from the server">
-                  {detail}
-                </span>
+                {/* Human copy inline; the raw evidence string is a tooltip
+                    only — it read as leaked debug text next to the polished
+                    phrase in a demo (015 R1 PROD-2). */}
+                <span className="ml-1.5 text-amber-200/80" title={detail}>{headline}</span>
               </li>
             );
           })}
