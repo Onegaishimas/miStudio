@@ -109,3 +109,26 @@ class TestDiscoveryAPI:
                    new=AsyncMock(return_value=run)):
             r = client.post("/api/v1/circuit-discovery/dsc1/attribution", json={})
         assert r.status_code == 409
+
+
+class TestAttributionCancel:
+    """R2 Q2/B6: an in-flight attribution pass is now cancellable."""
+
+    def test_cancel_running_attribution_200(self, client):
+        from unittest.mock import patch
+        run = _discovery(status="completed", attribution_status="running",
+                         attribution_task_id="atask1")
+        with patch("src.api.v1.endpoints.circuit_discovery._discovery_or_404",
+                   new=AsyncMock(return_value=run)), \
+             patch("src.core.celery_app.revoke_task") as rv:
+            r = client.post("/api/v1/circuit-discovery/dsc1/attribution/cancel")
+        assert r.status_code == 200
+        assert r.json()["attribution_status"] == "cancelled"
+
+    def test_cancel_when_no_attribution_409(self, client):
+        from unittest.mock import patch
+        run = _discovery(status="completed", attribution_status=None)
+        with patch("src.api.v1.endpoints.circuit_discovery._discovery_or_404",
+                   new=AsyncMock(return_value=run)):
+            r = client.post("/api/v1/circuit-discovery/dsc1/attribution/cancel")
+        assert r.status_code == 409

@@ -105,6 +105,10 @@ export const circuitsApi = {
     fetchAPI<{ id: string; status: string }>(
       `/circuit-discovery/${id}/cancel`, { method: 'POST' }),
 
+  cancelAttribution: (id: string) =>
+    fetchAPI<{ id: string; attribution_status: string }>(
+      `/circuit-discovery/${id}/attribution/cancel`, { method: 'POST' }),
+
   deleteDiscovery: (id: string) =>
     fetchAPI<{ deleted: string }>(`/circuit-discovery/${id}`, { method: 'DELETE' }),
 };

@@ -294,7 +294,9 @@ def _expand_candidates(db, candidates: List[Dict[str, Any]],
 
     def _features(ref) -> List[Tuple[int, int]]:
         layer = ref["layer"]
-        if "feature_idx" in ref:
+        # Value-check, not key presence (R2 B1 class): candidate refs from
+        # _unit_ref carry one key, but stay robust to both-keys-present dicts.
+        if ref.get("feature_idx") is not None:
             return [(layer, int(ref["feature_idx"]))]
         prof = db.query(ClusterProfile).filter(
             ClusterProfile.id == ref.get("cluster_profile_id")).first()

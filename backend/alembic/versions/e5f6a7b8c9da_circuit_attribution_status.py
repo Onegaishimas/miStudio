@@ -19,15 +19,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('circuit_discovery_runs',
-                  sa.Column('attribution_status', sa.String(16), nullable=True))
-    op.add_column('circuit_discovery_runs',
-                  sa.Column('attribution_progress', sa.Float(), nullable=True))
-    op.add_column('circuit_discovery_runs',
-                  sa.Column('attribution_error', sa.Text(), nullable=True))
+    op.execute("ALTER TABLE circuit_discovery_runs ADD COLUMN IF NOT EXISTS "
+               "attribution_status VARCHAR(16)")
+    op.execute("ALTER TABLE circuit_discovery_runs ADD COLUMN IF NOT EXISTS "
+               "attribution_progress DOUBLE PRECISION")
+    op.execute("ALTER TABLE circuit_discovery_runs ADD COLUMN IF NOT EXISTS "
+               "attribution_error TEXT")
+    op.execute("ALTER TABLE circuit_discovery_runs ADD COLUMN IF NOT EXISTS "
+               "attribution_task_id VARCHAR(155)")
 
 
 def downgrade() -> None:
-    op.drop_column('circuit_discovery_runs', 'attribution_error')
-    op.drop_column('circuit_discovery_runs', 'attribution_progress')
-    op.drop_column('circuit_discovery_runs', 'attribution_status')
+    # IF EXISTS: tolerant of a DB where this revision was applied at an
+    # earlier column set (dev drift while the migration was being authored).
+    op.execute("ALTER TABLE circuit_discovery_runs "
+               "DROP COLUMN IF EXISTS attribution_task_id")
+    op.execute("ALTER TABLE circuit_discovery_runs "
+               "DROP COLUMN IF EXISTS attribution_error")
+    op.execute("ALTER TABLE circuit_discovery_runs "
+               "DROP COLUMN IF EXISTS attribution_progress")
+    op.execute("ALTER TABLE circuit_discovery_runs "
+               "DROP COLUMN IF EXISTS attribution_status")

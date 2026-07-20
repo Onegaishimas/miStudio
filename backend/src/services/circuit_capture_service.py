@@ -60,21 +60,50 @@ def captures_dir() -> Path:
     return settings.data_dir / "circuit_captures"
 
 
+def size_ceiling_bytes(events_est: int) -> float:
+    """The store-size abort threshold (R1 QA-P1): 5× the probe estimate, with
+    a 64 MB floor so a tiny estimate doesn't abort a legitimate small capture."""
+    return max(events_est * EVENT_BYTES * STORE_SIZE_MULTIPLIER, 64 * 2**20)
+
+
+def exceeds_size_ceiling(buffered_events: int, events_est: int) -> bool:
+    return buffered_events * EVENT_BYTES > size_ceiling_bytes(events_est)
+
+
 class CircuitCaptureService:
     # ── concurrency guard ────────────────────────────────────────────────
 
+    # Postgres advisory-lock key: serializes the check-then-insert so two
+    # concurrent requests can't both pass the guard (R2 B2).
+    _GPU_LOCK_KEY = 0x1C1C_C0DE
+
     @staticmethod
     def assert_no_active_gpu_run(db) -> None:
-        """One GPU circuit task at a time on the single 3090 (R1 QA-P1 — the
-        endpoint docstring promised 409-on-concurrent). Capture is GPU;
-        attribution is GPU too but runs on the discovery row, checked there."""
+        """One GPU circuit task at a time on the single 3090 (R1 QA-P1 / R2
+        Q1). Covers BOTH captures (this table) AND attribution passes (on the
+        discovery row) — attribution loads a model too (R2 Q1). Serialized by
+        a transaction-scoped advisory lock so the check-then-insert can't race
+        (R2 B2); the lock releases at commit/rollback."""
+        from sqlalchemy import text
+
+        from ..models.circuit_runs import CircuitDiscoveryRun
+
+        db.execute(text("SELECT pg_advisory_xact_lock(:k)"),
+                   {"k": CircuitCaptureService._GPU_LOCK_KEY})
         active = db.query(CircuitCaptureRun).filter(
             CircuitCaptureRun.status.in_(
                 ("pending", "estimating", "running"))).first()
         if active is not None:
             raise CaptureConflictError(
                 f"Capture {active.id} is already {active.status} — one GPU "
-                f"circuit capture runs at a time; wait or cancel it first")
+                f"circuit task runs at a time; wait or cancel it first")
+        attr = db.query(CircuitDiscoveryRun).filter(
+            CircuitDiscoveryRun.attribution_status.in_(
+                ("pending", "running"))).first()
+        if attr is not None:
+            raise CaptureConflictError(
+                f"Attribution pass on {attr.id} is {attr.attribution_status} — "
+                f"one GPU circuit task runs at a time; wait or cancel it first")
 
     # ── run creation / validation (called from the endpoint) ─────────────
 
@@ -308,8 +337,6 @@ class CircuitCaptureService:
             store_dir.mkdir(parents=True, exist_ok=True)
             # Store-size guardrail (R1 QA-P1): abort if the true event rate
             # blows past the probe estimate, or the volume runs low on space.
-            size_ceiling = max(events_est * EVENT_BYTES * STORE_SIZE_MULTIPLIER,
-                               64 * 2**20)
             if shutil.disk_usage(store_dir).free < MIN_FREE_DISK_BYTES:
                 run.status = "failed"
                 run.error_message = "Insufficient free disk on the data volume"
@@ -347,7 +374,7 @@ class CircuitCaptureService:
                 # Running byte estimate from buffered events (u32 idx + u16
                 # pos + u32 doc + f16 act ≈ EVENT_BYTES/event, plus errnorm).
                 buffered = sum(ev.count for ev, _en, _at in writers.values())
-                if buffered * EVENT_BYTES > size_ceiling:
+                if exceeds_size_ceiling(buffered, events_est):
                     run.status = "failed"
                     run.error_message = (
                         f"Capture exceeded {STORE_SIZE_MULTIPLIER}× its size "

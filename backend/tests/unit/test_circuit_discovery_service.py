@@ -180,3 +180,59 @@ class TestCancellation:
         sync_db.refresh(run)
         assert run.status == "cancelled"
         assert run.candidates is None  # never wrote 'completed' results
+
+
+class TestSeedRefDiscrimination:
+    """R2 B1: model_dump() emits BOTH keys (unset=None), so key-presence
+    discrimination crashed the cluster-seed path with int(None). Pin the fix
+    (value-check) directly on the crash site."""
+
+    def test_cluster_seed_ref_does_not_crash(self):
+        from src.services.circuit_discovery_service import _seed_key_set
+        # Exactly what body.model_dump() produces for a cluster ref: both keys.
+        params = {"seed_refs": [
+            {"layer": 13, "feature_idx": None, "cluster_profile_id": "clp_x"},
+            {"layer": 14, "feature_idx": 5, "cluster_profile_id": None},
+        ]}
+        keys = _seed_key_set(params)
+        assert (13, "cluster:clp_x") in keys
+        assert (14, "feature:5") in keys
+
+    def test_feature_seed_ref_still_works(self):
+        from src.services.circuit_discovery_service import _seed_key_set
+        keys = _seed_key_set({"seed_refs": [
+            {"layer": 13, "feature_idx": 7, "cluster_profile_id": None}]})
+        assert keys == {(13, "feature:7")}
+
+
+class TestCaptureConcurrencyGuard:
+    """R2 Q1/B2: one GPU circuit task at a time — capture AND attribution."""
+
+    def test_running_capture_blocks(self, sync_db, tmp_path):
+        from src.services.circuit_capture_service import (
+            CaptureConflictError, CircuitCaptureService)
+        _build_store(tmp_path)
+        cap = _capture_row(sync_db, tmp_path)
+        cap.status = "running"
+        sync_db.commit()
+        with pytest.raises(CaptureConflictError, match="already running"):
+            CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+
+    def test_running_attribution_blocks_capture(self, sync_db, tmp_path):
+        from src.services.circuit_capture_service import (
+            CaptureConflictError, CircuitCaptureService)
+        _build_store(tmp_path)
+        cap = _capture_row(sync_db, tmp_path)
+        run = CircuitDiscoveryService.create_run(sync_db, {
+            "capture_run_id": cap.id, "mode": "open"})
+        run.attribution_status = "running"
+        sync_db.commit()
+        with pytest.raises(CaptureConflictError, match="Attribution"):
+            CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+
+    def test_idle_passes(self, sync_db, tmp_path):
+        from src.services.circuit_capture_service import CircuitCaptureService
+        _build_store(tmp_path)
+        _capture_row(sync_db, tmp_path)  # status 'completed'
+        # no raise
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
