@@ -12,7 +12,7 @@ import remarkGfm from 'remark-gfm';
 import {
   GitBranch, ArrowUpRight, ArrowDownRight, Trash2, Download, Layers,
   Pencil, Check, X as XIcon, FileDown, Upload, Plus, Camera, Search,
-  AlertTriangle, RotateCcw,
+  AlertTriangle, RotateCcw, ShieldCheck, FileText,
 } from 'lucide-react';
 import { circuitsApi } from '../../api/circuits';
 import type {
@@ -20,8 +20,10 @@ import type {
   CircuitCapture, CircuitCaptureCreate,
   DiscoveryRun, DiscoveryReport, DiscoveryCandidate, DiscoveryCreate,
   DiscoveryGranularity, DiscoveryMode, DiscoverySeedRef,
+  ValidateConfig,
 } from '../../types/circuits';
 import { RungChip } from '../circuits/RungChip';
+import { ManifestDrawer } from '../circuits/ManifestDrawer';
 import { COMPONENTS } from '../../config/brand';
 import { useDatasetsStore } from '../../stores/datasetsStore';
 import { useSAEsStore } from '../../stores/saesStore';
@@ -1207,9 +1209,314 @@ function DiscoveryTab() {
   );
 }
 
+// ── Validation tab (Feature 017) ──────────────────────────────────────────
+
+const VALIDATION_ACTIVE = new Set(['pending', 'running']);
+const isValidationActive = (s: string | null | undefined) =>
+  s != null && VALIDATION_ACTIVE.has(s);
+
+/** Per-edge results table for a validation pass. Rows come from the run's own
+ *  candidates that carry a `validation` write-back. Copy discipline: a PASS is
+ *  "causally validated (rung 2)"; a fail is "tested, did not validate". */
+export function ValidationResults({
+  run,
+  onOpenManifest,
+}: {
+  run: DiscoveryRun;
+  onOpenManifest: (id: string) => void;
+}) {
+  const validated = (run.candidates ?? []).filter((c) => c.validation != null);
+  if (validated.length === 0) {
+    return (
+      <p className="text-xs text-slate-500">
+        No per-edge results yet. Run a validation pass to test the top-K edges.
+      </p>
+    );
+  }
+  const batch = run.report?.validation ?? null;
+  return (
+    <div className="space-y-2">
+      {batch && (
+        <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300">
+          <span className="font-medium">Batch ({batch.ordering}):</span>{' '}
+          {batch.passed}/{batch.k} edges causally validated (rung 2)
+          {batch.survival != null && ` · ${(batch.survival * 100).toFixed(0)}% survival`}
+          {batch.wall_clock_seconds != null && ` · ${batch.wall_clock_seconds}s`}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-slate-500 text-left">
+              <th className="py-1 pr-3 font-medium">edge</th>
+              <th className="py-1 pr-3 font-medium">ordering</th>
+              <th className="py-1 pr-3 font-medium" title="effect size">ES</th>
+              <th className="py-1 pr-3 font-medium">status</th>
+              <th className="py-1 font-medium">manifest</th>
+            </tr>
+          </thead>
+          <tbody>
+            {validated.map((c, i) => {
+              const v = c.validation!;
+              const failHist = c.tested_and_failed_history?.find(
+                (h) => h.ordering === v.ordering);
+              return (
+                <tr key={i} className="border-t border-slate-800 text-slate-300">
+                  <td className="py-1 pr-3 font-mono whitespace-nowrap">
+                    {nodeLabel(c.up)} → {nodeLabel(c.down)}
+                  </td>
+                  <td className="py-1 pr-3 font-mono text-slate-400">{v.ordering}</td>
+                  <td className="py-1 pr-3 font-mono">{v.effect_size.toFixed(3)}</td>
+                  <td className="py-1 pr-3">
+                    {v.passed && c.validated_rung === 2 ? (
+                      <span className="rounded bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 text-[10px] whitespace-nowrap">
+                        causally validated (rung 2)
+                      </span>
+                    ) : (
+                      <span
+                        className="rounded bg-slate-700/60 text-slate-400 px-1.5 py-0.5 text-[10px] whitespace-nowrap"
+                        title={failHist?.reason}
+                      >
+                        tested, did not validate
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1">
+                    <button
+                      onClick={() => onOpenManifest(v.manifest_id)}
+                      className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200"
+                      title="Open validation manifest"
+                    >
+                      <FileText className="w-3 h-3" /> manifest
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ValidationTab() {
+  const [runs, setRuns] = useState<DiscoveryRun[]>([]);
+  const [runId, setRunId] = useState('');
+  const [run, setRun] = useState<DiscoveryRun | null>(null);
+  const [ordering, setOrdering] = useState<'coact' | 'attr'>('coact');
+  const [k, setK] = useState('20');
+  const [promptsPerEdge, setPromptsPerEdge] = useState('8');
+  const [nullSamples, setNullSamples] = useState('20');
+  const [signFrac, setSignFrac] = useState('0.8');
+  const [baseline, setBaseline] = useState<'zero' | 'corpus_mean'>('zero');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [manifestId, setManifestId] = useState<string | null>(null);
+
+  // Only completed discovery runs (with candidates) can be validated.
+  const completed = runs.filter(
+    (r) => r.status === 'completed' && r.candidate_count > 0);
+
+  useEffect(() => {
+    circuitsApi.listDiscoveries().then((r) => setRuns(r.discoveries)).catch(() => {});
+  }, []);
+
+  const loadRun = useCallback(() => {
+    if (!runId) { setRun(null); return; }
+    circuitsApi.getDiscovery(runId, true)
+      .then(setRun)
+      .catch((e) => setError(String(e.message ?? e)));
+  }, [runId]);
+
+  useEffect(() => { loadRun(); }, [loadRun]);
+
+  // Light 2.5s poll while a validation pass is in flight (validation has its
+  // own lifecycle; the discovery status stays 'completed'). Stops on terminal.
+  useEffect(() => {
+    if (!run || !isValidationActive(run.validation_status)) return;
+    const t = setInterval(loadRun, 2500);
+    return () => clearInterval(t);
+  }, [run, loadRun]);
+
+  const startValidation = () => {
+    if (!run) return;
+    setError(null);
+    const body: ValidateConfig = {
+      ordering,
+      k: parseInt(k, 10) || 20,
+      prompts_per_edge: parseInt(promptsPerEdge, 10) || 8,
+      null_samples: parseInt(nullSamples, 10) || 20,
+      percentile: 95,
+      sign_frac: parseFloat(signFrac) || 0.8,
+      baseline,
+      seed: 0,
+    };
+    setSubmitting(true);
+    circuitsApi.startValidation(run.id, body)
+      .then(() => loadRun())
+      // 409s surface the backend detail verbatim (e.g. "run attribution first"
+      // for attr ordering without a prior attribution pass).
+      .catch((e) => setError(String(e.detail ?? e.message ?? e)))
+      .finally(() => setSubmitting(false));
+  };
+
+  const cancelValidation = () => {
+    if (!run) return;
+    circuitsApi.cancelValidation(run.id)
+      .then(() => loadRun())
+      .catch((e) => setError(String(e.detail ?? e.message ?? e)));
+  };
+
+  const vActive = isValidationActive(run?.validation_status);
+
+  const Toggle = <T extends string>(
+    { value, options, onChange }: { value: T; options: { v: T; label: string }[]; onChange: (v: T) => void },
+  ) => (
+    <div className="inline-flex rounded bg-slate-800 border border-slate-700 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.v}
+          onClick={() => onChange(o.v)}
+          className={`px-2.5 py-1 text-xs rounded ${
+            value === o.v ? 'bg-violet-600 text-white' : 'text-slate-300 hover:text-white'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <p className="text-slate-400 text-sm">
+        Validation is the rung-2 causal tier: it intervenes on each top-K edge and
+        tests the downstream effect against a support-matched null. A passing edge is
+        causally validated (rung 2); a failing edge is tested but did not validate.
+      </p>
+
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
+      <div className={`${COMPONENTS.card.base} p-4 space-y-3`}>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Discovery run</label>
+          <select
+            className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            value={runId}
+            onChange={(e) => setRunId(e.target.value)}
+          >
+            <option value="">Select a completed discovery run…</option>
+            {completed.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.id.slice(0, 8)} · {r.candidate_count} candidates
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Ordering</label>
+            <Toggle
+              value={ordering}
+              onChange={setOrdering}
+              options={[{ v: 'coact', label: 'Co-activation' }, { v: 'attr', label: 'Attribution' }]}
+            />
+            {ordering === 'attr' && (
+              <p className="text-[10px] text-amber-300/80 mt-1">
+                Attribution ordering requires a prior attribution pass on the run.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Baseline</label>
+            <Toggle
+              value={baseline}
+              onChange={setBaseline}
+              options={[{ v: 'zero', label: 'Zero' }, { v: 'corpus_mean', label: 'Corpus mean' }]}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <div className="flex-1 min-w-[120px]">
+            <label className="block text-xs text-slate-400 mb-1">Top-K</label>
+            <input type="number"
+              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              value={k} onChange={(e) => setK(e.target.value)} />
+          </div>
+          <div className="flex-1 min-w-[120px]">
+            <label className="block text-xs text-slate-400 mb-1">Prompts / edge</label>
+            <input type="number"
+              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              value={promptsPerEdge} onChange={(e) => setPromptsPerEdge(e.target.value)} />
+          </div>
+          <div className="flex-1 min-w-[120px]">
+            <label className="block text-xs text-slate-400 mb-1">Null samples</label>
+            <input type="number"
+              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              value={nullSamples} onChange={(e) => setNullSamples(e.target.value)} />
+          </div>
+          <div className="flex-1 min-w-[120px]">
+            <label className="block text-xs text-slate-400 mb-1">Sign fraction</label>
+            <input type="number" step="0.05"
+              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              value={signFrac} onChange={(e) => setSignFrac(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={startValidation}
+            disabled={submitting || !run || vActive}
+            className="flex items-center gap-1.5 rounded bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          >
+            <ShieldCheck className="w-4 h-4" /> Validate top-K
+          </button>
+          {vActive && (
+            <span className="flex items-center gap-2 text-[11px] text-violet-300">
+              validation {run?.validation_status}
+              {run?.validation_progress != null && ` · ${Math.round(run.validation_progress)}%`}
+              <button onClick={cancelValidation}
+                className="rounded bg-slate-700 hover:bg-slate-600 px-2 py-0.5 text-slate-200">
+                cancel
+              </button>
+            </span>
+          )}
+          {run?.validation_status === 'failed' && (
+            <span className="text-[11px] text-red-300" title={run.validation_error ?? undefined}>
+              validation failed{run.validation_error ? ` — ${run.validation_error}` : ''}
+            </span>
+          )}
+          {run?.validation_status === 'cancelled' && (
+            <span className="text-[11px] text-slate-400">validation cancelled</span>
+          )}
+        </div>
+
+        {vActive && <ProgressBar value={run?.validation_progress ?? 0} />}
+      </div>
+
+      {run && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-slate-300">Per-edge results</h3>
+          <ValidationResults run={run} onOpenManifest={setManifestId} />
+        </div>
+      )}
+
+      {manifestId && (
+        <ManifestDrawer manifestId={manifestId} onClose={() => setManifestId(null)} />
+      )}
+    </div>
+  );
+}
+
 // ── Top-level panel with tab switcher ─────────────────────────────────────
 
-type CircuitTab = 'circuits' | 'capture' | 'discovery';
+type CircuitTab = 'circuits' | 'capture' | 'discovery' | 'validation';
 
 export function CircuitsPanel() {
   const [tab, setTab] = useState<CircuitTab>('circuits');
@@ -1218,6 +1525,7 @@ export function CircuitsPanel() {
     { id: 'circuits', label: 'Circuits' },
     { id: 'capture', label: 'Capture' },
     { id: 'discovery', label: 'Discovery' },
+    { id: 'validation', label: 'Validation' },
   ];
 
   return (
@@ -1247,6 +1555,7 @@ export function CircuitsPanel() {
       {tab === 'circuits' && <CircuitsListTab />}
       {tab === 'capture' && <CaptureTab />}
       {tab === 'discovery' && <DiscoveryTab />}
+      {tab === 'validation' && <ValidationTab />}
     </div>
   );
 }

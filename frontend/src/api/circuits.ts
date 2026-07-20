@@ -10,6 +10,7 @@ import type {
   Circuit, CircuitSummary,
   CircuitCapture, CircuitCaptureCreate,
   DiscoveryRun, DiscoveryCreate,
+  ValidateConfig, ValidationManifest,
 } from '../types/circuits';
 
 export const circuitsApi = {
@@ -113,4 +114,31 @@ export const circuitsApi = {
 
   deleteDiscovery: (id: string) =>
     fetchAPI<{ deleted: string }>(`/circuit-discovery/${id}`, { method: 'DELETE' }),
+
+  // ── Feature 017: Validation + manifests ─────────────────────────────────
+
+  /** Validate the top-K edges of a completed discovery run (rung-2 causal
+   *  tier). 409 if not completed / no candidates / a pass is already running;
+   *  422 on a bad ordering. */
+  startValidation: (id: string, body: ValidateConfig) =>
+    fetchAPI<{ id: string; task_id: string; status: string }>(
+      `/circuit-discovery/${id}/validate`,
+      { method: 'POST', body: JSON.stringify(body) }),
+
+  cancelValidation: (id: string) =>
+    fetchAPI<{ id: string; validation_status: string }>(
+      `/circuit-discovery/${id}/validate/cancel`, { method: 'POST' }),
+
+  getManifest: (id: string) =>
+    fetchAPI<ValidationManifest>(`/validation-manifests/${id}`),
+
+  listManifests: (params?: { discovery_run_id?: string; circuit_id?: string }) => {
+    const qs = buildQueryString(params ?? {});
+    return fetchAPI<{ manifests: ValidationManifest[] }>(
+      `/validation-manifests${qs ? `?${qs}` : ''}`);
+  },
+
+  reproduceManifest: (id: string) =>
+    fetchAPI<{ reproduce_of: string; task_id: string; status: string }>(
+      `/validation-manifests/${id}/reproduce`, { method: 'POST' }),
 };
