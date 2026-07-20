@@ -163,6 +163,15 @@ export interface DiscoveryCandidate {
     rung1_gate?: boolean;
   } | null;
   orderings?: { coact_rank?: number; attr_rank?: number } | null;
+  // Feature 017: rung-2 validation write-back onto the discovery candidate.
+  validation?: {
+    ordering: 'coact' | 'attr';
+    effect_size: number;
+    passed: boolean;
+    manifest_id: string;
+  } | null;
+  validated_rung?: number | null;
+  tested_and_failed_history?: { ordering: string; reason: string }[];
 }
 
 export interface DiscoveryReport {
@@ -197,6 +206,15 @@ export interface DiscoveryReport {
   attribution: Record<string, unknown> | null;
   uplift: null;
   wall_clock_seconds?: number;
+  // Feature 017: a completed validation pass records its batch summary here.
+  validation?: {
+    ordering: 'coact' | 'attr';
+    k: number;
+    survival: number | null;
+    passed: number;
+    manifest_id: string;
+    wall_clock_seconds?: number;
+  } | null;
 }
 
 export interface DiscoveryRun {
@@ -214,6 +232,65 @@ export interface DiscoveryRun {
   attribution_status?: string | null;
   attribution_progress?: number | null;
   attribution_error?: string | null;
+  // Validation's own lifecycle (Feature 017) — discovery status stays
+  // 'completed' regardless of a validation pass's outcome.
+  validation_status?: string | null;
+  validation_progress?: number | null;
+  validation_error?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ── Feature 017: Validation + manifests ───────────────────────────────────
+
+/** Config body for POST /circuit-discovery/{id}/validate. */
+export interface ValidateConfig {
+  ordering: 'coact' | 'attr';
+  k: number;
+  prompts_per_edge: number;
+  null_samples: number;
+  percentile: number;
+  sign_frac: number;
+  baseline: 'zero' | 'corpus_mean';
+  seed: number;
+}
+
+/** One edge verdict inside an edge_batch manifest's payload.edges. */
+export interface ValidationEdge {
+  up: { layer: number; feature_idx: number };
+  down: { layer: number; feature_idx: number };
+  effect_size: number;
+  sign_consistency: number;
+  sigma_d: number;
+  n_prompts: number;
+  null_percentile_value: number;
+  verdict: { passed: boolean; reason: string };
+  rung: 2 | null;
+  tested_and_failed: boolean;
+}
+
+/** A self-contained, reproducible validation manifest. */
+export interface ValidationManifest {
+  id: string;
+  kind: 'edge_batch' | 'faithfulness' | 'reproduction';
+  discovery_run_id: string | null;
+  circuit_id: string | null;
+  parent_manifest_id: string | null;
+  payload: {
+    intervention?: { kind?: string; baseline?: string };
+    config?: Record<string, unknown>;
+    seeds?: number[];
+    ordering?: string;
+    k?: number;
+    edges?: ValidationEdge[];
+    survival?: number | null;
+    null_summary?: { samples?: number; percentile?: number; kind?: string };
+    // reproduction manifests carry a tolerance verdict.
+    within_tolerance?: boolean;
+    max_delta?: number;
+    tolerance?: number;
+    deltas?: { edge: unknown; delta: number }[];
+    [k: string]: unknown;
+  };
+  created_at: string;
 }

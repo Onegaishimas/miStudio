@@ -18,6 +18,9 @@ interface AblationResponse {
   baseline_perplexity: number;
   ablated_perplexity: number;
   computed_at: string;
+  // 017: the backend now discloses when this is a statistical estimate rather
+  // than a real forward-pass ablation.
+  method?: string;
 }
 
 interface AblationAnalysisProps {
@@ -150,6 +153,17 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
           <AlertCircle className="h-5 w-5 text-slate-400 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-slate-400">{impact.description}</p>
         </div>
+
+        {/* 017: statistical-estimate caveat — this is not a model forward pass. */}
+        {data.method === 'statistical_estimate' && (
+          <div className="flex items-start space-x-2 bg-amber-500/10 border border-amber-500/30 rounded p-3">
+            <AlertCircle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-300">
+              Statistical estimate — not a model forward pass. For causal ablation,
+              validate the circuit edge.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Perplexity Metrics */}

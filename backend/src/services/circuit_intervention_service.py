@@ -196,13 +196,23 @@ class CircuitInterventionService:
                                  "percentile": scope["percentile"],
                                  "kind": "shuffled_non_edge_support_matched"},
             }
-            from .manifest_service import ManifestService  # sync-safe import
-            manifest_row = CircuitInterventionService._persist_manifest(
-                db, run_id, payload)
-
-            # write rung-2 verdicts back onto the discovery candidates
-            CircuitInterventionService._write_back(
-                run, edge_results, scope["ordering"], manifest_row_id=manifest_row)
+            reproduce_of = scope.get("reproduce_of")
+            if reproduce_of:
+                # Reproduction path (Task 2.2): compare this re-execution against
+                # the original manifest and persist a `reproduction` manifest
+                # with per-edge deltas + a within-tolerance verdict — the test
+                # that a rung-2 claim is reproducible, not a one-off.
+                manifest_row = CircuitInterventionService._persist_reproduction(
+                    db, run_id, reproduce_of, payload)
+            else:
+                manifest_row = CircuitInterventionService._persist_manifest(
+                    db, run_id, payload)
+                # write rung-2 verdicts back onto the discovery candidates
+                # (a reproduction never re-writes the candidates — it only
+                # confirms the original).
+                CircuitInterventionService._write_back(
+                    run, edge_results, scope["ordering"],
+                    manifest_row_id=manifest_row)
 
             run.validation_status = "completed"
             run.validation_progress = 100.0
@@ -411,6 +421,35 @@ class CircuitInterventionService:
         validate_payload("edge_batch", payload)
         m = ValidationManifest(kind="edge_batch", payload=payload,
                                discovery_run_id=run_id)
+        db.add(m)
+        db.commit()
+        db.refresh(m)
+        return m.id
+
+    @staticmethod
+    def _persist_reproduction(db, run_id, original_id, repro_payload) -> str:
+        """Persist a `reproduction` manifest: the re-executed edges + a verdict
+        comparing per-edge ES against the original (deterministic greedy passes
+        ⇒ deltas ~0; tolerance guards fp noise). Task 2.2."""
+        from ..models.validation_manifest import ValidationManifest
+        from .manifest_service import ManifestService
+        original = db.query(ValidationManifest).filter(
+            ValidationManifest.id == original_id).first()
+        verdict = (ManifestService.reproduction_verdict(
+            original.payload, repro_payload) if original is not None
+            else {"within_tolerance": None, "reason": "original manifest gone"})
+        payload = {
+            "reproduce_of": original_id,
+            "reproduced_edges": repro_payload.get("edges", []),
+            "verdict": verdict,
+            # keep the config so the reproduction is itself self-contained
+            "config": repro_payload.get("config"),
+            "seeds": repro_payload.get("seeds"),
+            "intervention": repro_payload.get("intervention"),
+        }
+        m = ValidationManifest(kind="reproduction", payload=payload,
+                               discovery_run_id=run_id,
+                               parent_manifest_id=original_id)
         db.add(m)
         db.commit()
         db.refresh(m)
