@@ -56,8 +56,21 @@ export interface Circuit extends CircuitSummary {
   members: CircuitMember[];
   edges: CircuitEdge[];
   budget: Record<string, unknown> | null;
-  faithfulness: { necessity?: number; sufficiency?: number } | null;
+  // Faithfulness (rung 3) — necessity/sufficiency causal evidence. `sufficiency_k`
+  // is the k-non-members restored for the sufficiency test; metric_id/manifest_ref
+  // point at the recorded run.
+  faithfulness: {
+    necessity?: number;
+    sufficiency?: number;
+    sufficiency_k?: number | null;
+    metric_id?: string | null;
+    manifest_ref?: string | null;
+  } | null;
+  // Lifecycle of a faithfulness run (pending|running|completed|failed|null).
+  faithfulness_status?: string | null;
   discovery: Record<string, unknown> | null;
+  // Producing discovery run, if any — a faithfulness run needs it for prompts.
+  discovery_run_id?: string | null;
   created_at: string;
 }
 
@@ -214,6 +227,14 @@ export interface DiscoveryReport {
     passed: number;
     manifest_id: string;
     wall_clock_seconds?: number;
+    // Both-orderings comparison (US-1): once both coact and attr orderings have
+    // been validated, `uplift` = survival(attr) − survival(coact) and each
+    // ordering's own survival/passed/k/manifest lands under `by_ordering`.
+    by_ordering?: {
+      coact?: { survival: number | null; passed: number; k: number; manifest_id: string };
+      attr?: { survival: number | null; passed: number; k: number; manifest_id: string };
+    } | null;
+    uplift?: number | null;
   } | null;
 }
 

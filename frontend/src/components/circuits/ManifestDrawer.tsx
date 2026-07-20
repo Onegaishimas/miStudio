@@ -8,8 +8,8 @@
  * did not validate". Backend `verdict.reason` strings render verbatim.
  */
 
-import { useEffect, useState } from 'react';
-import { X as XIcon, RefreshCw, Copy } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X as XIcon, RefreshCw, Copy, ArrowRight } from 'lucide-react';
 import { circuitsApi } from '../../api/circuits';
 import type { ValidationManifest, ValidationEdge } from '../../types/circuits';
 
@@ -39,31 +39,69 @@ function VerdictChip({ edge }: { edge: ValidationEdge }) {
 export function ManifestDrawer({
   manifestId,
   onClose,
+  onNavigate,
 }: {
   manifestId: string;
   onClose: () => void;
+  // Re-point the drawer at another manifest (used to jump to the fresh
+  // reproduction child once it lands). Falls back to a plain notice if absent.
+  onNavigate?: (id: string) => void;
 }) {
   const [manifest, setManifest] = useState<ValidationManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reproStatus, setReproStatus] = useState<string | null>(null);
   const [reproBusy, setReproBusy] = useState(false);
+  // The child reproduction manifest, once we find it by polling (R1 P4 —
+  // Reproduce used to fire a task whose verdict landed on a manifest the user
+  // never saw).
+  const [reproChildId, setReproChildId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   useEffect(() => {
     setManifest(null);
     setError(null);
     setReproStatus(null);
+    setReproChildId(null);
     circuitsApi
       .getManifest(manifestId)
       .then(setManifest)
       .catch((e) => setError(String(e.message ?? e)));
   }, [manifestId]);
 
+  // After a Reproduce, poll the run's manifests for the child reproduction
+  // (parent_manifest_id === this manifest) so its verdict is reachable.
+  const pollForChild = (runId: string) => {
+    let tries = 0;
+    const tick = () => {
+      if (!mountedRef.current) return;
+      circuitsApi.listManifests({ discovery_run_id: runId })
+        .then((r) => {
+          if (!mountedRef.current) return;
+          const child = r.manifests.find(
+            (m) => m.kind === 'reproduction' && m.parent_manifest_id === manifestId);
+          if (child) {
+            setReproChildId(child.id);
+            setReproStatus('complete');
+          } else if (tries++ < 20) {
+            setTimeout(tick, 2500);
+          }
+        })
+        .catch(() => { if (mountedRef.current && tries++ < 20) setTimeout(tick, 2500); });
+    };
+    tick();
+  };
+
   const reproduce = () => {
     setReproBusy(true);
     setError(null);
+    setReproChildId(null);
     circuitsApi
       .reproduceManifest(manifestId)
-      .then((r) => setReproStatus(r.status))
+      .then((r) => {
+        setReproStatus(r.status);
+        if (manifest?.discovery_run_id) pollForChild(manifest.discovery_run_id);
+      })
       .catch((e) => setError(String(e.message ?? e)))
       .finally(() => setReproBusy(false));
   };
@@ -244,11 +282,27 @@ export function ManifestDrawer({
                   )}
                   Reproduce
                 </button>
-                {reproStatus && (
+                {reproStatus && !reproChildId && (
                   <p className="text-[11px] text-emerald-300">
                     Reproduction {reproStatus} — a fresh manifest with a tolerance verdict is
                     being computed.
                   </p>
+                )}
+                {reproChildId && (
+                  onNavigate ? (
+                    <button
+                      onClick={() => onNavigate(reproChildId)}
+                      className="flex items-center gap-1.5 text-[11px] text-emerald-300 hover:text-emerald-200"
+                    >
+                      Reproduction complete — open the new manifest
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-emerald-300">
+                      Reproduction complete — new manifest{' '}
+                      <span className="font-mono">{reproChildId.slice(0, 8)}</span>.
+                    </p>
+                  )
                 )}
               </div>
             </>

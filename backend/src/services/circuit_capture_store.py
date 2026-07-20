@@ -22,7 +22,7 @@ synthetic stores (planted edges feed the stats-service tests).
 
 import logging
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 
@@ -190,6 +190,18 @@ class EventReader:
 
     def doc_ids(self) -> np.ndarray:
         return np.unique(self.events["doc_id"])
+
+    def feature_activation_mass(self) -> Dict[int, float]:
+        """{feature_idx: sum of captured activations} in ONE vectorized pass
+        over the whole events array — replaces per-feature Python loops over
+        16k–131k features (017 R2 B-6/B-7)."""
+        if len(self.events) == 0:
+            return {}
+        fids = np.asarray(self.events["feature_idx"], dtype=np.int64)
+        acts = np.asarray(self.events["act"], dtype=np.float64)
+        totals = np.bincount(fids, weights=acts)
+        nz = np.nonzero(totals)[0]
+        return {int(i): float(totals[i]) for i in nz}
 
 
 class ErrNormWriter(_BufferedWriter):

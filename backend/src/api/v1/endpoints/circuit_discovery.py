@@ -309,6 +309,39 @@ async def get_discovery(run_id: str,
                           include_candidates=include_candidates)
 
 
+class BuildCircuitBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    narrative: Optional[str] = Field(None, max_length=10_000)
+    # [[up_layer, up_idx, down_layer, down_idx], ...]; empty ⇒ all candidates
+    candidate_keys: List[List[int]] = Field(default_factory=list, max_length=400)
+
+
+@router.post("/circuit-discovery/{run_id}/build-circuit", status_code=201)
+async def build_circuit_from_discovery(run_id: str, body: BuildCircuitBody,
+                                       db: AsyncSession = Depends(get_db)):
+    """Build a circuit from selected candidates of a discovery run (R2 — the
+    MISSING discovery→circuit producer). The circuit carries `discovery_run_id`
+    so a later validation pass's rung-2 ES propagates onto it (once promoted),
+    which is what 015 reads. Created UNPROMOTED; promote + validate separately."""
+    from ....services.circuit_service import (
+        CircuitService, CircuitValidationError)
+
+    run = await _discovery_or_404(db, run_id)
+    if run.status != "completed":
+        raise HTTPException(409, f"Discovery run is {run.status} — "
+                                 f"build needs a completed run")
+    keys = [tuple(k) for k in body.candidate_keys]
+    try:
+        circuit = await CircuitService.from_candidates(
+            db, discovery_run_id=run_id, name=body.name,
+            candidate_keys=keys, narrative=body.narrative)
+    except CircuitValidationError as e:
+        raise HTTPException(422, str(e))
+    return {"id": circuit.id, "discovery_run_id": run_id,
+            "member_count": len(circuit.members or []),
+            "edge_count": len(circuit.edges or []), "rung": circuit.rung}
+
+
 @router.post("/circuit-discovery/{run_id}/cancel")
 async def cancel_discovery(run_id: str, db: AsyncSession = Depends(get_db)):
     from ....core.celery_app import revoke_task

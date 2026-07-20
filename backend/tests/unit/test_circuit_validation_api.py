@@ -145,3 +145,34 @@ class TestFaithfulnessAPI:
         body = r.json()
         assert body["task_id"] == "task_f1"
         assert body["circuit_id"] == "crc_f1"
+
+
+class TestFaithfulnessLifecycle:
+    """R2 B-5: faithfulness has an in-flight marker so it can't double-run and
+    the GPU guard sees it."""
+
+    def test_faithfulness_already_in_flight_409(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        from src.models.circuit import Circuit
+        c = Circuit(id="crc_f", name="F", granularity="feature",
+                    saes=[{"mistudio_sae_id": "s", "layer": 13}],
+                    members=[{"layer": 13, "member_kind": "feature_ref",
+                              "feature": {"feature_idx": 1, "strength": 0.5}}],
+                    edges=[], rung=1, discovery_run_id="dsc1",
+                    faithfulness_status="running")
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=c)):
+            r = client.post("/api/v1/circuits/crc_f/faithfulness", json={})
+        assert r.status_code == 409
+
+    def test_faithfulness_no_members_409(self, client):
+        from unittest.mock import AsyncMock, patch
+
+        from src.models.circuit import Circuit
+        c = Circuit(id="crc_g", name="G", granularity="feature", saes=[],
+                    members=[], edges=[], rung=0)
+        with patch("src.api.v1.endpoints.circuits.CircuitService.get",
+                   new=AsyncMock(return_value=c)):
+            r = client.post("/api/v1/circuits/crc_g/faithfulness", json={})
+        assert r.status_code == 409

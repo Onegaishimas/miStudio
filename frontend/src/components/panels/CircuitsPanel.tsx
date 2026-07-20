@@ -12,7 +12,7 @@ import remarkGfm from 'remark-gfm';
 import {
   GitBranch, ArrowUpRight, ArrowDownRight, Trash2, Download, Layers,
   Pencil, Check, X as XIcon, FileDown, Upload, Plus, Camera, Search,
-  AlertTriangle, RotateCcw, ShieldCheck, FileText,
+  AlertTriangle, RotateCcw, ShieldCheck, FileText, RefreshCw, Microscope,
 } from 'lucide-react';
 import { circuitsApi } from '../../api/circuits';
 import type {
@@ -101,10 +101,35 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftNarrative, setDraftNarrative] = useState('');
+  // Faithfulness (rung 3) trigger + its own poll lifecycle.
+  const [faithMode, setFaithMode] = useState<'necessity' | 'both'>('necessity');
+  const [faithBusy, setFaithBusy] = useState(false);
+  const [faithError, setFaithError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     circuitsApi.get(id).then(setCircuit).catch((e) => setError(String(e.message ?? e)));
   }, [id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Poll while a faithfulness run is pending/running (the run has its own
+  // lifecycle — the circuit otherwise stays put). Stops on terminal.
+  useEffect(() => {
+    const s = circuit?.faithfulness_status;
+    if (s !== 'pending' && s !== 'running') return;
+    const t = setInterval(load, 2500);
+    return () => clearInterval(t);
+  }, [circuit?.faithfulness_status, load]);
+
+  const runFaithfulness = () => {
+    if (!circuit) return;
+    setFaithError(null);
+    setFaithBusy(true);
+    circuitsApi.startFaithfulness(circuit.id, { mode: faithMode })
+      .then(() => load())
+      .catch((e) => setFaithError(String(e.detail ?? e.message ?? e)))
+      .finally(() => setFaithBusy(false));
+  };
 
   if (error && !circuit) return <p className="text-xs text-red-300 mt-2">{error}</p>;
   if (!circuit) return <p className="text-xs text-slate-500 mt-2">Loading evidence…</p>;
@@ -246,13 +271,76 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
         </div>
       )}
 
-      {circuit.faithfulness && (
-        <p className="text-xs text-slate-400">
-          Faithfulness: necessity {circuit.faithfulness.necessity?.toFixed(2) ?? '—'}
-          {circuit.faithfulness.sufficiency != null &&
-            ` · sufficiency ${circuit.faithfulness.sufficiency.toFixed(2)}`}
-        </p>
-      )}
+      {(() => {
+        const fs = circuit.faithfulness_status;
+        const running = fs === 'pending' || fs === 'running';
+        // Faithfulness needs at least one member and a producing discovery run
+        // for its ablation prompts (the backend 409s otherwise).
+        const canRun = circuit.members.length > 0 && circuit.discovery_run_id != null;
+        return (
+          <div className="border-t border-slate-700/60 pt-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="text-xs font-medium text-slate-400 flex items-center gap-1">
+                <Microscope className="w-3.5 h-3.5 text-violet-300" />
+                Faithfulness (rung 3)
+              </h4>
+              {/* mode toggle — necessity only, or necessity + sufficiency */}
+              <div className="inline-flex rounded bg-slate-800 border border-slate-700 p-0.5">
+                {(['necessity', 'both'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setFaithMode(m)}
+                    disabled={running}
+                    className={`px-2 py-0.5 text-[11px] rounded disabled:opacity-50 ${
+                      faithMode === m ? 'bg-violet-600 text-white' : 'text-slate-300 hover:text-white'}`}
+                  >
+                    {m === 'necessity' ? 'necessity' : 'both'}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={runFaithfulness}
+                disabled={faithBusy || running || !canRun}
+                className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                title={canRun
+                  ? 'Ablate the circuit and test necessity/sufficiency of its members'
+                  : 'Needs circuit members and a producing discovery run'}
+              >
+                {running
+                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                  : <Microscope className="w-3 h-3" />}
+                {running ? 'running…'
+                  : circuit.faithfulness ? 'Re-run faithfulness (rung 3)'
+                  : 'Run faithfulness (rung 3)'}
+              </button>
+            </div>
+
+            {!canRun && !circuit.faithfulness && (
+              <p className="text-[11px] text-slate-500">
+                Faithfulness needs circuit members and a producing discovery run for its
+                ablation prompts.
+              </p>
+            )}
+
+            {faithError && <p className="text-[11px] text-red-300">{faithError}</p>}
+
+            {fs === 'failed' && !running && (
+              <p className="text-[11px] text-red-300">Faithfulness run failed.</p>
+            )}
+
+            {circuit.faithfulness && (
+              <p className="text-xs text-slate-400">
+                Necessity {circuit.faithfulness.necessity?.toFixed(2) ?? '—'}
+                {circuit.faithfulness.sufficiency != null &&
+                  ` · sufficiency ${circuit.faithfulness.sufficiency.toFixed(2)}`}
+                {circuit.faithfulness.sufficiency_k != null &&
+                  ` (k=${circuit.faithfulness.sufficiency_k})`}
+                {' '}— the circuit is causally faithful to the degree these effects hold.
+              </p>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -567,19 +655,42 @@ function CaptureTab() {
         <div>
           <label className="block text-xs text-slate-400 mb-1">Layers &amp; SAEs</label>
           <div className="space-y-2">
-            {layerRows.map((row, i) => (
+            {layerRows.map((row, i) => {
+              // The SAE knows its own layer (trained one-layer-per-SAE), so
+              // derive + lock the layer box from the selected SAE — no
+              // re-typing the same fact (and no chance to contradict it). Stays
+              // editable only for an imported SAE that has no recorded layer.
+              const selectedSae = readySaes.find((s) => s.id === row.sae_id);
+              const saeLayer = selectedSae?.layer;
+              const layerLocked = saeLayer != null;
+              const shownLayer = layerLocked ? String(saeLayer) : row.layer;
+              return (
               <div key={i} className="flex items-center gap-2">
                 <input
                   type="number"
                   placeholder="layer"
-                  className="w-20 rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                  value={row.layer}
+                  className={`w-20 rounded border px-2 py-1.5 text-sm ${
+                    layerLocked
+                      ? 'bg-slate-800/50 border-slate-700 text-slate-400 cursor-not-allowed'
+                      : 'bg-slate-800 border-slate-600 text-slate-100'}`}
+                  value={shownLayer}
+                  readOnly={layerLocked}
+                  title={layerLocked
+                    ? `Layer ${saeLayer} — set by the selected SAE (trained on this layer)`
+                    : 'This SAE has no recorded layer — enter it'}
                   onChange={(e) => setLayerRows((rs) => rs.map((r, j) => j === i ? { ...r, layer: e.target.value } : r))}
                 />
                 <select
                   className="flex-1 rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
                   value={row.sae_id}
-                  onChange={(e) => setLayerRows((rs) => rs.map((r, j) => j === i ? { ...r, sae_id: e.target.value } : r))}
+                  onChange={(e) => {
+                    const sae = readySaes.find((s) => s.id === e.target.value);
+                    setLayerRows((rs) => rs.map((r, j) => j === i
+                      // adopt the SAE's own layer on select (locked box)
+                      ? { ...r, sae_id: e.target.value,
+                          layer: sae?.layer != null ? String(sae.layer) : r.layer }
+                      : r));
+                  }}
                 >
                   <option value="">Select an SAE…</option>
                   {readySaes.map((s) => (
@@ -597,7 +708,8 @@ function CaptureTab() {
                   <XIcon className="w-3.5 h-3.5" />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
           {layerRows.length < 8 && (
             <button
@@ -1234,6 +1346,12 @@ export function ValidationResults({
     );
   }
   const batch = run.report?.validation ?? null;
+  const byOrd = batch?.by_ordering ?? null;
+  const coact = byOrd?.coact ?? null;
+  const attr = byOrd?.attr ?? null;
+  const bothOrderings = coact != null && attr != null;
+  const pct = (v: number | null | undefined) =>
+    v != null ? `${(v * 100).toFixed(0)}%` : '—';
   return (
     <div className="space-y-2">
       {batch && (
@@ -1243,6 +1361,47 @@ export function ValidationResults({
           {batch.survival != null && ` · ${(batch.survival * 100).toFixed(0)}% survival`}
           {batch.wall_clock_seconds != null && ` · ${batch.wall_clock_seconds}s`}
         </div>
+      )}
+
+      {/* Both-orderings uplift (US-1): attribution re-ranking's causal payoff,
+          made legible — the survival rate for each ordering plus the delta. */}
+      {bothOrderings && (() => {
+        const uplift = batch?.uplift
+          ?? ((attr!.survival != null && coact!.survival != null)
+            ? attr!.survival - coact!.survival
+            : null);
+        const upliftPct = uplift != null ? Math.round(uplift * 100) : null;
+        const tone = upliftPct == null ? 'text-slate-300'
+          : upliftPct > 0 ? 'text-emerald-300'
+          : upliftPct < 0 ? 'text-amber-300'
+          : 'text-slate-300';
+        const sign = upliftPct != null && upliftPct > 0 ? '+' : '';
+        return (
+          <div className="rounded border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[11px] text-slate-300 space-y-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span>co-activation ordering: <span className="font-mono text-slate-200">{pct(coact!.survival)}</span> survival</span>
+              <span>attribution ordering: <span className="font-mono text-slate-200">{pct(attr!.survival)}</span> survival</span>
+              <span className={`font-medium ${tone}`}>
+                attribution re-ranking uplift: {upliftPct != null ? `${sign}${upliftPct}%` : '—'}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500">
+              {upliftPct == null || upliftPct === 0
+                ? 'attribution re-ranking left the causal survival rate unchanged.'
+                : upliftPct > 0
+                  ? 'attribution re-ranking raised the causal survival rate — its top edges validated more often.'
+                  : 'attribution re-ranking lowered the causal survival rate — co-activation ordering validated more often here.'}
+            </p>
+          </div>
+        );
+      })()}
+
+      {/* Only one ordering validated so far — point at the missing half. */}
+      {batch && !bothOrderings && (coact != null || attr != null) && (
+        <p className="text-[11px] text-slate-500">
+          Validate the {coact != null ? 'attribution' : 'co-activation'} ordering too to
+          compare survival rates and see the attribution re-ranking uplift.
+        </p>
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -1508,7 +1667,11 @@ function ValidationTab() {
       )}
 
       {manifestId && (
-        <ManifestDrawer manifestId={manifestId} onClose={() => setManifestId(null)} />
+        <ManifestDrawer
+          manifestId={manifestId}
+          onClose={() => setManifestId(null)}
+          onNavigate={setManifestId}
+        />
       )}
     </div>
   );

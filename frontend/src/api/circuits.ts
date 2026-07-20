@@ -141,4 +141,23 @@ export const circuitsApi = {
   reproduceManifest: (id: string) =>
     fetchAPI<{ reproduce_of: string; task_id: string; status: string }>(
       `/validation-manifests/${id}/reproduce`, { method: 'POST' }),
+
+  // ── Feature 017: Faithfulness (rung 3) ──────────────────────────────────
+
+  /** Launch a faithfulness run for a promoted/discovered circuit (rung-3 causal
+   *  tier: necessity ± sufficiency). 409 if the circuit has no members / no
+   *  discovery_run_id / a run is already in flight. */
+  startFaithfulness: (
+    id: string,
+    body?: {
+      mode?: 'necessity' | 'both';
+      k_nonmembers?: number;
+      ablate_all_n?: number;
+      n_prompts?: number;
+      seed?: number;
+    },
+  ) =>
+    fetchAPI<{ circuit_id: string; task_id: string; status: string }>(
+      `/circuits/${id}/faithfulness`,
+      { method: 'POST', body: JSON.stringify(body ?? {}) }),
 };
