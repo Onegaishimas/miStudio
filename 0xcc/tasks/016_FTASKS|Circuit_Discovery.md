@@ -2,7 +2,7 @@
 
 **Document ID:** 016_FTASKS|Circuit_Discovery
 **Version:** 2.0 (reworked for BRD-MIS-CIRCUITS-002)
-**Status:** Planned
+**Status:** ✅ IMPLEMENTED + 3 review rounds (27+21+verify findings; R1:17 fixed, R2:21 addressed, R3: GO for 017, 0 must-fix). Records: `.claude/context/sessions/review_feature016_R{1,2,3}_2026-07-*.md`. Phase 6 (GPU E2E) at close-out.
 **Source:** 016_FPRD · 016_FTDD · 016_FTID · IDL-32, IDL-36 · CIRCUITS-002 A.3/A.4/A.6 normative
 
 | Phase | Tasks | Status |
@@ -11,7 +11,7 @@
 | Phase 2: Capture | 3 tasks | ⏳ |
 | Phase 3: Statistics + discovery | 3 tasks | ⏳ |
 | Phase 4: Attribution | 2 tasks | ⏳ |
-| Phase 5: MCP + frontend + docs | 3 tasks | ⏳ |
+| Phase 5: MCP + frontend + docs | 3 tasks | ✅ |
 | Phase 6: Verification + acceptance | 2 tasks | ⏳ |
 | Phase 0: 018 hand-off preconditions | 5 tasks | ⏳ |
 
