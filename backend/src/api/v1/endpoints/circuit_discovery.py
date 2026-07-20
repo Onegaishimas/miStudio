@@ -120,6 +120,10 @@ def _discovery_out(run: CircuitDiscoveryRun, *, include_candidates: bool) -> Dic
         "attribution_status": run.attribution_status,
         "attribution_progress": run.attribution_progress,
         "attribution_error": run.attribution_error,
+        # Validation's own lifecycle (017) — discovery status stays 'completed'.
+        "validation_status": run.validation_status,
+        "validation_progress": run.validation_progress,
+        "validation_error": run.validation_error,
         "created_at": run.created_at, "updated_at": run.updated_at,
     }
     if include_candidates:

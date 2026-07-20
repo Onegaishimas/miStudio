@@ -69,6 +69,11 @@ def cleanup_stuck_circuit_runs_task(self):
                 run.attribution_status = "failed"
                 run.attribution_error = "Stuck attribution reclaimed by cleanup"
                 cleaned += 1
+            if run.validation_status in ("pending", "running") and \
+                    not _task_is_active(run.validation_task_id):
+                run.validation_status = "failed"
+                run.validation_error = "Stuck validation reclaimed by cleanup"
+                cleaned += 1
         if cleaned:
             db.commit()
             logger.info("Reclaimed %d stuck circuit run(s)", cleaned)
