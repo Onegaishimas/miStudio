@@ -94,6 +94,13 @@ class CircuitDiscoveryRun(Base):
     # separately (R2 A3: one shared celery_task_id revoked the wrong task).
     attribution_task_id = Column(String(155), nullable=True)
 
+    # Validation is ANOTHER separate lifecycle on the same run (017): a failed
+    # validation pass must not corrupt the completed discovery's presentation.
+    validation_status = Column(String(16), nullable=True)
+    validation_progress = Column(Float, nullable=True)
+    validation_error = Column(Text, nullable=True)
+    validation_task_id = Column(String(155), nullable=True)
+
     celery_task_id = Column(String(155), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
