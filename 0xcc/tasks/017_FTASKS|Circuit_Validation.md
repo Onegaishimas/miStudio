@@ -2,7 +2,7 @@
 
 **Document ID:** 017_FTASKS|Circuit_Validation
 **Version:** 1.0
-**Status:** Planned
+**Status:** ⏳ IMPLEMENTING — Task 3.0 + Ph1-5 backend + MCP + remediation + manual DONE; Validation-tab UI in progress; then 3-round review. Phase 6 GPU-E2E at close-out.
 **Source:** 017_FPRD · 017_FTDD · 017_FTID · IDL-34 · CIRCUITS-002 A.5/A.7 normative
 
 | Phase | Tasks | Status |
@@ -19,15 +19,15 @@
 ## Phase 1: Intervention primitives
 
 ### Task 1.1: Suppression hook
-- [ ] `_create_suppression_hook(sae, feature_idx, a_base, positions?)` (steering-hook variant; feature-LIST support for faithfulness) · same-pass encode for a_u(t) · **ε-invariance pin (never re-decode) + subtraction-exactness pin on toy tensors** · baseline variants (zero | corpus-mean from 016 store)
+- [x] DONE (22aa850: circuit_intervention_hooks — directional, never re-decode; ε-invariance + subtraction-exactness + feature-list-sum pins) `_create_suppression_hook(sae, feature_idx, a_base, positions?)` (steering-hook variant; feature-LIST support for faithfulness) · same-pass encode for a_u(t) · **ε-invariance pin (never re-decode) + subtraction-exactness pin on toy tensors** · baseline variants (zero | corpus-mean from 016 store)
 
 ## Phase 2: Manifests
 
 ### Task 2.1: Table + service
-- [ ] `validation_manifests` (`vman_`, kind edge_batch|faithfulness|reproduction, self-contained payload JSONB, parent refs) + Alembic (single-head, up+down) · persist/get/list-by-parent
+- [x] DONE (22aa850: validation_manifests migration 85f73dbda900; manifest_service persist/get/list + payload self-containment validation) `validation_manifests` (`vman_`, kind edge_batch|faithfulness|reproduction, self-contained payload JSONB, parent refs) + Alembic (single-head, up+down) · persist/get/list-by-parent
 
 ### Task 2.2: Reproduce
-- [ ] `POST /validation-manifests/{id}/reproduce` re-executes from payload → reproduction manifest with deltas + tolerance verdict · automated reproduction test
+- [x] DONE (ac6c64f: POST /validation-manifests/{id}/reproduce; reproduction_verdict per-edge ES delta + tolerance; pinned) `POST /validation-manifests/{id}/reproduce` re-executes from payload → reproduction manifest with deltas + tolerance verdict · automated reproduction test
 
 ## Phase 3: Edge validation
 
@@ -36,23 +36,23 @@
 - [x] DONE (CircuitService.write_edge_validation — the ONLY edge-write path, routes through update() so validators+rung-recompute+version-bump run; pinned: validation write lifts rung + bumps version + respects expected_version). **`update()`-only edge-write rule:** validation results write edges exclusively through `CircuitService.update` (never raw JSONB mutation) so contract validators + rung recompute always run; document in the service docstring and pin with a test that a validation write triggers rung recomputation.
 
 ### Task 3.1: Intervention service + task
-- [ ] Prompt windows from 016 store + SAME tokenization (id asserted) · matched greedy passes (fixed seeds) · Δ_p over clean-fire tokens · ES = mean/σ_d (σ_d from the SAME store) · shuffled-NON-edge support-matched null · sign-consistency gate (default 8/10, config) · tested_and_failed recording (rung history via 018's shared enum — import, never redefine)
+- [x] DONE (b95a5cf: circuit_intervention_service — prompt windows from 016 store, matched passes, ES=mean/σ_d (σ_d from SAME store), shuffled-non-edge null, sign gate, tested_and_failed history via 018 enum) Prompt windows from 016 store + SAME tokenization (id asserted) · matched greedy passes (fixed seeds) · Δ_p over clean-fire tokens · ES = mean/σ_d (σ_d from the SAME store) · shuffled-NON-edge support-matched null · sign-consistency gate (default 8/10, config) · tested_and_failed recording (rung history via 018's shared enum — import, never redefine)
 
 ### Task 3.2: Batch + uplift
-- [ ] Per-ordering scopes at EQUAL K · survival per tier per ordering · **uplift number into batch result + 016's discovery-run report** · results into discovery candidates + promoted-circuit edges · WS progress
+- [x] DONE (b95a5cf: top-K per ordering, survival per ordering, uplift(attr−coact at equal K) in math module; write-back to discovery candidates). Circuit-edge write via CircuitService.write_edge_validation (Task 3.0) Per-ordering scopes at EQUAL K · survival per tier per ordering · **uplift number into batch result + 016's discovery-run report** · results into discovery candidates + promoted-circuit edges · WS progress
 
 ## Phase 4: Faithfulness
 
 ### Task 4.1: Faithfulness service + task
-- [ ] Member expansion (cluster_ref → features) · per-layer SUM suppression hook · necessity + sufficiency (top-k non-members, k disclosed, default 256/layer; ablate-all proxy top-N recorded) · behavior metric = compare-workflow output-shift (imported, metric_id recorded) · necessity-only mode w/ sufficiency marked untested · scores on circuit record + manifest
+- [x] DONE (b95a5cf: member expansion, per-layer SUM suppression, necessity/sufficiency (necessity-only marks sufficiency untested), metric_id + ablate-all top-N proxy recorded). GPU measurement wiring at Phase-6 close-out Member expansion (cluster_ref → features) · per-layer SUM suppression hook · necessity + sufficiency (top-k non-members, k disclosed, default 256/layer; ablate-all proxy top-N recorded) · behavior metric = compare-workflow output-shift (imported, metric_id recorded) · necessity-only mode w/ sufficiency marked untested · scores on circuit record + manifest
 
 ## Phase 5: Remediation + MCP + UI
 
 ### Task 5.1: Heuristic remediation + copy audit
-- [ ] `calculate_ablation` docstring + `method: "statistical_estimate"` field · FeatureDetailModal retitle + caveat · MCP `get_feature_ablation` docstring · NEW shared `test_causal_language_audit.py` ("causal" forbidden below rung 2 across 015–018 surfaces)
+- [x] DONE (ac6c64f: calculate_ablation relabeled method='statistical_estimate' + honest docstring; MCP get_feature_ablation redirects to validate_circuit_edges; shared causal-audit extended to 017 surfaces) `calculate_ablation` docstring + `method: "statistical_estimate"` field · FeatureDetailModal retitle + caveat · MCP `get_feature_ablation` docstring · NEW shared `test_causal_language_audit.py` ("causal" forbidden below rung 2 across 015–018 surfaces)
 
 ### Task 5.2: MCP tools
-- [ ] `validate_circuit_edges`, `get_validation_manifest`, `reproduce_validation`, `run_circuit_faithfulness` (extend tools/circuits.py, same category) · rung-aware docstrings
+- [x] DONE (ac6c64f: validate_circuit_edges/get_validation_manifest/list_validation_manifests/reproduce_validation — rung-aware; smoke-pinned) `validate_circuit_edges`, `get_validation_manifest`, `reproduce_validation`, `run_circuit_faithfulness` (extend tools/circuits.py, same category) · rung-aware docstrings
 
 ### Task 5.3: Validation tab UI
 - [ ] Scope picker (ordering + K) + config · per-edge results (ES vs threshold, status chip, manifest link) · batch banner (survival per ordering + uplift) · ManifestDrawer (payload + Reproduce + verdict) · faithfulness display hooks for 018's circuit cards

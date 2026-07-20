@@ -54,8 +54,28 @@ All co-activation here is **same-token-position**. That finds within-position co
 
 A discovery candidate is a statistical association. The **Run attribution pass** action spends one forward + one backward per prompt (with the SAE reconstruction error held as a stop-gradient constant) to compute a **gradient-attribution score** per candidate — a second, independent evidence signal. It **re-ranks** the shortlist so the causal validation tier (017) is spent on the most promising edges, and it records both orderings so 017 can later report whether the re-ranking actually raised the validation survival rate.
 
-Attribution earns a candidate the **attribution-supported** rung — one step up the ladder, and explicitly *not* a causal claim. That rung comes only from intervention (Feature 017).
+Attribution earns a candidate the **attribution-supported** rung — one step up the ladder, and explicitly *not* a causal claim. That rung comes only from intervention (below).
+
+## Causal validation — the rung-2 tier
+
+Discovery and attribution produce *associations*. **Validation** is where a candidate earns the word "causal". The **Validation tab** takes the top-K edges of a run (in either ordering) and, for each, **intervenes**: it suppresses the upstream feature — subtracting its decoder direction from the residual stream, *never* re-decoding, so the SAE's reconstruction error is left untouched — runs the model, and measures how much the downstream feature's activation drops on the tokens where the upstream one fired.
+
+That drop, expressed as an **effect size** (mean drop over the downstream feature's own activation scale), is compared against a **null** built from shuffled non-edges — random support-matched upstream features that *aren't* connected to the downstream one. An edge reaches **rung 2 (causally validated)** only if its effect size beats the null percentile **and** is sign-consistent across prompts. An edge that's tested and doesn't clear the bar is recorded as **tested, did not validate** — history that never *demotes* a rung the edge earned another way.
+
+Run over both orderings, validation reports a **survival rate** per ordering, and the difference — the **uplift** — answers the question attribution set up: did re-ranking by attribution actually raise the fraction of edges that survive causal testing?
+
+### Faithfulness — the rung-3 tier
+
+For a whole circuit, **faithfulness** asks whether its members are *necessary* and *sufficient* for a behavior: suppress all members and measure how much of the behavior collapses (necessity), suppress everything *except* the members and measure how much survives (sufficiency). The behavior metric and the "ablate-all" proxy are always recorded, so the measurement is legible and reproducible.
+
+### Manifests — reproducible evidence
+
+Every validation run writes a **manifest**: a self-contained record of the intervention config, baseline, prompts, seeds, null summary, and per-edge effect sizes — everything needed to **reproduce** it. The **Reproduce** button re-executes from the manifest and reports whether the effect sizes come back within tolerance. A rung-2 claim you can't reproduce isn't a rung-2 claim.
+
+## A note on the feature-level "ablation impact"
+
+The impact number in the Feature Detail view is a **statistical estimate** (from a feature's activation frequency, magnitude, and consistency) — it runs *no* model inference and is labeled as such. It is a quick heuristic, never causal evidence. For a real causal measurement, validate the circuit edge.
 
 ## Doing it from an agent
 
-The [MCP server](/advanced/mcp-server) exposes the whole loop in the `circuits` category: `start_circuit_capture`, `list_circuit_captures`, `run_circuit_discovery`, `get_discovery_results` (which returns the full report), and `run_attribution_pass`. An agent can capture, mine at either granularity, attribution-rank, and read the disciplined report without the UI — and the tool descriptions carry the same lag-0 and rung-language discipline the UI does.
+The [MCP server](/advanced/mcp-server) exposes the whole loop in the `circuits` category: `start_circuit_capture`, `list_circuit_captures`, `run_circuit_discovery`, `get_discovery_results`, `run_attribution_pass`, and — for the causal tier — `validate_circuit_edges`, `get_validation_manifest`, `list_validation_manifests`, and `reproduce_validation`. Tool descriptions carry the same lag-0 and rung-language discipline the UI does: only `validate_circuit_edges` results earn causal language.
