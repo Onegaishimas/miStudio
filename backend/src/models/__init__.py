@@ -37,12 +37,14 @@ from .feature_grouping import (
 from .cluster_profile import ClusterProfile
 from .circuit import Circuit
 from .circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+from .validation_manifest import ValidationManifest
 from .agent_approval import AgentApprovalRequest, ApprovalStatus
 
 __all__ = [
     "Circuit",
     "CircuitCaptureRun",
     "CircuitDiscoveryRun",
+    "ValidationManifest",
     "Dataset",
     "DatasetStatus",
     "DatasetTokenization",
