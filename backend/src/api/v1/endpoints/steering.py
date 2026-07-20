@@ -49,6 +49,7 @@ from ....schemas.steering import (
 from ....services.sae_manager_service import SAEManagerService
 from ....services.steering_service import (
     get_steering_service,
+    load_sae_weights_cpu,
     resolve_decoder_weight,
     resolve_encoder_weight,
 )
@@ -1542,7 +1543,16 @@ async def _compute_multi_layer_allocation_response(
             )
         layer_sae_id[m.layer] = sid
 
-    service = get_steering_service()
+    # Cap the number of distinct SAEs (015 R1 QA-1): each one is loaded for the
+    # gain/prior math; an unbounded fat circuit would thrash the GPU/CPU.
+    MAX_ALLOCATION_SAES = 8
+    if len(set(layer_sae_id.values())) > MAX_ALLOCATION_SAES:
+        raise HTTPException(
+            422, {"code": "too_many_saes",
+                  "message": f"Multi-layer allocation references "
+                             f"{len(set(layer_sae_id.values()))} SAEs — "
+                             f"the cap is {MAX_ALLOCATION_SAES}."})
+
     decoders: dict = {}
     encoders: dict = {}
     offenders: list = []
@@ -1582,22 +1592,20 @@ async def _compute_multi_layer_allocation_response(
         constants_by_sae[layer] = resolve_constants(
             settings.steering_cluster_constants_json, sid)
 
-        # Load decoder (gain) + encoder (hazard prior). Failure degrades that
-        # layer to the approximate allocation and drops it from the prior source.
+        # Load ONLY the decoder (gain) + encoder (hazard prior) weight tensors
+        # on CPU — never onto the GPU, never into the SAE cache (015 R1 QA-1:
+        # this "read-only" endpoint used to force-load N full SAEs onto the
+        # 24 GB card). Failure degrades that layer to approximate G=1.
         try:
             rec_path = settings.resolve_data_path(rec.local_path)
             if rec_path.exists():
-                loaded = await service.load_sae(
-                    rec_path, sid,
-                    layer=rec.layer, d_model=rec.d_model,
-                    n_features=rec.n_features, architecture=rec.architecture,
-                )
-                dw = resolve_decoder_weight(loaded.model)
+                dw, ew = load_sae_weights_cpu(
+                    rec_path, d_model=rec.d_model,
+                    n_features=rec.n_features, architecture=rec.architecture)
                 if dw is not None:
-                    decoders[layer] = dw.detach()
-                ew = resolve_encoder_weight(loaded.model)
+                    decoders[layer] = dw
                 if ew is not None:
-                    encoders[layer] = ew.detach()
+                    encoders[layer] = ew
         except Exception as e:
             logger.warning(f"[ClusterAllocation] Layer {layer} SAE {sid} unavailable, approximate G=1: {e}")
 
@@ -1633,6 +1641,7 @@ async def _compute_multi_layer_allocation_response(
             ml_members,
             decoders=decoders,
             constants=constants,
+            constants_by_layer=constants_by_sae,  # per-SAE overrides (R1 ARCH-4)
             group_cohesion=request.group_cohesion,
         )
     except ValueError as e:

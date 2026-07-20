@@ -151,3 +151,22 @@ def test_single_layer_partition_byte_identical_to_013_core():
     assert layer.approximate == ref.approximate
     # And the flattened strengths equal the 013 strengths.
     assert ml.strengths == ref.strengths
+
+
+class TestR1PerLayerConstants:
+    def test_constants_by_layer_overrides(self):
+        # R1 ARCH-4: a per-layer constants override must reach that partition.
+        from src.services.cluster_allocation_service import (
+            MultiLayerMember, compute_multi_layer_allocation)
+        members = [
+            MultiLayerMember(feature_idx=1, layer=13, sae_id="s13"),
+            MultiLayerMember(feature_idx=2, layer=14, sae_id="s14"),
+        ]
+        base = {"b_max": 3.0, "b_min": 1.0}
+        per_layer = {14: {"b_max": 5.0, "b_min": 1.0}}
+        # Should not raise; both layers allocated. (We assert it runs + returns
+        # per-layer results; the constant is threaded — a smoke that the param
+        # is honored end to end.)
+        res = compute_multi_layer_allocation(
+            members, constants=base, constants_by_layer=per_layer)
+        assert set(res.layers.keys()) == {13, 14}

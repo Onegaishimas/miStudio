@@ -13,6 +13,7 @@ import {
   GitBranch, ArrowUpRight, ArrowDownRight, Trash2, Download, Layers,
   Pencil, Check, X as XIcon, FileDown, Upload, Plus, Camera, Search,
   AlertTriangle, RotateCcw, ShieldCheck, FileText, RefreshCw, Microscope,
+  Wand2,
 } from 'lucide-react';
 import { circuitsApi } from '../../api/circuits';
 import type {
@@ -27,6 +28,7 @@ import { ManifestDrawer } from '../circuits/ManifestDrawer';
 import { COMPONENTS } from '../../config/brand';
 import { useDatasetsStore } from '../../stores/datasetsStore';
 import { useSAEsStore } from '../../stores/saesStore';
+import { useSteeringStore } from '../../stores/steeringStore';
 import { SAEStatus } from '../../types/sae';
 
 // Polling terminal states shared by both run kinds.
@@ -345,11 +347,44 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
   );
 }
 
-function CircuitsListTab() {
+function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () => void }) {
   const [rows, setRows] = useState<CircuitSummary[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Which circuit is being staged into steering (spinner + disable).
+  const [steeringId, setSteeringId] = useState<string | null>(null);
+
+  const getSAE = useSAEsStore((s) => s.getSAE);
+  const loadCircuitIntoSteering = useSteeringStore((s) => s.loadCircuitIntoSteering);
+
+  // "Steer this circuit": fetch the full circuit (members + saes), resolve its
+  // primary SAE object, hydrate the steering selection, then navigate. The
+  // list row only has the CircuitSummary, so the members/saes needed to build
+  // the selection are fetched here (mirrors CircuitDetail's own get()).
+  const steerCircuit = async (id: string) => {
+    setSteeringId(id);
+    setError(null);
+    try {
+      const circuit = await circuitsApi.get(id);
+      const primaryRef = circuit.saes?.find((s) => s.mistudio_sae_id)?.mistudio_sae_id;
+      if (!primaryRef) {
+        setError('This circuit has no associated SAE — cannot load it into steering.');
+        return;
+      }
+      const primarySAE = await getSAE(primaryRef);
+      const ok = loadCircuitIntoSteering(circuit, primarySAE);
+      if (!ok) {
+        setError('This circuit has no loadable feature members to steer.');
+        return;
+      }
+      onNavigateToSteering?.();
+    } catch (e) {
+      setError(`Failed to load circuit into steering: ${String((e as Error).message ?? e)}`);
+    } finally {
+      setSteeringId(null);
+    }
+  };
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -463,6 +498,17 @@ function CircuitsListTab() {
                   {c.layers.map((l) => `L${l}`).join('+')}
                 </div>
               </button>
+              {c.promoted && (
+                <button
+                  onClick={() => steerCircuit(c.id)}
+                  disabled={steeringId === c.id}
+                  className="flex items-center gap-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait px-2.5 py-1.5 text-xs text-white"
+                  title="Load this circuit's members into the Steering panel (per-layer SAEs + validated hazards)"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  {steeringId === c.id ? 'Loading…' : 'Steer this circuit'}
+                </button>
+              )}
               {c.promoted ? (
                 <button
                   onClick={() => setPromoted(c.id, false)}
@@ -1681,7 +1727,7 @@ function ValidationTab() {
 
 type CircuitTab = 'circuits' | 'capture' | 'discovery' | 'validation';
 
-export function CircuitsPanel() {
+export function CircuitsPanel({ onNavigateToSteering }: { onNavigateToSteering?: () => void } = {}) {
   const [tab, setTab] = useState<CircuitTab>('circuits');
 
   const tabs: { id: CircuitTab; label: string }[] = [
@@ -1715,7 +1761,7 @@ export function CircuitsPanel() {
         ))}
       </div>
 
-      {tab === 'circuits' && <CircuitsListTab />}
+      {tab === 'circuits' && <CircuitsListTab onNavigateToSteering={onNavigateToSteering} />}
       {tab === 'capture' && <CaptureTab />}
       {tab === 'discovery' && <DiscoveryTab />}
       {tab === 'validation' && <ValidationTab />}

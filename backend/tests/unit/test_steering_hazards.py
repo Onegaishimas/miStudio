@@ -118,3 +118,37 @@ class TestCopyDiscipline:
         for hz in h:
             assert "causal" not in hz.evidence.lower()
             assert "heuristic" in hz.evidence
+
+
+class TestR1Fixes:
+    def test_cluster_ref_edges_skipped(self):
+        # R1 QA-2: an edge with feature_idx=None (cluster_ref) must be skipped,
+        # not crash / silently mis-key.
+        h = detect_hazards(
+            [_feat(13, 1), _feat(14, 2)],
+            circuit_edges=[{"up": {"layer": 13, "feature_idx": None},
+                            "down": {"layer": 14, "feature_idx": None},
+                            "rung": 2, "effect_size": 0.9}])
+        assert h == []  # no feature-level edge matched; no crash
+
+    def test_cluster_ref_members_skipped(self):
+        # a steered member with no feature_idx is filtered out
+        h = detect_hazards(
+            [{"layer": 13, "strength": 50}, _feat(14, 2)],  # no feature_idx on first
+            circuit_edges=[_edge(13, 1, 14, 2, 2, 0.9)])
+        assert h == []
+
+    def test_out_of_range_prior_index_no_crash(self):
+        import torch
+        # R1 #5: weight_prior with an out-of-range index → 0.0, not IndexError
+        dec = torch.randn(8, 4)   # only 4 features
+        enc = torch.randn(4, 8)
+        assert weight_prior(dec, 99, enc, 0) == 0.0
+        assert weight_prior(dec, 0, enc, 99) == 0.0
+
+    def test_duplicate_members_dedup(self):
+        # R1 #6: the same (up,down) pair from duplicate members warns ONCE
+        h = detect_hazards(
+            [_feat(13, 1, 50), _feat(13, 1, 50), _feat(14, 2, 50)],
+            circuit_edges=[_edge(13, 1, 14, 2, 2, 0.8)])
+        assert len(h) == 1

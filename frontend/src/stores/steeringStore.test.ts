@@ -1647,4 +1647,128 @@ describe('steeringStore', () => {
       expect(out.reduce((s, v) => s + Math.abs(v), 0)).toBeCloseTo(2.4, 1);
     });
   });
+
+  describe('loadCircuitIntoSteering (Feature 015)', () => {
+    // A promoted 2-layer circuit with a per-layer SAE for each of L13 and L14.
+    const twoLayerCircuit = {
+      id: 'circ-1',
+      name: 'induction head',
+      granularity: 'feature' as const,
+      layers: [13, 14],
+      member_count: 2,
+      edge_count: 1,
+      rung: 2,
+      rung_language: 'validated',
+      rung_next_step: '',
+      promoted: true,
+      model_id: 'model-456',
+      version: 1,
+      updated_at: '2024-01-01T00:00:00Z',
+      narrative: null,
+      saes: [
+        { mistudio_sae_id: 'sae-l13', layer: 13 },
+        { mistudio_sae_id: 'sae-l14', layer: 14 },
+      ],
+      members: [
+        { layer: 13, member_kind: 'feature_ref' as const,
+          feature: { feature_idx: 100, label: 'prev-token', strength: 1.2 } },
+        { layer: 14, member_kind: 'feature_ref' as const,
+          feature: { feature_idx: 200, label: 'copy', strength: 2.0 } },
+      ],
+      edges: [],
+      budget: null,
+      faithfulness: null,
+      discovery: null,
+      created_at: '2024-01-01T00:00:00Z',
+    } as any;
+
+    const primarySAE: SAE = { ...mockSAE, id: 'sae-l13', layer: 13 };
+
+    it('builds one SelectedFeature per layer with the correct layer + per-layer sae_id, sets circuit_id, and calls requestClusterAllocation', async () => {
+      const { result } = renderHook(() => useSteeringStore());
+
+      // Multi-layer allocation shape (Feature 015): keyed by layer.
+      vi.mocked(steeringApi.computeClusterAllocation).mockResolvedValue({
+        formula_id: 'freq-budget/sim-alloc/per-layer@1',
+        layers: {
+          13: { B: 2.4, B_dir: 2.4, G: 1, weights: [1], strengths: [1.2],
+                flags: [], constants_used: {}, approximate: false },
+          14: { B: 3.0, B_dir: 3.0, G: 1, weights: [1], strengths: [2.0],
+                flags: [], constants_used: {}, approximate: false },
+        },
+        hazards: [],
+        strengths: [1.2, 2.0],
+      } as any);
+
+      let ok = false;
+      await act(async () => {
+        ok = result.current.loadCircuitIntoSteering(twoLayerCircuit, primarySAE);
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(ok).toBe(true);
+      const feats = result.current.selectedFeatures;
+      expect(feats).toHaveLength(2);
+
+      const l13 = feats.find((f) => f.feature_idx === 100);
+      const l14 = feats.find((f) => f.feature_idx === 200);
+      expect(l13?.layer).toBe(13);
+      expect(l13?.sae_id).toBe('sae-l13');
+      expect(l14?.layer).toBe(14);
+      expect(l14?.sae_id).toBe('sae-l14');
+
+      // Panel SAE + circuit provenance
+      expect(result.current.selectedSAE?.id).toBe('sae-l13');
+      expect(result.current.clusterContext?.circuit_id).toBe('circ-1');
+      expect(result.current.clusterContext?.display_token).toBe('induction head');
+      expect(result.current.combinedMode).toBe(true);
+      // Not an authored profile — allocation must be allowed to run.
+      expect(result.current.activeProfile).toBeNull();
+
+      // requestClusterAllocation fired and threaded circuit_id.
+      expect(steeringApi.computeClusterAllocation).toHaveBeenCalledTimes(1);
+      const req = vi.mocked(steeringApi.computeClusterAllocation).mock.calls[0][0] as any;
+      expect(req.circuit_id).toBe('circ-1');
+      expect(req.members).toHaveLength(2);
+
+      // Hydration guard is released.
+      expect(result.current.isHydratingProfile).toBe(false);
+    });
+
+    it('expands cluster-ref members and skips those without expanded_members', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      const circuit = {
+        ...twoLayerCircuit,
+        members: [
+          { layer: 13, member_kind: 'cluster_ref' as const, cluster_name: 'A',
+            expanded_members: [
+              { feature_idx: 11, label: 'a1', strength: 0.5 },
+              { feature_idx: 12, label: 'a2', strength: 0.7 },
+            ] },
+          { layer: 14, member_kind: 'cluster_ref' as const, cluster_name: 'B',
+            expanded_members: null },
+        ],
+      } as any;
+      vi.mocked(steeringApi.computeClusterAllocation).mockResolvedValue({
+        formula_id: 'x', layers: {}, hazards: [], strengths: [],
+      } as any);
+
+      let ok = false;
+      act(() => { ok = result.current.loadCircuitIntoSteering(circuit, primarySAE); });
+      expect(ok).toBe(true);
+      const feats = result.current.selectedFeatures;
+      // 2 from the expanded cluster; the unexpanded cluster-ref is skipped.
+      expect(feats.map((f) => f.feature_idx).sort()).toEqual([11, 12]);
+      expect(feats.every((f) => f.layer === 13 && f.sae_id === 'sae-l13')).toBe(true);
+    });
+
+    it('returns false when the circuit has no loadable feature members', () => {
+      const { result } = renderHook(() => useSteeringStore());
+      const empty = { ...twoLayerCircuit, members: [] } as any;
+      let ok = true;
+      act(() => { ok = result.current.loadCircuitIntoSteering(empty, primarySAE); });
+      expect(ok).toBe(false);
+      expect(result.current.selectedFeatures).toHaveLength(0);
+    });
+  });
 });

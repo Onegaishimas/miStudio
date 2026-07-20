@@ -12,7 +12,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy, Boxes, BookMarked } from 'lucide-react';
+import { Brain, Plus, Trash2, ChevronUp, Search, Eye, Copy, Boxes, BookMarked, Layers } from 'lucide-react';
 import { useSteeringStore, MAX_SELECTED_FEATURES } from '../../stores/steeringStore';
 import { useSAEsStore } from '../../stores/saesStore';
 import { SAEStatus } from '../../types/sae';
@@ -268,7 +268,7 @@ export function FeatureSelector() {
             {/* Cluster provenance chip (Feature 012). Count derives from the live
                 selection — while context stands, the selection IS the hand-off set. */}
             {clusterContext && (
-              <div className="px-4 pt-3">
+              <div className="px-4 pt-3 flex items-center gap-2 flex-wrap">
                 <span
                   className={`${COMPONENTS.badge.default} gap-1.5 border-cyan-500/40 bg-cyan-500/10 text-cyan-300`}
                   title={`These features were handed off together from the "${clusterContext.display_token}" cluster`}
@@ -279,6 +279,21 @@ export function FeatureSelector() {
                     · {selectedFeatures.length} member{selectedFeatures.length !== 1 ? 's' : ''} selected
                   </span>
                 </span>
+                {/* Feature 015: layer-span badge (FPRD §4). Shown when a loaded
+                    circuit spans >1 distinct layer, e.g. "L13+L14". */}
+                {(() => {
+                  const layers = [...new Set(selectedFeatures.map((f) => f.layer))].sort((a, b) => a - b);
+                  if (layers.length <= 1) return null;
+                  return (
+                    <span
+                      className={`${COMPONENTS.badge.default} gap-1.5 border-violet-500/40 bg-violet-500/10 text-violet-300`}
+                      title={`This selection spans ${layers.length} layers`}
+                    >
+                      <Layers className="w-3 h-3" />
+                      {layers.map((l) => `L${l}`).join('+')}
+                    </span>
+                  );
+                })()}
               </div>
             )}
 

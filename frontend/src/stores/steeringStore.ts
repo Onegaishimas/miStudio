@@ -412,6 +412,20 @@ interface SteeringState {
   // cannot load (unbound, SAE mismatch, no members).
   loadProfileIntoSteering: (profile: import('../types/clusterProfile').ClusterProfile) => boolean;
 
+  // Feature 015: hydrate a PROMOTED circuit into the steering selection. Mirrors
+  // loadProfileIntoSteering but sources members from the circuit (per-layer SAEs
+  // via circuit.saes[]) and threads clusterContext.circuit_id so
+  // requestClusterAllocation sources cross-layer hazards from the circuit's
+  // VALIDATED edges (quantified ES). `primarySAE` is the resolved SAE object for
+  // the circuit's first saes[] entry (the panel fetches it) — it becomes the
+  // panel's selectedSAE; each feature keeps its own per-layer sae_id. Returns
+  // false when the circuit has no loadable feature members. Fires
+  // requestClusterAllocation after hydration.
+  loadCircuitIntoSteering: (
+    circuit: import('../types/circuits').Circuit,
+    primarySAE: SAE,
+  ) => boolean;
+
   // Active profile identity (label tier 1); cleared with clusterContext on any
   // selection mutation — a stale profile title is the mislabeling 012 removed.
   activeProfile: { id: string; name: string } | null;
@@ -603,11 +617,14 @@ export const useSteeringStore = create<SteeringState>()(
         // N=1 routes through the solo path verbatim (IDL-29 step 10).
         if (selectedFeatures.length === 1) return;
 
-        // Duplicate feature indices would double-count one direction in the
-        // formula — refuse and keep the solo baselines (v1 single-membership).
-        const idxs = selectedFeatures.map((f) => f.feature_idx);
-        if (new Set(idxs).size !== idxs.length) {
-          console.warn('[SteeringStore] Duplicate feature indices — skipping cluster allocation');
+        // A duplicate (feature_idx, layer) would double-count one direction in
+        // the formula — refuse. But the SAME feature_idx on DIFFERENT layers is
+        // legitimate for a cross-layer circuit (different SAEs, different
+        // directions) — 015 R1 #2: keying on feature_idx alone falsely refused
+        // exactly the multi-layer case this feature exists to serve.
+        const keys = selectedFeatures.map((f) => `${f.layer}:${f.feature_idx}`);
+        if (new Set(keys).size !== keys.length) {
+          console.warn('[SteeringStore] Duplicate (feature, layer) — skipping cluster allocation');
           return;
         }
 
@@ -636,6 +653,11 @@ export const useSteeringStore = create<SteeringState>()(
               ...(f.sae_id ? { sae_id: f.sae_id } : {}),
             })),
             group_cohesion: groupCohesion,
+            // Feature 015: source cross-layer hazards from the loaded circuit's
+            // VALIDATED edges (quantified ES) when one is in context.
+            ...(get().clusterContext?.circuit_id
+              ? { circuit_id: get().clusterContext!.circuit_id }
+              : {}),
           });
 
           // Stale guard: same instances, same SAE.
@@ -985,6 +1007,117 @@ export const useSteeringStore = create<SteeringState>()(
         } finally {
           set({ isHydratingProfile: false });
         }
+      },
+
+      // Feature 015: hydrate a promoted circuit into the steering selection.
+      // Mirrors loadProfileIntoSteering: clears the selection, adds one
+      // SelectedFeature per FEATURE member (and per expanded cluster-ref member)
+      // with the member's OWN layer + that layer's SAE, sets a circuit-scoped
+      // clusterContext (so the Blended result is circuit-titled AND the
+      // allocation request threads circuit_id → VALIDATED hazards), selects the
+      // circuit's primary SAE as the panel SAE, then fires requestClusterAllocation.
+      loadCircuitIntoSteering: (circuit, primarySAE) => {
+        // Map layer -> that layer's SAE id (mistudio_sae_id). The primary SAE is
+        // the panel's selectedSAE; each feature keeps its own per-layer sae_id.
+        const saeByLayer = new Map<number, string>();
+        for (const s of circuit.saes ?? []) {
+          if (s.layer != null && s.mistudio_sae_id) saeByLayer.set(s.layer, s.mistudio_sae_id);
+        }
+
+        // Flatten members into (feature_idx, layer, strength, label) tuples.
+        // feature_ref members are direct; cluster_ref members expand via
+        // expanded_members (feature-level v1 — a cluster-ref with no expansion is
+        // skipped with a log). Non-feature members carry no directions to steer.
+        type Loaded = { feature_idx: number; layer: number; strength: number; label: string | null };
+        const loaded: Loaded[] = [];
+        for (const m of circuit.members ?? []) {
+          if (m.member_kind === 'feature_ref' && m.feature?.feature_idx != null) {
+            loaded.push({
+              feature_idx: m.feature.feature_idx,
+              layer: m.layer,
+              strength: m.feature.strength ?? 0,
+              label: m.feature.label ?? null,
+            });
+          } else if (m.member_kind === 'cluster_ref') {
+            if (m.expanded_members && m.expanded_members.length > 0) {
+              for (const em of m.expanded_members) {
+                loaded.push({
+                  feature_idx: em.feature_idx,
+                  layer: m.layer,
+                  strength: em.strength ?? 0,
+                  label: em.label ?? null,
+                });
+              }
+            } else {
+              console.warn(
+                `[SteeringStore] Skipping cluster-ref member (no expanded_members) on layer ${m.layer} — v1 is feature-level`,
+              );
+            }
+          }
+        }
+
+        if (loaded.length === 0) return false;
+        // Cap at the panel max (extra members are dropped, not an error — the
+        // selection stays valid and the user sees a truncated but usable circuit).
+        const capped = loaded.slice(0, MAX_SELECTED_FEATURES);
+
+        // Extend (do not fork) the hydration guard so requestClusterAllocation
+        // doesn't fire mid-hydration off a partial selection.
+        set({ isHydratingProfile: true });
+        try {
+          const features: SelectedFeature[] = capped.map((m, i) => ({
+            instance_id: `${m.feature_idx}-${m.layer}-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 9)}`,
+            feature_idx: m.feature_idx,
+            feature_id: null,
+            layer: m.layer,
+            // The SAE trained on THIS member's layer; fall back to the primary
+            // SAE when a layer has no explicit saes[] entry (defensive — a
+            // well-formed circuit lists an SAE per member layer).
+            sae_id: saeByLayer.get(m.layer) ?? primarySAE.id,
+            // Circuit member strengths are EXPLICIT tuned values (auto-baselines
+            // bypassed). A zero/absent strength falls back to a sensible default
+            // so a member without a tuned magnitude still steers.
+            strength: m.strength !== 0 ? m.strength : (computeBaselineStrength(null).value),
+            strengthSource: 'manual' as const,
+            pinned: false,
+            label: m.label,
+            color: FEATURE_COLOR_ORDER[i % FEATURE_COLOR_ORDER.length],
+            max_activation: null,
+            activation_frequency: null,
+            similarity: null,
+          }));
+
+          set({
+            selectedSAE: primarySAE,
+            selectedFeatures: features,
+            clusterBudget: null,
+            layerBudgets: null,
+            hazards: null,
+            clusterNotice: null,
+            // A circuit is a BLENDED multi-layer artifact — load in Blended mode
+            // (mirrors the profile loader; Compare would fan out N generations).
+            combinedMode: true,
+            intensity: 1,
+            // circuit_id threads into requestClusterAllocation → VALIDATED hazards;
+            // display_token titles the Blended result with the circuit name.
+            clusterContext: {
+              group_id: circuit.id,
+              display_token: circuit.name,
+              circuit_id: circuit.id,
+            },
+            // A circuit is NOT an authored cluster profile — leave activeProfile
+            // null so requestClusterAllocation is allowed to compute the budget.
+            activeProfile: null,
+          });
+        } finally {
+          set({ isHydratingProfile: false });
+        }
+
+        // Compute per-layer budgets + hazards immediately (mirrors the profile
+        // loader). Fire-and-forget: allocation failure is non-fatal (the loader
+        // logs and keeps the loaded strengths).
+        void get().requestClusterAllocation();
+        return true;
       },
 
       // Add a feature to selection (returns false if max reached)

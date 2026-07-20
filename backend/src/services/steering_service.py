@@ -354,6 +354,39 @@ def resolve_encoder_weight(sae_model) -> Optional["torch.Tensor"]:
     return None
 
 
+def load_sae_weights_cpu(sae_path, *, d_model=None, n_features=None,
+                         architecture=None):
+    """Load JUST the decoder+encoder weight tensors on CPU — for the
+    read-only cluster-allocation math (gain G + hazard weight prior). Does NOT
+    touch the GPU or the steering-service SAE cache (015 R1 QA-1: the
+    allocation endpoint used to force-resident-load N full SAEs onto the 24 GB
+    card on a 'read-only' click). Returns (decoder[d_model,d_sae],
+    encoder[d_sae,d_model]) or (None, None) on failure."""
+    from ..ml.sparse_autoencoder import create_sae
+
+    state_dict, config, _fmt = load_sae_auto_detect(sae_path, device="cpu")
+    if config is not None:
+        d_in, d_sae = config.d_in, config.d_sae
+        arch = config.architecture or "standard"
+        normalize = config.normalize_activations or "none"
+    else:
+        enc = state_dict.get("encoder.weight")
+        if enc is not None:
+            d_sae, d_in = enc.shape
+        else:
+            d_in, d_sae = (d_model or 768), (n_features or 8192)
+        arch = architecture or "standard"
+        normalize = "constant_norm_rescale"
+    sae = create_sae(architecture_type=arch, hidden_dim=d_in, latent_dim=d_sae,
+                     l1_alpha=0.001, normalize_activations=normalize)
+    sae.load_state_dict(state_dict, strict=False)
+    sae.eval()  # CPU, fp32 — never .to(cuda), never .half()
+    dw = resolve_decoder_weight(sae)
+    ew = resolve_encoder_weight(sae)
+    return (dw.detach() if dw is not None else None,
+            ew.detach() if ew is not None else None)
+
+
 @dataclass
 class LoadedSAE:
     """Container for a loaded SAE model and its metadata."""

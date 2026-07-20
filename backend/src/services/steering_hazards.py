@@ -46,9 +46,13 @@ def weight_prior(up_decoder, up_idx: int, down_encoder, down_idx: int) -> float:
     decoder is [d_model, d_sae] (column i), encoder is [d_sae, d_model] (row j)
     — both project the same d_model space, so the cosine is well-defined.
     Reuses the resolve_*_weight conventions (add resolve_encoder_weight beside
-    resolve_decoder_weight)."""
+    resolve_decoder_weight). Out-of-range indices ⇒ 0.0 (no hazard), never an
+    IndexError — detect_hazards is a public pure function (R1 #5)."""
     import torch
 
+    if not (0 <= up_idx < up_decoder.shape[1]) or \
+            not (0 <= down_idx < down_encoder.shape[0]):
+        return 0.0
     d_i = up_decoder[:, up_idx]        # [d_model]
     e_j = down_encoder[down_idx, :]    # [d_model]
     return float(torch.nn.functional.cosine_similarity(
@@ -79,18 +83,31 @@ def detect_hazards(
     """
     edges_by_key = {}
     for e in (circuit_edges or []):
-        edges_by_key[_edge_key(e)] = e
+        k = _edge_key(e)
+        # Skip cluster-ref edges (feature_idx None — R1 QA-2): the steered list
+        # is feature-level, so a (layer, None, …) key can never match and its
+        # rung/ES aren't per-feature. Feature-level hazards only, in v1.
+        if None in k:
+            continue
+        edges_by_key[k] = e
+
+    # Feature-level members only (a cluster-ref member has no feature_idx).
+    feats = [m for m in steered if m.get("feature_idx") is not None]
 
     hazards: List[Hazard] = []
-    for i, up in enumerate(steered):
-        for down in steered:
+    seen_pairs = set()  # dedup (R1 #6): duplicate members must not double-warn
+    for up in feats:
+        for down in feats:
             if up["layer"] >= down["layer"]:
+                continue
+            pair = (up["layer"], up["feature_idx"], down["layer"], down["feature_idx"])
+            if pair in seen_pairs:
                 continue
             up_ref = {"layer": up["layer"], "feature_idx": up["feature_idx"]}
             down_ref = {"layer": down["layer"], "feature_idx": down["feature_idx"]}
             # co-steered sign: same sign ⇒ compounding, opposite ⇒ cancellation
             same_sign = (up.get("strength", 0) >= 0) == (down.get("strength", 0) >= 0)
-            key = (up["layer"], up["feature_idx"], down["layer"], down["feature_idx"])
+            key = pair
 
             edge = edges_by_key.get(key)
             if edge is not None and int(edge.get("rung", 0)) >= 2 \
@@ -105,6 +122,7 @@ def detect_hazards(
                     evidence=f"validated:ES={es:.3f}",
                     rung=int(edge.get("rung", 2)),
                     quantified_effect=es))
+                seen_pairs.add(pair)
                 continue
 
             # heuristic fallback — weight prior (labeled, never causal)
@@ -123,4 +141,5 @@ def detect_hazards(
                             up=up_ref, down=down_ref,
                             evidence=f"heuristic:weight_prior={prior:.3f}",
                             rung=0, quantified_effect=None))
+                        seen_pairs.add(pair)
     return hazards
