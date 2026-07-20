@@ -63,6 +63,72 @@ export interface ClusterBudget {
 }
 
 /**
+ * One layer's allocation inside a multi-layer response (Feature 015).
+ * Byte-identical to the 013 single-layer shape (so a 013-aware client reads each
+ * entry unchanged) plus the `sae_id` that steered this layer's directions.
+ * Matches backend `PerLayerAllocation`.
+ */
+export interface PerLayerAllocation {
+  sae_id?: string | null;
+  B: number;
+  B_dir: number;
+  G: number;
+  f_eff?: number | null;
+  weights: number[];
+  strengths: number[];
+  flags: string[];
+  cancellation_pair?: number[] | null;
+  constants_used: Record<string, number>;
+  approximate: boolean;
+}
+
+/**
+ * A cross-layer steering hazard (Feature 015, BR-024). Matches backend
+ * `HazardModel`. The `evidence` string carries its own ladder label
+ * (`validated:ES=…` — quantified, rung≥2 — or `heuristic:weight_prior=…` — a
+ * labeled weight prior, NEVER causal). The banner renders that string; it never
+ * upgrades a heuristic to a causal claim.
+ */
+export interface Hazard {
+  type: 'compounding' | 'cancellation';
+  up: { layer: number; feature_idx: number };
+  down: { layer: number; feature_idx: number };
+  evidence: string;
+  rung: number;
+  quantified_effect?: number | null;
+}
+
+/**
+ * Multi-layer cluster allocation response (Feature 015). Only returned when the
+ * cluster's members span >1 distinct layer; a single-layer cluster returns the
+ * 013 `ClusterAllocation` shape byte-identically. Matches backend
+ * `MultiLayerAllocationResponse`.
+ */
+export interface MultiLayerAllocation {
+  /** "freq-budget/sim-alloc/per-layer@1" — presence of `layers` is the discriminant. */
+  formula_id: string;
+  /** layer (string key) -> that layer's allocation. */
+  layers: Record<string, PerLayerAllocation>;
+  hazards: Hazard[];
+  /** per-member strengths flattened in request-member order (client convenience). */
+  strengths: number[];
+}
+
+/** The public allocation response is a union: 013 single-layer | 015 multi-layer. */
+export type AllocationResponse = ClusterAllocation | MultiLayerAllocation;
+
+/**
+ * Discriminate a multi-layer allocation response from the single-layer 013 shape.
+ * The multi-layer shape is the only one carrying a `layers` map.
+ */
+export function isMultiLayerAllocation(
+  r: AllocationResponse,
+): r is MultiLayerAllocation {
+  return typeof (r as MultiLayerAllocation).layers === 'object'
+    && (r as MultiLayerAllocation).layers !== null;
+}
+
+/**
  * Color options for selected features.
  * Up to 20 features (Feature 011). Colors are cosmetic — the original 4
  * (teal/blue/purple/amber) come first for continuity, then 16 more hues.
@@ -143,6 +209,13 @@ export interface SelectedFeature {
   comparison_id?: string; // Links to the comparison job this instance was used in (set when comparison runs)
   feature_idx: number;
   layer: number;
+  /**
+   * Feature 015: the SAE trained on THIS feature's layer. Set on add (the
+   * selected SAE) and on circuit/profile load (the member's own SAE). Omitted ⇒
+   * the request-level sae_id (single-layer flows send no per-feature sae_id, so
+   * the pre-015 request shape is unchanged).
+   */
+  sae_id?: string;
   strength: number; // Raw coefficient (Neuronpedia-compatible: 0.07 subtle, 80 strong)
   additional_strengths?: number[]; // Up to 3 additional strengths for multi-strength testing
   label: string | null;
@@ -476,6 +549,12 @@ export interface CombinedFeatureApplied {
   strength: number;
   label: string | null;
   color: FeatureColor;
+  /**
+   * Feature 015: the SAE that actually steered this feature (server truth —
+   * source of truth for which SAE each member went through). Omitted on
+   * single-SAE runs.
+   */
+  sae_id?: string | null;
 }
 
 /**

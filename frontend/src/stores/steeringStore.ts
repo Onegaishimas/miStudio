@@ -33,6 +33,8 @@ import {
   CombinedSteeringResponse,
   ClusterContext,
   ClusterBudget,
+  Hazard,
+  isMultiLayerAllocation,
 } from '../types/steering';
 import { SAE } from '../types/sae';
 import * as steeringApi from '../api/steering';
@@ -394,6 +396,13 @@ interface SteeringState {
   // Feature 013: allocation + rebalance + intensity
   requestClusterAllocation: (groupCohesion?: number | null) => Promise<void>;
   rebalanceStrength: (instanceId: string, newStrength: number) => void;
+  /**
+   * Feature 015: budget-preserving strength edit scoped to ONE layer. In
+   * single-layer selections this delegates to `rebalanceStrength` (identical
+   * behavior). In multi-layer selections it rebalances only members on `layer`
+   * against that layer's budget, leaving other layers untouched.
+   */
+  rebalance: (layer: number, instanceId: string, newStrength: number) => void;
   togglePin: (instanceId: string) => void;
   setIntensity: (value: number) => void;
 
@@ -419,6 +428,15 @@ interface SteeringState {
   // server-computed allocation governs the current selection. The formula is
   // server-side; the frontend owns only budget-preserving rebalance.
   clusterBudget: ClusterBudget | null;
+  // Feature 015 (multi-SAE cross-layer): per-layer budgets keyed by layer.
+  // Mirrors the single `clusterBudget` when the selection spans exactly ONE
+  // layer (existing clusterBudget consumers keep working untouched); populates
+  // per-layer when >1 distinct layer. Non-null only while an allocation governs
+  // the selection. Cleared alongside clusterBudget.
+  layerBudgets: Record<number, ClusterBudget> | null;
+  // Feature 015: cross-layer hazards returned by a multi-layer allocation.
+  // Warnings only — never mutate the config. Cleared alongside clusterBudget.
+  hazards: Hazard[] | null;
   // One-line notice shown when the budget model deliberately did NOT engage
   // (e.g. low-cohesion gate). Cleared alongside clusterBudget.
   clusterNotice: string | null;
@@ -513,6 +531,8 @@ export const useSteeringStore = create<SteeringState>()(
       clusterContext: null,
       combinedResultsTitle: null,
       clusterBudget: null,
+      layerBudgets: null,
+      hazards: null,
       clusterNotice: null,
       activeProfile: null,
       isHydratingProfile: false,
@@ -553,6 +573,8 @@ export const useSteeringStore = create<SteeringState>()(
           clusterContext: null,
           activeProfile: null,
           clusterBudget: null,
+          layerBudgets: null,
+          hazards: null,
           clusterNotice: null,
           intensity: 1,
           currentComparison: null,
@@ -597,6 +619,8 @@ export const useSteeringStore = create<SteeringState>()(
           feature_idx: f.feature_idx,
         }));
         const requestKey = requestMembers.map((m) => m.instance_id).sort().join(',');
+        // Feature 015: distinct layers governs single- vs multi-layer handling.
+        const distinctLayers = Array.from(new Set(selectedFeatures.map((f) => f.layer)));
         try {
           const allocation = await steeringApi.computeClusterAllocation({
             sae_id: selectedSAE.id,
@@ -606,6 +630,10 @@ export const useSteeringStore = create<SteeringState>()(
               similarity: f.similarity ?? null,
               activation_frequency: f.activation_frequency ?? null,
               sign: f.strength < 0 ? -1 : 1,
+              // Per-member SAE (015): the SAE trained on THIS layer. Omitted on a
+              // single-layer selection (server defaults to the request sae_id →
+              // the pre-015 request shape is unchanged).
+              ...(f.sae_id ? { sae_id: f.sae_id } : {}),
             })),
             group_cohesion: groupCohesion,
           });
@@ -618,11 +646,80 @@ export const useSteeringStore = create<SteeringState>()(
             return;
           }
 
+          // ── Multi-layer branch (Feature 015) ──────────────────────────────
+          // Only chosen when the selection spans >1 distinct layer AND the
+          // server returned the multi-layer union shape (defensive: keeps the
+          // single-layer path byte-identical if the server ever collapses).
+          if (distinctLayers.length > 1 && isMultiLayerAllocation(allocation)) {
+            // Flatten strengths in request-member order, per contract.
+            const allocByInstance: Record<string, { strength: number }> = {};
+            requestMembers.forEach((m, i) => {
+              allocByInstance[m.instance_id] = { strength: allocation.strengths[i] ?? 0 };
+            });
+
+            // Build one ClusterBudget per layer. Each layer's weights are its
+            // own response `weights` array, index-aligned with the request
+            // members ON THAT LAYER (server partitions by layer, preserving
+            // request order within each partition).
+            const layerBudgets: Record<number, ClusterBudget> = {};
+            for (const [layerKey, la] of Object.entries(allocation.layers)) {
+              const layerNum = Number(layerKey);
+              const layerInstances = requestMembers
+                .filter((m) => {
+                  const f = selectedFeatures.find((sf) => sf.instance_id === m.instance_id);
+                  return f?.layer === layerNum;
+                })
+                .map((m) => m.instance_id);
+              const weightsByInstance: Record<string, number> = {};
+              layerInstances.forEach((id, i) => {
+                weightsByInstance[id] = la.weights[i] ?? 0;
+              });
+              layerBudgets[layerNum] = {
+                B: la.B,
+                B_dir: la.B_dir,
+                G: la.G,
+                flags: la.flags,
+                approximate: la.approximate,
+                weightsByInstance,
+                formula_id: allocation.formula_id,
+                constants: la.constants_used,
+                f_eff: la.f_eff ?? null,
+              };
+            }
+
+            set({
+              // Multi-layer: no single governing budget. `clusterBudget` stays
+              // null so single-layer-only consumers don't misread a multi-layer
+              // selection; multi-layer flows read `layerBudgets`.
+              clusterBudget: null,
+              layerBudgets,
+              hazards: allocation.hazards ?? [],
+              clusterNotice: null,
+              selectedFeatures: current.map((f) => {
+                const a = allocByInstance[f.instance_id];
+                return a
+                  ? { ...f, strength: a.strength, strengthSource: 'cluster' as const, pinned: false }
+                  : f;
+              }),
+            });
+            return;
+          }
+
+          // ── Single-layer branch (Feature 013 — BYTE-IDENTICAL to pre-015) ──
+          // Defensive: if we somehow got the multi-layer shape for a single
+          // layer, bail rather than crash reading 013 fields off it.
+          if (isMultiLayerAllocation(allocation)) {
+            console.warn('[SteeringStore] Unexpected multi-layer shape for a single layer — skipping');
+            return;
+          }
+
           // Low-cohesion gate: keep solo baselines AND no governing budget —
           // rebalance, λ, and the budget bar must not engage on a gated cluster.
           if (allocation.flags.includes('low_cohesion')) {
             set({
               clusterBudget: null,
+              layerBudgets: null,
+              hazards: null,
               clusterNotice:
                 'Low cluster cohesion — kept per-feature baselines (budget model gated)',
             });
@@ -642,19 +739,25 @@ export const useSteeringStore = create<SteeringState>()(
           const weightsByInstance: Record<string, number> = {};
           for (const [id, a] of Object.entries(allocByInstance)) weightsByInstance[id] = a.weight;
 
+          const budget: ClusterBudget = {
+            B: allocation.B,
+            B_dir: allocation.B_dir,
+            G: allocation.G,
+            flags: allocation.flags,
+            approximate: allocation.approximate,
+            weightsByInstance,
+            // Provenance for saved profiles (self-describing budgets, 014).
+            formula_id: allocation.formula_id,
+            constants: allocation.constants_used,
+            f_eff: allocation.f_eff,
+          };
           set({
-            clusterBudget: {
-              B: allocation.B,
-              B_dir: allocation.B_dir,
-              G: allocation.G,
-              flags: allocation.flags,
-              approximate: allocation.approximate,
-              weightsByInstance,
-              // Provenance for saved profiles (self-describing budgets, 014).
-              formula_id: allocation.formula_id,
-              constants: allocation.constants_used,
-              f_eff: allocation.f_eff,
-            },
+            clusterBudget: budget,
+            // 015: single layer mirrors the one budget into layerBudgets so the
+            // per-layer UI can render uniformly; clusterBudget stays populated
+            // so every existing consumer keeps working untouched.
+            layerBudgets: { [distinctLayers[0]]: budget },
+            hazards: null,
             clusterNotice: null,
             selectedFeatures: current.map((f) => {
               const a = allocByInstance[f.instance_id];
@@ -698,6 +801,57 @@ export const useSteeringStore = create<SteeringState>()(
             for (const f of features) {
               if (f.pinned) continue;
               const w = clusterBudget.weightsByInstance[f.instance_id] ?? 0;
+              const share = wsum > 0 ? w / wsum : 1 / unpinned.length;
+              const sign = f.strength < 0 ? -1 : 1;
+              f.strength = Math.round(sign * remaining * share * 10) / 10;
+            }
+          }
+        }
+        set({ selectedFeatures: features });
+      },
+
+      // Feature 015: budget-preserving strength edit scoped to ONE layer.
+      // Single-layer selections have no layerBudgets partition beyond the one
+      // mirrored budget → delegate to rebalanceStrength (byte-identical 013
+      // behavior). Multi-layer selections rebalance ONLY members on `layer`
+      // against that layer's budget; members on other layers are untouched.
+      rebalance: (layer: number, instanceId: string, newStrength: number) => {
+        const { layerBudgets, clusterBudget, selectedFeatures } = get();
+        const layerBudget = layerBudgets?.[layer] ?? null;
+
+        // Delegate to the 013 path when there is no per-layer partition or only
+        // the single mirrored budget governs — preserves the existing behavior.
+        if (!layerBudget || !layerBudgets || Object.keys(layerBudgets).length <= 1) {
+          if (clusterBudget) {
+            get().rebalanceStrength(instanceId, newStrength);
+          } else {
+            get().updateFeatureStrength(instanceId, newStrength);
+          }
+          return;
+        }
+
+        // Pin the edited member; redistribute this layer's remaining budget
+        // across the layer's unpinned members by renormalized layer weights.
+        const features = selectedFeatures.map((f) =>
+          f.instance_id === instanceId
+            ? { ...f, strength: newStrength, pinned: true, strengthSource: 'manual' as const }
+            : { ...f },
+        );
+        const onLayer = features.filter((f) => f.layer === layer);
+        const pinnedTotal = onLayer
+          .filter((f) => f.pinned)
+          .reduce((s, f) => s + Math.abs(f.strength), 0);
+        const remaining = layerBudget.B - pinnedTotal;
+        const unpinned = onLayer.filter((f) => !f.pinned);
+        if (unpinned.length > 0) {
+          if (remaining < 0) {
+            for (const f of features) if (f.layer === layer && !f.pinned) f.strength = 0;
+          } else {
+            const wsum = unpinned.reduce(
+              (s, f) => s + (layerBudget.weightsByInstance[f.instance_id] ?? 0), 0);
+            for (const f of features) {
+              if (f.layer !== layer || f.pinned) continue;
+              const w = layerBudget.weightsByInstance[f.instance_id] ?? 0;
               const share = wsum > 0 ? w / wsum : 1 / unpinned.length;
               const sign = f.strength < 0 ? -1 : 1;
               f.strength = Math.round(sign * remaining * share * 10) / 10;
@@ -751,6 +905,13 @@ export const useSteeringStore = create<SteeringState>()(
             feature_idx: m.feature_idx,
             feature_id: null, // DB feature id unknown from a portable profile
             layer,
+            // Feature 015: the member's own SAE. A per-member sae_id (multi-SAE
+            // circuit definition) wins; else the profile's bound SAE; else the
+            // panel's selected SAE (unbound profiles bind at load).
+            sae_id:
+              (m as { sae_id?: string | null }).sae_id
+              ?? profile.sae_id
+              ?? selectedSAE.id,
             // Profile strengths are EXPLICIT tuned values — auto-baselines
             // bypassed. Sign rule (contract-rev review): a negative strength
             // is already directional; a non-negative one takes its direction
@@ -799,6 +960,11 @@ export const useSteeringStore = create<SteeringState>()(
           set({
             selectedFeatures: features,
             clusterBudget,
+            // 015: profiles are single-layer (every member binds to selectedSAE's
+            // layer), so layerBudgets mirrors the single budget for the per-layer
+            // UI; clusterBudget stays populated for every existing consumer.
+            layerBudgets: clusterBudget ? { [layer]: clusterBudget } : null,
+            hazards: null,
             clusterNotice: null,
             // A cluster profile is a BLENDED artifact — loading one switches to
             // Blended mode (E2E finding: Compare default sent 19 sequential
@@ -865,11 +1031,15 @@ export const useSteeringStore = create<SteeringState>()(
           feature_id: feature.feature_id,
           max_activation: feature.max_activation ?? null,
           activation_frequency: feature.activation_frequency ?? null,
+          // Feature 015: the feature steers through the currently-selected SAE.
+          // An explicit sae_id on the input (e.g. a circuit member's own SAE)
+          // wins; otherwise the panel's selected SAE.
+          sae_id: feature.sae_id ?? get().selectedSAE?.id ?? undefined,
         };
 
         // Any selection mutation invalidates cluster provenance (Feature 012)
         // and the cluster budget computed for it (Feature 013).
-        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, activeProfile: null, clusterBudget: null, clusterNotice: null });
+        set({ selectedFeatures: [...selectedFeatures, newFeature], clusterContext: null, activeProfile: null, clusterBudget: null, layerBudgets: null, hazards: null, clusterNotice: null });
         return true;
       },
 
@@ -882,6 +1052,8 @@ export const useSteeringStore = create<SteeringState>()(
           clusterContext: null, // selection mutated (Feature 012)
           activeProfile: null,
           clusterBudget: null,
+          layerBudgets: null,
+          hazards: null,
           clusterNotice: null,
         }));
       },
@@ -932,7 +1104,7 @@ export const useSteeringStore = create<SteeringState>()(
           activation_frequency: original.activation_frequency ?? null,
         };
 
-        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, activeProfile: null, clusterBudget: null, clusterNotice: null });
+        set({ selectedFeatures: [...selectedFeatures, duplicatedFeature], clusterContext: null, activeProfile: null, clusterBudget: null, layerBudgets: null, hazards: null, clusterNotice: null });
         return true;
       },
 
@@ -995,6 +1167,8 @@ export const useSteeringStore = create<SteeringState>()(
         // applying one exits cluster mode (Feature 013, documented behavior).
         set((state) => ({
           clusterBudget: null,
+          layerBudgets: null,
+          hazards: null,
           clusterNotice: null,
           selectedFeatures: state.selectedFeatures.map((f) => ({
             ...f,
@@ -1018,7 +1192,7 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Clear all selected features
       clearFeatures: () => {
-        set({ selectedFeatures: [], clusterContext: null, activeProfile: null, clusterBudget: null, clusterNotice: null, currentComparison: null });
+        set({ selectedFeatures: [], clusterContext: null, activeProfile: null, clusterBudget: null, layerBudgets: null, hazards: null, clusterNotice: null, currentComparison: null });
       },
 
       // Reorder features (drag and drop)
@@ -1162,7 +1336,7 @@ export const useSteeringStore = create<SteeringState>()(
             prompt,
             // λ applies in Compare too — the dial governs the selection, not
             // just the Blended request path (013 review finding).
-            selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
+            selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget || !!get().layerBudgets),
             generation_params: generationParams,
             include_unsteered: includeUnsteered,
             compute_metrics: computeMetrics,
@@ -1519,7 +1693,7 @@ export const useSteeringStore = create<SteeringState>()(
               const combinedRequest: CombinedSteeringRequest = {
                 sae_id: selectedSAE.id,
                 prompt,
-                selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
+                selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget || !!get().layerBudgets),
                 generation_params: generationParams,
                 advanced_params: advancedParams ?? undefined,
                 include_baseline: includeUnsteered,
@@ -1544,7 +1718,7 @@ export const useSteeringStore = create<SteeringState>()(
                 sae_id: selectedSAE.id,
                 prompt,
                 // λ applies in batch Compare too (parity with Blended).
-                selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
+                selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget || !!get().layerBudgets),
                 generation_params: generationParams,
                 include_unsteered: includeUnsteered,
                 compute_metrics: computeMetrics,
@@ -1800,7 +1974,7 @@ export const useSteeringStore = create<SteeringState>()(
           const request: CombinedSteeringRequest = {
             sae_id: selectedSAE.id,
             prompt,
-            selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget),
+            selected_features: applyIntensity(selectedFeatures, get().intensity, !!get().clusterBudget || !!get().layerBudgets),
             generation_params: generationParams,
             advanced_params: advancedParams ?? undefined,
             include_baseline: includeBaseline,
@@ -1951,6 +2125,8 @@ export const useSteeringStore = create<SteeringState>()(
           clusterContext: null, // selection replaced wholesale (Feature 012)
           activeProfile: null,
           clusterBudget: null,
+          layerBudgets: null,
+          hazards: null,
           clusterNotice: null,
           combinedResults: null,
           combinedResultsTitle: null,
@@ -2021,6 +2197,8 @@ export const useSteeringStore = create<SteeringState>()(
             clusterContext: null,
             activeProfile: null,
             clusterBudget: null,
+            layerBudgets: null,
+            hazards: null,
             clusterNotice: null,
             intensity: 1,
             combinedResults: null,

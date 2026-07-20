@@ -30,6 +30,7 @@ import { PromptListEditor } from '../steering/PromptListEditor';
 import { COMPONENTS } from '../../config/brand';
 import { useSteeringWebSocket } from '../../hooks/useSteeringWebSocket';
 import { AppliedFeaturesSummary } from '../steering/AppliedFeaturesSummary';
+import { HazardBanner } from '../steering/HazardBanner';
 import type { SteeringProgressEvent, SteeringCompletedEvent, SteeringFailedEvent } from '../../hooks/useSteeringWebSocket';
 
 export function SteeringPanel() {
@@ -87,9 +88,13 @@ export function SteeringPanel() {
     clearCombinedResults,
     clusterContext,
     clusterBudget,
+    layerBudgets,
     intensity,
     setIntensity,
   } = useSteeringStore();
+  // Feature 015: the λ dial governs the whole cluster whenever a budget is in
+  // effect — the single 013 budget OR a per-layer (multi-layer) budget map.
+  const budgetGoverns = !!clusterBudget || !!layerBudgets;
 
   const { saes, fetchSAEs } = useSAEsStore();
   const { templates, fetchTemplates, createTemplate } = usePromptTemplatesStore();
@@ -533,6 +538,9 @@ export function SteeringPanel() {
                   onFetchTemplates={fetchTemplates}
                   disabled={isGenerating}
                 />
+                {/* Cross-layer hazard banner (Feature 015): amber warning above
+                    the Generate button. Warnings only — never mutate the config. */}
+                <HazardBanner />
                 <div className="flex items-center justify-between mt-3">
                   <div className="flex items-center gap-4">
                     <div className="text-sm text-slate-500">
@@ -607,9 +615,10 @@ export function SteeringPanel() {
                         </div>
                       );
                     })()}
-                    {/* Cluster intensity dial (Feature 013): scales the whole
-                        cluster at request time; λ=0 previews unsteered. */}
-                    {clusterBudget && (
+                    {/* Cluster intensity dial (Feature 013 + 015): scales the whole
+                        cluster at request time; λ=0 previews unsteered. Applies to
+                        all layers in a multi-layer selection (015). */}
+                    {budgetGoverns && (
                       <label
                         className="flex items-center gap-2 text-xs text-slate-400 select-none"
                         title="Scales every member strength at generation time (tiles show unscaled values)"

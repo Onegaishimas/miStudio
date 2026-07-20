@@ -168,7 +168,14 @@ export function SelectedFeatureCard({
           <Hash className="w-3 h-3" />
           {feature.feature_idx}
         </span>
-        <span className="flex items-center gap-0.5 text-slate-500 text-xs shrink-0">
+        <span
+          className="flex items-center gap-0.5 text-slate-500 text-xs shrink-0"
+          title={
+            feature.sae_id
+              ? `Layer ${feature.layer} · steered through SAE ${feature.sae_id}`
+              : `Layer ${feature.layer}`
+          }
+        >
           <Layers className="w-3 h-3" />
           L{feature.layer}
         </span>
