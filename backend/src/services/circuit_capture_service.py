@@ -329,12 +329,15 @@ class CircuitCaptureService:
                 db.commit()
                 return {"status": "estimated", "estimate": estimate}
 
-            run.status = "running"
-            db.commit()
-
             # ── full capture ─────────────────────────────────────────────
             store_dir = captures_dir() / run.id
             store_dir.mkdir(parents=True, exist_ok=True)
+            # Persist store_path NOW, not at success (R3 B-R3-1): if the worker
+            # is OOM-killed mid-capture, cleanup_stuck_circuit_runs can still
+            # rmtree the orphaned partial store (its guard is `if store_path`).
+            run.status = "running"
+            run.store_path = str(store_dir)
+            db.commit()
             # Store-size guardrail (R1 QA-P1): abort if the true event rate
             # blows past the probe estimate, or the volume runs low on space.
             if shutil.disk_usage(store_dir).free < MIN_FREE_DISK_BYTES:
