@@ -270,11 +270,19 @@ class CorrelatedFeature(BaseModel):
 
 
 class CorrelationsResponse(BaseModel):
-    """Response schema for feature correlations analysis."""
+    """Response schema for feature correlations analysis.
+
+    NOTE (017 remediation): correlations are computed over a DETERMINISTIC
+    subsample (`sampled=true` when the training has more features than
+    `sample_size`), not the full feature set — disclosed so results are
+    understood as a bounded, reproducible sample rather than exhaustive.
+    """
     model_config = ConfigDict(from_attributes=True)
 
     correlated_features: List[CorrelatedFeature]
     computed_at: datetime
+    sampled: bool = False
+    sample_size: Optional[int] = None
 
 
 class AblationResponse(BaseModel):

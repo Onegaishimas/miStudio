@@ -48,3 +48,36 @@ def validate_circuit_edges(self, run_id: str, scope: Dict[str, Any]) -> Dict[str
                 db.commit()
             emit_circuit_run_failed("validation", run_id, str(e)[:500])
             raise
+
+
+@celery_app.task(bind=True, base=DatabaseTask,
+                 name="src.workers.circuit_validation_tasks.run_circuit_faithfulness",
+                 max_retries=0)
+def run_circuit_faithfulness(self, circuit_id: str,
+                             config: Dict[str, Any]) -> Dict[str, Any]:
+    """Faithfulness (rung 3) runs on a CIRCUIT, not a discovery run — its own
+    lifecycle: the result + a `faithfulness` manifest are the record (no
+    discovery-run status columns), and circuit.faithfulness is written through
+    the contract. WS on the "faithfulness" channel (run_id = circuit_id). The
+    single-GPU guard is asserted at the endpoint (advisory lock) before dispatch.
+    """
+    from ..services.circuit_faithfulness_service import (
+        CircuitFaithfulnessService, _FaithfulnessCancelled)
+
+    with self.get_db() as db:
+        try:
+            result = CircuitFaithfulnessService.run(
+                db, circuit_id, config,
+                cancel_check=None,
+                progress_cb=lambda pct: emit_circuit_run_progress(
+                    "faithfulness", circuit_id, pct))
+            emit_circuit_run_completed("faithfulness", circuit_id,
+                                       summary=result)
+            return result
+        except _FaithfulnessCancelled:
+            emit_circuit_run_failed("faithfulness", circuit_id, "cancelled")
+            return {"status": "cancelled", "circuit_id": circuit_id}
+        except Exception as e:
+            logger.exception("Circuit faithfulness %s failed", circuit_id)
+            emit_circuit_run_failed("faithfulness", circuit_id, str(e)[:500])
+            raise

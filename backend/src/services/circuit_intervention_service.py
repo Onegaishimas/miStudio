@@ -213,16 +213,39 @@ class CircuitInterventionService:
                 CircuitInterventionService._write_back(
                     run, edge_results, scope["ordering"],
                     manifest_row_id=manifest_row)
+                # AND propagate rung-2 ES onto any PROMOTED circuit built from
+                # this discovery run (R1 A1/#2) — this is what 015 reads for
+                # hazard quantification. The discovery candidates are ephemeral;
+                # the promoted circuit's edges are the durable record.
+                CircuitInterventionService._write_promoted_circuit_edges(
+                    db, run_id, edge_results, manifest_row)
+
+            # Last-writer race: a cancel that landed during the pass must not be
+            # clobbered by 'completed' (R1 #9).
+            db.refresh(run)
+            if run.validation_status == "cancelled":
+                return {"status": "cancelled"}
 
             run.validation_status = "completed"
             run.validation_progress = 100.0
-            run.report = {**(run.report or {}),
-                          "validation": {
-                              "ordering": scope["ordering"], "k": scope["k"],
-                              "survival": survival,
-                              "passed": len(survived),
-                              "manifest_id": manifest_row,
-                              "wall_clock_seconds": round(time.monotonic() - t0, 1)}}
+            if not reproduce_of:
+                # Store survival PER ORDERING so a second-ordering run doesn't
+                # overwrite the first, and compute UPLIFT when both exist (P2 —
+                # 016's whole point: did attribution re-ranking earn its keep?).
+                prev = dict((run.report or {}).get("validation") or {})
+                by_ordering = dict(prev.get("by_ordering") or {})
+                by_ordering[scope["ordering"]] = {
+                    "survival": survival, "passed": len(survived),
+                    "k": scope["k"], "manifest_id": manifest_row}
+                uplift = vmath.uplift(
+                    (by_ordering.get("attr") or {}).get("survival"),
+                    (by_ordering.get("coact") or {}).get("survival"))
+                run.report = {**(run.report or {}), "validation": {
+                    "ordering": scope["ordering"], "k": scope["k"],
+                    "survival": survival, "passed": len(survived),
+                    "manifest_id": manifest_row,
+                    "by_ordering": by_ordering, "uplift": uplift,
+                    "wall_clock_seconds": round(time.monotonic() - t0, 1)}}
             db.commit()
             return {"status": "completed", "validated": len(edge_results),
                     "passed": len(survived), "survival": survival,
@@ -364,11 +387,27 @@ class CircuitInterventionService:
         import torch
 
         rng = np.random.default_rng(scope["seed"] + 7919)
-        candidates = [f for f in up_reader.feature_ids if f != exclude]
-        if not candidates:
+        # ACTUAL support-matching (R1 #5): the null must be non-edges with
+        # SIMILAR support to `exclude` — a random tiny-support u' yields ~0 Δ
+        # and deflates the threshold, letting real edges pass too easily. Band
+        # to within 2× of the excluded feature's support; widen if too few.
+        target_support = len(up_reader.feature_events(exclude))
+        all_others = [f for f in up_reader.feature_ids if f != exclude]
+        if not all_others:
             return []
-        picks = rng.choice(candidates,
-                           size=min(scope["null_samples"], len(candidates)),
+
+        def _supp(f):
+            return len(up_reader.feature_events(int(f)))
+
+        band = [f for f in all_others
+                if 0.5 * target_support <= _supp(f) <= 2.0 * target_support]
+        # widen to nearest-by-support if the band is too small for a real null
+        pool = band if len(band) >= scope["null_samples"] else sorted(
+            all_others, key=lambda f: abs(_supp(f) - target_support)
+        )[:max(scope["null_samples"] * 3, len(band))]
+        if not pool:
+            return []
+        picks = rng.choice(pool, size=min(scope["null_samples"], len(pool)),
                            replace=False)
         up_module = get_hookable_module(structure.layers_module[up_L],
                                         "residual", structure)
@@ -408,10 +447,76 @@ class CircuitInterventionService:
 
     @staticmethod
     def _empty_result(up, down, reason):
+        # Include EVERY key a full result has (R1 #4): the manifest UI does
+        # e.null_percentile_value.toFixed(...) and reads sigma_d, so a missing
+        # key crashes the whole drawer.
         return {"up": up, "down": down, "effect_size": 0.0,
-                "sign_consistency": 0.0, "n_prompts": 0,
+                "sign_consistency": 0.0, "sigma_d": 0.0,
+                "null_percentile_value": 0.0, "n_prompts": 0,
                 "verdict": {"passed": False, "reason": reason},
                 "rung": None, "tested_and_failed": True}
+
+    @staticmethod
+    def _write_promoted_circuit_edges(db, run_id, edge_results, manifest_id):
+        """Propagate rung-2 validation onto PROMOTED circuits built from this
+        discovery run (R1 A1) — the durable, 015-readable record. Routes
+        through the contract (validate + rung recompute + version bump) exactly
+        like CircuitService.write_edge_validation, but sync (worker context).
+        Never raw JSONB mutation (018 R2-A5)."""
+        from ..models.circuit import Circuit
+        from ..schemas.circuit_definition import CircuitDefinitionV1
+
+        updates = {}
+        for r in edge_results:
+            up, down = r["up"], r["down"]
+            key = (up.get("layer"), up.get("feature_idx"),
+                   down.get("layer"), down.get("feature_idx"))
+            if r["rung"] == 2:
+                updates[key] = {"rung": 2, "effect_size": r["effect_size"],
+                                "validation_manifest_ref": manifest_id}
+            elif r["tested_and_failed"]:
+                # history, never a demotion (018 ladder)
+                updates[key] = {"validation_manifest_ref": manifest_id,
+                                "_tested_and_failed": r["verdict"]["reason"]}
+        if not updates:
+            return
+        circuits = db.query(Circuit).filter(
+            Circuit.discovery_run_id == run_id,
+            Circuit.promoted == True).all()  # noqa: E712
+        for circuit in circuits:
+            edges = [dict(e) for e in (circuit.edges or [])]
+            changed = False
+            for e in edges:
+                up, down = e.get("up", {}), e.get("down", {})
+                k = (up.get("layer"), up.get("feature_idx"),
+                     down.get("layer"), down.get("feature_idx"))
+                if k in updates:
+                    upd = dict(updates[k])
+                    failed = upd.pop("_tested_and_failed", None)
+                    if failed is not None:
+                        hist = list(e.get("tested_and_failed") or [])
+                        # record the rung it was tested at (2) as history
+                        hist.append(2)
+                        e["tested_and_failed"] = hist
+                    e.update(upd)
+                    changed = True
+            if not changed:
+                continue
+            # round-trip through the contract so validators + rung recompute run
+            try:
+                defn = CircuitDefinitionV1(
+                    name=circuit.name, narrative=circuit.narrative,
+                    saes=circuit.saes, members=circuit.members, edges=edges,
+                    budget=circuit.budget, faithfulness=circuit.faithfulness)
+            except Exception:
+                logger.exception(
+                    "Validation write-back produced an invalid circuit %s — "
+                    "skipping edge propagation", circuit.id)
+                continue
+            circuit.edges = [e.model_dump(mode="json") for e in defn.edges]
+            circuit.rung = int(defn.displayed_rung())
+            circuit.version = (circuit.version or 1) + 1
+        db.commit()
 
     @staticmethod
     def _persist_manifest(db, run_id, payload) -> str:

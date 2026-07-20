@@ -104,6 +104,15 @@ class CircuitCaptureService:
             raise CaptureConflictError(
                 f"Attribution pass on {attr.id} is {attr.attribution_status} — "
                 f"one GPU circuit task runs at a time; wait or cancel it first")
+        # Validation is a GPU task too (R1 #7/Q1 — the guard missed it, so a
+        # capture/attribution could run concurrently with a validation pass).
+        val = db.query(CircuitDiscoveryRun).filter(
+            CircuitDiscoveryRun.validation_status.in_(
+                ("pending", "running"))).first()
+        if val is not None:
+            raise CaptureConflictError(
+                f"Validation pass on {val.id} is {val.validation_status} — "
+                f"one GPU circuit task runs at a time; wait or cancel it first")
 
     # ── run creation / validation (called from the endpoint) ─────────────
 

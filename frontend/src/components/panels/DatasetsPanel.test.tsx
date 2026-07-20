@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+// Component tree uses useWebSocketContext() via WebSocket hooks, so it must be
+// wrapped in <WebSocketProvider>. renderWithProviders does that.
+import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { DatasetsPanel } from './DatasetsPanel';
 import { useDatasetsStore } from '../../stores/datasetsStore';
 import { DatasetStatus } from '../../types/dataset';
@@ -347,14 +350,15 @@ describe('DatasetsPanel', () => {
       // Modal should not be present initially
       expect(screen.queryByTestId('detail-modal')).not.toBeInTheDocument();
 
+      // The panel sorts active (downloading/processing) datasets first, so the
+      // first card is Test Dataset 2 (DOWNLOADING), not Test Dataset 1.
       const viewButton = screen.getAllByText('View')[0];
       fireEvent.click(viewButton);
 
       await waitFor(() => {
         const modal = screen.getByTestId('detail-modal');
         expect(modal).toBeInTheDocument();
-        // Check the modal contains the dataset name
-        expect(modal).toHaveTextContent('Test Dataset 1');
+        expect(modal).toHaveTextContent('Test Dataset 2');
       });
     });
 
@@ -381,15 +385,15 @@ describe('DatasetsPanel', () => {
     it('should open modal with correct dataset data', async () => {
       render(<DatasetsPanel />);
 
-      // Click second dataset
+      // Second card in sorted order is Test Dataset 1 (READY sorts after the
+      // active DOWNLOADING dataset).
       const viewButtons = screen.getAllByText('View');
       fireEvent.click(viewButtons[1]);
 
       await waitFor(() => {
         const modal = screen.getByTestId('detail-modal');
         expect(modal).toBeInTheDocument();
-        // Check the modal contains the second dataset name
-        expect(modal).toHaveTextContent('Test Dataset 2');
+        expect(modal).toHaveTextContent('Test Dataset 1');
       });
     });
 
@@ -402,7 +406,8 @@ describe('DatasetsPanel', () => {
       fireEvent.click(deleteButtons[0]);
 
       await waitFor(() => {
-        expect(mockDeleteDataset).toHaveBeenCalledWith('dataset-1');
+        // First card in sorted order is the active DOWNLOADING dataset-2.
+        expect(mockDeleteDataset).toHaveBeenCalledWith('dataset-2');
       });
     });
 

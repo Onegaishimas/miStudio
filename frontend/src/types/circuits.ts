@@ -285,11 +285,17 @@ export interface ValidationManifest {
     edges?: ValidationEdge[];
     survival?: number | null;
     null_summary?: { samples?: number; percentile?: number; kind?: string };
-    // reproduction manifests carry a tolerance verdict.
-    within_tolerance?: boolean;
-    max_delta?: number;
-    tolerance?: number;
-    deltas?: { edge: unknown; delta: number }[];
+    // reproduction manifests carry the verdict NESTED under `verdict` (R1 #3)
+    // and the re-executed edges under `reproduced_edges`.
+    reproduce_of?: string;
+    reproduced_edges?: ValidationEdge[];
+    verdict?: {
+      within_tolerance: boolean | null;
+      max_delta?: number | null;
+      tolerance?: number;
+      reason?: string;
+      deltas?: { edge: unknown; delta: number }[];
+    };
     [k: string]: unknown;
   };
   created_at: string;

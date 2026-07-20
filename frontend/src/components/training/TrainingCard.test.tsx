@@ -147,9 +147,9 @@ describe('TrainingCard', () => {
 
       expect(screen.getByText('GPT-2 Small')).toBeInTheDocument();
       expect(screen.getByText('TinyStories')).toBeInTheDocument();
+      // Progress is shown as a percentage next to the progress bar (the
+      // redesigned card no longer renders a "Training Progress" label).
       expect(screen.getByText('50.0%')).toBeInTheDocument();
-      // Check for progress display elements
-      expect(screen.getByText('Training Progress')).toBeInTheDocument();
     });
 
     it('should display training ID', () => {
@@ -322,7 +322,6 @@ describe('TrainingCard', () => {
 
       // Check that progress percentage is displayed
       expect(screen.getByText('50.0%')).toBeInTheDocument();
-      expect(screen.getByText('Training Progress')).toBeInTheDocument();
     });
 
     it('should display metrics when progress > 10%', () => {
@@ -336,13 +335,13 @@ describe('TrainingCard', () => {
         />
       );
 
-      // Loss: 0.123 → formatted as "0.1230" with toFixed(4)
-      expect(screen.getByText('0.1230')).toBeInTheDocument();
+      // Loss: 0.123 → formatted as "0.123000" with toFixed(6)
+      expect(screen.getByText('0.123000')).toBeInTheDocument();
       // L0 Sparsity: 0.045 * 8192 = ~369 (absolute count via formatL0Absolute)
       expect(screen.getByText('~369')).toBeInTheDocument();
-      // Check metric labels
+      // Check inline metric labels (redesigned card uses short labels).
       expect(screen.getByText('Loss')).toBeInTheDocument();
-      expect(screen.getByText('L0 Sparsity')).toBeInTheDocument();
+      expect(screen.getByText('L0')).toBeInTheDocument();
     });
 
     it('should not display metrics when progress <= 10%', () => {
@@ -694,8 +693,10 @@ describe('TrainingCard', () => {
         />
       );
 
-      // Component shows "Started:" not "Created:"
-      expect(screen.getByText(/Started:/)).toBeInTheDocument();
+      // The redesigned header shows the started time via toLocaleTimeString()
+      // (no "Started:" label). Assert the formatted time is rendered.
+      const expectedTime = new Date('2025-01-20T10:00:00Z').toLocaleTimeString();
+      expect(screen.getByText(expectedTime)).toBeInTheDocument();
     });
 
     it('should display completion time for completed trainings', () => {
@@ -714,7 +715,9 @@ describe('TrainingCard', () => {
         />
       );
 
-      expect(screen.getByText(/Completed:/)).toBeInTheDocument();
+      // For completed trainings the header renders the derived duration
+      // (start→completed) rather than a "Completed:" label. 10:00→11:00 = 1h.
+      expect(screen.getByText(/1h 0m/)).toBeInTheDocument();
     });
 
     it('should calculate and display duration for completed trainings', () => {
@@ -733,9 +736,7 @@ describe('TrainingCard', () => {
         />
       );
 
-      // Duration should be displayed
-      expect(screen.getByText(/Duration:/)).toBeInTheDocument();
-      // Check for duration format (1h 30m)
+      // Duration is rendered in the header without a "Duration:" label.
       expect(screen.getByText(/1h 30m/)).toBeInTheDocument();
     });
   });
@@ -835,7 +836,6 @@ describe('TrainingCard', () => {
 
       // Component should still render without errors
       expect(screen.getByText('50.0%')).toBeInTheDocument();
-      expect(screen.getByText('Training Progress')).toBeInTheDocument();
     });
 
     it('should handle training with 0% progress', () => {
@@ -854,7 +854,6 @@ describe('TrainingCard', () => {
       );
 
       expect(screen.getByText('0.0%')).toBeInTheDocument();
-      expect(screen.getByText('Training Progress')).toBeInTheDocument();
     });
 
     it('should handle training with 100% progress', () => {
@@ -874,8 +873,6 @@ describe('TrainingCard', () => {
       );
 
       expect(screen.getByText('100.0%')).toBeInTheDocument();
-      // Component doesn't display "X / Y" format for steps
-      expect(screen.getByText('Training Progress')).toBeInTheDocument();
     });
 
     it('should handle empty models and datasets arrays', () => {

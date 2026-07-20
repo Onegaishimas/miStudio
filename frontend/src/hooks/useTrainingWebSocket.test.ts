@@ -28,11 +28,22 @@ vi.mock('../contexts/WebSocketContext', () => ({
 
 // Mock trainingsStore
 const mockUpdateTrainingStatus = vi.fn();
+const mockAddCheckpoint = vi.fn();
 
+// The hook consumes the store via selectors:
+//   useTrainingsStore((state) => state.updateTrainingStatus)
+//   useTrainingsStore((state) => state.addCheckpoint)
+// so the mock must honor the selector and expose the full surface it reads.
 vi.mock('../stores/trainingsStore', () => ({
-  useTrainingsStore: () => ({
-    updateTrainingStatus: mockUpdateTrainingStatus,
-  }),
+  // Build the state lazily inside the hook so the mock fns (declared below)
+  // are initialized by the time the selector runs.
+  useTrainingsStore: (selector?: (state: any) => unknown) => {
+    const storeState = {
+      updateTrainingStatus: mockUpdateTrainingStatus,
+      addCheckpoint: mockAddCheckpoint,
+    };
+    return selector ? selector(storeState) : storeState;
+  },
 }));
 
 describe('useTrainingWebSocket', () => {

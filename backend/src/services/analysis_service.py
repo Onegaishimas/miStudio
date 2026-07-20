@@ -427,15 +427,19 @@ class AnalysisService:
 
             logger.info(f"Current feature: {len(current_tokens)} tokens, freq={current_freq:.3f}, mean={current_mean:.3f}, max={current_max:.3f}")
 
-            # Load other features from the same training
-            # Sample up to 2000 for efficiency
+            # Load other features from the same training.
+            # DETERMINISTIC sample (R1 #12): the old `ORDER BY func.random()`
+            # gave a different subset on every call — non-reproducible "related
+            # features", frozen arbitrarily by the 7-day cache. Order by a
+            # stable key so the same query always samples the same features;
+            # `sampled` is disclosed in the response.
             sample_size = 2000
             features_stmt = select(Feature).where(
                 and_(
                     Feature.training_id == feature.training_id,
                     Feature.id != feature_id
                 )
-            ).order_by(func.random()).limit(sample_size)
+            ).order_by(Feature.id).limit(sample_size)
 
             if isinstance(self.db, AsyncSession):
                 result = await self.db.execute(features_stmt)
@@ -539,7 +543,9 @@ class AnalysisService:
 
             return CorrelationsResponse(
                 correlated_features=correlated_features,
-                computed_at=computed_at
+                computed_at=computed_at,
+                sampled=len(other_features) >= sample_size,
+                sample_size=sample_size,
             )
 
         except Exception as e:

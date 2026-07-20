@@ -98,8 +98,8 @@ describe('DatasetCard', () => {
       const dataset = createMockDataset();
       const { container } = render(<DatasetCard dataset={dataset} />);
 
-      // Check for the main Database icon (the large one)
-      const databaseIcon = container.querySelector('svg[class*="w-8 h-8"]');
+      // Check for the main Database icon (rendered at w-6 h-6).
+      const databaseIcon = container.querySelector('svg[class*="w-6 h-6"]');
       expect(databaseIcon).toBeInTheDocument();
     });
   });
@@ -129,28 +129,32 @@ describe('DatasetCard', () => {
       expect(mockOnClick).not.toHaveBeenCalled();
     });
 
-    it('should not be clickable when status is processing', () => {
+    it('should be clickable when status is processing', () => {
+      // Processing datasets are now openable (to view tokenization progress),
+      // so the card is clickable (isClickable includes 'processing').
       const dataset = createMockDataset({ status: DatasetStatus.PROCESSING });
       const mockOnClick = vi.fn();
       const { container } = render(<DatasetCard dataset={dataset} onClick={mockOnClick} />);
 
       const card = container.firstChild as HTMLElement;
-      expect(card.className).toContain('cursor-default');
+      expect(card.className).toContain('cursor-pointer');
 
       fireEvent.click(card);
-      expect(mockOnClick).not.toHaveBeenCalled();
+      expect(mockOnClick).toHaveBeenCalledTimes(1);
     });
 
-    it('should not be clickable when status is error', () => {
+    it('should be clickable when status is error', () => {
+      // Error datasets are now openable (to inspect the failure), so the card
+      // is clickable (isClickable includes 'error').
       const dataset = createMockDataset({ status: DatasetStatus.ERROR });
       const mockOnClick = vi.fn();
       const { container } = render(<DatasetCard dataset={dataset} onClick={mockOnClick} />);
 
       const card = container.firstChild as HTMLElement;
-      expect(card.className).toContain('cursor-default');
+      expect(card.className).toContain('cursor-pointer');
 
       fireEvent.click(card);
-      expect(mockOnClick).not.toHaveBeenCalled();
+      expect(mockOnClick).toHaveBeenCalledTimes(1);
     });
   });
 

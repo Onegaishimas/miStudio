@@ -404,7 +404,9 @@ describe('ModelCard', () => {
       const deleteButton = screen.getByTitle('Delete model');
       fireEvent.click(deleteButton);
 
-      expect(confirmSpy).toHaveBeenCalledWith('Are you sure you want to delete TinyLlama-1.1B?');
+      expect(confirmSpy).toHaveBeenCalledWith(
+        'Are you sure you want to delete TinyLlama-1.1B? This will also delete all associated extractions.'
+      );
       expect(mockOnDelete).toHaveBeenCalledWith('m_test123');
 
       confirmSpy.mockRestore();
