@@ -113,3 +113,28 @@ class TestAttnSidecar:
     def test_disabled_by_default(self, store):
         _, _, at = open_writers(store, 12)
         assert at is None
+
+
+class TestSizeGuardrail:
+    """R2 T2: the store-size abort math (R1 QA-P1) is now unit-testable
+    without a GPU."""
+
+    def test_exceeds_ceiling(self):
+        from src.services.circuit_capture_service import (
+            EVENT_BYTES, STORE_SIZE_MULTIPLIER, exceeds_size_ceiling,
+            size_ceiling_bytes)
+        est = 10_000_000  # big enough estimate that the 64MB floor doesn't apply
+        ceiling = size_ceiling_bytes(est)
+        assert ceiling == est * EVENT_BYTES * STORE_SIZE_MULTIPLIER
+        under = int(ceiling / EVENT_BYTES) - 1
+        over = int(ceiling / EVENT_BYTES) + 1000
+        assert not exceeds_size_ceiling(under, est)
+        assert exceeds_size_ceiling(over, est)
+
+    def test_floor_protects_small_captures(self):
+        from src.services.circuit_capture_service import (
+            EVENT_BYTES, exceeds_size_ceiling, size_ceiling_bytes)
+        # Tiny estimate → 64 MB floor, not 5×tiny.
+        assert size_ceiling_bytes(10) == 64 * 2**20
+        # A modest real capture under the floor is NOT aborted.
+        assert not exceeds_size_ceiling(1_000_000, 10)

@@ -726,7 +726,7 @@ function nodeLabel(n: DiscoveryCandidate['up']): string {
   return `L${n.layer}:f${n.feature_idx}`;
 }
 
-function RunReportCard({ report }: { report: DiscoveryReport }) {
+export function RunReportCard({ report }: { report: DiscoveryReport }) {
   const caps = report.caps;
   const capWarn = caps?.candidates_truncated
     || (caps?.unit_cap_hit_layers?.length ?? 0) > 0
@@ -754,7 +754,14 @@ function RunReportCard({ report }: { report: DiscoveryReport }) {
 
       <div className="text-xs text-slate-400 grid grid-cols-2 gap-x-4 gap-y-1">
         <span>null: {report.null_summary.method} ({report.null_summary.shuffles}× · p{report.null_summary.percentile})</span>
-        <span>FDR: {report.fdr.discipline} · q={report.fdr.q} · {report.fdr.passed}/{report.fdr.tested} passed</span>
+        <span>
+          FDR: {report.fdr.discipline} · q={report.fdr.q} · {report.fdr.passed}/{report.fdr.tested} passed
+          {report.fdr.p_resolution != null && (
+            <span className="text-slate-500" title="Finest achievable p-value (pooled-standardized null); FDR can only pass edges above this floor.">
+              {' '}· p-res {report.fdr.p_resolution.toExponential(1)}
+            </span>
+          )}
+        </span>
       </div>
 
       <div>
@@ -810,9 +817,14 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
 
   useEffect(() => { load(); }, [load]);
 
-  // Light poll while the run (or an attribution pass) is active.
+  // Light poll while the run OR its attribution pass is active (R2 B3 —
+  // discovery status stays 'completed' during attribution, so we must also
+  // watch attribution_status or the pass's progress never refreshes).
   useEffect(() => {
-    if (!run || !isActive(run.status)) return;
+    if (!run) return;
+    const active = isActive(run.status)
+      || (run.attribution_status != null && isActive(run.attribution_status));
+    if (!active) return;
     const t = setInterval(load, 2500);
     return () => clearInterval(t);
   }, [run, load]);
@@ -826,10 +838,30 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
       .finally(() => setAttrBusy(false));
   };
 
+  const cancelAttribution = () => {
+    if (!run) return;
+    circuitsApi.cancelAttribution(run.id)
+      .then(() => load())
+      .catch((e) => setError(String(e.message ?? e)));
+  };
+
+  const attrActive = run?.attribution_status != null
+    && ['pending', 'running'].includes(run.attribution_status);
+
   if (error && !run) return <p className="text-xs text-red-300 mt-2">{error}</p>;
   if (!run) return <p className="text-xs text-slate-500 mt-2">Loading report…</p>;
 
-  const candidates = run.candidates ?? [];
+  // After attribution, re-order by attr_rank so the re-ranking is VISIBLE
+  // (US-5); before, keep the persisted co-activation order.
+  const attributed = run.attribution_status === 'completed';
+  const candidates = (run.candidates ?? []).slice().sort((a, b) => {
+    if (!attributed) return (a.orderings?.coact_rank ?? 0) - (b.orderings?.coact_rank ?? 0);
+    const ar = a.orderings?.attr_rank, br = b.orderings?.attr_rank;
+    if (ar == null && br == null) return 0;
+    if (ar == null) return 1;  // unattributed (e.g. deleted profile) sort last
+    if (br == null) return -1;
+    return ar - br;
+  });
 
   return (
     <div className="mt-3 border-t border-slate-700/60 pt-3 space-y-3">
@@ -838,13 +870,41 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
       {run.report && <RunReportCard report={run.report} />}
 
       {run.status === 'completed' && (
-        <button
-          onClick={startAttribution}
-          disabled={attrBusy}
-          className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-100 disabled:opacity-50"
-        >
-          <RotateCcw className="w-3.5 h-3.5" /> Run attribution pass
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={startAttribution}
+            disabled={attrBusy || attrActive}
+            className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-100 disabled:opacity-50"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            {run.attribution_status === 'completed' ? 'Re-run attribution pass'
+              : 'Run attribution pass'}
+          </button>
+          {/* Attribution's own lifecycle, distinct from the discovery status (R2 B3/B4) */}
+          {attrActive && (
+            <span className="flex items-center gap-2 text-[11px] text-violet-300">
+              attribution {run.attribution_status}
+              {run.attribution_progress != null
+                && ` · ${Math.round(run.attribution_progress)}%`}
+              <button onClick={cancelAttribution}
+                className="rounded bg-slate-700 hover:bg-slate-600 px-2 py-0.5 text-slate-200">
+                cancel
+              </button>
+            </span>
+          )}
+          {run.attribution_status === 'completed' && (
+            <span className="text-[11px] text-emerald-300">attribution complete</span>
+          )}
+          {run.attribution_status === 'failed' && (
+            <span className="text-[11px] text-red-300"
+              title={run.attribution_error ?? undefined}>
+              attribution failed{run.attribution_error ? ` — ${run.attribution_error}` : ''}
+            </span>
+          )}
+          {run.attribution_status === 'cancelled' && (
+            <span className="text-[11px] text-slate-400">attribution cancelled</span>
+          )}
+        </div>
       )}
 
       {candidates.length > 0 ? (
@@ -858,6 +918,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
                 <th className="py-1 pr-3 font-medium">null %</th>
                 <th className="py-1 pr-3 font-medium">repl.</th>
                 <th className="py-1 pr-3 font-medium">attribution</th>
+                {attributed && <th className="py-1 pr-3 font-medium" title="co-activation rank → attribution rank">rank Δ</th>}
               </tr>
             </thead>
             <tbody>
@@ -882,6 +943,13 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
                       </span>
                     ) : '—'}
                   </td>
+                  {attributed && (
+                    <td className="py-1 pr-3 font-mono text-slate-400">
+                      {c.orderings?.coact_rank != null && c.orderings?.attr_rank != null
+                        ? `${c.orderings.coact_rank + 1}→${c.orderings.attr_rank + 1}`
+                        : '—'}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

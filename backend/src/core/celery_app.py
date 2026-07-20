@@ -253,6 +253,16 @@ celery_app.conf.update(
                 "queue": "low_priority",
             },
         },
+        # Cleanup stuck circuit runs (Feature 016, R2 Q3): a died capture
+        # leaves 'running' and would lock out every future capture via the
+        # single-GPU guard. Runs every 10 minutes.
+        "cleanup-stuck-circuit-runs": {
+            "task": "cleanup_stuck_circuit_runs",
+            "schedule": 600.0,
+            "options": {
+                "queue": "low_priority",
+            },
+        },
         # Cleanup stuck training jobs - runs every 10 minutes
         "cleanup-stuck-trainings": {
             "task": "cleanup_stuck_trainings",
@@ -349,6 +359,7 @@ celery_app.autodiscover_tasks(
         "src.workers.steering_tasks",  # Steering operations in dedicated GPU worker
         "src.workers.enhanced_labeling_tasks",  # Enhanced per-feature two-pass labeling
         "src.workers.circuit_capture_tasks",  # Circuit capture/discovery/attribution (Feature 016)
+        "src.workers.cleanup_stuck_circuit_runs",  # Reclaim stuck circuit runs (Feature 016)
     ],
     force=True,
 )

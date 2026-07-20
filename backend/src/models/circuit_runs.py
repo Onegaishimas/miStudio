@@ -90,6 +90,9 @@ class CircuitDiscoveryRun(Base):
     # pending | running | completed | failed | cancelled
     attribution_progress = Column(Float, nullable=True)
     attribution_error = Column(Text, nullable=True)
+    # Attribution's OWN task id — the discovery task id must stay revocable
+    # separately (R2 A3: one shared celery_task_id revoked the wrong task).
+    attribution_task_id = Column(String(155), nullable=True)
 
     celery_task_id = Column(String(155), nullable=True)
 

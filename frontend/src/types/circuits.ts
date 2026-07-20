@@ -173,6 +173,7 @@ export interface DiscoveryReport {
   fdr: {
     discipline: string;
     p_source: string;
+    p_resolution?: number;
     q: number;
     tested: number;
     passed: number;
@@ -207,6 +208,11 @@ export interface DiscoveryRun {
   report: DiscoveryReport | null;
   candidate_count: number;
   candidates?: DiscoveryCandidate[];
+  // Attribution's own lifecycle (R2 B4) — the discovery status stays
+  // 'completed' regardless of the attribution pass's outcome.
+  attribution_status?: string | null;
+  attribution_progress?: number | null;
+  attribution_error?: string | null;
   created_at: string;
   updated_at: string;
 }

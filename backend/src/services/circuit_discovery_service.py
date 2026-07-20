@@ -148,7 +148,7 @@ class CircuitDiscoveryService:
                 # the OPEN pool by support; seeds are the point of the run.
                 seed_feature_ids = {
                     int(r["feature_idx"]) for r in p.get("seed_refs", [])
-                    if r.get("layer") == L and "feature_idx" in r
+                    if r.get("layer") == L and r.get("feature_idx") is not None
                 } if p["mode"] == "seeded" else set()
                 units, capped = _feature_units(
                     reader, discovery_docs, p["s_min"],
@@ -402,13 +402,18 @@ def _max_acts_per_key(keys: np.ndarray,
 
 
 def _seed_key_set(params: Dict[str, Any]):
-    """seed_refs → {(layer, 'feature:<idx>'|'cluster:<id>')}."""
+    """seed_refs → {(layer, 'feature:<idx>'|'cluster:<id>')}.
+
+    Discriminate on VALUE, not key presence: the typed DiscoverySeedRef
+    model_dump()s BOTH keys with the unset one None, so `"feature_idx" in ref`
+    is always true — the R1 typed-model fix relocated the int(None) crash to
+    the cluster-seed path, which is the DEFAULT seeded flow (R2 B1)."""
     keys = set()
     for ref in params.get("seed_refs", []):
         layer = ref.get("layer")
-        if "feature_idx" in ref:
+        if ref.get("feature_idx") is not None:
             keys.add((layer, f"feature:{int(ref['feature_idx'])}"))
-        elif "cluster_profile_id" in ref:
+        elif ref.get("cluster_profile_id") is not None:
             keys.add((layer, f"cluster:{ref['cluster_profile_id']}"))
     return keys
 

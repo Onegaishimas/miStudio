@@ -154,10 +154,11 @@ async def create_capture(body: CaptureCreate, db: AsyncSession = Depends(get_db)
     from ....workers.circuit_capture_tasks import capture_circuit_activations
 
     def _create(sync_db):
-        # 409-on-concurrent in the SAME transaction as the insert, so two
-        # simultaneous requests can't both pass the check (R1 QA-P1).
-        if body.confirm:
-            CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        # 409-on-concurrent in the SAME transaction as the insert, advisory-
+        # locked so two simultaneous requests can't both pass (R1 QA-P1 / R2
+        # B2). The estimate path runs a GPU PROBE too, so guard it as well
+        # (R2 B5) — not just confirm.
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
         return CircuitCaptureService.create_run(sync_db, body.model_dump())
 
     try:
@@ -344,14 +345,50 @@ async def start_attribution(run_id: str, body: AttributionCreate,
     # discovery's status. 409 if an attribution pass is already in flight.
     if run.attribution_status in ("pending", "running"):
         raise HTTPException(409, "An attribution pass is already in flight")
-    run.attribution_status = "pending"
-    run.attribution_progress = 0.0
-    run.attribution_error = None
-    await db.commit()
+    # Attribution loads a model — it's a GPU task and must respect the same
+    # single-GPU guard as capture (R2 Q1). The guard + the attribution_status
+    # write share ONE advisory-locked transaction so the check-then-mark can't
+    # race a concurrent capture/attribution (R2 B2).
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
+
+    def _guard_and_mark(sync_db):
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        row = sync_db.query(CircuitDiscoveryRun).filter(
+            CircuitDiscoveryRun.id == run_id).first()
+        row.attribution_status = "pending"
+        row.attribution_progress = 0.0
+        row.attribution_error = None
+        sync_db.commit()
+
+    try:
+        await _run_sync(db, _guard_and_mark)
+    except CaptureConflictError as e:
+        raise HTTPException(409, str(e))
     task = run_circuit_attribution.delay(run.id, prompt_limit=body.prompt_limit)
-    run.celery_task_id = task.id
+    await db.execute(
+        CircuitDiscoveryRun.__table__.update()
+        .where(CircuitDiscoveryRun.id == run.id)
+        .values(attribution_task_id=task.id))  # own id — discovery's intact (R2 A3)
     await db.commit()
     return {"id": run.id, "task_id": task.id, "status": "queued"}
+
+
+@router.post("/circuit-discovery/{run_id}/attribution/cancel")
+async def cancel_attribution(run_id: str, db: AsyncSession = Depends(get_db)):
+    """Cancel an in-flight attribution pass (R2 Q2/B6 — the worker polls
+    attribution_status, but nothing set it to cancelled before)."""
+    from ....core.celery_app import revoke_task
+
+    run = await _discovery_or_404(db, run_id)
+    if run.attribution_status not in ("pending", "running"):
+        raise HTTPException(
+            409, f"Attribution is {run.attribution_status} — nothing to cancel")
+    run.attribution_status = "cancelled"
+    await db.commit()
+    if run.attribution_task_id:
+        revoke_task(run.attribution_task_id)
+    return {"id": run.id, "attribution_status": "cancelled"}
 
 
 # ── sync bridge (create_run/delete_run are worker-shared sync code) ──────
