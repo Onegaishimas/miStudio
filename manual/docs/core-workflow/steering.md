@@ -72,3 +72,30 @@ Steering multiple features simultaneously is NOT the same as running them separa
 After execution, results are presented in a structured comparison view showing baseline and steered outputs side-by-side with perplexity metrics:
 
 ![Steering Session Results — Baseline vs steered outputs with perplexity comparison](/img/miStudio_Steering_Panel-SessionResults.jpg)
+
+## Multi-layer circuits — steering across SAEs
+
+Everything above steers features from **one** SAE at **one** layer. A discovered [circuit](/core-workflow/circuits), though, spans layers — its members live on the layers each was found on, and each layer has its own SAE. Feature 015 makes steering follow the circuit: **every member steers through the SAE trained on its own layer**, in a single generation.
+
+### The own-layer rule
+
+Each feature carries the SAE it belongs to. When you load a multi-layer circuit into the steering panel, the members arrive with their per-layer SAEs already set — an L13 member steers through the L13 SAE, an L14 member through the L14 SAE, in the same Blended run. You cannot steer an L14-trained feature at L10: that's rejected with a clear message naming the offending member, never quietly served through the wrong decoder (which would inject a direction from the wrong layer's basis — the bug this feature exists to fix).
+
+### Per-layer budgets, one dial
+
+The [budget model](/core-workflow/steering#the-budget) runs **independently per layer** — each layer gets its own budget bar (total budget B, cohesion gain G, similarity-weighted allocation) computed against that layer's SAE. One global intensity dial (λ) scales the whole circuit at once, so you tune the entire cross-layer behaviour with a single control while each layer keeps its principled starting strengths. The applied-features summary groups members by layer so you can see, and verify, that each one steered through its own SAE.
+
+### Hazard warnings — compounding and cancellation
+
+Steering an **upstream** feature that drives a **downstream** feature you're *also* steering makes their influences **compound** (or, with opposite signs, **cancel**). miStudio surfaces this before you generate — an amber banner listing the pairs — but **never silently corrects it**; you decide.
+
+The warning is as strong as the evidence:
+
+- If the circuit has a **validated edge** between the pair (a rung-2 edge that survived [causal validation](/core-workflow/circuits#causal-validation-the-rung-2-tier)), the warning is **quantified from the measured effect size** — "validated edge, ES=0.8 — combined influence ≈ higher than the naive sum."
+- If there's no validated edge, a **weight-prior heuristic** (how aligned the upstream feature's output direction is with the downstream feature's input direction) still warns — but every such warning is explicitly **labeled `heuristic`**, never presented as causal. It's a hint to check, not a proven mechanism.
+
+This is the payoff of the whole circuits arc: the same validated evidence that earns a circuit its rung-2 badge is what makes the steering hazard warning trustworthy instead of a guess.
+
+:::info VRAM
+Each distinct SAE the circuit references loads onto the GPU (~130 MB for an 8k-feature SAE). A typical two- or three-layer circuit adds well under a gigabyte; only the SAEs the circuit actually uses are loaded, and exiting steering mode frees them all.
+:::

@@ -22,6 +22,11 @@ class SteerFeature(BaseModel):
 
     feature_idx: int = Field(..., ge=0, description="Feature (neuron) index in the SAE")
     layer: int = Field(..., ge=0, description="Layer the SAE was trained on")
+    # Feature 015: per-feature SAE for cross-layer circuits. Omitted ⇒ the
+    # request-level sae_id. A feature whose layer ≠ its SAE's trained layer is
+    # rejected (own-layer rule), never steered through the wrong decoder.
+    sae_id: Optional[str] = Field(
+        None, description="SAE for THIS feature (015 multi-layer); defaults to the request sae_id")
     strength: float = Field(
         ..., ge=-300, le=300,
         description="Raw steering coefficient, Neuronpedia scale. Start ±5–20; ±100+ often collapses output",
@@ -75,11 +80,26 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         sae_id: str,
         members: list[dict],
         group_cohesion: Optional[float] = None,
+        circuit_id: Optional[str] = None,
     ) -> Any:
         """Compute the principled starting strength allocation for steering a
-        CLUSTER of features (Feature 013). members: [{feature_idx, layer,
-        similarity?, activation_frequency?, sign?}] (1-20, all on the SAE's layer).
-        Returns {B, B_dir, G, f_eff, weights, strengths, flags, constants_used}.
+        CLUSTER of features (Feature 013) — or a MULTI-LAYER circuit (Feature
+        015). members: [{feature_idx, layer, sae_id?, similarity?,
+        activation_frequency?, sign?}] (1-20).
+
+        OWN-LAYER RULE (015): each member is steered through the SAE trained on
+        ITS layer — pass `sae_id` per member for cross-layer circuits (omitted ⇒
+        the request-level sae_id). A member whose layer ≠ its SAE's trained
+        layer is REJECTED (422 listing offenders), never silently mis-served.
+
+        Single-layer requests return the 013 shape unchanged: {B, B_dir, G,
+        f_eff, weights, strengths, flags, constants_used}. Multi-layer requests
+        (members span >1 layer) return {formula_id, layers: {L: {B, B_dir, G,
+        weights, strengths, flags, sae_id}}, hazards: [...], strengths: [...]}.
+        Pass `circuit_id` to source hazard evidence from a stored circuit's
+        VALIDATED edges (rung>=2 → quantified ES); otherwise the weight-prior
+        heuristic labels each hazard 'heuristic' (never causal). VRAM envelope:
+        each referenced SAE loads (~130 MB per 8k SAE); ≤4 extra documented.
         Read-only — safe without steering mode.
 
         HONOR THE FLAGS CONTRACT before seeding steer_combined:
@@ -95,6 +115,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         body: dict = {"sae_id": sae_id, "members": members}
         if group_cohesion is not None:
             body["group_cohesion"] = group_cohesion
+        if circuit_id is not None:
+            body["circuit_id"] = circuit_id
         return await client.post("/steering/cluster-allocation", json_body=body)
 
     @mcp.tool()
@@ -173,7 +195,15 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         top_p: float = 0.9,
     ) -> Any:
         """Apply ALL selected features simultaneously in one generation pass
-        (synergy testing). GPU-heavy background task — returns task_id."""
+        (synergy testing). GPU-heavy background task — returns task_id.
+
+        MULTI-LAYER (015): give each feature its own `sae_id` to steer a
+        cross-layer circuit — every feature steers through the SAE trained on
+        ITS layer (own-layer rule; a layer/SAE mismatch is rejected, never
+        mis-served). `features_applied` reports each member's layer + SAE so you
+        can verify. VRAM envelope: each distinct SAE loads (~130 MB per 8k SAE).
+        Compounding/cancellation across layers is surfaced by
+        compute_cluster_allocation's hazards — check them before steering."""
         body = {
             "sae_id": sae_id,
             "model_id": model_id,
