@@ -95,9 +95,13 @@ async def test_decoder_failure_degrades_to_approximate():
         "src.api.v1.endpoints.steering.SAEManagerService.get_sae",
         new=AsyncMock(return_value=_mk_sae()),
     ), patch(
-        "src.api.v1.endpoints.steering.get_steering_service"
-    ) as svc:
-        svc.return_value.load_sae = AsyncMock(side_effect=RuntimeError("boom"))
+        "src.api.v1.endpoints.steering.load_sae_weights_cpu",
+        side_effect=RuntimeError("boom"),
+    ), patch(
+        "src.api.v1.endpoints.steering.settings"
+    ) as st:
+        st.resolve_data_path.return_value = MagicMock(exists=MagicMock(return_value=True))
+        st.steering_cluster_constants_json = "{}"
         resp = await compute_cluster_strength_allocation(_req(), db=MagicMock())
     assert resp.approximate is True
     assert resp.G == 1.0
@@ -108,23 +112,21 @@ async def test_decoder_failure_degrades_to_approximate():
 @pytest.mark.asyncio
 async def test_happy_path_with_decoder_and_flags():
     sae = _mk_sae()
-    loaded = MagicMock()
+    dec = torch.zeros(16, 100)
+    dec[0, 0] = 1.0
+    dec[0, 1] = 1.0  # identical directions → G = 1
     with patch(
         "src.api.v1.endpoints.steering.SAEManagerService.get_sae", new=AsyncMock(return_value=sae)
     ), patch(
-        "src.api.v1.endpoints.steering.get_steering_service"
-    ) as svc, patch(
-        "src.api.v1.endpoints.steering.resolve_decoder_weight"
-    ) as rdw, patch(
+        # single-layer now loads the decoder on CPU via load_sae_weights_cpu
+        # (R2 F5 — no GPU load on the read-only endpoint).
+        "src.api.v1.endpoints.steering.load_sae_weights_cpu",
+        return_value=(dec, torch.zeros(100, 16)),
+    ), patch(
         "src.api.v1.endpoints.steering.settings"
     ) as st:
         st.resolve_data_path.return_value = MagicMock(exists=MagicMock(return_value=True))
         st.steering_cluster_constants_json = "{}"
-        svc.return_value.load_sae = AsyncMock(return_value=loaded)
-        dec = torch.zeros(16, 100)
-        dec[0, 0] = 1.0
-        dec[0, 1] = 1.0  # identical directions → G = 1
-        rdw.return_value = dec
         resp = await compute_cluster_strength_allocation(
             _req(group_cohesion=0.3), db=MagicMock()
         )
@@ -232,3 +234,54 @@ async def test_multi_layer_422_when_member_sae_wrong_layer():
     assert e.value.status_code == 422
     assert e.value.detail["code"] == "sae_layer_mismatch"
     assert any(o["feature_idx"] == 2 for o in e.value.detail["offenders"])
+
+
+@pytest.mark.asyncio
+async def test_multi_layer_validated_hazard_from_circuit_edges():
+    """R2 F9 — the ARC PAYOFF seam: a circuit_id whose stored edges carry a
+    rung-2 validated edge (with effect_size) produces a QUANTIFIED hazard,
+    not just the heuristic. This is 017's validated ES reaching 015's steering."""
+    from src.schemas.steering import MultiLayerAllocationResponse
+
+    req = ClusterAllocationRequest(
+        sae_id="sae_A", circuit_id="crc_1",
+        members=[
+            ClusterAllocationMember(feature_idx=1, layer=13, similarity=0.8,
+                                    activation_frequency=0.2, sae_id="sae_A"),
+            ClusterAllocationMember(feature_idx=2, layer=14, similarity=0.8,
+                                    activation_frequency=0.2, sae_id="sae_B"),
+        ],
+    )
+    saes = {"sae_A": _mk_sae_layer(13, "sae_A"), "sae_B": _mk_sae_layer(14, "sae_B")}
+
+    async def get_sae(db, sid):
+        return saes[sid]
+
+    # the circuit's stored edges: a rung-2 validated edge 13:1 → 14:2, ES=0.8
+    validated_edges = [{
+        "up": {"layer": 13, "feature_idx": 1},
+        "down": {"layer": 14, "feature_idx": 2},
+        "rung": 2, "effect_size": 0.8,
+    }]
+
+    with patch(
+        "src.api.v1.endpoints.steering.SAEManagerService.get_sae", new=get_sae
+    ), patch(
+        "src.api.v1.endpoints.steering.get_steering_service"
+    ), patch(
+        "src.api.v1.endpoints.steering._load_circuit_edges",
+        new=AsyncMock(return_value=validated_edges),
+    ), patch(
+        "src.api.v1.endpoints.steering.settings"
+    ) as st:
+        st.resolve_data_path.return_value = MagicMock(exists=MagicMock(return_value=False))
+        st.steering_cluster_constants_json = "{}"
+        st.steering_hazard_prior_threshold = 0.5
+        resp = await compute_cluster_strength_allocation(req, db=MagicMock())
+
+    assert isinstance(resp, MultiLayerAllocationResponse)
+    assert len(resp.hazards) == 1
+    h = resp.hazards[0]
+    assert h.evidence.startswith("validated:ES=")   # quantified, not heuristic
+    assert h.rung == 2
+    assert h.quantified_effect == pytest.approx(0.8)

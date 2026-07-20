@@ -373,6 +373,13 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
         return;
       }
       const primarySAE = await getSAE(primaryRef);
+      // The SAE must be READY, else allocation/generate 422s downstream with a
+      // confusing error (R2 F3). Fail fast with a clear message.
+      if (primarySAE?.status !== SAEStatus.READY) {
+        setError(`This circuit's SAE (${primaryRef}) is not ready `
+          + `(${primarySAE?.status ?? 'unknown'}) — download/prepare it first.`);
+        return;
+      }
       const ok = loadCircuitIntoSteering(circuit, primarySAE);
       if (!ok) {
         setError('This circuit has no loadable feature members to steer.');

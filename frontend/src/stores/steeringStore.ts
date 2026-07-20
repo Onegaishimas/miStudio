@@ -1028,25 +1028,28 @@ export const useSteeringStore = create<SteeringState>()(
         // feature_ref members are direct; cluster_ref members expand via
         // expanded_members (feature-level v1 — a cluster-ref with no expansion is
         // skipped with a log). Non-feature members carry no directions to steer.
-        type Loaded = { feature_idx: number; layer: number; strength: number; label: string | null };
+        type Loaded = { feature_idx: number; layer: number; strength: number | null | undefined; label: string | null };
         const loaded: Loaded[] = [];
+        const skippedLayers = new Set<number>();  // members whose layer has no SAE
+        const pushMember = (feature_idx: number, layer: number,
+                            strength: number | null | undefined, label: string | null) => {
+          // A member whose layer has NO SAE in the circuit must NOT fall back to
+          // the primary (wrong-layer) SAE — that fails the own-layer rule and
+          // 422s BOTH allocation and generate (R2 F2). Skip it, warn.
+          if (!saeByLayer.has(layer)) {
+            skippedLayers.add(layer);
+            return;
+          }
+          loaded.push({ feature_idx, layer, strength, label });
+        };
         for (const m of circuit.members ?? []) {
           if (m.member_kind === 'feature_ref' && m.feature?.feature_idx != null) {
-            loaded.push({
-              feature_idx: m.feature.feature_idx,
-              layer: m.layer,
-              strength: m.feature.strength ?? 0,
-              label: m.feature.label ?? null,
-            });
+            pushMember(m.feature.feature_idx, m.layer, m.feature.strength,
+                       m.feature.label ?? null);
           } else if (m.member_kind === 'cluster_ref') {
             if (m.expanded_members && m.expanded_members.length > 0) {
               for (const em of m.expanded_members) {
-                loaded.push({
-                  feature_idx: em.feature_idx,
-                  layer: m.layer,
-                  strength: em.strength ?? 0,
-                  label: em.label ?? null,
-                });
+                pushMember(em.feature_idx, m.layer, em.strength, em.label ?? null);
               }
             } else {
               console.warn(
@@ -1054,6 +1057,11 @@ export const useSteeringStore = create<SteeringState>()(
               );
             }
           }
+        }
+        if (skippedLayers.size > 0) {
+          console.warn(
+            `[SteeringStore] Circuit ${circuit.id}: layers ${[...skippedLayers].join(', ')} have no SAE — those members were skipped (cannot steer without their layer's SAE)`,
+          );
         }
 
         if (loaded.length === 0) return false;
@@ -1070,14 +1078,14 @@ export const useSteeringStore = create<SteeringState>()(
             feature_idx: m.feature_idx,
             feature_id: null,
             layer: m.layer,
-            // The SAE trained on THIS member's layer; fall back to the primary
-            // SAE when a layer has no explicit saes[] entry (defensive — a
-            // well-formed circuit lists an SAE per member layer).
-            sae_id: saeByLayer.get(m.layer) ?? primarySAE.id,
+            // The SAE trained on THIS member's layer — guaranteed present
+            // (members on SAE-less layers were skipped above; R2 F2).
+            sae_id: saeByLayer.get(m.layer)!,
             // Circuit member strengths are EXPLICIT tuned values (auto-baselines
-            // bypassed). A zero/absent strength falls back to a sensible default
-            // so a member without a tuned magnitude still steers.
-            strength: m.strength !== 0 ? m.strength : (computeBaselineStrength(null).value),
+            // bypassed). Only a NULLISH strength (absent) falls back to a
+            // default — an explicit 0 is honored (a parked/inactive member is
+            // steered at 0, not the default; R2 F4).
+            strength: m.strength ?? computeBaselineStrength(null).value,
             strengthSource: 'manual' as const,
             pinned: false,
             label: m.label,
@@ -1087,13 +1095,23 @@ export const useSteeringStore = create<SteeringState>()(
             similarity: null,
           }));
 
+          const capNotice = loaded.length > MAX_SELECTED_FEATURES
+            ? `Circuit has ${loaded.length} members; only the first ${MAX_SELECTED_FEATURES} were loaded.`
+            : null;
           set({
             selectedSAE: primarySAE,
             selectedFeatures: features,
+            // Clear the prior run's result so a freshly-loaded circuit doesn't
+            // show another selection's output (R2 PROD-1 — selectSAE clears
+            // these; the circuit loader must too).
+            combinedResults: null,
+            combinedResultsTitle: null,
             clusterBudget: null,
             layerBudgets: null,
             hazards: null,
-            clusterNotice: null,
+            // Surface a truncation notice (R2 QA-2 — a scientist loading an
+            // L13+L14+L15 circuit must know if a tail layer was dropped).
+            clusterNotice: capNotice,
             // A circuit is a BLENDED multi-layer artifact — load in Blended mode
             // (mirrors the profile loader; Compare would fan out N generations).
             combinedMode: true,
