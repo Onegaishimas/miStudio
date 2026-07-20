@@ -314,14 +314,24 @@ export interface ClusterAllocationMemberInput {
   similarity?: number | null;
   activation_frequency?: number | null;
   sign?: 1 | -1;
+  /** Feature 015: SAE for THIS member's layer; omitted ⇒ request sae_id. */
+  sae_id?: string;
 }
 
+/**
+ * Feature 015: the endpoint returns a UNION — single-layer clusters get the 013
+ * `ClusterAllocation` shape (unchanged); clusters spanning >1 layer get the
+ * `MultiLayerAllocation` shape (`layers` map + `hazards`). Discriminate with
+ * `isMultiLayerAllocation`.
+ */
 export async function computeClusterAllocation(body: {
   sae_id: string;
   members: ClusterAllocationMemberInput[];
   group_cohesion?: number | null;
-}): Promise<import('../types/steering').ClusterAllocation> {
-  return fetchAPI<import('../types/steering').ClusterAllocation>('/steering/cluster-allocation', {
+  /** Feature 015: circuit whose validated edges quantify cross-layer hazards. */
+  circuit_id?: string;
+}): Promise<import('../types/steering').AllocationResponse> {
+  return fetchAPI<import('../types/steering').AllocationResponse>('/steering/cluster-allocation', {
     method: 'POST',
     body: JSON.stringify(body),
   });

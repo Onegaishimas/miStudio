@@ -70,9 +70,13 @@ export function FeatureSelector() {
     clearFeatures,
     clusterContext,
     clusterBudget,
-    rebalanceStrength,
+    layerBudgets,
+    rebalance,
     togglePin,
   } = useSteeringStore();
+  // Feature 015: a budget governs the selection when EITHER the single 013
+  // budget OR a per-layer (multi-layer) budget map is present.
+  const budgetGoverns = !!clusterBudget || !!layerBudgets;
   const { setSaveDialogOpen } = useClusterProfilesStore();
 
   // Strength preset values
@@ -346,15 +350,15 @@ export function FeatureSelector() {
                   key={feature.instance_id}
                   feature={feature}
                   onStrengthChange={(strength) =>
-                    clusterBudget
-                      ? rebalanceStrength(feature.instance_id, strength)
+                    budgetGoverns
+                      ? rebalance(feature.layer, feature.instance_id, strength)
                       : updateFeatureStrength(feature.instance_id, strength)
                   }
                   onAdditionalStrengthsChange={(strengths) =>
                     setAdditionalStrengths(feature.instance_id, strengths)
                   }
                   onRemove={() => removeFeature(feature.instance_id)}
-                  onTogglePin={clusterBudget ? () => togglePin(feature.instance_id) : undefined}
+                  onTogglePin={budgetGoverns ? () => togglePin(feature.instance_id) : undefined}
                   onContextMenu={handleSelectedFeatureContextMenu}
                 />
               ))}
