@@ -6,7 +6,7 @@ and serialization for feature steering comparison operations.
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Literal
+from typing import Optional, Dict, Any, List, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -28,6 +28,11 @@ class SelectedFeature(BaseModel):
     )
     feature_idx: int = Field(..., ge=0, description="Feature index in the SAE")
     layer: int = Field(..., ge=0, description="Target layer for steering (L0, L1, etc.)")
+    # Feature 015: per-feature SAE — a multi-layer circuit steers each feature
+    # through the SAE trained on ITS layer. Omitted ⇒ the request-level sae_id
+    # (back-compatible: single-layer flows send no per-feature sae_id).
+    sae_id: Optional[str] = Field(
+        None, description="SAE for THIS feature (015); defaults to the request sae_id")
     strength: float = Field(
         ...,
         ge=-300.0,
@@ -472,6 +477,10 @@ class CombinedFeatureApplied(BaseModel):
 
     feature_idx: int = Field(..., description="Feature index")
     layer: int = Field(..., description="Target layer")
+    # Feature 015: which SAE actually steered this feature (source of truth =
+    # the config used at hook time, not the request) — lets the applied summary
+    # group by layer and verify each member steered through its own SAE.
+    sae_id: Optional[str] = Field(None, description="SAE that steered this feature (015)")
     strength: float = Field(..., description="Steering strength applied")
     label: Optional[str] = Field(None, description="Feature label")
     color: str = Field("teal", description="Color for UI display")
@@ -531,6 +540,12 @@ class ClusterAllocationMember(BaseModel):
     similarity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Context similarity to the cluster")
     activation_frequency: Optional[float] = Field(None, description="Fraction of tokens where the feature fires")
     sign: Literal[1, -1] = Field(1, description="+1 boost, -1 suppress")
+    # Feature 015: the SAE trained on THIS member's layer. Omitted ⇒ the
+    # request-level sae_id (single-layer clusters send no per-member sae_id, so
+    # the 013 request shape is unchanged). Required (per member) when a cluster
+    # spans multiple layers — each layer partition allocates against its own SAE.
+    sae_id: Optional[str] = Field(
+        None, description="SAE for THIS member's layer (015); defaults to the request sae_id")
 
 
 class ClusterAllocationRequest(BaseModel):
@@ -539,6 +554,11 @@ class ClusterAllocationRequest(BaseModel):
     sae_id: str = Field(..., description="SAE whose decoder defines the injected directions")
     members: List[ClusterAllocationMember] = Field(..., min_length=1, max_length=20)
     group_cohesion: Optional[float] = Field(None, ge=0.0, le=1.0, description="Source cluster cohesion for the gate")
+    # Feature 015: when set, hazard detection promotes any stored circuit edge at
+    # rung ≥2 to the PRIMARY (quantified) evidence source for the same steered
+    # pair; absent ⇒ hazards fall back to the labeled weight-prior heuristic.
+    circuit_id: Optional[str] = Field(
+        None, description="Circuit whose validated edges quantify cross-layer hazards (015)")
 
 
 class ClusterAllocationResponse(BaseModel):
@@ -555,3 +575,68 @@ class ClusterAllocationResponse(BaseModel):
     constants_used: Dict[str, float]
     formula_id: str
     approximate: bool = False
+
+
+# ============================================================================
+# Multi-Layer Cluster Allocation Schemas (Feature 015, IDL-29 reused per layer)
+# ============================================================================
+
+class PerLayerAllocation(BaseModel):
+    """One layer's 013 allocation inside a multi-layer response.
+
+    Byte-for-byte the same fields the single-layer response carries (so a client
+    that already understands 013 reads each layer entry unchanged) plus the
+    `sae_id` that steered this layer's directions.
+    """
+
+    sae_id: Optional[str] = Field(None, description="SAE that defined this layer's directions (015)")
+    B: float
+    B_dir: float
+    G: float
+    f_eff: Optional[float] = None
+    weights: List[float]
+    strengths: List[float]
+    flags: List[str] = Field(default_factory=list)
+    cancellation_pair: Optional[List[int]] = None
+    constants_used: Dict[str, float]
+    approximate: bool = False
+
+
+class HazardModel(BaseModel):
+    """A cross-layer steering hazard (Feature 015, BR-024).
+
+    Mirrors ``steering_hazards.Hazard.to_dict()`` — evidence carries its own
+    ladder label (``validated:ES=…`` vs ``heuristic:weight_prior=…``); the copy
+    never claims causality for a heuristic pair (IDL-35).
+    """
+
+    type: Literal["compounding", "cancellation"]
+    up: Dict[str, int] = Field(..., description="{layer, feature_idx}")
+    down: Dict[str, int] = Field(..., description="{layer, feature_idx}")
+    evidence: str
+    rung: int = Field(0, description="edge rung (0 for a pure heuristic pair)")
+    quantified_effect: Optional[float] = Field(None, description="measured ES for validated edges")
+
+
+class MultiLayerAllocationResponse(BaseModel):
+    """Per-layer allocation for a cluster that spans multiple layers (015).
+
+    Only emitted when >1 distinct layer is present; a single-layer cluster
+    returns the 013 ``ClusterAllocationResponse`` shape byte-identically. Each
+    partition runs the UNCHANGED IDL-29 pipeline against its own layer's SAE
+    decoder — the formula is not forked.
+    """
+
+    formula_id: str = Field(..., description="freq-budget/sim-alloc/per-layer@1")
+    layers: Dict[str, PerLayerAllocation] = Field(
+        ..., description="layer (as string key) -> that layer's allocation")
+    hazards: List[HazardModel] = Field(
+        default_factory=list, description="cross-layer compounding/cancellation warnings")
+    strengths: List[float] = Field(
+        ..., description="per-member strengths flattened in request-member order (client convenience)")
+
+
+# The public allocation response is a UNION with the single-layer 013 shape
+# FIRST, so existing clients deserialize a single-layer response identically to
+# before Feature 015 (the multi-layer form is only chosen when layers differ).
+AllocationResponseUnion = Union[ClusterAllocationResponse, MultiLayerAllocationResponse]

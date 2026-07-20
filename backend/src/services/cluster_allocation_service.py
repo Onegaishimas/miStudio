@@ -73,6 +73,18 @@ class AllocationMember:
 
 
 @dataclass
+class MultiLayerMember(AllocationMember):
+    """A cluster member carrying the SAE for its own layer (Feature 015).
+
+    Extends the 013 AllocationMember with ``sae_id`` so a multi-layer cluster
+    partitions cleanly and each layer's response can report which SAE defined
+    its directions.
+    """
+
+    sae_id: Optional[str] = None
+
+
+@dataclass
 class AllocationResult:
     B: float
     B_dir: float
@@ -321,6 +333,117 @@ def compute_allocation(
         cancellation_pair=cancellation_pair,
         constants_used={k: c[k] for k in ("a", "b", "m", "M", "cohesion_gate", "gamma") if k in c},
         approximate=approximate,
+    )
+
+
+MULTI_LAYER_FORMULA_ID = "freq-budget/sim-alloc/per-layer@1"
+
+
+@dataclass
+class MultiLayerAllocationResult:
+    """Per-layer allocation for a cluster that spans multiple layers (015).
+
+    ``layers`` maps each layer to its own ``AllocationResult`` (the UNCHANGED
+    013 output) plus the ``sae_id`` that layer allocated against. ``strengths``
+    is the per-member allocation flattened back into the ORIGINAL request-member
+    order (client convenience). ``hazards`` is filled by the endpoint (needs the
+    encoder/decoder tensors + optional circuit edges — steering_hazards).
+    """
+
+    layers: Dict[int, "AllocationResult"]
+    layer_sae_ids: Dict[int, Optional[str]]
+    strengths: List[float]
+    formula_id: str = MULTI_LAYER_FORMULA_ID
+
+
+def compute_multi_layer_allocation(
+    members: List["MultiLayerMember"],
+    decoders: Optional[Dict[int, Any]] = None,
+    constants: Optional[Dict[str, float]] = None,
+    group_cohesion: Optional[float] = None,
+) -> MultiLayerAllocationResult:
+    """Allocate strengths across a MULTI-LAYER cluster (Feature 015).
+
+    Partitions ``members`` by layer and runs the EXISTING single-layer
+    ``compute_allocation`` on each partition against THAT layer's decoder — the
+    IDL-29 math is reused verbatim, never forked. The per-partition results are
+    reassembled with each member's strength returned to its original position so
+    ``strengths`` mirrors the request order.
+
+    Notes:
+      * ``decoders`` maps layer -> decoder tensor ([d_model, d_sae]); a missing
+        layer degrades that partition to the approximate (G=1) allocation, same
+        as the single-layer endpoint.
+      * ``group_cohesion`` (a whole-cluster property) is applied to every
+        partition's gate — matching how the single-layer path uses it.
+      * A SINGLE-layer member set is still valid here: the caller (endpoint)
+        must route single-layer requests to ``compute_allocation`` directly so
+        the 013 response is byte-identical; this function is for the >1-layer
+        case, but does not itself error on one layer.
+
+    Args:
+        members: cluster members carrying ``layer`` and (015) ``sae_id``.
+        decoders: {layer -> decoder tensor}; None ⇒ all approximate.
+        constants: resolved IDL-29 constants (shared across layers).
+        group_cohesion: source cluster cohesion for each partition's gate.
+
+    Returns:
+        MultiLayerAllocationResult with per-layer results + flattened strengths.
+    """
+    if not members:
+        raise ValueError("members must be non-empty")
+
+    decoders = decoders or {}
+
+    # Stable partition by layer preserving first-seen layer order, and remember
+    # each member's original index so strengths return to request order.
+    partitions: Dict[int, List[Tuple[int, "MultiLayerMember"]]] = {}
+    layer_order: List[int] = []
+    for orig_idx, m in enumerate(members):
+        if m.layer not in partitions:
+            partitions[m.layer] = []
+            layer_order.append(m.layer)
+        partitions[m.layer].append((orig_idx, m))
+
+    layers_out: Dict[int, AllocationResult] = {}
+    layer_sae_ids: Dict[int, Optional[str]] = {}
+    flat_strengths: List[Optional[float]] = [None] * len(members)
+
+    for layer in layer_order:
+        entries = partitions[layer]
+        part_members = [
+            AllocationMember(
+                feature_idx=m.feature_idx,
+                layer=m.layer,
+                similarity=m.similarity,
+                activation_frequency=m.activation_frequency,
+                sign=m.sign,
+            )
+            for _, m in entries
+        ]
+        # The layer's SAE id — first member's (all members of a layer share it
+        # by construction: the endpoint validates one SAE per layer).
+        layer_sae_ids[layer] = entries[0][1].sae_id
+
+        result = compute_allocation(
+            part_members,
+            decoder=decoders.get(layer),
+            constants=constants,
+            group_cohesion=group_cohesion,
+        )
+        layers_out[layer] = result
+
+        # Scatter this partition's strengths back to original member positions.
+        for (orig_idx, _), s in zip(entries, result.strengths):
+            flat_strengths[orig_idx] = s
+
+    # Every slot filled (each member belongs to exactly one partition).
+    strengths = [s if s is not None else 0.0 for s in flat_strengths]
+
+    return MultiLayerAllocationResult(
+        layers=layers_out,
+        layer_sae_ids=layer_sae_ids,
+        strengths=strengths,
     )
 
 

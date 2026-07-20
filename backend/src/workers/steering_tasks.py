@@ -642,6 +642,7 @@ def steering_combined_task(
     sae_d_model: Optional[int] = None,
     sae_n_features: Optional[int] = None,
     sae_architecture: Optional[str] = None,
+    sae_meta_map: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Execute combined multi-feature steering in isolated worker process.
@@ -741,6 +742,7 @@ def steering_combined_task(
             sae_d_model=sae_d_model,
             sae_n_features=sae_n_features,
             sae_architecture=sae_architecture,
+            sae_meta_map=sae_meta_map,
             progress_callback=progress_callback,
         )
 

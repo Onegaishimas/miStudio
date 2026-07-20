@@ -202,6 +202,17 @@ class Settings(BaseSettings):
         description="Timeout for steering generation requests in seconds (default 120s, max 10 minutes)"
     )
 
+    # Feature 015 (IDL-32/IDL-35): cross-layer steering hazard heuristic. The
+    # weight-prior fallback warns when |cos(W_dec(Lᵢ)[:,i], W_enc(Lⱼ)[j,:])| ≥
+    # this threshold for a co-steered upstream→downstream pair. Labeled
+    # `heuristic` — never causal. Validated circuit edges (rung ≥2) always win.
+    steering_hazard_prior_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Weight-prior threshold above which a cross-layer steering pair is flagged (015 heuristic)",
+    )
+
     # Token and Feature Filtering Configuration
     # Stage 1: Tokenization-time filtering (conservative, permanent)
     tokenization_filter_enabled: bool = Field(

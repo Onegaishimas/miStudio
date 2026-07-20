@@ -286,6 +286,9 @@ class FeatureSteeringConfig:
     strength: float  # Raw steering coefficient (matches Neuronpedia)
     label: Optional[str] = None
     color: str = "teal"
+    # Feature 015: the SAE that steers THIS feature (its own layer's SAE). None
+    # in every single-SAE flow, which routes through the request-level SAE.
+    sae_id: Optional[str] = None
 
     @property
     def multiplier(self) -> float:
@@ -361,6 +364,42 @@ class LoadedSAE:
     d_in: int
     d_sae: int
     device: str
+
+
+@dataclass
+class SaeMeta:
+    """Load-time metadata for one referenced SAE (Feature 015).
+
+    Threaded from the endpoint (which owns DB access) into generate_combined so
+    the worker can resolve EVERY distinct sae_id a multi-layer circuit
+    references — not just the request-level one. Single-SAE flows carry exactly
+    one entry, so behaviour is unchanged.
+    """
+
+    sae_id: str
+    sae_path: str
+    layer: Optional[int] = None
+    d_model: Optional[int] = None
+    n_features: Optional[int] = None
+    architecture: Optional[str] = None
+
+
+class SaeLayerMismatchError(Exception):
+    """A steered feature targets a layer whose SAE was not the one supplied.
+
+    Raised by resolve_sae_map at SUBMIT time (the endpoint turns it into a 422
+    listing offenders) so a mis-serve never reaches the GPU worker. Each
+    offender is {feature_idx, layer, sae_id, sae_layer}.
+    """
+
+    def __init__(self, offenders: List[Dict[str, Any]]):
+        self.offenders = offenders
+        detail = ", ".join(
+            f"feature {o['feature_idx']} on layer {o['layer']} routed to SAE "
+            f"{o['sae_id']} (layer {o['sae_layer']})"
+            for o in offenders
+        )
+        super().__init__(f"feature/SAE layer mismatch: {detail}")
 
 
 @dataclass
@@ -632,6 +671,79 @@ class SteeringService:
         logger.info(f"Loaded SAE {sae_id}: d_in={d_in}, d_sae={d_sae}, layer={sae_layer}")
 
         return loaded
+
+    async def resolve_sae_map(
+        self,
+        request: "CombinedSteeringRequest",
+        sae_meta_map: Dict[str, "SaeMeta"],
+        *,
+        force_reload: bool = False,
+    ) -> Dict[str, LoadedSAE]:
+        """Load every DISTINCT SAE a combined request references (Feature 015).
+
+        Each feature steers through the SAE trained on ITS layer: the SAE for a
+        feature is ``feature.sae_id`` when present, else the request-level
+        ``request.sae_id``. This collects the distinct ids, loads each via the
+        EXISTING ``load_sae`` (a cache hit when already resident), and validates
+        ``feature.layer == loaded.layer`` for every feature — raising
+        ``SaeLayerMismatchError`` listing offenders BEFORE any generation.
+
+        Regression note: when only one distinct sae_id is referenced (every
+        single-SAE flow), the returned map has a single entry and the caller's
+        behaviour is unchanged.
+
+        Args:
+            request: the combined steering request.
+            sae_meta_map: {sae_id -> SaeMeta} load metadata for the referenced
+                ids (built by the endpoint, which owns DB access).
+            force_reload: forwarded to ``load_sae`` (the request-level SAE is
+                force-reloaded today to dodge cached-state corruption).
+
+        Returns:
+            {sae_id -> LoadedSAE} for exactly the referenced ids.
+        """
+        referenced: List[str] = []
+        for f in request.selected_features:
+            sid = f.sae_id or request.sae_id
+            if sid not in referenced:
+                referenced.append(sid)
+
+        sae_map: Dict[str, LoadedSAE] = {}
+        for sid in referenced:
+            meta = sae_meta_map.get(sid)
+            if meta is None:
+                # Endpoint validates existence up-front; this guards the worker
+                # path against a request that slipped through with an unknown id.
+                raise SaeLayerMismatchError([{
+                    "feature_idx": -1, "layer": -1,
+                    "sae_id": sid, "sae_layer": None,
+                }])
+            sae_map[sid] = await self.load_sae(
+                Path(meta.sae_path),
+                sid,
+                force_reload=force_reload,
+                layer=meta.layer,
+                d_model=meta.d_model,
+                n_features=meta.n_features,
+                architecture=meta.architecture,
+            )
+
+        # Per-feature layer validation against the SAE that will steer it.
+        offenders: List[Dict[str, Any]] = []
+        for f in request.selected_features:
+            sid = f.sae_id or request.sae_id
+            loaded = sae_map[sid]
+            if f.layer != loaded.layer:
+                offenders.append({
+                    "feature_idx": f.feature_idx,
+                    "layer": f.layer,
+                    "sae_id": sid,
+                    "sae_layer": loaded.layer,
+                })
+        if offenders:
+            raise SaeLayerMismatchError(offenders)
+
+        return sae_map
 
     def _find_hf_model_path(self, base_path: Path) -> Optional[Path]:
         """
@@ -1113,34 +1225,63 @@ class SteeringService:
     def _register_steering_hooks(
         self,
         model: PreTrainedModel,
-        sae: LoadedSAE,
+        sae,
         feature_configs: List[FeatureSteeringConfig],
+        *,
+        default_sae_id: Optional[str] = None,
     ) -> List[Any]:
         """
         Register steering hooks on the model.
 
-        Supports multi-layer steering where each feature can target a different layer.
-        Groups features by layer and registers one hook per layer.
+        Supports multi-layer / multi-SAE steering: each feature is steered
+        through the SAE trained on ITS OWN layer (Feature 015). Features are
+        grouped by ``(sae_id, layer)`` and one hook is registered per group,
+        created with THAT group's SAE — so a feature placed on layer L is always
+        steered with the SAE whose ``.layer == L`` (no wrong-basis steering).
+
+        Regression guarantee: when ``sae`` is a single ``LoadedSAE`` (every
+        solo/compare/single-SAE-combined caller), the grouping collapses to the
+        prior group-by-layer and each hook receives that one SAE — byte-identical
+        to the pre-015 behaviour.
 
         Args:
-            model: The transformer model
-            sae: Loaded SAE model
-            feature_configs: List of all feature steering configurations
+            model: The transformer model.
+            sae: EITHER a single ``LoadedSAE`` (legacy single-SAE path) OR a
+                ``{sae_id -> LoadedSAE}`` map (Feature 015 multi-SAE path).
+            feature_configs: All feature steering configurations. Each config's
+                ``sae_id`` (falling back to ``default_sae_id``) selects its SAE
+                from the map.
+            default_sae_id: The request-level SAE id used when a config carries
+                no ``sae_id`` (ignored in the single-SAE overload).
 
         Returns:
-            List of hook handles for cleanup
+            List of hook handles for cleanup.
         """
-        # Group features by layer
-        features_by_layer: Dict[int, List[FeatureSteeringConfig]] = {}
+        single_sae = sae if isinstance(sae, LoadedSAE) else None
+        sae_map: Optional[Dict[str, LoadedSAE]] = None if single_sae is not None else sae
+
+        # Group features by (sae_id, layer). In the single-SAE overload the
+        # sae_id is a constant so this is exactly the prior group-by-layer.
+        groups: Dict[Tuple[Optional[str], int], List[FeatureSteeringConfig]] = {}
         for config in feature_configs:
-            layer = config.layer
-            if layer not in features_by_layer:
-                features_by_layer[layer] = []
-            features_by_layer[layer].append(config)
+            sid = config.sae_id or default_sae_id
+            key = (sid, config.layer)
+            groups.setdefault(key, []).append(config)
 
         handles = []
 
-        for layer, layer_features in features_by_layer.items():
+        for (sid, layer), layer_features in groups.items():
+            # Resolve the SAE for THIS group's layer.
+            if single_sae is not None:
+                group_sae = single_sae
+            else:
+                group_sae = sae_map.get(sid)
+                if group_sae is None:
+                    logger.warning(
+                        f"[Steering] No SAE for id {sid} (layer {layer}), skipping group"
+                    )
+                    continue
+
             # Get target module
             target_module = self._get_target_module(model, layer)
 
@@ -1148,13 +1289,13 @@ class SteeringService:
                 logger.warning(f"Could not find layer {layer} in model, skipping")
                 continue
 
-            # Create and register hook
-            hook_fn = self._create_steering_hook(sae, layer_features)
+            # Create and register hook with the SAE whose layer matches the group.
+            hook_fn = self._create_steering_hook(group_sae, layer_features)
             handle = target_module.register_forward_hook(hook_fn)
             handles.append(handle)
 
             logger.info(
-                f"[Steering] Registered hook on layer {layer}, "
+                f"[Steering] Registered hook on layer {layer} (sae={sid}), "
                 f"module type: {type(target_module).__name__}, "
                 f"features: {[f.feature_idx for f in layer_features]}"
             )
@@ -2125,6 +2266,10 @@ class SteeringService:
         sae_d_model: Optional[int] = None,
         sae_n_features: Optional[int] = None,
         sae_architecture: Optional[str] = None,
+        # Feature 015: load metadata for EVERY distinct sae_id the request
+        # references ({sae_id -> SaeMeta}). None ⇒ single-SAE flow, built from
+        # the scalar sae_* params below → byte-identical to the pre-015 path.
+        sae_meta_map: Optional[Dict[str, "SaeMeta"]] = None,
         # Progress callback for Celery tasks
         progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> CombinedSteeringResponse:
@@ -2164,18 +2309,33 @@ class SteeringService:
                 progress_callback(percent, message)
 
         try:
-            # Load SAE and model
-            emit_progress(5, "Loading SAE...")
-            # CRITICAL: Force reload SAE to avoid corruption from cached state
-            sae = await self.load_sae(
-                sae_path,
-                request.sae_id,
-                force_reload=True,
-                layer=sae_layer,
-                d_model=sae_d_model,
-                n_features=sae_n_features,
-                architecture=sae_architecture,
+            # Build the per-SAE load metadata. Absent a caller-supplied map
+            # (single-SAE flow), synthesize a one-entry map from the scalar
+            # params so downstream code takes the identical multi-SAE codepath
+            # with N=1 — no behavioural fork.
+            if sae_meta_map is None:
+                sae_meta_map = {
+                    request.sae_id: SaeMeta(
+                        sae_id=request.sae_id,
+                        sae_path=str(sae_path),
+                        layer=sae_layer,
+                        d_model=sae_d_model,
+                        n_features=sae_n_features,
+                        architecture=sae_architecture,
+                    )
+                }
+
+            # Load EVERY distinct SAE the request references and validate that
+            # each feature's layer matches its SAE. The request-level SAE is
+            # force-reloaded (as before) to dodge cached-state corruption;
+            # additional SAEs use the cache when resident.
+            emit_progress(5, "Loading SAE(s)...")
+            sae_map = await self.resolve_sae_map(
+                request, sae_meta_map, force_reload=True,
             )
+            # Preserve the historical `sae` local for the single-SAE path so the
+            # rest of this method reads unchanged when only one SAE is used.
+            sae = sae_map[request.sae_id]
 
             emit_progress(15, "Loading model...")
             # CRITICAL: Always force reload the model to avoid corruption from cached state
@@ -2187,16 +2347,26 @@ class SteeringService:
             # CRITICAL: Reset all model state to ensure NO context from prior prompts
             self._reset_model_state(model)
 
-            # Build list of applied features for response
+            # Resolve each feature's SAE id ONCE (feature.sae_id ?? request-level)
+            # — this is the source of truth threaded into both the hook configs
+            # and the applied-summary, so features_applied[].sae_id reflects the
+            # SAE actually used at hook time, never merely the request.
+            resolved_sae_ids = [
+                (f.sae_id or request.sae_id) for f in request.selected_features
+            ]
+
+            # Build list of applied features for response (sae_id = the config
+            # used at hook time — Feature 015 source of truth).
             features_applied = [
                 CombinedFeatureApplied(
                     feature_idx=f.feature_idx,
                     layer=f.layer,
+                    sae_id=sid,
                     strength=f.strength,
                     label=f.label,
                     color=f.color,
                 )
-                for f in request.selected_features
+                for f, sid in zip(request.selected_features, resolved_sae_ids)
             ]
 
             # Calculate total steering strength (sum of absolute values)
@@ -2234,7 +2404,9 @@ class SteeringService:
             # CRITICAL: Reset model state before combined generation
             self._reset_model_state(model)
 
-            # Create configs for ALL features
+            # Create configs for ALL features, threading each feature's resolved
+            # SAE id so _register_steering_hooks groups by (sae_id, layer) and
+            # steers each feature through its OWN layer's SAE.
             all_feature_configs = [
                 FeatureSteeringConfig(
                     feature_idx=f.feature_idx,
@@ -2242,13 +2414,24 @@ class SteeringService:
                     strength=f.strength,
                     label=f.label,
                     color=f.color,
+                    sae_id=sid,
                 )
-                for f in request.selected_features
+                for f, sid in zip(request.selected_features, resolved_sae_ids)
             ]
 
-            # Register steering hooks for ALL features at once
-            # The existing _create_steering_hook already accumulates multiple features!
-            handles = self._register_steering_hooks(model, sae, all_feature_configs)
+            # Register steering hooks for ALL features at once.
+            # The existing _create_steering_hook already accumulates multiple
+            # features. When exactly one SAE is referenced we pass the single
+            # LoadedSAE so the hook path is byte-identical to the pre-015 flow;
+            # when several are referenced we pass the whole map + the request's
+            # default id so each (sae_id, layer) group steers through its own SAE.
+            if len(sae_map) == 1:
+                handles = self._register_steering_hooks(model, sae, all_feature_configs)
+            else:
+                handles = self._register_steering_hooks(
+                    model, sae_map, all_feature_configs,
+                    default_sae_id=request.sae_id,
+                )
 
             try:
                 # Generate with ALL features applied simultaneously
@@ -2673,6 +2856,9 @@ class SteeringService:
         sae_d_model: Optional[int] = None,
         sae_n_features: Optional[int] = None,
         sae_architecture: Optional[str] = None,
+        # Feature 015: JSON-serializable {sae_id -> SaeMeta-as-dict} for every
+        # distinct SAE the request references. None ⇒ single-SAE flow.
+        sae_meta_map: Optional[Dict[str, Dict[str, Any]]] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> Dict[str, Any]:
         """
@@ -2690,6 +2876,8 @@ class SteeringService:
             sae_d_model: SAE model dimension
             sae_n_features: Number of SAE features
             sae_architecture: SAE architecture type
+            sae_meta_map: Feature 015 — {sae_id -> SaeMeta dict} for multi-SAE
+                requests; None keeps the byte-identical single-SAE path.
             progress_callback: Optional callback for progress updates (percent, message)
 
         Returns:
@@ -2697,6 +2885,13 @@ class SteeringService:
         """
         # Convert request_dict back to Pydantic model
         request = CombinedSteeringRequest(**request_dict)
+
+        # Rehydrate the SaeMeta map (if any) from its JSON dict form.
+        meta_map: Optional[Dict[str, SaeMeta]] = None
+        if sae_meta_map:
+            meta_map = {
+                sid: SaeMeta(**meta) for sid, meta in sae_meta_map.items()
+            }
 
         # Run the async method synchronously
         loop = asyncio.new_event_loop()
@@ -2712,6 +2907,7 @@ class SteeringService:
                     sae_d_model=sae_d_model,
                     sae_n_features=sae_n_features,
                     sae_architecture=sae_architecture,
+                    sae_meta_map=meta_map,
                     progress_callback=progress_callback,
                 )
             )
