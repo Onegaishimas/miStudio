@@ -1176,23 +1176,44 @@ class TestTheDEPLOYMENTEnablesWhatTheCodeRegisters:
     serves it.
     """
 
-    MANIFEST = "k8s/mistudio-deployment.yaml"
+    def _manifests(self) -> dict:
+        """`{path: categories}` for EVERY manifest setting MCP_TOOL_CATEGORIES.
 
-    def _deployed_categories(self) -> set:
+        This checked ONE hardcoded path and I picked the wrong one: I fixed
+        `k8s/mistudio-deployment.yaml`, watched the guard go green, and the
+        change reached nothing — ArgoCD deploys `k8s/base` via kustomize, and
+        `mistudio-deployment.yaml` is a legacy standalone manifest that
+        `kustomization.yaml` does not reference. The guard confirmed a file
+        nobody deploys.
+
+        Discovered rather than named, so a manifest added later is covered and
+        a stale one cannot drift out of sight. Every copy must agree: whichever
+        one is live, the capability is on.
+        """
         import re
         from pathlib import Path
 
         repo = Path(__file__).resolve().parents[3]
-        text = (repo / self.MANIFEST).read_text()
-        m = re.search(
-            r"name:\s*MCP_TOOL_CATEGORIES\s*\n(?:\s*#[^\n]*\n)*\s*value:\s*\"([^\"]+)\"",
-            text,
+        pattern = re.compile(
+            r"name:\s*MCP_TOOL_CATEGORIES\s*\n(?:\s*#[^\n]*\n)*\s*value:\s*\"([^\"]+)\""
         )
-        assert m, (
-            f"could not find MCP_TOOL_CATEGORIES in {self.MANIFEST} — the "
-            "manifest layout changed and this guard is checking nothing"
+        found = {}
+        for path in sorted((repo / "k8s").rglob("*.yaml")):
+            m = pattern.search(path.read_text())
+            if m:
+                rel = str(path.relative_to(repo))
+                found[rel] = {c.strip() for c in m.group(1).split(",") if c.strip()}
+        assert found, (
+            "no manifest under k8s/ sets MCP_TOOL_CATEGORIES — either the "
+            "layout changed or the env var was renamed, and this guard is "
+            "checking nothing"
         )
-        return {c.strip() for c in m.group(1).split(",") if c.strip()}
+        return found
+
+    def _deployed_categories(self) -> set:
+        """The INTERSECTION across manifests: a category is only reliably
+        enabled if every manifest that could be deployed enables it."""
+        return set.intersection(*self._manifests().values())
 
     def test_every_DEFAULT_category_is_actually_deployed(self):
         """A category the code enables by default and the manifest disables is
