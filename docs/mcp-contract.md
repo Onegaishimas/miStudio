@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**93 tools across 13 categories.**
+**92 tools across 13 categories.**
 
 
 ## `admin` (2 tools)
@@ -167,7 +167,7 @@ require `MILLM_API_URL` and are never enabled by default.
 | `mistudio_howto` | — | START HERE for circuit/steering work — workflow guidance an agent cannot infer from tool signatures. |
 | `search_features` | `GET /extractions/{…}/features` | Search/filter features within an extraction. |
 
-## `steering` (11 tools)
+## `steering` (10 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
@@ -175,7 +175,6 @@ require `MILLM_API_URL` and are never enabled by default.
 | `compute_cluster_allocation` | `POST /steering/cluster-allocation` | Compute the principled starting strength allocation for steering a CLUSTER of features (Feature 013) — or a MULTI-LAYER circuit (Feature 015). |
 | `enter_steering_mode` | `POST /steering/enter-mode` | Enter steering mode — LOADS THE MODEL+SAE ONTO THE GPU. |
 | `exit_steering_mode` | `POST /steering/exit-mode` | Exit steering mode and free the GPU memory it held. |
-| `get_approval_status` | `GET /mcp/approvals/{…}` | Poll an operator-approval request. |
 | `get_steering_mode` | `GET /steering/mode` | Is steering mode active (model+SAE pre-loaded on the GPU)? |
 | `get_steering_result` | `GET /steering/async/result/{…}`<br>`GET status` | Poll an async steering task. |
 | `steer_combined` | `POST /steering/async/combined` | Apply ALL selected features simultaneously in one generation pass (synergy testing). |

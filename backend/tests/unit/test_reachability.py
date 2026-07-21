@@ -981,47 +981,60 @@ class TestTheHowtoToolIsReachableAndHonest:
         )
 
     def test_EVERY_registered_tool_appears_in_the_generated_index(self):
-        """The completeness guarantee. THIS is the guard that makes "no
-        capability is invisible" true rather than aspirational.
+        """The completeness guarantee, checked REGISTRY vs REGISTRY.
 
-        Measured before it existed: prose (instructions + written topics)
-        covered 70 of 93 tools — 23 invisible. The derived index covers 93/93,
-        because it reads the registry instead of remembering it.
+        This test used to build its expectation by regexing module source for
+        `@mcp.tool()`. An adversarial pass showed why that is worthless: a tool
+        registered by a helper (`mcp.tool()(fn)`) or in a loop is absent from
+        the scanner AND from the index, so the two agreed and the guard passed
+        while the tool was invisible everywhere. Comparing two views that share
+        a blind spot proves nothing.
 
-        Note the extractor must tolerate the UNGATED tools. millm_delete_circuit,
-        millm_import_circuit and millm_circuit_sensing_clear deliberately omit
-        @gated (argument/scope validation must run BEFORE the gate check), so a
-        pattern requiring @gated silently drops exactly the three most
-        destructive tools in the surface — my own audit undercounted 93 as 90
-        for precisely that reason.
+        Now both sides come from `build_server()` + `list_tools()` — the same
+        call an agent makes. If the index and the server disagree about what
+        exists, that IS the defect.
         """
-        import inspect
+        import asyncio as _asyncio
+        import os as _os
 
-        from src.mcp_server.tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+        from src.mcp_server.config import MCPSettings, VALID_CATEGORIES
+        from src.mcp_server.server import build_server
         from src.mcp_server.tools.howto import _all_tools
 
-        registered = set()
-        for mods in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.values():
-            for module in mods:
-                registered |= set(
-                    re.findall(
-                        r"@mcp\.tool\(\)(?:\s*#[^\n]*)?\s*(?:@[\w.()\"', ]+\s*)*"
-                        r"(?:#[^\n]*\s*)*async def (\w+)",
-                        inspect.getsource(module),
-                    )
-                )
-        assert len(registered) > 80, (
-            f"only found {len(registered)} registered tools — the extraction "
-            "is broken and this guard is checking nothing"
+        _os.environ.setdefault("MILLM_API_URL", "http://millm.test")
+        mcp, _c = build_server(
+            MCPSettings(tool_categories=",".join(sorted(VALID_CATEGORIES)),
+                        allow_anonymous=True),
+            stdio=True,
+        )
+        served = {t.name for t in _asyncio.run(mcp.list_tools())}
+        assert len(served) > 80, (
+            f"only {len(served)} tools served — this guard is checking nothing"
         )
 
-        indexed = {n for entries in _all_tools().values() for n, _ in entries}
-        missing = sorted(registered - indexed)
+        index = _all_tools()
+        indexed = {n for entries in index.values() for n, _ in entries}
+
+        missing = sorted(served - indexed)
         assert not missing, (
-            f"{len(missing)} registered tool(s) are absent from the generated "
-            f"index and therefore INVISIBLE to an agent: {missing}. Either the "
-            "extractor in _all_tools() cannot parse their shape, or they lack "
-            "a docstring."
+            f"{len(missing)} tool(s) the server SERVES are absent from the "
+            f"index and therefore invisible to an agent: {missing}"
+        )
+
+        # And the reverse: an index naming a tool the server does not serve
+        # sends an agent after something that does not exist.
+        phantom = sorted(indexed - served)
+        assert not phantom, (
+            f"the index names {phantom}, which the server does not serve"
+        )
+
+        # Presence is not coverage. A docstring-less tool was previously
+        # indexed with an empty summary, so the metric read 93/93 while an
+        # agent got a name and nothing else.
+        blank = sorted(n for e in index.values() for n, d in e if not d.strip())
+        assert not blank, (
+            f"{blank} are indexed with an EMPTY summary — they read as covered "
+            "and tell an agent nothing. Give them a docstring."
         )
 
     def test_the_ungated_destructive_tools_are_indexed(self):
@@ -1097,7 +1110,10 @@ class TestTheHowtoToolIsReachableAndHonest:
         for tool in tools:
             for pname, schema in (tool.inputSchema or {}).get("properties", {}).items():
                 total += 1
-                if not schema.get("description"):
+                # F4: `"   "` is truthy. An auto-formatter or a stripped
+                # placeholder produces exactly that, and it tells an agent
+                # nothing while reading as covered.
+                if not (schema.get("description") or "").strip():
                     bare.append(f"{tool.name}.{pname}")
         assert total > 150, f"only {total} parameters found — extraction broken"
         assert not bare, (

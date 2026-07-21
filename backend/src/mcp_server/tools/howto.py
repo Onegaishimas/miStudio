@@ -507,62 +507,81 @@ TOPICS: dict[str, str] = {
 # ── Generated coverage ─────────────────────────────────────────────────────
 
 
-def _all_tools() -> dict[str, list[tuple[str, str]]]:
-    """Every registered tool with its one-line summary, read from the LIVE
-    registry.
 
-    F20 follow-up: `_TOOL_MAP` above is hand-written, and a coverage audit
-    found it silently omitted 23 tools — the same
-    hand-maintained-list failure this codebase has now hit four times (the
-    copy audit's SURFACES, the reachability harness's category list, the
-    contract guard's row scraper, and now this). Prose is good at grouping by
-    intent; it is bad at completeness.
+def _run_sync(coro):
+    """Await `coro` whether or not a loop is already running.
 
-    So the intent-grouped map stays for orientation, and THIS provides the
-    guarantee: nothing can be invisible, because the index is derived rather
-    than remembered. A tool added tomorrow appears here with no edit.
+    `_all_tools()` is called from an async tool AND from sync tests, so it
+    cannot assume either context.
     """
-    import ast
-    import inspect
+    import asyncio
+    import concurrent.futures
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # Inside a loop: run it on a worker thread with its own loop.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _all_tools() -> dict[str, list[tuple[str, str]]]:
+    """Every tool the SERVER ACTUALLY REGISTERS, with its one-line summary.
+
+    Derived by BUILDING THE SERVER and reading `list_tools()` — the same call
+    an agent makes. Everything else is a proxy for that and can disagree with
+    it.
+
+    An earlier version scanned module SOURCE for `@mcp.tool()` decorators and
+    called that "the live registry" in its own docstring. An adversarial pass
+    defeated it five ways, all invisible: a tool registered by a helper or a
+    loop (`mcp.tool()(fn)`) rather than a literal decorator; a module imported
+    but absent from CATEGORY_MODULES — the ORIGINAL F20 defect verbatim; an
+    aliased decorator. Each left a real tool out of the index while every guard
+    stayed green, because the scanner and the guards shared the same blind
+    spot and the contract generator laundered it on regeneration.
+
+    A source scanner over a hand-maintained module list is the exact failure
+    mode this index exists to end. The registry is the only authority on what
+    is registered, so ask it.
+
+    Category attribution still comes from the module maps: `list_tools()`
+    returns a flat list with no category, so the server is built once per
+    category. A tool in no map cannot be attributed — and cannot be reached by
+    an agent either, which is the point.
+    """
+    import asyncio
+    import os
+
+    from ..config import MCPSettings
+    from ..server import build_server
 
     from . import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
 
-    def _decorated_tools(source: str):
-        """(name, docstring) for every `@mcp.tool()` function, via AST.
-
-        Was a regex requiring `async def NAME(...)` with no nested parens
-        before the docstring. Annotating parameters with
-        `Annotated[T, Field(description=...)]` introduces exactly such a paren,
-        and 43 tools silently fell out of the index — caught only because the
-        completeness guard refused to let it ship.
-
-        A parser cannot be fooled by signature shape, which is the whole point:
-        this index is the completeness guarantee, so its extractor must not
-        have a form it quietly cannot read.
-        """
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
-                continue
-            for dec in node.decorator_list:
-                target = dec.func if isinstance(dec, ast.Call) else dec
-                # `@mcp.tool()` — match the attribute, not the whole call
-                if isinstance(target, ast.Attribute) and target.attr == "tool":
-                    yield node.name, (ast.get_docstring(node) or "")
-                    break
+    # millm_* categories register only with a configured URL; a placeholder is
+    # enough to enumerate them, since nothing is called here.
+    os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")
 
     out: dict[str, list[tuple[str, str]]] = {}
-    for category, modules in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.items():
+    for category in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}:
+        mcp, _client = build_server(
+            MCPSettings(tool_categories=category, allow_anonymous=True),
+            stdio=True,
+        )
+        # `mistudio_howto` is itself an async tool, so this runs INSIDE a
+        # running loop and `asyncio.run` raises there. A blanket `except:
+        # continue` hid that and returned an EMPTY index — a silent blanking
+        # of the completeness guarantee, which is the exact failure this whole
+        # effort exists to prevent. Never swallow here.
+        tools = _run_sync(mcp.list_tools())
         entries: list[tuple[str, str]] = []
-        for module in modules:
-            for name, doc in _decorated_tools(inspect.getsource(module)):
-                summary = " ".join(doc.split())
-                # First sentence, capped — enough to decide whether to look
-                # closer, without pasting a full docstring per tool.
-                cut = summary.find(". ")
-                if 0 < cut < 160:
-                    summary = summary[: cut + 1]
-                entries.append((name, summary[:170]))
+        for tool in tools:
+            summary = " ".join((tool.description or "").split())
+            cut = summary.find(". ")
+            if 0 < cut < 160:
+                summary = summary[: cut + 1]
+            entries.append((tool.name, summary[:170]))
         if entries:
             out[category] = sorted(entries)
     return out
