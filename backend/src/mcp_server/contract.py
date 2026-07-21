@@ -97,8 +97,18 @@ def collect() -> dict[str, list[dict[str, Any]]]:
     """`{category: [{name, summary, endpoints, destructive}]}` from the registry."""
     from .tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
 
+    # The REGISTRY is the authority on what exists; the AST pass only enriches
+    # rows with endpoints, which `list_tools()` cannot report. An earlier
+    # version derived membership from the AST alone and an adversarial pass
+    # walked straight through it.
+    from .tools.howto import _all_tools
+
+    index = _all_tools()
+
     out: dict[str, list[dict[str, Any]]] = {}
     for category, modules in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.items():
+        served = {n: d for n, d in index.get(category, [])}
+        seen_in_source: set[str] = set()
         rows: list[dict[str, Any]] = []
         for module in modules:
             tree = ast.parse(inspect.getsource(module))
@@ -117,6 +127,14 @@ def collect() -> dict[str, list[dict[str, Any]]]:
                 cut = summary.find(". ")
                 if 0 < cut < 150:
                     summary = summary[: cut + 1]
+                if node.name not in served:
+                    # Registered-by-helper tools are invisible to this AST
+                    # pass; they are picked up from `served` below. A tool in
+                    # the source but NOT served (conditional registration) is
+                    # correctly omitted — the contract records what an agent
+                    # can actually call.
+                    continue
+                seen_in_source.add(node.name)
                 rows.append({
                     "name": node.name,
                     "summary": summary[:160],
@@ -135,6 +153,12 @@ def collect() -> dict[str, list[dict[str, Any]]]:
                                   "irreversible")
                     ),
                 })
+        # Anything the server serves that the AST could not see still gets a
+        # row — without an endpoint, but never omitted.
+        for name, summary in served.items():
+            if name not in seen_in_source:
+                rows.append({"name": name, "summary": summary,
+                             "endpoints": [], "destructive": False})
         if rows:
             out[category] = sorted(rows, key=lambda r: r["name"])
     return out
