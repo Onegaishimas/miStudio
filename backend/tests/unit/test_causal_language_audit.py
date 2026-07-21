@@ -157,6 +157,7 @@ def _prose_units(text: str):
     if tree is None:
         chunks.append((1, text))
     else:
+        docstring_nodes = set()
         for node in ast.walk(tree):
             if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
                                  ast.AsyncFunctionDef)):
@@ -164,6 +165,27 @@ def _prose_units(text: str):
                 if doc:
                     line = getattr(node, "lineno", 1)
                     chunks.append((line, doc))
+                    # Remember the node so its literal is not scanned twice.
+                    body = getattr(node, "body", None)
+                    if body and isinstance(body[0], ast.Expr):
+                        docstring_nodes.add(id(body[0].value))
+
+        # F20 R2-01: EVERY string literal, not just docstrings.
+        #
+        # The AST rewrite (R1-11) fixed the line-wrapping bypass and opened a
+        # new one: an overclaim in a RETURNED ERROR MESSAGE — copy an agent
+        # relays verbatim — became invisible, because only docstrings were
+        # scanned. Verified:
+        #
+        #     return {"error": "This edge is causally validated by observation."}
+        #
+        # passed the audit entirely. An R1 fix reintroducing the defect class
+        # it removed is the pattern this increment has hit in every round.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if id(node) in docstring_nodes:
+                    continue
+                chunks.append((getattr(node, "lineno", 1), node.value))
         # Standalone comments: prose a reviewer reads.
         for i, raw in enumerate(text.splitlines(), 1):
             stripped = raw.strip()
@@ -314,6 +336,28 @@ class TestTheAuditCanActuallyFail:
         assert not (CAUSAL.search(sentence) and not ALLOWED_CONTEXT.search(sentence)), (
             f"the audit FLAGS legitimate copy: {sentence!r} — false positives "
             "are how an audit gets loosened until it stops auditing"
+        )
+
+    def test_an_overclaim_in_a_STRING_LITERAL_is_caught(self):
+        """F20 R2-01. The AST rewrite (R1-11) scanned docstrings only, so an
+        overclaim in a RETURNED ERROR MESSAGE — copy an agent relays verbatim —
+        became invisible. Verified: this exact snippet passed the audit.
+
+        An R1 fix reintroducing the defect class it removed is the pattern this
+        increment has hit in every round, which is why the control is here."""
+        src = (
+            'def tool():\n'
+            '    """A clean docstring."""\n'
+            '    return {"error": "This edge is causally validated by '
+            'observation."}\n'
+        )
+        flagged = [
+            u for _n, u in _prose_units(src)
+            if CAUSAL.search(u) and not ALLOWED_CONTEXT.search(u)
+        ]
+        assert flagged, (
+            "an overclaim in a returned message is invisible to the audit — "
+            "the agent relays it and the docstrings stay clean"
         )
 
     def test_a_WRAPPED_overclaim_is_still_caught(self):
