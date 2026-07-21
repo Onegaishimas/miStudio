@@ -156,11 +156,23 @@ WORKFLOW:
 
 WHAT TO SELECT FOR:
   * A real `max_activation` — you need it to set strength (see calibration).
-  * `activation_frequency` in a middle band (~0.001-0.05). Very frequent
-    features are near-ubiquitous and steering them perturbs everything; very
-    rare ones may never fire on your traffic.
+  * `activation_frequency` — RELATIVE TO THE SAE, not an absolute band.
+    MEASURED on this deployment (2026-07-21, LFM2.5 residual SAEs): medians
+    run 0.35-0.73 and the 5th percentile is still ~0.20-0.50. This field is
+    NOT per-token sparsity; it is computed over evaluation samples, so a
+    "0.7" feature is TYPICAL here, not near-ubiquitous.
+    An earlier version of this guidance said to prefer ~0.001-0.05, which
+    would reject essentially every feature in this deployment. Compare a
+    candidate against its own SAE's distribution instead of a fixed number.
   * A layer where an SAE is ATTACHED in miLLM, or the circuit cannot serve
     fully and will degrade to a per-layer slice.
+
+CHECK WHAT THE CAPTURE CORPUS IS before mining for a THEME. This deployment's
+captures run over OpenWebText-2M — general web text. Features for a specific
+theme (humor, legal register, code) exist and are labelled, but they fire
+SPARSELY there, so themed edges can fail `s_min` support for a reason that has
+nothing to do with whether the circuit is real. A null result on a themed
+search is evidence about the CORPUS at least as much as about the model.
 
 For a multi-layer circuit, pick features whose meanings plausibly relate
 across layers (upstream earlier, downstream later). If you want that relation
