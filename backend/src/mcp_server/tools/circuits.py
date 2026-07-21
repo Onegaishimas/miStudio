@@ -59,10 +59,23 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         model_hf_id: Optional[str] = None,
     ) -> Any:
         """Create a circuit from discovery candidates or hand assembly.
+
+        PASS `discovery_run_id` IF YOU HAVE ONE. Omitting it PERMANENTLY
+        forfeits `run_circuit_faithfulness`, which draws its prompts from that
+        capture store and 409s without it. The failure surfaces later, at a
+        different tool, and the only remedy is recreating the circuit. Any
+        hand-assembled circuit therefore cannot be faithfulness-tested.
+
         Contract rules enforced server-side: per-layer member caps (20 PER
         LAYER), edges must ascend layers and reference members. Rejections
         return the exact violation. model_hf_id (HF repo id) is the
-        cross-instance-stable model provenance carried by exports."""
+        cross-instance-stable model provenance carried by exports.
+
+        STRENGTHS live on members (`member.feature.strength`) and are what
+        actually steers — edges carry evidence only. Measured envelope: about
+        0.15 x the feature's REAL max_activation per member, total ~3 across
+        two layers; a circuit at ~50x that emitted pure token soup in
+        production. See mistudio_howto('strength_calibration')."""
         return await client.post("/circuits", json_body={
             "name": name, "saes": saes, "members": members,
             "edges": edges or [], "narrative": narrative, "budget": budget,
@@ -101,7 +114,14 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     @mcp.tool()
     async def delete_circuit(circuit_id: str) -> Any:
         """Delete a circuit permanently (its manifests survive — they are
-        first-class records)."""
+        first-class records).
+
+        IRREVERSIBLE, and this tool does NOT check whether the circuit is
+        serving in miLLM — unlike its sibling `millm_delete_circuit`, which
+        refuses a serving circuit without `acknowledge_serving`. Deleting one
+        that miLLM has imported does not stop it serving there, but you lose
+        the definition. Export first (`export_circuit_definition`) if you may
+        want it back."""
         return await client.delete(f"/circuits/{circuit_id}")
 
     @mcp.tool()
@@ -112,10 +132,21 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def export_circuit_definition(circuit_id: str) -> Any:
-        """Export mistudio.circuit-definition/v1 JSON (lossless: rungs, edge
+        """Export the portable circuit-definition JSON (lossless: rungs, edge
         types, attribution, manifest refs, provenance all travel). This is
         the raw contract document — for the human-readable rung_language
-        string, use get_circuit/list_circuits."""
+        string, use get_circuit/list_circuits.
+
+        FEEDING THIS TO miLLM: the document's `saes[].mistudio_sae_id` must be
+        the id MILLM knows (e.g.
+        `mistudio--sae-<model>--layer_12--width_8k--res`), NOT miStudio's
+        internal `sae_xxxxxxxx` row id. They are DIFFERENT NAMESPACES for the
+        same SAE and no tool translates between them — read miLLM's ids from
+        `millm_status`. A mismatched id imports fine and only fails at
+        activation, as an unbound SAE.
+
+        The `kind` field is `mistudio.circuit-definition` with NO `/v1`
+        suffix, despite the schema file and docs saying v1."""
         return await client.get(f"/circuits/{circuit_id}/export")
 
     @mcp.tool()
@@ -142,7 +173,16 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         with FIRST-CLASS positions + error norms). layers = [{layer, sae_id}].
         confirm=false returns a cost ESTIMATE only (probe); call again with
         confirm=true — or start_circuit_capture_confirm — to launch the full
-        capture. Managed GPU task: poll get_task_status."""
+        capture. Managed GPU task.
+
+        POLL `list_circuit_captures` (NOT get_task_status). This endpoint
+        returns a raw Celery task id and creates no task-queue row, so
+        get_task_status cannot see it — status lives on the capture run.
+
+        Serialised against ALL other circuit GPU work (attribution,
+        validation, faithfulness) by one advisory lock, ACROSS UNRELATED
+        circuits: a 409 may name a run you do not own. Back off and poll; do
+        not retry immediately."""
         return await client.post("/circuit-capture", json_body={
             "dataset_id": dataset_id, "model_id": model_id, "layers": layers,
             "epsilon": epsilon, "sample_cap": sample_cap,
@@ -199,7 +239,14 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         (attribution_supported) by sign-agreement + magnitude. This is
         attribution, NOT causal proof — rung stays ≤1 until 017 intervenes.
         Both orderings are preserved so 017 can report survival-rate uplift.
-        GPU task: poll get_task_status, then get_discovery_results."""
+        GPU task.
+
+        POLL `get_discovery_results` and read `attribution_status` (NOT
+        get_task_status — this returns a raw Celery id with no task-queue
+        row). Terminal when it leaves pending/running.
+
+        Holds the shared circuit-GPU lock (see start_circuit_capture); a 409
+        may name unrelated work."""
         return await client.post(f"/circuit-discovery/{run_id}/attribution",
                                  json_body={"prompt_limit": prompt_limit})
 
@@ -249,7 +296,18 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         validation, so the score is a real faithfulness measurement — the
         manifest records the exact metric so the number is never trusted blind.
         Returns a task
-        id; poll get_task_status then get_circuit for circuit.faithfulness."""
+        id.
+
+        POLL `get_circuit` and read `faithfulness_status`, then
+        `circuit.faithfulness` for the result (NOT get_task_status — raw
+        Celery id, no task-queue row).
+
+        REQUIRES the circuit to have a `discovery_run_id`: its prompts come
+        from that capture store. A circuit created WITHOUT one — any
+        hand-authored circuit — is refused 409 here and can never be
+        faithfulness-tested. That is decided at create_circuit, not here.
+
+        Holds the shared circuit-GPU lock; a 409 may name unrelated work."""
         return await client.post(
             f"/circuits/{circuit_id}/faithfulness", json_body={
                 "mode": mode, "k_nonmembers": k_nonmembers,

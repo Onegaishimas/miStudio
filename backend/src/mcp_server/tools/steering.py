@@ -126,8 +126,19 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def enter_steering_mode() -> Any:
-        """Enter steering mode — LOADS THE MODEL+SAE ONTO THE GPU. This consumes
-        significant VRAM and may contend with other jobs. Exit when done."""
+        """Enter steering mode — LOADS THE MODEL+SAE ONTO THE GPU.
+
+        OPTIONAL. Every steer_* submit auto-starts the worker if it is not
+        running, so this only moves the ~10s cold start out of your first
+        task. Calling it is not a prerequisite.
+
+        `exit_steering_mode` IS required when you finish: nothing else reaps
+        the worker and it holds VRAM indefinitely.
+
+        Contends for the same single GPU as the circuit pipeline
+        (capture/attribution/validation/faithfulness), which uses a separate
+        advisory lock that does NOT know about this worker — running both at
+        once can OOM as an opaque task failure rather than a clean refusal."""
         return await client.post("/steering/enter-mode")
 
     @mcp.tool()
@@ -147,7 +158,16 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     ) -> Any:
         """Run a steering comparison: 1-4 features, each generating steered output
         side-by-side with an unsteered baseline. GPU-heavy background task —
-        returns task_id; poll get_steering_result. Strengths in [-300, 300]."""
+        returns task_id; poll get_steering_result. Strengths in [-300, 300].
+
+        POLLING IS NOT OPTIONAL: get_steering_result releases an agent
+        concurrency slot. Submit without ever polling and you wedge your own
+        steering surface until the MCP process restarts.
+
+        UNDER APPROVAL MODE the return shape CHANGES — you get
+        {approval_request_id, status: "pending_approval"} instead of a
+        task_id, and must poll get_approval_status (which only exists as a
+        tool when approval mode is on). Handle both shapes."""
         body = {
             "sae_id": sae_id,
             "model_id": model_id,
@@ -172,7 +192,16 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     ) -> Any:
         """Dose-response sweep: one feature generated at each strength value
         (e.g. [0, 5, 20, 50]). The definitive causal-validation tool. GPU-heavy
-        background task — returns task_id; poll get_steering_result."""
+        background task — returns task_id; poll get_steering_result.
+
+        POLLING IS NOT OPTIONAL: get_steering_result releases an agent
+        concurrency slot. Submit without ever polling and you wedge your own
+        steering surface until the MCP process restarts.
+
+        UNDER APPROVAL MODE the return shape CHANGES — you get
+        {approval_request_id, status: "pending_approval"} instead of a
+        task_id, and must poll get_approval_status (which only exists as a
+        tool when approval mode is on). Handle both shapes."""
         body = {
             "sae_id": sae_id,
             "model_id": model_id,
@@ -196,6 +225,16 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     ) -> Any:
         """Apply ALL selected features simultaneously in one generation pass
         (synergy testing). GPU-heavy background task — returns task_id.
+
+        POLLING IS NOT OPTIONAL: get_steering_result releases an agent
+        concurrency slot. Submit without ever polling and you wedge your own
+        steering surface until the MCP process restarts.
+
+        UNDER APPROVAL MODE the return shape CHANGES — you get
+        {approval_request_id, status: "pending_approval"} instead of a
+        task_id, and must poll get_approval_status (which only exists as a
+        tool when approval mode is on). Handle both shapes.
+
 
         MULTI-LAYER (015): give each feature its own `sae_id` to steer a
         cross-layer circuit — every feature steers through the SAE trained on

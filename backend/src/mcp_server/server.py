@@ -28,23 +28,40 @@ from .tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
 logger = logging.getLogger(__name__)
 
 SERVER_INSTRUCTIONS = """\
-miStudio MCP server — agentic access to SAE feature analysis and steering.
+miStudio MCP server — SAE feature analysis, circuit discovery, and steering.
 
-Typical loop: list_extractions → compute_feature_groups → get_feature_groups →
-get_feature_group_members → get_feature_examples/token-analysis/logit-lens →
-steer_sweep (causal validation) → update_feature_label with evidence notes.
+**CALL `mistudio_howto` FIRST** for circuit or steering work. 92 tools across
+13 categories is more than a description can carry; that tool holds the
+workflows, the document shapes that cross between miStudio and miLLM, and the
+failure modes that look like something else.
+
+Two planes: miStudio DISCOVERS and CALIBRATES (it runs the model to learn);
+miLLM SERVES (it runs the model to serve, behind an OpenAI-compatible API).
+The boundary is a portable document, not a code dependency.
+
+Feature analysis: list_extractions → search_features → get_feature →
+get_feature_examples/token-analysis/logit-lens → update_feature_label.
+
+Circuit discovery (each stage EARNS an evidence rung — see
+`mistudio_howto(\"discovery_pipeline\")`): start_circuit_capture →
+run_circuit_discovery (rung 0) → run_attribution_pass (rung 1) →
+validate_circuit_edges (rung 2, a real intervention) → create_circuit →
+run_circuit_faithfulness → promote_circuit → export_circuit_definition.
+
+Steering: steer_sweep / steer_compare / steer_combined auto-start the GPU
+worker, so enter_steering_mode is OPTIONAL (it just pays the cold start up
+front). exit_steering_mode is MANDATORY — nothing else reaps the worker.
+Poll get_steering_result: it also releases a concurrency slot.
 
 Long-running operations return task ids — poll get_task_status /
-get_steering_result. Steering is GPU-heavy: enter_steering_mode first, exit
-when done, and respect the guardrail messages.
+get_steering_result.
 
-Cross-product (when millm_* tools are present): miLLM is the always-on
-serving runtime. Move a tuned cluster into production with
-export_cluster_definition → millm_import_cluster(definition=…, activate=true),
-then millm_set_intensity to dial it and millm_sensing_enable /
-millm_sensing_events to watch its members co-fire on live traffic.
+Cross-product (when millm_* tools are present): move a tuned artifact into
+production with export_cluster_definition → millm_import_cluster, or
+export_circuit_definition → millm_import_circuit → millm_activate_circuit.
+A circuit below rung 2 is REFUSED unless you pass acknowledge_unvalidated.
 millm_status answers "what is steering right now" in one call. When miLLM is
-down, its tools return {"unavailable": "millm", "reason": …} — report the
+down its tools return {"unavailable": "millm", "reason": …} — report the
 reason, don't retry in a loop.
 """
 

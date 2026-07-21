@@ -3,6 +3,7 @@ Pins for the evidence ladder (018 Task 1.1, IDL-35): single-source enum,
 rung transition rules, TS mirror sync, and the no-parallel-enums grep guard.
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -121,8 +122,24 @@ class TestRungThreeIsCircuitLevelNotEdgeLevel:
             if py.name == "evidence_ladder.py":
                 continue  # the ladder DEFINES the tier
             text = py.read_text()
-            if "FAITHFULNESS_TESTED" in text:
-                offenders.append(str(py.relative_to(src)))
+            for node in ast.walk(ast.parse(text)):
+                # The defect is EXECUTABLE code naming the tier — an import, a
+                # comparison, an assignment. Prose that merely mentions it is
+                # documentation, and forbidding that would mean the guidance
+                # tool could not explain the rule this very test enforces.
+                #
+                # Found by exactly that collision: adding `mistudio_howto`,
+                # whose evidence_ladder topic says "rung 3 is not an edge
+                # rung", tripped a substring check that could not tell an
+                # explanation from a write.
+                if isinstance(node, ast.Attribute) and node.attr == "FAITHFULNESS_TESTED":
+                    offenders.append(f"{py.relative_to(src)}:{node.lineno}")
+                elif isinstance(node, ast.Name) and node.id == "FAITHFULNESS_TESTED":
+                    offenders.append(f"{py.relative_to(src)}:{node.lineno}")
+                elif isinstance(node, ast.ImportFrom) and any(
+                    a.name == "FAITHFULNESS_TESTED" for a in node.names
+                ):
+                    offenders.append(f"{py.relative_to(src)}:{node.lineno}")
         assert offenders == [], (
             "FAITHFULNESS_TESTED is referenced in production code: "
             f"{offenders}. Rung 3 is a CIRCUIT-level result carried in "

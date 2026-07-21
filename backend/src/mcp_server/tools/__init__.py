@@ -12,6 +12,7 @@ from . import (
     experiments,
     features,
     groups,
+    howto,
     jobs,
     labeling,
     millm_clusters,
@@ -24,7 +25,7 @@ from . import (
 
 # category name → module (registration order = tools/list order)
 CATEGORY_MODULES = {
-    "read": [discovery, features],
+    "read": [discovery, features, howto],
     "groups": [groups],
     "steering": [steering],
     "experiments": [experiments],
