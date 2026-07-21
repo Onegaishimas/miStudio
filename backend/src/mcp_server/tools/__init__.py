@@ -16,6 +16,7 @@ from . import (
     labeling,
     millm_clusters,
     millm_runtime,
+    millm_circuits,
     millm_sensing,
     profiles,
     steering,
@@ -40,5 +41,6 @@ CATEGORY_MODULES = {
 MILLM_CATEGORY_MODULES = {
     "millm_runtime": [millm_runtime],
     "millm_clusters": [millm_clusters],
+    "millm_circuits": [millm_circuits],
     "millm_sensing": [millm_sensing],
 }
