@@ -32,8 +32,9 @@ references is how an agent ends up serving a circuit against the wrong feature
 basis.
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ..health_gate import HealthGate, gated
@@ -96,7 +97,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_list_circuits(limit: int = 50, offset: int = 0) -> Any:
+    async def millm_list_circuits(limit: Annotated[int, Field(description="Max rows to return")] = 50, offset: Annotated[int, Field(description="Rows to skip, for paging")] = 0) -> Any:
         """Imported circuits with their evidence rung.
 
         `rung_language` is the server's phrase, rendered from the evidence
@@ -132,9 +133,9 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     @mcp.tool()
     @gated(gate, "millm")
     async def millm_activate_circuit(
-        circuit_id: str,
-        acknowledge_unvalidated: bool = False,
-        allow_layer_overlap: bool = False,
+        circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")],
+        acknowledge_unvalidated: Annotated[bool, Field(description="Serve a circuit below rung 2 (not causally validated). Pass ONLY on explicit human instruction, and report the rung first. Does NOT persist — the intensity dial re-applies the gate")] = False,
+        allow_layer_overlap: Annotated[bool, Field(description="Compose with a circuit already holding a layer. Only valid when details.overridable is true; a COLLISION (same layer AND feature) is never overridable")] = False,
     ) -> Any:
         """Serve a circuit.
 
@@ -170,7 +171,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_deactivate_circuit(circuit_id: str) -> Any:
+    async def millm_deactivate_circuit(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")]) -> Any:
         """Stop serving a circuit and release its layer claims.
 
         `cleared_steering: false` with a warning means the steering could NOT
@@ -181,7 +182,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     @mcp.tool()
     @gated(gate, "millm")
     async def millm_set_circuit_intensity(
-        intensity: float, acknowledge_unvalidated: bool = False
+        intensity: Annotated[float, Field(description="Global steering dial. Bounded by the artifact's AUTHORED intensity_range (server-enforced), not a fixed 0-2")], acknowledge_unvalidated: Annotated[bool, Field(description="Serve a circuit below rung 2 (not causally validated). Pass ONLY on explicit human instruction, and report the rung first. Does NOT persist — the intensity dial re-applies the gate")] = False
     ) -> Any:
         """Dial the active circuit's global lambda.
 
@@ -218,7 +219,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     # the gate before the body, which would make the serving check unreachable
     # while miLLM is down. Gate checked manually AFTER validation.
     async def millm_delete_circuit(
-        circuit_id: str, acknowledge_serving: bool = False
+        circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")], acknowledge_serving: Annotated[bool, Field(description="Delete a circuit that is currently SERVING. Irreversible: stops live steering AND destroys the definition. Export first")] = False
     ) -> Any:
         """Delete an imported circuit permanently.
 
@@ -287,7 +288,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
             }
         return result
 
-    async def _is_serving(circuit_id: str) -> Optional[bool]:
+    async def _is_serving(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")]) -> Optional[bool]:
         """True/False if known, None if the serving state could not be read.
 
         Callers must treat None as "unknown" and NOT as "not serving" — see
@@ -317,7 +318,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     # payload gets told "millm is down", sending it to fix the wrong thing.
     # The gate is checked manually below, AFTER validation.
     async def millm_import_circuit(
-        definition: dict, on_conflict: Optional[str] = None
+        definition: Annotated[dict, Field(description="A portable definition document. `kind` carries NO /v1 suffix")], on_conflict: Annotated[Optional[str], Field(description="'rename' (default — keep both) | 'fail' (refuse if the name exists)")] = None
     ) -> Any:
         """Import a `mistudio.circuit-definition/v1` document (INLINE only).
 
@@ -345,7 +346,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_export_circuit(circuit_id: str) -> Any:
+    async def millm_export_circuit(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")]) -> Any:
         """The circuit's ORIGINAL document, byte-for-byte.
 
         Returned RAW — not in the `{success, data}` envelope — because the
@@ -358,7 +359,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_release_circuit_claims(circuit_id: str) -> Any:
+    async def millm_release_circuit_claims(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")]) -> Any:
         """Release ONE circuit's stuck layer claims.
 
         Use when an activation is refused naming a circuit that
@@ -396,9 +397,9 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     @mcp.tool()
     @gated(gate, "millm")
     async def millm_circuit_sensing_events(
-        circuit_id: Optional[str] = None,
-        limit: int = 50,
-        since: Optional[str] = None,
+        circuit_id: Annotated[Optional[str], Field(description="miStudio circuit id (circ_xxxxxxxx)")] = None,
+        limit: Annotated[int, Field(description="Max rows to return")] = 50,
+        since: Annotated[Optional[str], Field(description="ISO-8601 timestamp WITH a UTC offset (e.g. 2026-07-21T12:00:00Z). A naive timestamp is refused — it would shift the window silently")] = None,
     ) -> Any:
         """Observed edge firings, newest first.
 
@@ -425,7 +426,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_circuit_sensing_event(event_id: int) -> Any:
+    async def millm_circuit_sensing_event(event_id: Annotated[int, Field(description="Event id (INTEGER) from the events list")]) -> Any:
         """One edge observation in full: both endpoints with their layer,
         feature, position and activation, the observed token lag, and the
         context window.
@@ -441,7 +442,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_circuit_sensing_enable(circuit_id: str) -> Any:
+    async def millm_circuit_sensing_enable(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")]) -> Any:
         """Enable edge sensing for a circuit (persists; arms when it serves).
 
         Enabled is operator INTENT and is reported distinctly from `armed`: a
@@ -456,14 +457,14 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_circuit_sensing_disable(circuit_id: str) -> Any:
+    async def millm_circuit_sensing_disable(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx)")]) -> Any:
         """Disable edge sensing for a circuit. Recorded events are kept."""
         return await millm.post(f"/api/circuit-sensing/{circuit_id}/disable")
 
     @mcp.tool()
     # NO @gated: scope validation must run BEFORE the gate (R1-16).
     async def millm_circuit_sensing_clear(
-        circuit_id: Optional[str] = None, all_circuits: bool = False
+        circuit_id: Annotated[Optional[str], Field(description="miStudio circuit id (circ_xxxxxxxx)")] = None, all_circuits: Annotated[bool, Field(description="Clear observations for EVERY circuit. Mutually exclusive with circuit_id; one of the two is required — there is no default")] = False
     ) -> Any:
         """Delete recorded edge observations. IRREVERSIBLE.
 

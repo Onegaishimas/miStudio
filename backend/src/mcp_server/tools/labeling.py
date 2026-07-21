@@ -1,7 +1,8 @@
 """Labeling write-back tools (category: labeling) — Feature 010 provenance rules."""
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ..client import MiStudioClient
@@ -11,12 +12,12 @@ from ..config import MCPSettings
 def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> None:
     @mcp.tool()
     async def update_feature_label(
-        feature_id: str,
-        name: Optional[str] = None,
-        category: Optional[str] = None,
-        description: Optional[str] = None,
-        notes: Optional[str] = None,
-        override_protected: bool = False,
+        feature_id: Annotated[str, Field(description="Feature row id from search_features/get_feature_groups")],
+        name: Annotated[Optional[str], Field(description="Human-readable name")] = None,
+        category: Annotated[Optional[str], Field(description="Filter by label category")] = None,
+        description: Annotated[Optional[str], Field(description="Longer free-text description")] = None,
+        notes: Annotated[Optional[str], Field(description="Free-text evidence notes stored with the label")] = None,
+        override_protected: Annotated[bool, Field(description="Overwrite an aqua-starred (completed) label. The previous label is NOT recoverable")] = False,
     ) -> Any:
         """Update a feature's label. Writes carry label_source='mcp_agent' provenance.
 
@@ -38,12 +39,12 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.patch(f"/features/{feature_id}", json_body=body)
 
     @mcp.tool()
-    async def run_enhanced_labeling(feature_id: str) -> Any:
+    async def run_enhanced_labeling(feature_id: Annotated[str, Field(description="Feature row id from search_features/get_feature_groups")]) -> Any:
         """Trigger two-pass enhanced LLM labeling for one feature (background job;
         uses the labeling backend configured in Settings). Poll get_enhanced_label."""
         return await client.post(f"/features/{feature_id}/label/enhanced", json_body={})
 
     @mcp.tool()
-    async def get_enhanced_label(feature_id: str) -> Any:
+    async def get_enhanced_label(feature_id: Annotated[str, Field(description="Feature row id from search_features/get_feature_groups")]) -> Any:
         """Latest enhanced-labeling job + synthesized label for a feature."""
         return await client.get(f"/features/{feature_id}/label/enhanced/latest")

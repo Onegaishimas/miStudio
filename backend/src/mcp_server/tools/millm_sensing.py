@@ -5,8 +5,9 @@ Cluster co-activation observation: when did the active cluster's members
 fire together, on what tokens, with what context.
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ..health_gate import HealthGate, gated
@@ -24,9 +25,9 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_sensing_events(profile_id: Optional[str] = None,
-                                   limit: int = 50,
-                                   since: Optional[str] = None) -> Any:
+    async def millm_sensing_events(profile_id: Annotated[Optional[str], Field(description="Cluster-profile id from list_cluster_profiles")] = None,
+                                   limit: Annotated[int, Field(description="Max rows to return")] = 50,
+                                   since: Annotated[Optional[str], Field(description="ISO-8601 timestamp WITH a UTC offset (e.g. 2026-07-21T12:00:00Z). A naive timestamp is refused — it would shift the window silently")] = None) -> Any:
         """Co-activation events newest-first. Each row carries the span,
         fired members with peak activations, score, human summary, the
         ±K token context window (context_text/context_token_ids) when the
@@ -56,16 +57,16 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_sensing_enable(profile_id: str) -> Any:
+    async def millm_sensing_enable(profile_id: Annotated[str, Field(description="Cluster-profile id from list_cluster_profiles")]) -> Any:
         """Enable sensing for a cluster (persists; arms live when that
         cluster is active with an SAE attached)."""
         return await millm.post(f"/api/sensing/{profile_id}/enable")
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_sensing_config(profile_id: str,
-                                   min_k: Optional[int] = None,
-                                   reset: bool = False) -> Any:
+    async def millm_sensing_config(profile_id: Annotated[str, Field(description="Cluster-profile id from list_cluster_profiles")],
+                                   min_k: Annotated[Optional[int], Field(description="Quorum: how many members must co-fire to record an event. Cannot exceed the sensable member count")] = None,
+                                   reset: Annotated[bool, Field(description="Clear the override and return to the default quorum")] = False) -> Any:
         """SET a cluster's sensing quorum (members that must co-fire for an
         event) — this tool WRITES config; use millm_sensing_status to read.
         Provide min_k, OR reset=true to restore the default (ALL members
@@ -83,6 +84,6 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_sensing_disable(profile_id: str) -> Any:
+    async def millm_sensing_disable(profile_id: Annotated[str, Field(description="Cluster-profile id from list_cluster_profiles")]) -> Any:
         """Disable sensing for a cluster (disarms live if armed)."""
         return await millm.post(f"/api/sensing/{profile_id}/disable")
