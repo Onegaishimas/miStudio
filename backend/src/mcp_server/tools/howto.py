@@ -203,8 +203,21 @@ MEASURED ENVELOPE (2026-07-21, LFM2.5-1.2B-Instruct, 2 layers, 1 edge; see
 The cliff is SHARP — one step past it, output is unusable with no warning.
 
 RULE OF THUMB: start at <= 0.15 * max_activation per member, on 2 layers, and
-sweep upward while reading the generated text. Total ~3 units was the ceiling
-in that measurement.
+sweep upward while reading the generated text.
+
+THE PER-MEMBER RULE DOES NOT BOUND THE SUM. Measured 2026-07-21 on a 4-member
+3-layer circuit (crc_124fd83d1f2a): compute_cluster_allocation proposed total
+3.50, EVERY member satisfied <= 0.15 x max_activation (1.1-5.9% in fact), and
+3.50 collapsed generation outright — perplexity 695.9 vs 7.6 baseline. The
+usable ceiling for that circuit was total ~1.4, roughly 0.4x the ~3 that a
+2-layer measurement suggested. More layers means a tighter total budget, not a
+looser one.
+
+TRUST THE SWEEP OVER THE FORMULA. compute_cluster_allocation gives a principled
+STARTING POINT and surfaces hazards (it flagged 'cancellation' on that circuit,
+which was consistent with the tight envelope) — but it does not predict the
+collapse point. Sweep and read the text; then set `intensity_range` so the dial
+CANNOT reach the degradation point you observed.
 
 WHY `max_activation` MUST BE REAL: expressing strength as a fraction of it is
 what keeps members comparable. A fixture with a placeholder
