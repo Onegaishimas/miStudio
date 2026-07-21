@@ -138,15 +138,23 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         narrative: Annotated[Optional[str], Field(description="Free-text account of what this circuit is claimed to do")] = None,
         members: Annotated[Optional[list], Field(description="[{layer, member_kind, feature:{feature_idx, strength, label, max_activation}}]. STRENGTH IS WHAT STEERS; ~0.15 x the real max_activation per member, total ~3")] = None,
         edges: Annotated[Optional[list], Field(description="[{up:{layer,feature_idx}, down:{...}, type, rung}] — EVIDENCE ONLY, carries no strength and does not steer")] = None,
+        saes: Annotated[Optional[list], Field(description="[{layer, sae_id}] — the SAE each layer resolves to. REQUIRED for the export to be servable: an entry with no id exports as `mistudio_sae_id: null` and fails at miLLM as an unbound SAE. Read the ids from list_circuit_captures.")] = None,
         budget: Annotated[Optional[dict], Field(description="{intensity, intensity_range:[lo,hi]} — the dial envelope carried to miLLM")] = None,
         granularity: Annotated[Optional[str], Field(description="Filter: 'feature' | 'cluster'")] = None,
     ) -> Any:
         """Edit a circuit (rename, fix a narrative, drop a bad edge, adjust
         members, switch granularity) — the agent review loop is not
-        create-only. Structural contract rules re-validate on every update."""
+        create-only. Structural contract rules re-validate on every update.
+
+        `saes` is repairable here. That matters for circuits created before
+        `sae_id` was accepted as an alias: they persisted with a null SAE id,
+        which exports clean and only fails at miLLM as an unbound SAE. The
+        PATCH route always accepted `saes`; this tool simply did not expose it,
+        so the only field that makes an export SERVABLE was unreachable from
+        MCP."""
         body = {k: v for k, v in {
             "name": name, "narrative": narrative, "members": members,
-            "edges": edges, "budget": budget,
+            "edges": edges, "saes": saes, "budget": budget,
             "granularity": granularity}.items() if v is not None}
         return await client.patch(f"/circuits/{circuit_id}", json_body=body)
 

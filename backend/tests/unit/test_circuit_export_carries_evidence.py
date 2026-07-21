@@ -193,6 +193,37 @@ class TestTheEvidencePreservingPathIsREACHABLE:
                 "the exported rung would lose its evidence"
             )
 
+    def test_update_circuit_EXPOSES_saes(self):
+        """The only field that makes an export servable must be settable.
+
+        The PATCH route accepted `saes` all along
+        (`endpoints/circuits.py` lists it in CircuitUpdate and in the
+        cannot-be-nulled guard), but the MCP tool omitted the parameter — so a
+        circuit persisted with a null SAE id could not be repaired by any
+        agent. Same class as the unregistered tool: the capability existed and
+        was unreachable.
+        """
+        tool = self._tools()["update_circuit"]
+        props = (tool.inputSchema or {}).get("properties", {})
+        assert "saes" in props, (
+            "update_circuit does not expose `saes`, so a circuit exported "
+            "with `mistudio_sae_id: null` cannot be repaired from MCP and "
+            "can never be served through miLLM"
+        )
+
+    def test_update_circuit_actually_FORWARDS_saes(self):
+        """Exposing the parameter and dropping it on the floor looks identical
+        from the schema. Assert it reaches the request body."""
+        from src.mcp_server.tools import circuits as mod
+
+        src = inspect.getsource(mod.register)
+        idx = src.index("async def update_circuit")
+        body = src[idx : idx + 2500]
+        assert '"saes": saes' in body, (
+            "update_circuit accepts `saes` but never puts it in the PATCH "
+            "body — the repair would silently no-op"
+        )
+
     def test_create_circuit_STEERS_callers_to_the_better_path(self):
         """Docstrings are the only guidance an agent gets before choosing.
 
