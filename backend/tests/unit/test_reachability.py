@@ -1159,3 +1159,86 @@ class TestTheHowtoToolIsReachableAndHonest:
                 f"{tool} is registered and reachable but the server "
                 "instructions never mention it"
             )
+
+
+class TestTheDEPLOYMENTEnablesWhatTheCodeRegisters:
+    """The reachability rule applied to CONFIGURATION, not just code.
+
+    F20 found 16 tools registered nowhere. This is the same defect one layer
+    out: `circuits` IS in DEFAULT_CATEGORIES, and the k8s manifest set an
+    explicit MCP_TOOL_CATEGORIES list that omitted it. All 19 circuit tools —
+    plus the 16 millm_circuit_* tools — were implemented, registered, unit
+    tested, documented in the generated contract, and switched OFF in
+    production. An agent asking for them got "no such tool".
+
+    Every guard in this file passes `tool_categories` in explicitly, so none of
+    them could ever see this. A capability is not shipped until the DEPLOYMENT
+    serves it.
+    """
+
+    MANIFEST = "k8s/mistudio-deployment.yaml"
+
+    def _deployed_categories(self) -> set:
+        import re
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[3]
+        text = (repo / self.MANIFEST).read_text()
+        m = re.search(
+            r"name:\s*MCP_TOOL_CATEGORIES\s*\n(?:\s*#[^\n]*\n)*\s*value:\s*\"([^\"]+)\"",
+            text,
+        )
+        assert m, (
+            f"could not find MCP_TOOL_CATEGORIES in {self.MANIFEST} — the "
+            "manifest layout changed and this guard is checking nothing"
+        )
+        return {c.strip() for c in m.group(1).split(",") if c.strip()}
+
+    def test_every_DEFAULT_category_is_actually_deployed(self):
+        """A category the code enables by default and the manifest disables is
+        a capability that exists everywhere except where it is used."""
+        from src.mcp_server.config import DEFAULT_CATEGORIES
+
+        deployed = self._deployed_categories()
+        defaults = {c.strip() for c in DEFAULT_CATEGORIES.split(",")}
+        missing = sorted(defaults - deployed)
+        assert not missing, (
+            f"{missing} are in DEFAULT_CATEGORIES but the deployment's "
+            f"explicit MCP_TOOL_CATEGORIES omits them, so their tools are "
+            "unreachable in production while every other guard reports green."
+        )
+
+    def test_the_circuit_categories_are_deployed(self):
+        """Named explicitly: these are the 35 tools that were off, and the
+        whole causal-discovery pipeline lives in them."""
+        deployed = self._deployed_categories()
+        for category in ("circuits", "millm_circuits"):
+            assert category in deployed, (
+                f"{category} is not enabled in the deployment — its tools "
+                "cannot be called by any agent"
+            )
+
+    def test_every_deployed_category_is_VALID(self):
+        """A typo in the manifest silently drops a whole category rather than
+        erroring, so the list must be checked against the real names."""
+        from src.mcp_server.config import VALID_CATEGORIES
+
+        unknown = sorted(self._deployed_categories() - set(VALID_CATEGORIES))
+        assert not unknown, (
+            f"the manifest enables {unknown}, which are not valid categories — "
+            "the server ignores them and the intended tools stay off"
+        )
+
+    def test_admin_stays_OFF(self):
+        """Specificity: this guard must not become 'enable everything'.
+
+        `admin` is two irreversible deletes — delete_extraction takes every
+        feature, label and activation example with it — and it is deliberately
+        absent from DEFAULT_CATEGORIES. If it is ever enabled that should be a
+        conscious decision with its own reasoning, not a side effect of a test
+        that says 'turn it all on'.
+        """
+        assert "admin" not in self._deployed_categories(), (
+            "admin (irreversible deletes) is enabled in the deployment — if "
+            "that is intended, change this test deliberately and say why"
+        )
