@@ -410,6 +410,28 @@ git commit -m "feat: [brief description]" -m "- [key change 1]" -m "- [key chang
 - [ ] Functions/methods have docstrings if required
 - [ ] Error handling implemented per ADR standards
 
+### Reachability (a shipping gate, not a style preference)
+
+**A capability is not shipped until a test FAILS when its wiring is removed.**
+
+Before marking any user-facing capability complete — an MCP tool, a REST route, a
+panel, a store action — delete the line that REGISTERS it, run the suite, and
+require a red. Green means the capability is unreachable in production, untested,
+or both.
+
+This repo's MCP server is the cautionary case: the 16 `millm_circuit_*` tools
+were fully implemented, unit-tested and documented in `docs/mcp-contract.md`
+while never registered with the server. Every test passed by importing the tool
+module directly, so the suite was green and the docs said ✅ while no agent could
+call the feature. See `backend/tests/unit/test_reachability.py` — the harness that
+now guards it, and the shape to copy for new surfaces.
+
+- [ ] Assert presence in the **live registry**, never that the module imports
+- [ ] Assert the **payload and the call count** — "was called" passes against a
+      call sending the wrong arguments
+- [ ] When a review round fixes an unreachable capability, mutate the new wiring
+      as a negative control to prove the guard bites
+
 ### File Organization Rules
 *[Will be defined in ADR, examples:]*
 - Place test files alongside source files: `Component.tsx` + `Component.test.tsx`
