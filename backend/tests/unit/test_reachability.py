@@ -37,6 +37,36 @@ from src.mcp_server.tools import MILLM_CATEGORY_MODULES
 # ── Shape 1: registry ──────────────────────────────────────────────────────
 
 
+
+def _tool_names_in(module) -> set[str]:
+    """Tool names a module DECLARES, read from its source text.
+
+    Deliberately not obtained by registering the module: that would ask the
+    registration path to vouch for itself, which is the circularity this file
+    exists to break. `@mcp.tool()` immediately above `async def NAME` is the
+    declaration; whether it reaches the server is the thing under test.
+    """
+    import inspect
+    import re as _re
+
+    src = inspect.getsource(module)
+    return set(
+        _re.findall(
+            r"@mcp\.tool\(\)(?:\s*#[^\n]*)?\s*(?:@[\w.()\"', ]+\s*)*"
+            r"(?:#[^\n]*\s*)*async def (millm_[a-z_]+)",
+            src,
+        )
+    )
+
+
+
+def _millm_circuits_module():
+    """The module under test, resolved once for parametrize-time use."""
+    from src.mcp_server.tools import millm_circuits
+
+    return millm_circuits
+
+
 class TestRegistryReachability:
     """RCH-3, shape 1. A module imported but not registered fails SILENTLY —
     the import succeeds, the tools are never exposed, and nothing errors."""
@@ -122,6 +152,42 @@ class TestBuiltServerReachability:
         prove nothing about the wiring."""
         names = self._build("read", monkeypatch)
         assert "millm_circuit_status" not in names
+
+    @pytest.mark.parametrize("category", sorted(MILLM_CATEGORY_MODULES))
+    def test_EVERY_millm_category_reaches_the_built_server(
+        self, category, monkeypatch
+    ):
+        """F20 R3-10. The original F20 defect was reproducible TODAY, one
+        category over.
+
+        The test above hardcoded `millm_circuits`, so the reachability rule
+        this whole file exists to enforce was enforced for exactly one of four
+        categories. Adding `if category == "millm_sensing": continue` to the
+        registration loop in server.py left the entire suite green while a
+        whole tool category was unreachable — the same shape as the defect
+        that started this feature (16 tools implemented, unit-tested,
+        documented, never registered).
+
+        Driven off the registry rather than a hand-written list, so a category
+        added later is covered the moment it exists. A hand-maintained list is
+        only as good as the list, and this file already learned that once.
+        """
+        names = self._build(category, monkeypatch)
+        expected = {
+            t
+            for module in MILLM_CATEGORY_MODULES[category]
+            for t in _tool_names_in(module)
+        }
+        assert expected, (
+            f"could not determine any tool names for {category} — the "
+            "extraction is broken and this test is checking nothing"
+        )
+        missing = sorted(expected - names)
+        assert not missing, (
+            f"category {category!r} is enabled but {missing} did not reach "
+            "the built server. The tools exist and are testable by direct "
+            "import; no agent can call them."
+        )
 
 
 # ── Shape 3: caller ────────────────────────────────────────────────────────
@@ -665,6 +731,15 @@ class TestDeletingAServingCircuitIsRefused:
         assert ("DELETE", "/api/circuits/c1", {}) in client.calls
 
     @pytest.mark.asyncio
+    async def test_a_CLEAN_delete_carries_no_warning(self):
+        """R3-03's warning must be rare enough to mean something. If every
+        delete carried it, it would be scrolled past like every other banner
+        and the one that mattered would go unread."""
+        result, _ = await self._call({"data": [{"id": "other"}]})
+        assert "guard_skipped" not in result
+        assert "warning" not in result
+
+    @pytest.mark.asyncio
     async def test_the_override_skips_the_check_entirely(self):
         _, client = await self._call(
             {"data": [{"id": "c1"}]}, acknowledge_serving=True
@@ -683,8 +758,16 @@ class TestDeletingAServingCircuitIsRefused:
         needs it. This is a guard against the plausible mistake (a stale id),
         not a lock against a determined caller.
         """
-        _, client = await self._call(RuntimeError("boom"))
+        result, client = await self._call(RuntimeError("boom"))
         assert ("DELETE", "/api/circuits/c1", {}) in client.calls
+
+        # F20 R3-03: and it must SAY SO. R2-20 chose to fail open and then
+        # said nothing — the response was byte-identical to a clean delete, so
+        # the operator whose steering just stopped could not connect the two.
+        # A guard that silently does not run is worse than no guard, because
+        # the tool description promises it did.
+        assert result["guard_skipped"] == "serving_state_unreadable"
+        assert "WITHOUT confirming" in result["warning"]
 
     @pytest.mark.asyncio
     async def test_an_unrecognised_active_shape_is_UNKNOWN_not_not_serving(self):
@@ -693,5 +776,97 @@ class TestDeletingAServingCircuitIsRefused:
         'nothing is serving' — it fails open by the rule above, but via the
         UNKNOWN branch, and the distinction is what keeps a future shape
         change from silently disabling the guard."""
-        _, client = await self._call({"data": {"id": "c1"}})
+        result, client = await self._call({"data": {"id": "c1"}})
         assert ("DELETE", "/api/circuits/c1", {}) in client.calls
+        assert result["guard_skipped"] == "serving_state_unreadable", (
+            "an unrecognised /active shape is UNKNOWN, so this delete was "
+            "also unguarded and must be reported as such"
+        )
+
+
+class TestEveryToolRespectsTheGate:
+    """F20 R3-11/12. The gate was verified on ONE tool of twelve, and the
+    hand-rolled variant on ONE of three.
+
+    R1-06 found that `millm_import_circuit` omits `@gated` deliberately (so
+    argument validation runs first) and checks the gate by hand, with nothing
+    testing that hand-rolled check. The fix was applied to that tool alone. Two
+    siblings hand-roll the same check — and they are the module's two
+    DESTRUCTIVE tools:
+
+      * `millm_delete_circuit`         — permanent deletion
+      * `millm_circuit_sensing_clear`  — irreversible, and global in scope
+
+    Deleting the `gate.check` block from either left the whole suite green
+    while the tool issued its destructive call against a miLLM known to be
+    down. Likewise `TestGateDegradation` used `millm_circuit_status` as sole
+    representative, so eleven `@gated` tools could lose their decorator
+    silently — turning a clean structured `unavailable` into an unclassifiable
+    connection error.
+
+    Parameterized over the LIVE registry: a tool added later is covered the
+    moment it exists.
+    """
+
+    #: Minimal valid arguments per tool. A tool absent from here uses `{}`.
+    ARGS = {
+        "millm_activate_circuit": {"circuit_id": "c1"},
+        "millm_deactivate_circuit": {"circuit_id": "c1"},
+        "millm_delete_circuit": {"circuit_id": "c1"},
+        "millm_export_circuit": {"circuit_id": "c1"},
+        "millm_set_circuit_intensity": {"intensity": 1.0},
+        "millm_import_circuit": {"definition": {"kind": "x"}},
+        "millm_release_circuit_claims": {"circuit_id": "c1"},
+        "millm_circuit_sensing_enable": {"circuit_id": "c1"},
+        "millm_circuit_sensing_disable": {"circuit_id": "c1"},
+        "millm_circuit_sensing_clear": {"circuit_id": "c1"},
+        "millm_circuit_sensing_event": {"event_id": 1},
+    }
+
+    def _closed_gate_call(self, tool_name):
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.tools import millm_circuits
+
+        gate = MagicMock()
+        gate.check = AsyncMock(return_value=(False, "connection refused"))
+        mcp = FastMCP("t")
+        client = RecordingClient()
+        millm_circuits.register(mcp, client, gate)
+
+        result = asyncio.run(
+            mcp._tool_manager.call_tool(tool_name, self.ARGS.get(tool_name, {}))
+        )
+        payload = result[0] if isinstance(result, tuple) else result
+        return str(payload), client
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        sorted(_tool_names_in(_millm_circuits_module())),
+    )
+    def test_a_closed_gate_issues_NO_http_call(self, tool_name):
+        """The property that matters for the destructive tools: with miLLM
+        known to be down, nothing is sent. A tool that reports `unavailable`
+        AFTER issuing its DELETE has already done the damage."""
+        _text, client = self._closed_gate_call(tool_name)
+        assert not client.calls, (
+            f"{tool_name} issued {client.calls} with the gate CLOSED. For a "
+            "destructive tool this means the irreversible call went out while "
+            "miLLM was known to be unreachable."
+        )
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        sorted(_tool_names_in(_millm_circuits_module())),
+    )
+    def test_a_closed_gate_says_so_in_a_way_an_agent_can_classify(
+        self, tool_name
+    ):
+        """An agent must distinguish "miLLM is down" (retry later) from "this
+        tool does not exist" (never retry) and from "your arguments are wrong"
+        (fix and retry). Silence, or a raw exception, collapses all three."""
+        text, _client = self._closed_gate_call(tool_name)
+        assert "unavailable" in text and "millm" in text, (
+            f"{tool_name} with a closed gate returned {text[:200]!r}, which "
+            "does not identify itself as a miLLM availability problem"
+        )

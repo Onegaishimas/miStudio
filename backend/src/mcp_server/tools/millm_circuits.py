@@ -245,6 +245,7 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         if not ok:
             return {"unavailable": "millm", "reason": reason}
 
+        unchecked = False
         if not acknowledge_serving:
             serving = await _is_serving(circuit_id)
             if serving is True:
@@ -259,8 +260,32 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
                         "pass acknowledge_serving=true."
                     ),
                 }
+            unchecked = serving is None
 
-        return await millm.delete(f"/api/circuits/{circuit_id}")
+        result = await millm.delete(f"/api/circuits/{circuit_id}")
+
+        # F20 R3-03: a SILENT fail-open is a guard that lies by omission.
+        #
+        # R2-20 chose to fail open so cleanup stays possible during an outage,
+        # and that is still right — but it said nothing. When /active could not
+        # be read, the delete proceeded WITHOUT the protection this tool
+        # advertises and the response was byte-identical to a clean delete. The
+        # operator whose steering just stopped had no way to connect the two.
+        #
+        # In the payload rather than a log line, because the agent is the one
+        # that has to decide whether to go looking.
+        if unchecked and isinstance(result, dict):
+            result = {
+                **result,
+                "guard_skipped": "serving_state_unreadable",
+                "warning": (
+                    f"Deleted {circuit_id} WITHOUT confirming it was not "
+                    "serving — miLLM's /api/circuits/active could not be "
+                    "read. If steering has stopped unexpectedly, this is "
+                    "where to look."
+                ),
+            }
+        return result
 
     async def _is_serving(circuit_id: str) -> Optional[bool]:
         """True/False if known, None if the serving state could not be read.
