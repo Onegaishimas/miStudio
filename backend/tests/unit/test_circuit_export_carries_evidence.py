@@ -1,0 +1,144 @@
+"""A circuit definition must be SERVABLE and its rung must be CHECKABLE.
+
+Both defects here were found by running the real pipeline and then reading the
+exported document — not by any test or audit.
+
+DEFECT 1 — the export could not name its own SAEs.
+`create_circuit(saes=[{"layer": 12, "sae_id": "sae_f2397db47ab9"}])` produced
+`mistudio_sae_id: null`. `DefinitionSAERef` uses the wire name
+`mistudio_sae_id`, and Pydantic's DEFAULT `extra="ignore"` silently discarded
+`sae_id`. The definition validated, persisted and exported clean; it would only
+fail much later at miLLM, as an unbound SAE, with nothing pointing back here.
+
+Every other tool in this codebase calls that value `sae_id`
+(`start_circuit_capture` takes `[{layer, sae_id}]`), so the wrong key is the
+NATURAL thing to send.
+
+DEFECT 2 — the export kept the rung and lost the evidence.
+`CircuitService.from_candidates` populates each edge with its coactivation
+statistics, attribution score, rung-2 effect size and validation_manifest_ref.
+`create` stores exactly what it is handed. The evidence-preserving path is
+`POST /circuit-discovery/{run_id}/build-circuit` — which had NO MCP TOOL, so an
+agent could only reach `create_circuit` and could only produce evidence-free
+circuits. A consumer got "trust me, it is rung 2" with no way to check.
+"""
+
+import inspect
+
+import pytest
+
+
+class TestTheDefinitionCanNameItsSAEs:
+    def test_sae_id_is_accepted_as_an_alias(self):
+        """The name every other tool uses must work, or the natural call is
+        the broken one."""
+        from src.schemas.cluster_profile import DefinitionSAERef
+
+        ref = DefinitionSAERef(**{"layer": 12, "sae_id": "sae_f2397db47ab9"})
+        assert ref.mistudio_sae_id == "sae_f2397db47ab9", (
+            "`sae_id` was dropped — a circuit built this way exports with a "
+            "null SAE id and cannot be served"
+        )
+
+    def test_the_wire_name_still_works(self):
+        """Round-tripping an exported document must not regress."""
+        from src.schemas.cluster_profile import DefinitionSAERef
+
+        ref = DefinitionSAERef(
+            **{"layer": 12, "mistudio_sae_id": "sae_f2397db47ab9"}
+        )
+        assert ref.mistudio_sae_id == "sae_f2397db47ab9"
+
+    def test_an_unknown_field_is_REJECTED_not_silently_dropped(self):
+        """The core of the defect: `extra="ignore"` turns a typo into a null.
+
+        A definition that cannot name its SAEs cannot be served, so the wrong
+        key has to fail HERE — at the boundary — not three systems downstream
+        as an unbound SAE.
+        """
+        from pydantic import ValidationError
+
+        from src.schemas.cluster_profile import DefinitionSAERef
+
+        with pytest.raises(ValidationError):
+            DefinitionSAERef(**{"layer": 12, "sae_idd": "typo"})
+
+    def test_a_full_definition_round_trips_the_sae_id(self):
+        """End to end through the contract model, not just the leaf."""
+        from src.schemas.circuit_definition import CircuitDefinitionV1
+
+        defn = CircuitDefinitionV1(
+            name="t",
+            saes=[{"layer": 12, "sae_id": "sae_abc"}],
+            members=[{
+                "layer": 12, "member_kind": "feature_ref",
+                "feature": {"feature_idx": 1, "strength": 1.0},
+            }],
+        )
+        assert defn.saes[0].mistudio_sae_id == "sae_abc"
+        assert defn.model_dump(mode="json")["saes"][0]["mistudio_sae_id"] == "sae_abc"
+
+
+class TestTheEvidencePreservingPathIsREACHABLE:
+    """The rung is a claim; the evidence is what makes it checkable."""
+
+    def _tools(self):
+        import asyncio
+        import os
+
+        from src.mcp_server.config import MCPSettings
+        from src.mcp_server.server import build_server
+
+        os.environ.setdefault("MILLM_API_URL", "http://millm.test")
+        mcp, _c = build_server(
+            MCPSettings(tool_categories="circuits", allow_anonymous=True),
+            stdio=True,
+        )
+        return {t.name: t for t in asyncio.run(mcp.list_tools())}
+
+    def test_build_circuit_from_discovery_is_registered(self):
+        """It existed as a REST route with no MCP tool, so an agent could only
+        reach create_circuit — and could only produce evidence-free circuits."""
+        assert "build_circuit_from_discovery" in self._tools(), (
+            "the evidence-preserving discovery->circuit path is unreachable "
+            "from MCP; agents can only hand-assemble, which drops coactivation, "
+            "attribution, effect_size and validation_manifest_ref"
+        )
+
+    def test_it_calls_the_build_endpoint_not_plain_create(self):
+        """A tool that registers but posts to /circuits would look right and
+        silently lose the evidence — the exact failure this closes."""
+        from src.mcp_server.tools import circuits as mod
+
+        src = inspect.getsource(mod.register)
+        idx = src.index("async def build_circuit_from_discovery")
+        body = src[idx : idx + 2000]
+        assert "/build-circuit" in body, (
+            "build_circuit_from_discovery does not post to the build-circuit "
+            "endpoint, so it cannot be carrying discovery evidence"
+        )
+
+    def test_from_candidates_actually_populates_edge_evidence(self):
+        """Guards the service the tool depends on. If this stops attaching
+        evidence, the tool becomes a slower create_circuit."""
+        from src.services.circuit_service import CircuitService
+
+        src = inspect.getsource(CircuitService.from_candidates)
+        for field in ("coactivation", "attribution", "effect_size",
+                      "validation_manifest_ref"):
+            assert field in src, (
+                f"from_candidates no longer carries {field} onto its edges — "
+                "the exported rung would lose its evidence"
+            )
+
+    def test_create_circuit_STEERS_callers_to_the_better_path(self):
+        """Docstrings are the only guidance an agent gets before choosing.
+
+        create_circuit is still correct for hand assembly; it must just not be
+        the default choice for a discovered circuit.
+        """
+        desc = self._tools()["create_circuit"].description or ""
+        assert "build_circuit_from_discovery" in desc, (
+            "create_circuit does not point at the evidence-preserving path, so "
+            "an agent has no reason to prefer it"
+        )

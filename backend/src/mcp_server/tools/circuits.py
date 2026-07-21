@@ -46,6 +46,36 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get(f"/circuits/{circuit_id}")
 
     @mcp.tool()
+    async def build_circuit_from_discovery(
+        run_id: Annotated[str, Field(description="Discovery run id from run_circuit_discovery; must be status=completed")],
+        name: Annotated[str, Field(description="Human-readable circuit name")],
+        candidate_keys: Annotated[Optional[list], Field(description="[[up_layer, up_idx, down_layer, down_idx], ...] selecting which candidates become edges. EMPTY/omitted = ALL candidates, including any that failed validation — select explicitly unless you mean all")] = None,
+        narrative: Annotated[Optional[str], Field(description="Free-text account of what this circuit is claimed to do")] = None,
+    ) -> Any:
+        """Build a circuit from a discovery run's candidates — PREFER THIS over
+        create_circuit when the circuit came from discovery.
+
+        This is the EVIDENCE-PRESERVING path. It carries onto each edge the
+        coactivation statistics (pmi, lift, support, null percentile), the
+        attribution score and gate, the rung-2 effect size, and the
+        validation_manifest_ref — and derives each edge's rung from what
+        actually passed rather than from what you assert.
+
+        `create_circuit` does none of that. A circuit hand-assembled there
+        exports with `effect_size`, `coactivation`, `attribution` and
+        `validation_manifest_ref` all null: the RUNG survives the export but
+        the evidence behind it does not, so a consumer gets "trust me, it is
+        rung 2" with no way to check. It also sets `discovery_run_id`, without
+        which run_circuit_faithfulness is refused 409 forever.
+
+        Created UNPROMOTED. Promote separately; promotion is a badge, not a
+        gate."""
+        return await client.post(
+            f"/circuit-discovery/{run_id}/build-circuit",
+            json_body={"name": name, "narrative": narrative,
+                       "candidate_keys": candidate_keys or []})
+
+    @mcp.tool()
     async def create_circuit(
         name: Annotated[str, Field(description="Human-readable circuit name")],
         saes: Annotated[list, Field(description="[{layer, sae_id}] — the SAEs this circuit references, one per layer")],
@@ -60,7 +90,14 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         model_id: Annotated[Optional[str], Field(description="miStudio model row id")] = None,
         model_hf_id: Annotated[Optional[str], Field(description="HuggingFace repo id — the cross-instance-stable provenance carried by exports")] = None,
     ) -> Any:
-        """Create a circuit from discovery candidates or hand assembly.
+        """Create a circuit from hand assembly.
+
+        IF THIS CAME FROM A DISCOVERY RUN, USE `build_circuit_from_discovery`
+        INSTEAD. This tool stores exactly the edges you hand it, so the
+        coactivation statistics, attribution scores, effect sizes and
+        validation_manifest_refs that discovery/validation measured are NOT
+        carried: the exported definition keeps the rung and loses the evidence
+        for it.
 
         PASS `discovery_run_id` IF YOU HAVE ONE. Omitting it PERMANENTLY
         forfeits `run_circuit_faithfulness`, which draws its prompts from that
