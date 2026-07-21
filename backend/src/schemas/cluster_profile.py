@@ -146,7 +146,24 @@ class DefinitionModelRef(BaseModel):
 
 
 class DefinitionSAERef(BaseModel):
-    mistudio_sae_id: Optional[str] = None
+    """One SAE the definition references.
+
+    `extra="forbid"` is deliberate. Pydantic's default is `ignore`, which turned
+    a caller's `sae_id` into a SILENTLY NULL `mistudio_sae_id` — the definition
+    validated, persisted and exported clean, and only failed much later at
+    miLLM as an unbound SAE. A definition that cannot name its SAEs cannot be
+    served, so the wrong key must fail HERE, at the boundary, not three systems
+    downstream.
+
+    `sae_id` is accepted as an alias because it is the name every other tool in
+    this codebase uses for the same value (`start_circuit_capture` takes
+    `[{layer, sae_id}]`); rejecting it outright would be pedantry rather than
+    safety. `mistudio_sae_id` remains the wire name.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    mistudio_sae_id: Optional[str] = Field(None, alias="sae_id")
     layer: Optional[int] = None
     hook_type: Optional[str] = None
     n_features: Optional[int] = None

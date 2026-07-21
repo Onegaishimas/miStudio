@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**92 tools across 13 categories.**
+**93 tools across 13 categories.**
 
 
 ## `admin` (2 tools)
@@ -32,11 +32,12 @@ require `MILLM_API_URL` and are never enabled by default.
 | `delete_experiment` ⚠️ | `DELETE /steering/experiments/{…}` | DESTRUCTIVE: permanently delete a saved steering experiment. |
 | `delete_extraction` ⚠️ | `DELETE /extractions/{…}` | DESTRUCTIVE: permanently delete an extraction job AND every feature, label, and activation example derived from it. |
 
-## `circuits` (19 tools)
+## `circuits` (20 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
-| `create_circuit` | `POST /circuits` | Create a circuit from discovery candidates or hand assembly. |
+| `build_circuit_from_discovery` | `POST /circuit-discovery/{…}/build-circuit` | Build a circuit from a discovery run's candidates — PREFER THIS over create_circuit when the circuit came from discovery. |
+| `create_circuit` | `POST /circuits` | Create a circuit from hand assembly. |
 | `delete_circuit` ⚠️ | `DELETE /circuits/{…}` | Delete a circuit permanently (its manifests survive — they are first-class records). |
 | `export_circuit_definition` | `GET /circuits/{…}/export` | Export the portable circuit-definition JSON (lossless: rungs, edge types, attribution, manifest refs, provenance all travel). |
 | `export_circuit_slices` | `POST /circuits/{…}/export-slices` | Export per-layer cluster-definition/v1 slices (BR-014) for today's single-SAE consumers (miLLM). |
