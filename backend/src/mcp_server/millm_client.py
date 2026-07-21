@@ -91,6 +91,16 @@ class MiLLMClient:
     async def put(self, path: str, json_body: dict[str, Any]) -> Any:
         return await self.request("PUT", path, json_body=json_body)
 
+    async def delete(self, path: str, **params: Any) -> Any:
+        """DELETE with optional query params (Feature 20).
+
+        Added for the circuit surface: circuit deletion and scoped
+        edge-observation clearing both need it, and neither can be expressed as
+        a POST without lying about the verb.
+        """
+        clean = {k: v for k, v in params.items() if v is not None}
+        return await self.request("DELETE", path, params=clean or None)
+
     async def raw_get(self, path: str) -> Any:
         """GET an endpoint that returns a RAW document (no envelope) — the
         cluster export IS the portable artifact (contract §2)."""
