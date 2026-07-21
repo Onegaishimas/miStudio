@@ -17,6 +17,15 @@ stated in the tool descriptions because an agent reads those, not this file:
     `unsensable_edges` before concluding a circuit is quiet.
   * `steering: null` MEANS NOT EVALUATED, never "not steering".
 
+Three failure shapes, which need three different responses (R2-07):
+
+  * `{"error": …}`        — YOUR CALL was wrong. Fix the arguments and retry.
+  * `{"unavailable": …}`  — miLLM is DOWN. Report it; do not retry in a loop.
+  * a tool ERROR with a `code` — the operation was REFUSED for a stated
+    reason (`UNVALIDATED_CIRCUIT`, `CIRCUIT_LAYER_CONTENTION`,
+    `NO_ACTIVE_CIRCUIT`, `AMBIGUOUS_ACTIVE_CIRCUIT`). Read the code and act on
+    it; a retry without changing anything will be refused identically.
+
 No hub tools. Circuit import is inline-only (EC-20.5): a circuit references
 several SAEs by id, and importing one from a remote pack without checking those
 references is how an agent ends up serving a circuit against the wrong feature
@@ -68,6 +77,11 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         generation. Do NOT derive it from `is_active`: an active row can be a
         slice-fallback, unparseable or unattached circuit that steers nothing.
         `steering: null` means NOT EVALUATED, never "not steering".
+
+        Failure shapes: `{"error": …}` means YOUR CALL was wrong,
+        `{"unavailable": "millm"}` means the server is DOWN, and a tool error
+        with a `code` means the operation was REFUSED for a stated reason.
+        Three different responses; do not conflate them.
 
         `serving_mode` matters. `"full"` means the whole circuit is serving.
         `"slice_fallback"` means only a PER-LAYER PROJECTION is — the SAE set
@@ -124,7 +138,11 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     ) -> Any:
         """Serve a circuit.
 
-        Two refusals arrive as `success:false` bodies, not errors:
+        Two refusals. Both come back as a TOOL ERROR carrying a structured
+        payload — the client raises on any `success:false` envelope — so read
+        the `code` and `details` on the error rather than expecting a normal
+        result. (F20 R2-06: these were described as "bodies, not errors", which
+        is what the SERVER sends and not what the AGENT receives.)
 
         `UNVALIDATED_CIRCUIT` — the circuit's rung is below 2, so it is not
         causally validated. Re-send with `acknowledge_unvalidated=true` only
@@ -162,21 +180,37 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_set_circuit_intensity(intensity: float) -> Any:
+    async def millm_set_circuit_intensity(
+        intensity: float, acknowledge_unvalidated: bool = False
+    ) -> Any:
         """Dial the active circuit's global lambda.
 
         Refused while SEVERAL circuits serve: no single circuit's dial
         describes the response.
 
-        With NOTHING serving you get a 200 body carrying `NO_ACTIVE_CIRCUIT`.
-        That is the expected shape, not an error — activate a circuit first.
+        With NOTHING serving you get `NO_ACTIVE_CIRCUIT`; activate a circuit
+        first. With SEVERAL serving you get `AMBIGUOUS_ACTIVE_CIRCUIT`, naming
+        them — deactivate all but one. Both surface as a TOOL ERROR with the
+        code in its payload, not as a normal result: read the code, do not
+        treat it as a transport fault.
+
+        F20 R2-04: a rung<2 circuit re-applies its evidence gate on EVERY dial,
+        because re-applying is a fresh arm. Without `acknowledge_unvalidated`
+        this tool hit a hard `UNVALIDATED_CIRCUIT` wall with no parameter to
+        escape it — an agent that legitimately activated an unvalidated circuit
+        was dead-ended on its very next step. Pass it again here, on the same
+        explicit human instruction that authorised the activation.
 
         For a SLICE-FALLBACK circuit the steering belongs to a CLUSTER PROFILE,
         which keeps its own intensity: this dial is recorded but NOT applied,
         and the response says so. Adjust the slice's cluster instead — its dial
         follows cluster rules, including the 0.5 floor."""
         return await millm.put(
-            "/api/circuits/active/intensity", json_body={"intensity": intensity}
+            "/api/circuits/active/intensity",
+            json_body={
+                "intensity": intensity,
+                "acknowledge_unvalidated": acknowledge_unvalidated,
+            },
         )
 
     @mcp.tool()
@@ -369,6 +403,15 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         ok, reason = await gate.check("millm")
         if not ok:
             return {"unavailable": "millm", "reason": reason}
+        # NOTE (R2-08): global scope is expressed to the server by OMITTING
+        # `circuit_id` — there is no `all_circuits` parameter on the route. So
+        # this call is byte-identical to the unscoped call the guard above
+        # refuses, and the guard is CLIENT-SIDE ONLY.
+        #
+        # That is the correct division: the server cannot know whether an
+        # omission was deliberate, and the agent surface is where the mistake
+        # actually happens. Stated here so the next reader does not "fix" the
+        # apparent drop by forwarding a parameter the route would reject.
         return await millm.delete(
             "/api/circuit-sensing/events", circuit_id=circuit_id
         )

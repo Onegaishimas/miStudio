@@ -210,7 +210,7 @@ EXPECTED_CALLS = {
         "PUT", "/api/circuits/active/intensity", {"intensity": 1.0},
         # The body KEY is the whole contract here: the endpoint requires
         # `intensity`, so any other key 422s on every call.
-        {"json_body": {"intensity": 1.0}},
+        {"json_body": {"intensity": 1.0, "acknowledge_unvalidated": False}},
     ),
     "millm_delete_circuit": (
         "DELETE", "/api/circuits/c1", {"circuit_id": "c1"}, {},
@@ -315,7 +315,11 @@ class TestCallerReachability:
         enveloped `get`."""
         manager, client = _tools_by_name()
         asyncio.run(manager.call_tool("millm_export_circuit", {"circuit_id": "c1"}))
-        assert client.calls[-1][0] == "RAW_GET"
+        # R2-10: `calls[0]`, not `[-1]`. R1-04 rejected last-call assertions
+        # everywhere else and this one was left behind — a tool issuing a wrong
+        # first call and a right second would have passed.
+        assert len(client.calls) == 1
+        assert client.calls[0][0] == "RAW_GET"
 
 
 # ── Gate degradation ───────────────────────────────────────────────────────
@@ -450,6 +454,29 @@ class TestDestructiveScopeIsExplicit:
         assert client.calls, "the deliberate global clear was blocked too"
         assert client.calls[0][0] == "DELETE"
 
+    def test_the_DESTRUCTIVE_branch_sends_no_circuit_id(self):
+        """F20 R2-05: `EXPECTED_CALLS` pins only the scoped call, so the branch
+        that deletes EVERY observation in the deployment was asserted by
+        nothing.
+
+        Global scope is expressed to the server by OMITTING `circuit_id`. A
+        future edit that passed it through would silently narrow the delete —
+        or, re-pointed the other way, widen a scoped one. R1-16's fix was
+        half-pinned: the refusal was tested, the destructive success path was
+        not."""
+        manager, client = _tools_by_name()
+        asyncio.run(
+            manager.call_tool(
+                "millm_circuit_sensing_clear", {"all_circuits": True}
+            )
+        )
+        method, path, payload = client.calls[0]
+        assert (method, path) == ("DELETE", "/api/circuit-sensing/events")
+        assert payload == {"circuit_id": None}, (
+            f"the global clear sent {payload} — global scope is expressed by "
+            "OMITTING circuit_id, so anything else changes what is deleted"
+        )
+
     def test_scope_validation_runs_BEFORE_the_gate(self):
         """A scope mistake is about the CALL. Reporting it as "millm is down"
         sends the agent to fix the wrong thing."""
@@ -462,11 +489,21 @@ class TestDestructiveScopeIsExplicit:
         mcp = FastMCP("t")
         millm_circuits.register(mcp, RecordingClient(), gate)
 
+        client = RecordingClient()
+        mcp2 = FastMCP("t2")
+        millm_circuits.register(mcp2, client, gate)
         result = asyncio.run(
-            mcp._tool_manager.call_tool("millm_circuit_sensing_clear", {})
+            mcp2._tool_manager.call_tool("millm_circuit_sensing_clear", {})
         )
         assert "exactly one scope" in str(result), (
             "a scope error was reported as miLLM being unavailable"
+        )
+        # R2-09: the import tool's ordering test asserts this and the
+        # DESTRUCTIVE tool's did not — so a mutation returning the scope error
+        # AFTER issuing the DELETE would have passed. The tool that can delete
+        # everything got the weaker of the two tests.
+        assert not client.calls, (
+            "the scope error was returned but the DELETE went out first"
         )
 
 
@@ -502,7 +539,14 @@ class TestTheDescriptionsCarryWhatAnAgentNeeds:
         activate something. An agent told neither will treat it as a fault."""
         d = self._descriptions()["millm_set_circuit_intensity"]
         assert "NO_ACTIVE_CIRCUIT" in d
-        assert "expected shape" in d
+        assert "AMBIGUOUS_ACTIVE_CIRCUIT" in d, (
+            "R2-03 added a refusal for several serving circuits and the tool "
+            "never mentioned it"
+        )
+        # R2-06: these surface as a TOOL ERROR, because the client raises on
+        # any `success:false`. Describing them as bodies told the agent to
+        # expect a normal result.
+        assert "TOOL ERROR" in d
 
     def test_the_slice_dial_names_what_DOES_govern_intensity(self):
         """Telling an agent the write is inert without naming the alternative
@@ -542,3 +586,17 @@ class TestTheDescriptionsCarryWhatAnAgentNeeds:
             "the measured hazard's caveat must travel with it, or an agent "
             "relays a single-fixture result as a general law"
         )
+
+
+class TestTheThreeFailureShapesAreDistinguishable:
+    """F20 R2-07. `{"error": …}` (your call), `{"unavailable": …}` (server
+    down) and a coded tool error (operation refused) need three DIFFERENT
+    agent responses — and the vocabulary was documented in no tool description,
+    only in a module docstring that `list_tools()` does not transport."""
+
+    def test_the_first_tool_an_agent_meets_explains_them(self):
+        manager, _ = _tools_by_name()
+        d = {t.name: (t.description or "") for t in manager.list_tools()}
+        status = d["millm_circuit_status"]
+        assert '{"error"' in status and "unavailable" in status
+        assert "REFUSED" in status
