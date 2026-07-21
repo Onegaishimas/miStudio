@@ -8,8 +8,9 @@ GPU-heavy operations. Guardrails (Feature 010, BR-3.4):
   instead of running immediately (poll get_approval_status)
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
@@ -20,8 +21,8 @@ from ..config import MCPSettings
 class SteerFeature(BaseModel):
     """One feature to steer with."""
 
-    feature_idx: int = Field(..., ge=0, description="Feature (neuron) index in the SAE")
-    layer: int = Field(..., ge=0, description="Layer the SAE was trained on")
+    feature_idx: Annotated[int, Field(description="Feature INDEX within the SAE (0..n_features-1) — not a row id")] = Field(..., ge=0, description="Feature (neuron) index in the SAE")
+    layer: Annotated[int, Field(description="Transformer layer this feature lives on; must match the SAE's trained layer")] = Field(..., ge=0, description="Layer the SAE was trained on")
     # Feature 015: per-feature SAE for cross-layer circuits. Omitted ⇒ the
     # request-level sae_id. A feature whose layer ≠ its SAE's trained layer is
     # rejected (own-layer rule), never steered through the wrong decoder.
@@ -38,7 +39,7 @@ _inflight: set[str] = set()
 
 
 def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> None:
-    def _generation_params(max_new_tokens: int, temperature: float, top_p: float) -> dict:
+    def _generation_params(max_new_tokens: Annotated[int, Field(description="Tokens to generate")], temperature: Annotated[float, Field(description="Sampling temperature; 0 = greedy")], top_p: Annotated[float, Field(description="Nucleus sampling threshold")]) -> dict:
         return {
             "max_new_tokens": min(max_new_tokens, settings.steering_max_new_tokens),
             "temperature": temperature,
@@ -77,10 +78,10 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def compute_cluster_allocation(
-        sae_id: str,
-        members: list[dict],
-        group_cohesion: Optional[float] = None,
-        circuit_id: Optional[str] = None,
+        sae_id: Annotated[str, Field(description="miStudio SAE id (sae_xxxxxxxx). NOTE: a circuit-definition's mistudio_sae_id is miLLM's DIFFERENT id form; no tool translates")],
+        members: Annotated[list[dict], Field(description="[{feature_idx, strength, ...}] — strength is what STEERS; keep the total modest (~3 across two layers)")],
+        group_cohesion: Annotated[Optional[float], Field(description="Cohesion score carried from the source group")] = None,
+        circuit_id: Annotated[Optional[str], Field(description="miStudio circuit id (circ_xxxxxxxx)")] = None,
     ) -> Any:
         """Compute the principled starting strength allocation for steering a
         CLUSTER of features (Feature 013) — or a MULTI-LAYER circuit (Feature
@@ -148,13 +149,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def steer_compare(
-        sae_id: str,
-        prompt: str,
-        features: list[SteerFeature],
-        model_id: Optional[str] = None,
-        max_new_tokens: int = 256,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
+        sae_id: Annotated[str, Field(description="miStudio SAE id (sae_xxxxxxxx). NOTE: a circuit-definition's mistudio_sae_id is miLLM's DIFFERENT id form; no tool translates")],
+        prompt: Annotated[str, Field(description="Prompt to generate from")],
+        features: Annotated[list[SteerFeature], Field(description="Features to steer. Give each its own sae_id for cross-layer work; strengths sum on the residual stream")],
+        model_id: Annotated[Optional[str], Field(description="miStudio model row id")] = None,
+        max_new_tokens: Annotated[int, Field(description="Tokens to generate")] = 256,
+        temperature: Annotated[float, Field(description="Sampling temperature; 0 = greedy")] = 0.7,
+        top_p: Annotated[float, Field(description="Nucleus sampling threshold")] = 0.9,
     ) -> Any:
         """Run a steering comparison: 1-4 features, each generating steered output
         side-by-side with an unsteered baseline. GPU-heavy background task —
@@ -180,15 +181,15 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def steer_sweep(
-        sae_id: str,
-        prompt: str,
-        feature_idx: int,
-        layer: int,
-        strength_values: list[float],
-        model_id: Optional[str] = None,
-        max_new_tokens: int = 256,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
+        sae_id: Annotated[str, Field(description="miStudio SAE id (sae_xxxxxxxx). NOTE: a circuit-definition's mistudio_sae_id is miLLM's DIFFERENT id form; no tool translates")],
+        prompt: Annotated[str, Field(description="Prompt to generate from")],
+        feature_idx: Annotated[int, Field(description="Feature INDEX within the SAE (0..n_features-1) — not a row id")],
+        layer: Annotated[int, Field(description="Transformer layer this feature lives on; must match the SAE's trained layer")],
+        strength_values: Annotated[list[float], Field(description="Strengths to sweep, e.g. [1,2,5,10]. Read the generations to find your usable ceiling — output collapses well below the +/-300 bound")],
+        model_id: Annotated[Optional[str], Field(description="miStudio model row id")] = None,
+        max_new_tokens: Annotated[int, Field(description="Tokens to generate")] = 256,
+        temperature: Annotated[float, Field(description="Sampling temperature; 0 = greedy")] = 0.7,
+        top_p: Annotated[float, Field(description="Nucleus sampling threshold")] = 0.9,
     ) -> Any:
         """Dose-response sweep: one feature generated at each strength value
         (e.g. [0, 5, 20, 50]). The definitive causal-validation tool. GPU-heavy
@@ -215,13 +216,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def steer_combined(
-        sae_id: str,
-        prompt: str,
-        features: list[SteerFeature],
-        model_id: Optional[str] = None,
-        max_new_tokens: int = 256,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
+        sae_id: Annotated[str, Field(description="miStudio SAE id (sae_xxxxxxxx). NOTE: a circuit-definition's mistudio_sae_id is miLLM's DIFFERENT id form; no tool translates")],
+        prompt: Annotated[str, Field(description="Prompt to generate from")],
+        features: Annotated[list[SteerFeature], Field(description="Features to steer. Give each its own sae_id for cross-layer work; strengths sum on the residual stream")],
+        model_id: Annotated[Optional[str], Field(description="miStudio model row id")] = None,
+        max_new_tokens: Annotated[int, Field(description="Tokens to generate")] = 256,
+        temperature: Annotated[float, Field(description="Sampling temperature; 0 = greedy")] = 0.7,
+        top_p: Annotated[float, Field(description="Nucleus sampling threshold")] = 0.9,
     ) -> Any:
         """Apply ALL selected features simultaneously in one generation pass
         (synergy testing). GPU-heavy background task — returns task_id.
@@ -254,7 +255,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await _submit("steer_combined", "/steering/async/combined", body)
 
     @mcp.tool()
-    async def get_steering_result(task_id: str) -> Any:
+    async def get_steering_result(task_id: Annotated[str, Field(description="Steering task id returned by steer_compare/sweep/combined")]) -> Any:
         """Poll an async steering task. Returns status and, when completed, the
         generated outputs and metrics."""
         result = await client.get(f"/steering/async/result/{task_id}")
@@ -267,7 +268,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return result
 
     @mcp.tool()
-    async def cancel_steering_task(task_id: str) -> Any:
+    async def cancel_steering_task(task_id: Annotated[str, Field(description="Steering task id returned by steer_compare/sweep/combined")]) -> Any:
         """Cancel a running steering task and free its guardrail slot."""
         result = await client.delete(f"/steering/async/task/{task_id}")
         _inflight.discard(task_id)

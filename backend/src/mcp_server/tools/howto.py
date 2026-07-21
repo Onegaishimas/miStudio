@@ -32,8 +32,9 @@ Numbers cite where they were measured. Nothing is aspirational: if a workflow
 is not implemented, this says so rather than describing the intent.
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ..client import MiStudioClient
@@ -521,23 +522,40 @@ def _all_tools() -> dict[str, list[tuple[str, str]]]:
     guarantee: nothing can be invisible, because the index is derived rather
     than remembered. A tool added tomorrow appears here with no edit.
     """
+    import ast
     import inspect
-    import re as _re
 
     from . import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+
+    def _decorated_tools(source: str):
+        """(name, docstring) for every `@mcp.tool()` function, via AST.
+
+        Was a regex requiring `async def NAME(...)` with no nested parens
+        before the docstring. Annotating parameters with
+        `Annotated[T, Field(description=...)]` introduces exactly such a paren,
+        and 43 tools silently fell out of the index — caught only because the
+        completeness guard refused to let it ship.
+
+        A parser cannot be fooled by signature shape, which is the whole point:
+        this index is the completeness guarantee, so its extractor must not
+        have a form it quietly cannot read.
+        """
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                target = dec.func if isinstance(dec, ast.Call) else dec
+                # `@mcp.tool()` — match the attribute, not the whole call
+                if isinstance(target, ast.Attribute) and target.attr == "tool":
+                    yield node.name, (ast.get_docstring(node) or "")
+                    break
 
     out: dict[str, list[tuple[str, str]]] = {}
     for category, modules in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.items():
         entries: list[tuple[str, str]] = []
         for module in modules:
-            src = inspect.getsource(module)
-            for match in _re.finditer(
-                r"@mcp\.tool\(\)(?:\s*#[^\n]*)?\s*(?:@[\w.()\"', ]+\s*)*"
-                r"(?:#[^\n]*\s*)*async def (\w+)\([^)]*\)[^:]*:\s*\"\"\"(.*?)\"\"\"",
-                src,
-                _re.S,
-            ):
-                name, doc = match.group(1), match.group(2)
+            for name, doc in _decorated_tools(inspect.getsource(module)):
                 summary = " ".join(doc.split())
                 # First sentence, capped — enough to decide whether to look
                 # closer, without pasting a full docstring per tool.
@@ -552,7 +570,7 @@ def _all_tools() -> dict[str, list[tuple[str, str]]]:
 
 def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> None:
     @mcp.tool()
-    async def mistudio_howto(topic: Optional[str] = None) -> Any:
+    async def mistudio_howto(topic: Annotated[Optional[str], Field(description="Guidance topic. Omit for the overview and the topic list")] = None) -> Any:
         """START HERE for circuit/steering work — workflow guidance an agent
         cannot infer from tool signatures.
 

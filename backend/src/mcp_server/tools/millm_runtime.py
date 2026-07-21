@@ -6,8 +6,9 @@ when miLLM is unreachable they return {"unavailable": "millm", "reason": …}
 instead of raising (tools are never unregistered — contract §3).
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ..health_gate import HealthGate, gated
@@ -32,8 +33,8 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_activate_profile(profile_id: str,
-                                     apply_steering: bool = True) -> Any:
+    async def millm_activate_profile(profile_id: Annotated[str, Field(description="Cluster-profile id from list_cluster_profiles")],
+                                     apply_steering: Annotated[bool, Field(description="Apply the profile's steering immediately on activation")] = True) -> Any:
         """Activate a miLLM profile by id — replaces the live steering.
         Cluster rows enforce the declared-feature-space gate server-side
         (a mismatched SAE refuses with a clear reason)."""
@@ -44,15 +45,15 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_deactivate_profile(profile_id: str) -> Any:
+    async def millm_deactivate_profile(profile_id: Annotated[str, Field(description="Cluster-profile id from list_cluster_profiles")]) -> Any:
         """Deactivate a miLLM profile (clears live steering when it is the
         active one)."""
         return await millm.post(f"/api/profiles/{profile_id}/deactivate")
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_set_intensity(intensity: float,
-                                  reapply: Optional[bool] = None) -> Any:
+    async def millm_set_intensity(intensity: Annotated[float, Field(description="Global steering dial. Bounded by the artifact's AUTHORED intensity_range (server-enforced), not a fixed 0-2")],
+                                  reapply: Annotated[Optional[bool], Field(description="Re-apply the steering hooks after setting intensity. Omit to keep the default (true)")] = None) -> Any:
         """Set the ACTIVE cluster's persistent intensity dial (lambda). The
         authored intensity_range is enforced server-side; dialing to 0 is
         always allowed. Affects all traffic (global dial) — per-request

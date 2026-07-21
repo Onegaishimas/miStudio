@@ -1060,6 +1060,55 @@ class TestTheHowtoToolIsReachableAndHonest:
         assert "tools" in overview["topics"]
         assert overview.get("tool_count", 0) > 80
 
+    def test_EVERY_parameter_has_a_description(self):
+        """Surface 3: the schema an agent actually reads when choosing arguments.
+
+        Measured before this guard: 220 parameters across 93 tools, and 220 of
+        them had NO description. An agent saw `granularity: string` with no
+        valid values, `fdr_q: number` with no range, and `sae_id: string` with
+        no hint which of two namespaces it meant. That is the same class of
+        failure that had me guessing `kind` wrong and mixing up SAE ids.
+
+        Enum-like strings must list their values, ids must name their
+        namespace, and numerics that drive GPU cost must say so — but those are
+        judgement calls a test cannot make. What a test CAN enforce is that
+        nothing ships blank, which is what stops the surface silently
+        regressing to where it started.
+        """
+        import asyncio as _asyncio
+        import os as _os
+
+        from src.mcp_server.config import MCPSettings, VALID_CATEGORIES
+        from src.mcp_server.server import build_server
+
+        _os.environ.setdefault("MILLM_API_URL", "http://millm.test")
+        settings = MCPSettings(
+            tool_categories=",".join(sorted(VALID_CATEGORIES)),
+            allow_anonymous=True,
+        )
+        mcp, _client = build_server(settings, stdio=True)
+        tools = _asyncio.run(mcp.list_tools())
+        assert len(tools) > 80, (
+            f"only {len(tools)} tools built — this guard is checking nothing"
+        )
+
+        bare = []
+        total = 0
+        for tool in tools:
+            for pname, schema in (tool.inputSchema or {}).get("properties", {}).items():
+                total += 1
+                if not schema.get("description"):
+                    bare.append(f"{tool.name}.{pname}")
+        assert total > 150, f"only {total} parameters found — extraction broken"
+        assert not bare, (
+            f"{len(bare)} of {total} parameters have no description, so an "
+            f"agent must guess their meaning: {sorted(bare)[:15]}"
+            + (" …" if len(bare) > 15 else "")
+            + "\n\nAdd Annotated[T, Field(description=...)]. For enum-like "
+            "strings LIST THE VALUES; for ids NAME THE NAMESPACE; for numerics "
+            "give the range and any GPU cost."
+        )
+
     def test_the_server_instructions_point_at_it(self):
         """The instructions are the only thing an agent reads before choosing
         a tool. If they do not name howto, howto is undiscoverable."""

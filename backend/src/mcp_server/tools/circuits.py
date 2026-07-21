@@ -9,7 +9,9 @@ steer them (steer_combined with per-member sae_id) → export definitions or
 per-layer v1 slices for today's single-SAE consumers.
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
+
+from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
 
@@ -20,9 +22,9 @@ from ..config import MCPSettings
 def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> None:
     @mcp.tool()
     async def list_circuits(
-        promoted: Optional[bool] = None,
-        min_rung: Optional[int] = None,
-        granularity: Optional[str] = None,
+        promoted: Annotated[Optional[bool], Field(description="Promotion is a BADGE, not a gate: it never restricts export or steering, and is reversible")] = None,
+        min_rung: Annotated[Optional[int], Field(description="Filter to circuits at or above this evidence rung (0 mined, 1 attribution, 2 causally validated, 3 faithfulness-tested)")] = None,
+        granularity: Annotated[Optional[str], Field(description="Filter: 'feature' | 'cluster'")] = None,
     ) -> Any:
         """List circuits with rung + rung_language on every row. min_rung
         filters by evidence rung (0 mined, 1 attribution-supported,
@@ -37,7 +39,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get("/circuits", **params)
 
     @mcp.tool()
-    async def get_circuit(circuit_id: str) -> Any:
+    async def get_circuit(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) — NOT a miLLM circuit id")]) -> Any:
         """One circuit: members by layer, typed edges with full evidence
         (statistics, attribution, validation manifest refs), budget,
         faithfulness, rung + rung_language + what-moves-it-up."""
@@ -45,18 +47,18 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def create_circuit(
-        name: str,
-        saes: list,
-        members: list,
-        edges: Optional[list] = None,
-        narrative: Optional[str] = None,
-        budget: Optional[dict] = None,
-        granularity: str = "feature",
-        discovery_run_id: Optional[str] = None,
-        discovery: Optional[dict] = None,
-        faithfulness: Optional[dict] = None,
-        model_id: Optional[str] = None,
-        model_hf_id: Optional[str] = None,
+        name: Annotated[str, Field(description="Human-readable circuit name")],
+        saes: Annotated[list, Field(description="[{layer, sae_id}] — the SAEs this circuit references, one per layer")],
+        members: Annotated[list, Field(description="[{layer, member_kind, feature:{feature_idx, strength, label, max_activation}}]. STRENGTH IS WHAT STEERS; ~0.15 x the real max_activation per member, total ~3")],
+        edges: Annotated[Optional[list], Field(description="[{up:{layer,feature_idx}, down:{...}, type, rung}] — EVIDENCE ONLY, carries no strength and does not steer")] = None,
+        narrative: Annotated[Optional[str], Field(description="Free-text account of what this circuit is claimed to do")] = None,
+        budget: Annotated[Optional[dict], Field(description="{intensity, intensity_range:[lo,hi]} — the dial envelope carried to miLLM")] = None,
+        granularity: Annotated[str, Field(description="'feature' (individual SAE features) | 'cluster' (precomputed cluster supernodes)")] = "feature",
+        discovery_run_id: Annotated[Optional[str], Field(description="Discovery run this came from. PASS IT IF YOU HAVE IT — omitting permanently forfeits run_circuit_faithfulness")] = None,
+        discovery: Annotated[Optional[dict], Field(description="Provenance: {mode, granularity, corpus, split, thresholds, dates}")] = None,
+        faithfulness: Annotated[Optional[dict], Field(description="Pre-computed circuit-level faithfulness, if you already have it")] = None,
+        model_id: Annotated[Optional[str], Field(description="miStudio model row id")] = None,
+        model_hf_id: Annotated[Optional[str], Field(description="HuggingFace repo id — the cross-instance-stable provenance carried by exports")] = None,
     ) -> Any:
         """Create a circuit from discovery candidates or hand assembly.
 
@@ -85,7 +87,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         })
 
     @mcp.tool()
-    async def promote_circuit(circuit_id: str, promoted: bool = True) -> Any:
+    async def promote_circuit(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) — NOT a miLLM circuit id")], promoted: Annotated[bool, Field(description="Promotion is a BADGE, not a gate — reversible, never restricts export or steering")] = True) -> Any:
         """Promote a circuit into a loadable multi-layer steering profile —
         or unpromote it (promoted=false). Promotion is a BADGE, not a gate —
         unvalidated circuits promote and carry their rung visibly everywhere."""
@@ -94,13 +96,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def update_circuit(
-        circuit_id: str,
-        name: Optional[str] = None,
-        narrative: Optional[str] = None,
-        members: Optional[list] = None,
-        edges: Optional[list] = None,
-        budget: Optional[dict] = None,
-        granularity: Optional[str] = None,
+        circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) from list_circuits/create_circuit — NOT a miLLM circuit id")],
+        name: Annotated[Optional[str], Field(description="Human-readable circuit name")] = None,
+        narrative: Annotated[Optional[str], Field(description="Free-text account of what this circuit is claimed to do")] = None,
+        members: Annotated[Optional[list], Field(description="[{layer, member_kind, feature:{feature_idx, strength, label, max_activation}}]. STRENGTH IS WHAT STEERS; ~0.15 x the real max_activation per member, total ~3")] = None,
+        edges: Annotated[Optional[list], Field(description="[{up:{layer,feature_idx}, down:{...}, type, rung}] — EVIDENCE ONLY, carries no strength and does not steer")] = None,
+        budget: Annotated[Optional[dict], Field(description="{intensity, intensity_range:[lo,hi]} — the dial envelope carried to miLLM")] = None,
+        granularity: Annotated[Optional[str], Field(description="Filter: 'feature' | 'cluster'")] = None,
     ) -> Any:
         """Edit a circuit (rename, fix a narrative, drop a bad edge, adjust
         members, switch granularity) — the agent review loop is not
@@ -112,7 +114,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.patch(f"/circuits/{circuit_id}", json_body=body)
 
     @mcp.tool()
-    async def delete_circuit(circuit_id: str) -> Any:
+    async def delete_circuit(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) — NOT a miLLM circuit id")]) -> Any:
         """Delete a circuit permanently (its manifests survive — they are
         first-class records).
 
@@ -125,13 +127,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.delete(f"/circuits/{circuit_id}")
 
     @mcp.tool()
-    async def import_circuit_definition(definition: dict) -> Any:
+    async def import_circuit_definition(definition: Annotated[dict, Field(description="A circuit-definition document. `kind` is 'mistudio.circuit-definition' with NO /v1 suffix")]) -> Any:
         """Import a mistudio.circuit-definition/v1 document (the BR-013
         round-trip). Unknown kinds are rejected explicitly."""
         return await client.post("/circuits/import", json_body=definition)
 
     @mcp.tool()
-    async def export_circuit_definition(circuit_id: str) -> Any:
+    async def export_circuit_definition(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) — NOT a miLLM circuit id")]) -> Any:
         """Export the portable circuit-definition JSON (lossless: rungs, edge
         types, attribution, manifest refs, provenance all travel). This is
         the raw contract document — for the human-readable rung_language
@@ -150,7 +152,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get(f"/circuits/{circuit_id}/export")
 
     @mcp.tool()
-    async def export_circuit_slices(circuit_id: str) -> Any:
+    async def export_circuit_slices(circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) — NOT a miLLM circuit id")]) -> Any:
         """Export per-layer cluster-definition/v1 slices (BR-014) for today's
         single-SAE consumers (miLLM). Each slice is a PARTIAL RENDERING —
         parent rung travels in the response and in each slice's provenance;
@@ -161,13 +163,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def start_circuit_capture(
-        dataset_id: str,
-        layers: list,
-        model_id: Optional[str] = None,
-        epsilon: float = 0.1,
-        sample_cap: int = 2000,
-        attention_capture: Optional[dict] = None,
-        confirm: bool = False,
+        dataset_id: Annotated[str, Field(description="Dataset to capture activations over")],
+        layers: Annotated[list, Field(description="[{layer, sae_id}] — which layers to capture, each with its SAE")],
+        model_id: Annotated[Optional[str], Field(description="miStudio model row id")] = None,
+        epsilon: Annotated[float, Field(gt=0, description="Activation threshold for recording a firing event; lower captures more, growing the store")] = 0.1,
+        sample_cap: Annotated[int, Field(ge=1, description="Max documents to capture. GPU time scales with this")] = 2000,
+        attention_capture: Annotated[Optional[dict], Field(description="Also record attention-mediated signals (Tier-2.5); costs more GPU time")] = None,
+        confirm: Annotated[bool, Field(description="false = probe and return a COST ESTIMATE only; true = actually run the capture")] = False,
     ) -> Any:
         """Start a circuit-capture run (per-token multi-layer SAE activations
         with FIRST-CLASS positions + error norms). layers = [{layer, sae_id}].
@@ -196,14 +198,14 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def run_circuit_discovery(
-        capture_run_id: str,
-        granularity: str = "feature",
-        mode: str = "open",
-        seed_refs: Optional[list] = None,
-        s_min: int = 20,
-        null_shuffles: int = 100,
-        fdr_q: float = 0.05,
-        force: bool = False,
+        capture_run_id: Annotated[str, Field(description="Capture run id from start_circuit_capture; must be status=completed")],
+        granularity: Annotated[str, Field(description="'feature' (individual SAE features) | 'cluster' (precomputed cluster supernodes)")] = "feature",
+        mode: Annotated[str, Field(description="'open' (mine all pairs) | 'seeded' (expand from seed_refs)")] = "open",
+        seed_refs: Annotated[Optional[list], Field(description="Seed features/clusters to expand from. Only used when mode='seeded'")] = None,
+        s_min: Annotated[int, Field(ge=1, description="Minimum support (co-occurrence count) for a pair to be considered. Higher = fewer, stronger candidates")] = 20,
+        null_shuffles: Annotated[int, Field(ge=1, description="Circular-shift null samples per pair. DRIVES RUNTIME roughly linearly; 100 is the calibrated default")] = 100,
+        fdr_q: Annotated[float, Field(gt=0, lt=1, description="Benjamini-Hochberg false-discovery rate. Lower = stricter, fewer surviving candidates")] = 0.05,
+        force: Annotated[bool, Field(description="Re-run even if a completed discovery already exists for this capture")] = False,
     ) -> Any:
         """Mine a completed capture store for candidate cross-layer edges.
         granularity: feature | cluster (supernodes over curated profiles —
@@ -221,8 +223,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         })
 
     @mcp.tool()
-    async def get_discovery_results(run_id: str,
-                                    include_candidates: bool = True) -> Any:
+    async def get_discovery_results(run_id: Annotated[str, Field(description="Discovery run id from run_circuit_discovery")],
+                                    include_candidates: Annotated[bool, Field(description="Include the full candidate list, not just the statistical report")] = True) -> Any:
         """A discovery run + its report (null-model summary, FDR discipline,
         held-out replication RATE, stage counts, caps, uncovered seeds, lag-0
         disclosure) + ranked candidates (PMI, support, null percentile,
@@ -232,8 +234,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
                                 include_candidates=include_candidates)
 
     @mcp.tool()
-    async def run_attribution_pass(run_id: str,
-                                   prompt_limit: Optional[int] = None) -> Any:
+    async def run_attribution_pass(run_id: Annotated[str, Field(description="Discovery run id from run_circuit_discovery")],
+                                   prompt_limit: Annotated[Optional[int], Field(description="Prompts used for the gradient attribution pass")] = None) -> Any:
         """Tier-2 gradient-attribution pass over a discovery run's candidates:
         re-ranks the shortlist before 017's causal validation and gates rung-1
         (attribution_supported) by sign-agreement + magnitude. This is
@@ -254,13 +256,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def validate_circuit_edges(
-        run_id: str,
-        ordering: str = "coact",
-        k: int = 20,
-        prompts_per_edge: int = 8,
-        null_samples: int = 20,
-        sign_frac: float = 0.8,
-        baseline: str = "zero",
+        run_id: Annotated[str, Field(description="Discovery run id from run_circuit_discovery")],
+        ordering: Annotated[str, Field(description="'coact' (co-activation rank) | 'attr' (attribution rank — REQUIRES a completed run_attribution_pass, else 409)")] = "coact",
+        k: Annotated[int, Field(ge=1, description="Top-k edges to validate. GPU COST ~ k x prompts_per_edge x (1 + null_samples) forward passes")] = 20,
+        prompts_per_edge: Annotated[int, Field(ge=1, description="Prompts per edge, drawn from the capture store. More = tighter effect size, linearly more GPU")] = 8,
+        null_samples: Annotated[int, Field(ge=1, description="Support-matched non-edge pairs forming the null. Below 10 the verdict FAILS as underpowered rather than passing")] = 20,
+        sign_frac: Annotated[float, Field(ge=0, le=1, description="Fraction of prompts whose effect must share the mean sign for rung 2. 0.8 = the BR-018 criterion")] = 0.8,
+        baseline: Annotated[str, Field(description="Ablation baseline: 'zero' (clamp the feature to 0) | 'mean' (clamp to its mean activation)")] = "zero",
     ) -> Any:
         """Causally validate the top-K edges of a discovery run (rung 2):
         suppress the upstream feature, run the model, measure the downstream
@@ -277,12 +279,12 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def run_circuit_faithfulness(
-        circuit_id: str,
-        mode: str = "both",
-        k_nonmembers: int = 256,
-        ablate_all_n: int = 1024,
-        n_prompts: int = 16,
-        seed: int = 0,
+        circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) from list_circuits/create_circuit — NOT a miLLM circuit id")],
+        mode: Annotated[str, Field(description="'both' (necessity + sufficiency) | 'necessity' (sufficiency marked untested)")] = "both",
+        k_nonmembers: Annotated[int, Field(ge=1, description="Top-k NON-member features ablated for the sufficiency approximation; disclosed on the badge")] = 256,
+        ablate_all_n: Annotated[int, Field(ge=1, description="Per-layer top-N ablated to approximate ablate-all, the necessity denominator")] = 1024,
+        n_prompts: Annotated[int, Field(ge=1, description="Prompts per behaviour measurement (4 measurements are run)")] = 16,
+        seed: Annotated[int, Field(description="RNG seed for prompt sampling; fix it to make a run reproducible")] = 0,
     ) -> Any:
         """Faithfulness-test a circuit (rung 3 — the HIGHEST tier): suppress
         its members and measure how much of the behavior they drive is
@@ -315,7 +317,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
                 "seed": seed})
 
     @mcp.tool()
-    async def get_validation_manifest(manifest_id: str) -> Any:
+    async def get_validation_manifest(manifest_id: Annotated[str, Field(description="Validation manifest id from list_validation_manifests")]) -> Any:
         """A validation manifest — the SELF-CONTAINED, reproducible record of a
         validation run (intervention config, baseline, prompts, seeds, null
         summary, per-edge effect sizes). The evidence behind a rung-2 claim."""
@@ -323,8 +325,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def list_validation_manifests(
-        discovery_run_id: Optional[str] = None,
-        circuit_id: Optional[str] = None,
+        discovery_run_id: Annotated[Optional[str], Field(description="Discovery run this came from. PASS IT IF YOU HAVE IT — omitting permanently forfeits run_circuit_faithfulness")] = None,
+        circuit_id: Annotated[Optional[str], Field(description="miStudio circuit id (circ_xxxxxxxx) — NOT a miLLM circuit id")] = None,
     ) -> Any:
         """List validation manifests for a discovery run or a circuit."""
         params: dict[str, Any] = {}
@@ -335,7 +337,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get("/validation-manifests", **params)
 
     @mcp.tool()
-    async def reproduce_validation(manifest_id: str) -> Any:
+    async def reproduce_validation(manifest_id: Annotated[str, Field(description="Validation manifest id from list_validation_manifests")]) -> Any:
         """Re-execute an edge_batch manifest from its payload and compare —
         the test that a rung-2 claim is reproducible, not a one-off. Returns a
         task id; the reproduction manifest carries per-edge deltas + a

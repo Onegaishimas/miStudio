@@ -236,6 +236,33 @@ The MCP server itself never consumes WebSockets — agents poll via `get_task_st
 | In-scope endpoint coverage as MCP tools | 100% |
 | Documented client configs | Claude Code + one other MCP client |
 
+### 11.1 Discoverability (added 2026-07-21)
+
+Coverage above measures whether a capability EXISTS as a tool. It says nothing
+about whether an agent can FIND or CORRECTLY USE it — and that gap went
+unmeasured until an agent lost most of a session rediscovering facts the server
+already held. At that point: 93 registered tools, of which the server
+instructions named 17; four entire categories invisible, including the whole
+causal-discovery pipeline; and 220 of 220 tool parameters with no description.
+
+Each criterion below is enforced by a test, because every hand-maintained
+equivalent in this codebase has drifted (the copy audit's surface list, the
+reachability harness's category list, the contract row scraper, the
+hand-written tool map).
+
+| Metric | Target | Enforced by |
+|--------|--------|-------------|
+| Registered tools present in the generated index | 100% | `test_reachability.py::test_EVERY_registered_tool_appears_in_the_generated_index` |
+| Tool parameters carrying a description | 100% | `test_reachability.py::test_EVERY_parameter_has_a_description` |
+| `docs/mcp-contract.md` matches the live registry | exact | `test_mcp_contract_generated.py` |
+| Guidance topics that resolve | 100% | `test_reachability.py::test_the_extraction_works` |
+| Tool names cited in guidance that actually exist | 100% | `test_reachability.py::test_the_tool_map_names_only_REAL_tools` |
+
+**Standing rule.** A parameter whose valid values cannot be guessed MUST list
+them; an id parameter MUST name its namespace; a numeric that drives GPU cost
+MUST say so. A test can enforce that a description exists, not that it is
+useful — that part is review's job.
+
 ---
 
 ## 12. Testing Requirements

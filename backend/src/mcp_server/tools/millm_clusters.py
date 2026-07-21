@@ -6,8 +6,9 @@ miStudio export_cluster_definition → millm_import_cluster(activate=True) →
 millm_set_intensity / millm_sensing_enable.
 """
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ..health_gate import HealthGate, gated
@@ -24,12 +25,12 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     async def millm_import_cluster(
-        definition: Optional[dict] = None,
-        repo_id: Optional[str] = None,
-        filename: Optional[str] = None,
-        revision: Optional[str] = None,
-        activate: bool = False,
-        on_conflict: Optional[str] = None,
+        definition: Annotated[Optional[dict], Field(description="A portable definition document. `kind` carries NO /v1 suffix")] = None,
+        repo_id: Annotated[Optional[str], Field(description="HuggingFace repo id to import from")] = None,
+        filename: Annotated[Optional[str], Field(description="File within the repo")] = None,
+        revision: Annotated[Optional[str], Field(description="Git revision/branch/tag; defaults to the repo default branch")] = None,
+        activate: Annotated[bool, Field(description="Activate immediately after import")] = False,
+        on_conflict: Annotated[Optional[str], Field(description="'rename' (default — keep both) | 'fail' (refuse if the name exists)")] = None,
     ) -> Any:
         """Import a mistudio.cluster-definition/v1 into miLLM.
 
@@ -68,9 +69,9 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_hub_search(q: Optional[str] = None,
-                               base_model: Optional[str] = None,
-                               limit: int = 20) -> Any:
+    async def millm_hub_search(q: Annotated[Optional[str], Field(description="Free-text hub search query")] = None,
+                               base_model: Annotated[Optional[str], Field(description="Filter hub results to artifacts trained on this base model")] = None,
+                               limit: Annotated[int, Field(description="Max rows to return")] = 20) -> Any:
         """Search public Hugging Face cluster packs (repos tagged
         mistudio-cluster-definition), optionally narrowed to a base model."""
         return await millm.get("/api/clusters/hub/search",
@@ -78,20 +79,20 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_activate_cluster(cluster_id: str) -> Any:
+    async def millm_activate_cluster(cluster_id: Annotated[str, Field(description="miLLM cluster id from millm_list_clusters")]) -> Any:
         """Activate an imported cluster (applies all members at
         sign x strength x lambda; hard compatibility gate server-side)."""
         return await millm.post(f"/api/clusters/{cluster_id}/activate")
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_deactivate_cluster(cluster_id: str) -> Any:
+    async def millm_deactivate_cluster(cluster_id: Annotated[str, Field(description="miLLM cluster id from millm_list_clusters")]) -> Any:
         """Deactivate a cluster (clears its live steering)."""
         return await millm.post(f"/api/clusters/{cluster_id}/deactivate")
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_export_cluster(cluster_id: str) -> Any:
+    async def millm_export_cluster(cluster_id: Annotated[str, Field(description="miLLM cluster id from millm_list_clusters")]) -> Any:
         """Re-export a cluster's lossless original v1 document (byte-honest —
         survives unknown additive fields)."""
         return await millm.raw_get(f"/api/clusters/{cluster_id}/export")
