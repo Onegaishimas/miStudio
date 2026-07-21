@@ -26,6 +26,7 @@ Three shapes are needed, because each catches what the others cannot:
 """
 
 import asyncio
+import re
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -870,3 +871,226 @@ class TestEveryToolRespectsTheGate:
             f"{tool_name} with a closed gate returned {text[:200]!r}, which "
             "does not identify itself as a miLLM availability problem"
         )
+
+
+class TestTheHowtoToolIsReachableAndHonest:
+    """`mistudio_howto` carries the workflow knowledge tool signatures cannot.
+
+    Written after an agent ran the full circuit loop and lost most of a session
+    rediscovering things this server already knew — a `/v1` suffix that does
+    not belong on `kind`, a nested member shape that reads as missing data, a
+    feature join key that returns "0 labelled" for a fully-labelled corpus, and
+    a strength scale ~50x off that shipped token soup to production.
+
+    An auditing pass then found the deeper problem: 92 tools across 13
+    categories, and SERVER_INSTRUCTIONS named 17 of them. FOUR ENTIRE
+    CATEGORIES were unmentioned — including both circuit surfaces (35 tools).
+    The whole causal-validation pipeline was reachable over MCP the entire
+    time and nothing said so.
+
+    Guidance an agent cannot reach is guidance that does not exist, so this
+    asserts the LIVE registry, not the module.
+    """
+
+    def _built(self, monkeypatch):
+        from src.mcp_server.config import MCPSettings
+        from src.mcp_server.server import build_server
+
+        settings = MCPSettings(tool_categories="read", allow_anonymous=True)
+        mcp, _client = build_server(settings, stdio=True)
+        return {t.name: t for t in asyncio.run(mcp.list_tools())}
+
+    def test_it_reaches_the_built_server_in_a_DEFAULT_category(self, monkeypatch):
+        """It ships with `read` deliberately: `read` is in DEFAULT_CATEGORIES,
+        so every agent gets the guidance without opting in."""
+        from src.mcp_server.config import DEFAULT_CATEGORIES
+
+        assert "read" in DEFAULT_CATEGORIES, (
+            "howto ships with `read` precisely because it is a default; if "
+            "that changed, move howto to whatever is still default"
+        )
+        assert "mistudio_howto" in self._built(monkeypatch)
+
+    def test_every_advertised_topic_actually_resolves(self):
+        """The topic list is the tool's own index. A name it advertises but
+        cannot return is a dead end an agent has no way to recover from."""
+        from src.mcp_server.tools.howto import TOPICS
+
+        assert len(TOPICS) >= 7, f"only {len(TOPICS)} topics — content lost?"
+        advertised = set(re.findall(r"^  ([a-z_]+) ", TOPICS["overview"], re.M))
+        # `tools` is DERIVED (from _all_tools()), not a prose entry in TOPICS —
+        # it resolves in the dispatcher. Covered by
+        # test_the_index_is_reachable_through_the_tool, which calls it for real.
+        missing = sorted(advertised - set(TOPICS) - {"tools"})
+        assert not missing, (
+            f"the overview advertises {missing}, which resolve to nothing"
+        )
+
+    def test_the_discovery_pipeline_topic_names_only_REAL_tools(self):
+        """Its value is telling an agent the pipeline exists. Naming a tool
+        that does not exist would send it down a path with no exit — worse
+        than saying nothing."""
+        import inspect
+
+        from src.mcp_server.tools import circuits as circuits_mod
+        from src.mcp_server.tools.howto import TOPICS
+
+        source = inspect.getsource(circuits_mod)
+        real = set(re.findall(r"async def (\w+)", source))
+        named = set(re.findall(r"`(\w+)`", TOPICS["discovery_pipeline"]))
+        # Only check names that look like circuit tools; prose backticks other
+        # things too (field names, statuses).
+        claimed = {n for n in named if "circuit" in n or n in real}
+        phantom = sorted(claimed - real)
+        assert not phantom, (
+            f"discovery_pipeline names {phantom}, which do not exist in the "
+            "circuits tool module"
+        )
+
+    def test_the_tool_map_names_only_REAL_tools(self):
+        """The map's value is telling an agent a capability exists. A phantom
+        name sends it down a path with no exit — strictly worse than silence.
+
+        Verified across the WHOLE registry, not one module: the map spans 13
+        categories and a per-module check would miss cross-category typos.
+        """
+        import inspect
+
+        from src.mcp_server.tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+        from src.mcp_server.tools.howto import TOPICS
+
+        real = set()
+        for mods in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.values():
+            for module in mods:
+                real |= set(re.findall(r"async def (\w+)", inspect.getsource(module)))
+        assert len(real) > 50, f"only found {len(real)} tools — extraction broken"
+
+        prefixes = ("get_", "list_", "run_", "steer_", "millm_", "save_",
+                    "delete_", "update_", "find_", "compute_", "export_",
+                    "import_", "enter_", "exit_", "cancel_", "start_",
+                    "validate_", "promote_", "create_")
+        named = set(re.findall(r"\b([a-z][a-z0-9_]{6,})\b", TOPICS["tool_map"]))
+        claimed = {n for n in named
+                   if (n in real or n.startswith(prefixes))
+                   # `millm_circuit_* (13)` is a prose wildcard, not a name.
+                   and not n.endswith("_")}
+        phantom = sorted(claimed - real)
+        assert not phantom, (
+            f"tool_map names {phantom}, which are not registered anywhere. An "
+            "agent told a tool exists will try to call it."
+        )
+
+    def test_EVERY_registered_tool_appears_in_the_generated_index(self):
+        """The completeness guarantee. THIS is the guard that makes "no
+        capability is invisible" true rather than aspirational.
+
+        Measured before it existed: prose (instructions + written topics)
+        covered 70 of 93 tools — 23 invisible. The derived index covers 93/93,
+        because it reads the registry instead of remembering it.
+
+        Note the extractor must tolerate the UNGATED tools. millm_delete_circuit,
+        millm_import_circuit and millm_circuit_sensing_clear deliberately omit
+        @gated (argument/scope validation must run BEFORE the gate check), so a
+        pattern requiring @gated silently drops exactly the three most
+        destructive tools in the surface — my own audit undercounted 93 as 90
+        for precisely that reason.
+        """
+        import inspect
+
+        from src.mcp_server.tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+        from src.mcp_server.tools.howto import _all_tools
+
+        registered = set()
+        for mods in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.values():
+            for module in mods:
+                registered |= set(
+                    re.findall(
+                        r"@mcp\.tool\(\)(?:\s*#[^\n]*)?\s*(?:@[\w.()\"', ]+\s*)*"
+                        r"(?:#[^\n]*\s*)*async def (\w+)",
+                        inspect.getsource(module),
+                    )
+                )
+        assert len(registered) > 80, (
+            f"only found {len(registered)} registered tools — the extraction "
+            "is broken and this guard is checking nothing"
+        )
+
+        indexed = {n for entries in _all_tools().values() for n, _ in entries}
+        missing = sorted(registered - indexed)
+        assert not missing, (
+            f"{len(missing)} registered tool(s) are absent from the generated "
+            f"index and therefore INVISIBLE to an agent: {missing}. Either the "
+            "extractor in _all_tools() cannot parse their shape, or they lack "
+            "a docstring."
+        )
+
+    def test_the_ungated_destructive_tools_are_indexed(self):
+        """Named explicitly because they are the ones a shape-sensitive
+        extractor drops, and they are the ones that delete things."""
+        from src.mcp_server.tools.howto import _all_tools
+
+        indexed = {n for entries in _all_tools().values() for n, _ in entries}
+        for tool in ("millm_delete_circuit", "millm_import_circuit",
+                     "millm_circuit_sensing_clear"):
+            assert tool in indexed, f"{tool} is missing from the index"
+
+    def test_the_index_is_reachable_through_the_tool(self):
+        """A derived index nothing returns is the dead code this replaced —
+        `_all_tools()` existed for an hour before anything called it."""
+        import asyncio as _asyncio
+
+        from unittest.mock import MagicMock as _MM
+
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.tools import howto as _howto
+
+        mcp = FastMCP("t")
+        _howto.register(mcp, _MM(), _MM())
+        fn = mcp._tool_manager._tools["mistudio_howto"].fn
+
+        result = _asyncio.run(fn(topic="tools"))
+        assert result.get("tool_count", 0) > 80, (
+            "the tools topic returned no index — _all_tools() is unwired"
+        )
+        assert "circuits" in result["tools"]
+
+        # And the no-arg response must ADVERTISE it, or an agent never asks.
+        overview = _asyncio.run(fn())
+        assert "tools" in overview["topics"]
+        assert overview.get("tool_count", 0) > 80
+
+    def test_the_server_instructions_point_at_it(self):
+        """The instructions are the only thing an agent reads before choosing
+        a tool. If they do not name howto, howto is undiscoverable."""
+        from src.mcp_server.server import SERVER_INSTRUCTIONS
+
+        assert "mistudio_howto" in SERVER_INSTRUCTIONS
+
+        # A mention buried mid-paragraph is not a pointer. The instructions
+        # must DIRECT the agent there, in the first few lines, or it will pick
+        # a tool before it ever reads about the guidance.
+        #
+        # Control note: the first version of this test asserted only that the
+        # name appeared somewhere, and a mutation that removed the actual
+        # call-to-action SURVIVED — the name still occurred further down. A
+        # test that cannot fail against the defect it names is not a test.
+        head = SERVER_INSTRUCTIONS.split("\n\n")[1] if "\n\n" in SERVER_INSTRUCTIONS else ""
+        assert "mistudio_howto" in head and "FIRST" in head, (
+            "the instructions mention mistudio_howto but do not tell the "
+            "agent to call it first — an agent reads the top and chooses a "
+            "tool, so a buried mention is invisible in practice"
+        )
+
+    def test_the_instructions_name_the_discovery_pipeline_entry_point(self):
+        """The specific omission that cost a session: the instructions
+        described the CLUSTER path in detail and said nothing about circuit
+        discovery, so an agent had no reason to think it existed."""
+        from src.mcp_server.server import SERVER_INSTRUCTIONS
+
+        for tool in ("start_circuit_capture", "validate_circuit_edges",
+                     "export_circuit_definition"):
+            assert tool in SERVER_INSTRUCTIONS, (
+                f"{tool} is registered and reachable but the server "
+                "instructions never mention it"
+            )
