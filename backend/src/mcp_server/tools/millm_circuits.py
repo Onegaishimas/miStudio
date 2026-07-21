@@ -281,13 +281,18 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
     @mcp.tool()
     @gated(gate, "millm")
-    async def millm_circuit_sensing_event(event_id: str) -> Any:
+    async def millm_circuit_sensing_event(event_id: int) -> Any:
         """One edge observation in full: both endpoints with their layer,
         feature, position and activation, the observed token lag, and the
         context window.
 
         The rung language on this row is as-of-observation (see
-        `millm_circuit_sensing_events`)."""
+        `millm_circuit_sensing_events`).
+
+        `event_id` is an INTEGER. F20 R1-05: this advertised `str`, so the
+        schema accepted "abc" and the agent got a FastAPI 422 from the route
+        instead of a usable error from the tool — and the caller test pinned a
+        call shape production would have rejected."""
         return await millm.get(f"/api/circuit-sensing/events/{event_id}")
 
     @mcp.tool()
