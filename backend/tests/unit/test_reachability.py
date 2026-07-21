@@ -143,14 +143,23 @@ class RecordingClient:
     async def post(self, path, json_body=None, **params):
         return await self._record("POST", path, json_body=json_body, **params)
 
-    async def put(self, path, json_body=None):
+    async def put(self, path, json_body):
+        # F20 R1-07: `json_body` is REQUIRED on the real client. Giving it a
+        # default here meant a tool calling `put(path)` with no body passed
+        # every test and TypeError'd in production — the recorder was more
+        # forgiving than the thing it stands in for, which is the one property
+        # a stand-in must never have.
         return await self._record("PUT", path, json_body=json_body)
 
     async def delete(self, path, **params):
         return await self._record("DELETE", path, **params)
 
     async def raw_get(self, path):
-        return await self._record("RAW_GET", path)
+        # R1-08: the real `raw_get` returns the UNENVELOPED body — that is the
+        # whole reason the export uses it. Returning an envelope here would let
+        # a tool that wrongly unwraps `.data` pass.
+        self.calls.append(("RAW_GET", path, {}))
+        return {"kind": "mistudio.circuit-definition", "schema_version": "1"}
 
 
 def _open_gate():
@@ -171,50 +180,72 @@ def _tools_by_name():
     return manager, client
 
 
-#: Each tool's DOCUMENTED method and path. A tool that registers but calls
-#: nothing, or calls a different endpoint, fails here.
+#: Each tool's DOCUMENTED call: `(method, path, tool_kwargs, expected_payload)`.
+#:
+#: F20 R1-04: `expected_payload` was added because the assertion below checked
+#: only method and path and DISCARDED the recorded kwargs. Three mutations
+#: survived 26/26 green:
+#:
+#:   * dropping `limit=`/`offset=` from the list call
+#:   * changing the intensity body key to `{"lambda": …}` — which 422s on
+#:     EVERY call in production, because the endpoint requires `intensity`
+#:   * disabling the manual gate check in `millm_import_circuit`
+#:
+#: A harness whose stated rule is "a test FAILS when the wiring is removed"
+#: was verifying the address and not the letter.
 EXPECTED_CALLS = {
-    "millm_circuit_status": ("GET", "/api/circuits/active", {}),
-    "millm_list_circuits": ("GET", "/api/circuits", {}),
-    "millm_circuit_claims": ("GET", "/api/circuits/claims", {}),
+    "millm_circuit_status": ("GET", "/api/circuits/active", {}, {}),
+    "millm_list_circuits": ("GET", "/api/circuits", {}, {"limit": 50, "offset": 0}),
+    "millm_circuit_claims": ("GET", "/api/circuits/claims", {}, {}),
     "millm_activate_circuit": (
         "POST", "/api/circuits/c1/activate", {"circuit_id": "c1"},
+        {"json_body": None, "acknowledge_unvalidated": "false",
+         "allow_layer_overlap": "false"},
     ),
     "millm_deactivate_circuit": (
         "POST", "/api/circuits/c1/deactivate", {"circuit_id": "c1"},
+        {"json_body": None},
     ),
     "millm_set_circuit_intensity": (
         "PUT", "/api/circuits/active/intensity", {"intensity": 1.0},
+        # The body KEY is the whole contract here: the endpoint requires
+        # `intensity`, so any other key 422s on every call.
+        {"json_body": {"intensity": 1.0}},
     ),
     "millm_delete_circuit": (
-        "DELETE", "/api/circuits/c1", {"circuit_id": "c1"},
+        "DELETE", "/api/circuits/c1", {"circuit_id": "c1"}, {},
     ),
     "millm_import_circuit": (
         "POST", "/api/circuits/import", {"definition": {"kind": "x"}},
+        {"json_body": {"kind": "x"}, "on_conflict": None},
     ),
     "millm_export_circuit": (
-        "RAW_GET", "/api/circuits/c1/export", {"circuit_id": "c1"},
+        "RAW_GET", "/api/circuits/c1/export", {"circuit_id": "c1"}, {},
     ),
     "millm_release_circuit_claims": (
         "POST", "/api/circuits/claims/release", {"circuit_id": "c1"},
+        {"json_body": None, "circuit_id": "c1"},
     ),
     "millm_circuit_sensing_status": (
-        "GET", "/api/circuit-sensing/status", {},
+        "GET", "/api/circuit-sensing/status", {}, {},
     ),
     "millm_circuit_sensing_events": (
         "GET", "/api/circuit-sensing/events", {},
+        {"circuit_id": None, "limit": 50, "since": None},
     ),
     "millm_circuit_sensing_event": (
-        "GET", "/api/circuit-sensing/events/e1", {"event_id": "e1"},
+        "GET", "/api/circuit-sensing/events/7", {"event_id": 7}, {},
     ),
     "millm_circuit_sensing_enable": (
         "POST", "/api/circuit-sensing/c1/enable", {"circuit_id": "c1"},
+        {"json_body": None},
     ),
     "millm_circuit_sensing_disable": (
         "POST", "/api/circuit-sensing/c1/disable", {"circuit_id": "c1"},
+        {"json_body": None},
     ),
     "millm_circuit_sensing_clear": (
-        "DELETE", "/api/circuit-sensing/events", {},
+        "DELETE", "/api/circuit-sensing/events", {}, {"circuit_id": None},
     ),
 }
 
@@ -230,15 +261,25 @@ class TestCallerReachability:
     @pytest.mark.parametrize("tool_name", sorted(EXPECTED_CALLS))
     def test_the_tool_issues_its_documented_call(self, tool_name):
         manager, client = _tools_by_name()
-        method, path, kwargs = EXPECTED_CALLS[tool_name]
+        method, path, kwargs, payload = EXPECTED_CALLS[tool_name]
 
         asyncio.run(manager.call_tool(tool_name, kwargs))
 
         assert client.calls, f"{tool_name} registered but issued NO call"
-        actual_method, actual_path, _ = client.calls[-1]
+        assert len(client.calls) == 1, (
+            f"{tool_name} issued {len(client.calls)} calls; asserting on the "
+            "last would let a wrong first call through"
+        )
+        actual_method, actual_path, actual_payload = client.calls[0]
         assert (actual_method, actual_path) == (method, path), (
             f"{tool_name} called {actual_method} {actual_path}, documented as "
             f"{method} {path}"
+        )
+        # R1-04: the PAYLOAD, not just the address. Verifying where a tool
+        # points and not what it sends is how a permanently-422ing dial ships
+        # with a green suite.
+        assert actual_payload == payload, (
+            f"{tool_name} sent {actual_payload}, documented as {payload}"
         )
 
     def test_every_registered_tool_is_covered_here(self):
@@ -250,6 +291,19 @@ class TestCallerReachability:
         assert not missing, (
             f"tools with no caller assertion: {sorted(missing)} — add them to "
             "EXPECTED_CALLS or they ship unverified"
+        )
+
+    def test_export_returns_the_document_UNWRAPPED(self):
+        """R1-08. The export IS the portable artifact. A tool that unwrapped
+        `.data` would return None for a raw response — and the previous
+        assertion checked only the method string, so it could not tell."""
+        manager, client = _tools_by_name()
+        result = asyncio.run(
+            manager.call_tool("millm_export_circuit", {"circuit_id": "c1"})
+        )
+        assert "mistudio.circuit-definition" in str(result), (
+            "the export did not come back as the raw document — unwrapping "
+            "`.data` on a raw response yields None"
         )
 
     def test_export_uses_the_RAW_path(self):
@@ -285,6 +339,48 @@ class TestGateDegradation:
         text = str(payload)
         assert "unavailable" in text and "millm" in text
         assert not client.calls, "a closed gate still issued the HTTP call"
+
+    def test_the_UNGATED_tool_still_checks_the_gate(self):
+        """F20 R1-06. `millm_import_circuit` omits `@gated` deliberately (so
+        argument validation runs first) and checks the gate BY HAND — and
+        nothing tested that hand-rolled check.
+
+        A mutation disabling it SURVIVED the whole suite: the tool would have
+        issued its HTTP call with miLLM known-down, turning a clean structured
+        "unavailable" into a connection error the agent cannot classify.
+
+        `test_argument_validation_runs_BEFORE_the_gate` below only exercises
+        the BAD-argument path, which returns before reaching the gate at all —
+        so the one tool that hand-rolls the gate was the one tool whose gate
+        was unverified. That is this feature's own named anti-pattern, in the
+        feature that exists to enforce against it.
+        """
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.tools import millm_circuits
+
+        gate = MagicMock()
+        gate.check = AsyncMock(return_value=(False, "connection refused"))
+        mcp = FastMCP("t")
+        client = RecordingClient()
+        millm_circuits.register(mcp, client, gate)
+
+        # VALID arguments, so validation passes and the gate is what must stop
+        # it.
+        result = asyncio.run(
+            mcp._tool_manager.call_tool(
+                "millm_import_circuit", {"definition": {"kind": "x"}}
+            )
+        )
+        text = str(result)
+        assert "unavailable" in text and "millm" in text, (
+            "the hand-rolled gate did not refuse; the agent gets a connection "
+            "error instead of a structured unavailable"
+        )
+        assert not client.calls, (
+            "the tool issued its HTTP call with the gate CLOSED — miLLM is "
+            "known-down and it called anyway"
+        )
 
     def test_argument_validation_runs_BEFORE_the_gate(self):
         """An agent debugging its own payload must not be told "millm is
