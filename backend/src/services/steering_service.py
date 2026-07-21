@@ -1493,6 +1493,22 @@ class SteeringService:
         generation_time_ms = int((time.time() - start_time) * 1000)
         token_count = len(generated_ids)
 
+        # A model that emits EOS immediately yields token_count>0 and, after
+        # skip_special_tokens, an EMPTY string. Every layer above reports that
+        # as a normal success, which is worse than an error during CALIBRATION:
+        # a strength that collapses the model into instant-EOS looks like a
+        # clean run, and a sweep reads it as "this strength is fine".
+        # Not an exception — an empty generation is real model behaviour, and
+        # raising here would abort a sweep partway through.
+        if not generated_text.strip():
+            logger.warning(
+                "Steered generation produced NO text (%d token(s), all "
+                "special/whitespace) in %dms. Treat any metric derived from "
+                "this sample as invalid — the usual cause is a steering "
+                "strength high enough to collapse the output distribution.",
+                token_count, generation_time_ms,
+            )
+
         # CRITICAL: Reset state again after generation to ensure clean slate for next call
         self._reset_model_state(model)
 
