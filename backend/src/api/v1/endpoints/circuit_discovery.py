@@ -437,11 +437,16 @@ async def _run_sync(db: AsyncSession, fn):
     from ....core.database import get_sync_db
 
     def _call():
-        gen = get_sync_db()
-        sync_db = next(gen)
-        try:
+        # `get_sync_db` is @contextmanager-decorated, so calling it returns a
+        # _GeneratorContextManager — NOT a generator. `next(...)` on that
+        # raises TypeError, so EVERY request through this bridge 500'd:
+        # capture, discovery, attribution, validation and their cancels.
+        #
+        # The endpoints existed, were registered and were documented, and not
+        # one of them could ever succeed. Every other caller in the codebase
+        # uses `with get_sync_db()`; this one hand-rolled the protocol and got
+        # it wrong.
+        with get_sync_db() as sync_db:
             return fn(sync_db)
-        finally:
-            gen.close()
 
     return await anyio.to_thread.run_sync(_call)
