@@ -38,26 +38,151 @@ MILLM_TOOL_MODULES = sorted(
     (BACKEND / "mcp_server" / "tools").glob("millm_*.py")
 )
 
-# A causal claim is only OK when negated or naming a rung-2+ label.
+# F20 R1-09/10: NEGATION-anchored, not topic-anchored.
+#
+# The previous `ALLOWED_CONTEXT` whitelisted TOPIC WORDS — `causal\s+evidence`,
+# `causal\s+effect`, `causal\s+validation`, `real\s+causal`, `rung\s*2`. So
+# naming the topic legitimised any claim about it, and six real overclaims
+# passed, verified by execution:
+#
+#   "These edges are backed by causal evidence from live traffic."
+#   "The observation constitutes a causal effect on the output."
+#   "Sensing performs a causal intervention on each edge."   <- the worst one
+#   "This is a real causal mechanism."
+#   "rung 2 reached by observation alone; causal proof implied."
+#   "Edge firing gives causal validation automatically."
+#
+# An audit that passes "sensing performs a causal intervention" is worse than
+# no audit: it certifies the single most dangerous false claim this surface can
+# make, and it does so with a green tick.
+#
+# The rule now: an occurrence is permitted only when the SAME SENTENCE denies
+# the claim, gates it on a rung, or names the ladder vocabulary as vocabulary.
 CAUSAL = re.compile(r"\bcausal(?:ly)?\b", re.IGNORECASE)
-# Qualifiers that make an occurrence legitimate.
+
+#: DENIALS — the claim is being refused.
+_DENIAL = (
+    r"not\s+(?:a\s+|yet\s+)?causal",
+    r"never\s+causal",
+    # `n[o']?t?\s+…` degenerated to matching mere WHITESPACE — every char
+    # after `n` was optional — so it licensed "has BEEN causally validated",
+    # the exact claim it was written to deny. Caught by this file's own
+    # wrapped-overclaim control, which is why that control exists.
+    r"\b(?:not|n't|never)\s+causally\s+validated",
+    r"never\s+describ\w*\s+.{0,40}causal",
+    r"forbid\w*\s+.{0,40}causal",
+    r"must\s+not\s+.{0,40}causal",
+    r"no\s+causal",
+    r"without\s+.{0,20}causal",
+    # "raising a rung REQUIRES a causal intervention" — states what this
+    # surface cannot do, so it denies rather than claims.
+    r"requires?\s+a\s+causal",
+    r"only\s+a\s+causal",
+)
+
+#: RUNG GATES — the claim is explicitly conditioned on the ladder.
+_GATED = (
+    r"rung\s*(?:>=|≥)\s*2",
+    r"rung\s*<\s*2",
+    r"below\s+rung\s+2",
+    r"rung-2\s+label",
+)
+
+#: VOCABULARY — the phrase is NAMED as a ladder label rather than ASSERTED of
+#: the thing at hand.
+#:
+#: The distinction that matters: "rung 2 is called 'causally validated'" is
+#: vocabulary; "this circuit is causally validated" is a claim. The tell is an
+#: adjacent rung NUMBER or tier name — the ladder enumerating itself.
+_VOCABULARY = (
+    r"causal\s+(?:words|language|vocabulary|copy)",
+    r"rung_language",
+    # The ladder enumerated: "2 causally validated, 3 faithfulness-tested".
+    r"\b[0-3]\s+causally\s+validated",
+    # NOT a bare "rung 2 … causal": that let
+    # "rung 2 reached by observation alone; causal proof implied" through —
+    # the ladder-label rule licensing the exact overclaim it should catch.
+    # The label is `causally validated`; only that pairing is vocabulary.
+    r"rung\s*2[^.]{0,20}causally\s+validated",
+    r"causal\s+validation[^.]{0,30}rung\s*2",
+    # "Rung 3 sits ABOVE rung 2 causal validation" — comparing TIERS, which
+    # names the ladder rather than claiming a circuit's place on it.
+    r"rung\s*[0-3][^.]{0,20}(?:above|below)[^.]{0,20}causal",
+    r"rung\s*2\)?:",                    # "…(rung 2): suppress the upstream…"
+    # A TIER is a level of the ladder, not a property of a circuit.
+    r"causal\s+tier",
+    # The IMPERATIVE action only ("Causally validate the top-K edges"), NOT the
+    # past participle. `causally validate\b` also matched "has been causally
+    # VALIDATED against a held-out set" — the vocabulary rule licensing the
+    # exact claim it exists to catch. Caught by this file's own wrapped-
+    # overclaim control.
+    r"^causally\s+validate\b",
+    # Naming a LATER step denies the claim about the current one: "re-ranks
+    # the shortlist BEFORE 017's causal validation" says this pass is not it.
+    r"before\s+[^.]{0,30}causal",
+    r"causal\s+validation\s+(?:happens|runs|occurs)",
+)
+
 ALLOWED_CONTEXT = re.compile(
-    r"(not\s+(?:a\s+)?causal|NOT\s+causal|never\s+describe.*causal|"
-    r"causally\s+validate|causal\s+validation|causal\s+tier|"
-    r"causal\s+proof|causal\s+words|causal\s+language|causal\s+measurement|"
-    # F20: naming the MECHANISM that raises a rung is not claiming one has
-    # been raised. "raising a rung requires a causal intervention" is the
-    # OPPOSITE of an overclaim — it says this surface cannot do it.
-    r"causal\s+intervention|"
-    r"causal\s+evidence|causal\s+effect|real\s+causal|rung\s*2|017)",
-    re.IGNORECASE)
+    "|".join(_DENIAL + _GATED + _VOCABULARY), re.IGNORECASE
+)
+
+
+def _prose_units(text: str):
+    """Yield `(line_no, sentence)` over PROSE ONLY — docstrings and comments.
+
+    F20 R1-11/12: the audit was LINE-based, so a qualifier on the previous line
+    was invisible and an overclaim could be hidden by wrapping at the right
+    column (Black does this routinely at line-length 100). Rejoining lines
+    fixed that and introduced a new problem: multi-line function SIGNATURES
+    were glued into "sentences", producing false positives on parameter lists.
+
+    Patching the tokeniser twice was the signal to change the unit. The audit
+    is about COPY — what a human or an agent reads — and copy lives in
+    docstrings. Code is not copy, so code is not scanned. Comments ARE included
+    because a reviewer reads them, but they are stripped by `_code_only` where
+    that is the caller's intent.
+    """
+    import ast
+    import re as _re
+
+    chunks: list[tuple[int, str]] = []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        # Not parseable (a tool DESCRIPTION rather than a module) — treat the
+        # whole thing as prose.
+        tree = None
+
+    if tree is None:
+        chunks.append((1, text))
+    else:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node)
+                if doc:
+                    line = getattr(node, "lineno", 1)
+                    chunks.append((line, doc))
+        # Standalone comments: prose a reviewer reads.
+        for i, raw in enumerate(text.splitlines(), 1):
+            stripped = raw.strip()
+            if stripped.startswith("#"):
+                chunks.append((i, stripped.lstrip("# ")))
+
+    for line_no, chunk in chunks:
+        # Split into sentences, with wrapped lines rejoined first.
+        flat = " ".join(l.strip() for l in chunk.splitlines() if l.strip())
+        for sentence in _re.split(r"(?<=[.!?])\s+", flat):
+            if sentence.strip():
+                yield line_no, sentence.strip()
 
 
 def _offending_lines(path: Path):
     bad = []
-    for i, line in enumerate(path.read_text().splitlines(), 1):
-        if CAUSAL.search(line) and not ALLOWED_CONTEXT.search(line):
-            bad.append((i, line.strip()))
+    for line_no, sentence in _prose_units(path.read_text()):
+        if CAUSAL.search(sentence) and not ALLOWED_CONTEXT.search(sentence):
+            bad.append((line_no, sentence[:120]))
     return bad
 
 
@@ -92,9 +217,9 @@ def test_no_unqualified_causal_language_in_millm_tools(path):
     """F20 task 3.4. A mutation planting "causally validated" in a tool
     description SURVIVED the entire reachability suite until this existed."""
     bad = []
-    for i, line in enumerate(_code_only(path.read_text()).splitlines(), 1):
-        if CAUSAL.search(line) and not ALLOWED_CONTEXT.search(line):
-            bad.append((i, line.strip()))
+    for line_no, sentence in _prose_units(_code_only(path.read_text())):
+        if CAUSAL.search(sentence) and not ALLOWED_CONTEXT.search(sentence):
+            bad.append((line_no, sentence[:120]))
     assert not bad, (
         f"{path.name} makes an unqualified causal claim on a surface an AGENT "
         f"reads and relays: {bad}"
@@ -137,10 +262,73 @@ def test_registered_DESCRIPTIONS_are_audited_too():
 
     bad = []
     for tool in tools:
-        for line in (tool.description or "").splitlines():
-            if CAUSAL.search(line) and not ALLOWED_CONTEXT.search(line):
-                bad.append(f"{tool.name}: {line.strip()}")
+        for _no, sentence in _prose_units(tool.description or ""):
+            if CAUSAL.search(sentence) and not ALLOWED_CONTEXT.search(sentence):
+                bad.append(f"{tool.name}: {sentence[:120]}")
     assert not bad, (
         "a REGISTERED tool description asserts causal evidence:\n  "
         + "\n  ".join(bad)
     )
+
+
+class TestTheAuditCanActuallyFail:
+    """F20 R1-09..12. The audit's own negative controls, in the file rather
+    than in a reviewer's memory.
+
+    An audit nobody has watched fail is an audit nobody has tested. The
+    previous `ALLOWED_CONTEXT` whitelisted TOPIC WORDS, so naming the topic
+    legitimised any claim about it — all six of these passed, verified by
+    execution. The worst was "sensing performs a causal intervention": an audit
+    that certifies that is worse than no audit at all.
+    """
+
+    OVERCLAIMS = [
+        "These edges are backed by causal evidence from live traffic.",
+        "The observation constitutes a causal effect on the output.",
+        "Sensing performs a causal intervention on each edge.",
+        "This is a real causal mechanism.",
+        "rung 2 reached by observation alone; causal proof implied.",
+        "Edge firing gives causal validation automatically.",
+    ]
+
+    #: Legitimate uses that MUST keep passing. An audit that cannot tell these
+    #: apart gets disabled by whoever it blocks next.
+    LEGITIMATE = [
+        "Raising one requires a causal intervention, which happens in miStudio.",
+        "This circuit is NOT causally validated — its rung is below 2.",
+        "min_rung filters by rung (0 mined, 1 attribution-supported, "
+        "2 causally validated, 3 faithfulness-tested).",
+        "Observation NEVER raises a rung.",
+        "Rung 3 sits above rung 2 causal validation.",
+        "re-ranks the shortlist before 017's causal validation",
+    ]
+
+    @pytest.mark.parametrize("sentence", OVERCLAIMS)
+    def test_an_overclaim_is_caught(self, sentence):
+        assert CAUSAL.search(sentence) and not ALLOWED_CONTEXT.search(sentence), (
+            f"the audit PASSES an overclaim: {sentence!r}"
+        )
+
+    @pytest.mark.parametrize("sentence", LEGITIMATE)
+    def test_a_legitimate_use_is_permitted(self, sentence):
+        assert not (CAUSAL.search(sentence) and not ALLOWED_CONTEXT.search(sentence)), (
+            f"the audit FLAGS legitimate copy: {sentence!r} — false positives "
+            "are how an audit gets loosened until it stops auditing"
+        )
+
+    def test_a_WRAPPED_overclaim_is_still_caught(self):
+        """R1-11: the audit was LINE-based, so wrapping at the right column
+        hid an overclaim — and Black wraps docstrings routinely."""
+        wrapped = (
+            '"""This circuit has been causally\n'
+            '        validated against a held-out set."""'
+        )
+        units = list(_prose_units(wrapped))
+        flagged = [
+            s for _n, s in units
+            if CAUSAL.search(s) and not ALLOWED_CONTEXT.search(s)
+        ]
+        assert flagged, (
+            "a claim split across two lines is invisible to the audit — "
+            "wrapping is now a bypass"
+        )
