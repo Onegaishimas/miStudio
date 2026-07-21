@@ -12,7 +12,7 @@ Two families:
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 SCHEMA_VERSION = "1"
 DEFINITION_KIND = "mistudio.cluster-definition"
@@ -148,22 +148,41 @@ class DefinitionModelRef(BaseModel):
 class DefinitionSAERef(BaseModel):
     """One SAE the definition references.
 
-    `extra="forbid"` is deliberate. Pydantic's default is `ignore`, which turned
-    a caller's `sae_id` into a SILENTLY NULL `mistudio_sae_id` — the definition
-    validated, persisted and exported clean, and only failed much later at
-    miLLM as an unbound SAE. A definition that cannot name its SAEs cannot be
-    served, so the wrong key must fail HERE, at the boundary, not three systems
-    downstream.
+    `mistudio_sae_id` is the wire name, and `sae_id` is accepted as an input
+    alias because that is what every other tool in this codebase calls the same
+    value (`start_circuit_capture` takes `[{layer, sae_id}]`). Pydantic's
+    default `extra="ignore"` used to turn a caller's `sae_id` into a SILENTLY
+    NULL `mistudio_sae_id`: the definition validated, persisted and exported
+    clean, then failed much later at miLLM as an unbound SAE, with nothing
+    pointing back here.
 
-    `sae_id` is accepted as an alias because it is the name every other tool in
-    this codebase uses for the same value (`start_circuit_capture` takes
-    `[{layer, sae_id}]`); rejecting it outright would be pedantry rather than
-    safety. `mistudio_sae_id` remains the wire name.
+    An entry that names no SAE id at all is rejected by `CircuitService`, not
+    by this model — see the implementation comment below for why the check
+    cannot live in the schema without publishing a contract that lies.
     """
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # THE POINT: `sae_id` must not become a silent null.
+    #
+    # `validation_alias` (NOT `alias`) — a plain `alias` also renames the field
+    # on SERIALISATION, which republished the schema with `sae_id` and NO
+    # `mistudio_sae_id`. With extra="forbid" that made every previously
+    # exported document INVALID. The schema-sync guard caught it before it
+    # shipped; without that guard this "fix" would have broken every consumer.
+    #
+    # `extra="ignore"` is KEPT deliberately, not restored by accident. The
+    # published JSON Schema cannot express "accepts either name" — pydantic
+    # omits validation aliases in BOTH schema modes — so extra="forbid" would
+    # publish a contract that rejects the very alias the model accepts. A
+    # schema that lies about what it takes is worse than a permissive one.
+    #
+    # Typo protection therefore lives in the SERVICE layer instead, where it
+    # can see the whole request: see CircuitService._validate. That is the
+    # right place anyway — it can name the offending key AND the layer.
+    model_config = ConfigDict(populate_by_name=True)
 
-    mistudio_sae_id: Optional[str] = Field(None, alias="sae_id")
+    mistudio_sae_id: Optional[str] = Field(
+        None, validation_alias=AliasChoices("mistudio_sae_id", "sae_id")
+    )
     layer: Optional[int] = None
     hook_type: Optional[str] = None
     n_features: Optional[int] = None

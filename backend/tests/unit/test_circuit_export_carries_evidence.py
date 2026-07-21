@@ -49,19 +49,81 @@ class TestTheDefinitionCanNameItsSAEs:
         )
         assert ref.mistudio_sae_id == "sae_f2397db47ab9"
 
-    def test_an_unknown_field_is_REJECTED_not_silently_dropped(self):
-        """The core of the defect: `extra="ignore"` turns a typo into a null.
+    def test_the_published_schema_still_names_the_WIRE_field(self):
+        """Guards the regression this fix nearly caused.
 
-        A definition that cannot name its SAEs cannot be served, so the wrong
-        key has to fail HERE — at the boundary — not three systems downstream
-        as an unbound SAE.
+        A plain `alias="sae_id"` also renames the field on SERIALISATION. The
+        republished JSON Schema then advertised `sae_id` and DROPPED
+        `mistudio_sae_id` — and with extra="forbid", every previously exported
+        document became INVALID. The schema-sync guard caught it; this pins it.
         """
-        from pydantic import ValidationError
-
         from src.schemas.cluster_profile import DefinitionSAERef
 
-        with pytest.raises(ValidationError):
-            DefinitionSAERef(**{"layer": 12, "sae_idd": "typo"})
+        props = DefinitionSAERef.model_json_schema()["properties"]
+        assert "mistudio_sae_id" in props, (
+            "the published schema no longer names `mistudio_sae_id` — every "
+            "existing exported definition would fail validation"
+        )
+
+    def test_an_sae_entry_with_no_id_is_REJECTED_by_the_service(self):
+        """The typo protection, at the layer that can express it.
+
+        The contract model cannot use extra="forbid": pydantic omits validation
+        aliases from the JSON Schema in both modes, so forbidding extras would
+        publish a contract that rejects the `sae_id` the model accepts. The
+        check therefore lives in CircuitService._validate, which can name both
+        the offending key and its layer.
+        """
+        from src.services.circuit_service import (
+            CircuitService, CircuitValidationError)
+
+        with pytest.raises(CircuitValidationError) as exc:
+            CircuitService._validate(
+                name="t", narrative=None,
+                saes=[{"layer": 12, "sae_idd": "typo"}],
+                members=[{"layer": 12, "member_kind": "feature_ref",
+                          "feature": {"feature_idx": 1, "strength": 1.0}}],
+                edges=[], budget=None)
+        msg = str(exc.value)
+        assert "sae_idd" in msg and "layer 12" in msg, (
+            f"the error must name the offending key and layer; got: {msg}"
+        )
+
+    def test_a_NULL_sae_id_is_REJECTED_and_blamed_on_the_manifest(self):
+        """The evidence-preserving path can produce this shape itself.
+
+        `from_candidates` builds each entry as
+        `sae_by_layer.get(L, {}).get("sae_id")`. When a member's layer is not
+        covered by the capture manifest that yields None — an unbound SAE that
+        exports clean and fails at miLLM. The key IS present here, so the
+        "you misspelled it" message would be actively misleading.
+        """
+        from src.services.circuit_service import (
+            CircuitService, CircuitValidationError)
+
+        with pytest.raises(CircuitValidationError) as exc:
+            CircuitService._validate(
+                name="t", narrative=None,
+                saes=[{"mistudio_sae_id": None, "layer": 12}],
+                members=[{"layer": 12, "member_kind": "feature_ref",
+                          "feature": {"feature_idx": 1, "strength": 1.0}}],
+                edges=[], budget=None)
+        msg = str(exc.value)
+        assert "null SAE id" in msg and "capture manifest" in msg, (
+            f"the error must point at the manifest, not a typo; got: {msg}"
+        )
+
+    def test_a_valid_sae_entry_passes_the_service_guard(self):
+        """Specificity: the guard must not reject correct input."""
+        from src.services.circuit_service import CircuitService
+
+        defn = CircuitService._validate(
+            name="t", narrative=None,
+            saes=[{"layer": 12, "sae_id": "sae_abc"}],
+            members=[{"layer": 12, "member_kind": "feature_ref",
+                      "feature": {"feature_idx": 1, "strength": 1.0}}],
+            edges=[], budget=None)
+        assert defn.saes[0].mistudio_sae_id == "sae_abc"
 
     def test_a_full_definition_round_trips_the_sae_id(self):
         """End to end through the contract model, not just the leaf."""

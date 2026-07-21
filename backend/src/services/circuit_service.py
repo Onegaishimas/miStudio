@@ -50,6 +50,44 @@ class CircuitService:
                   faithfulness: Optional[dict] = None,
                   discovery: Optional[dict] = None) -> CircuitDefinitionV1:
         """Round-trip through the contract model — its validators are the law."""
+        # An SAE entry that names no id becomes `mistudio_sae_id: null`, which
+        # exports clean and only fails at miLLM as an unbound SAE. The contract
+        # model cannot catch this: it accepts `mistudio_sae_id` and `sae_id`
+        # via validation_alias, and cannot use extra="forbid" without
+        # publishing a JSON Schema that rejects the alias it accepts (see
+        # DefinitionSAERef). So the check belongs HERE, where the offending key
+        # and its layer can both be named.
+        _SAE_ID_KEYS = {"mistudio_sae_id", "sae_id"}
+        for entry in saes or []:
+            if not isinstance(entry, dict):
+                continue
+            if any(entry.get(k) for k in _SAE_ID_KEYS):
+                continue
+            layer = entry.get("layer")
+            if _SAE_ID_KEYS & set(entry):
+                # The key is there and NULL. The usual source is
+                # `from_candidates`, where `sae_by_layer.get(L, {}).get(...)`
+                # yields None for a layer the capture manifest never covered —
+                # so point at that rather than at a spelling mistake.
+                detail = (
+                    f"SAE entry for layer {layer} has a null SAE id. If this "
+                    "came from a discovery run, the capture manifest has no "
+                    f"SAE for layer {layer}, so that layer cannot be served."
+                )
+            else:
+                stray = sorted(set(entry) - {"layer", "hook_type", "n_features",
+                                             "d_model", "source_hint"})
+                detail = (
+                    f"SAE entry for layer {layer} names no SAE id. Use "
+                    "`sae_id` or `mistudio_sae_id`"
+                    + (f" — got {stray}" if stray else "")
+                    + "."
+                )
+            raise CircuitValidationError(
+                detail + " A definition that cannot name its SAEs cannot be "
+                "served: it would export clean and fail later at miLLM as an "
+                "unbound SAE."
+            )
         try:
             return CircuitDefinitionV1(
                 name=name,
