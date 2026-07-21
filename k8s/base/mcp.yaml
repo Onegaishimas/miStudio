@@ -36,7 +36,16 @@ spec:
                   name: mistudio-secrets
                   key: mcp-auth-token
             - name: MCP_TOOL_CATEGORIES
-              value: "read,groups,steering,labeling,experiments,profiles,jobs,millm_runtime,millm_clusters,millm_sensing"
+              # THIS is the manifest ArgoCD deploys (k8s/base via kustomize).
+              # `circuits` is in the code's DEFAULT_CATEGORIES and this explicit
+              # list silently overrode it, so all 19 circuit tools AND the 16
+              # millm_circuit_* tools were unreachable in production while
+              # being registered, tested and documented.
+              #
+              # `admin` stays OFF deliberately — two irreversible delete tools
+              # (delete_extraction takes every feature, label and activation
+              # example with it), and it is not in DEFAULT_CATEGORIES either.
+              value: "read,groups,steering,labeling,experiments,profiles,circuits,jobs,millm_runtime,millm_clusters,millm_sensing,millm_circuits"
             # Unified MCP (miLLM Feature 9): millm_* categories talk to the
             # miLLM deployment; unset/empty URL skips them at registration.
             - name: MILLM_API_URL
