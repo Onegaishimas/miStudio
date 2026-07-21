@@ -69,6 +69,11 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         slice-fallback, unparseable or unattached circuit that steers nothing.
         `steering: null` means NOT EVALUATED, never "not steering".
 
+        `serving_mode` matters. `"full"` means the whole circuit is serving.
+        `"slice_fallback"` means only a PER-LAYER PROJECTION is — the SAE set
+        was incomplete — so the circuit's own rung does NOT describe what is
+        steering, and you must not report it as though the circuit were served.
+
         While more than one circuit serves, the per-request dial and the
         `X-miLLM-Circuit-Rung` header are BOTH suppressed — no single circuit's
         dial or evidence describes the response. Do not substitute either
@@ -83,7 +88,16 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         `rung_language` is the server's phrase, rendered from the evidence
         ladder — transport it verbatim. Never re-derive a rung locally: a
         circuit's rung is the MINIMUM over its edges, computed server-side, and
-        a local guess would overclaim on the first edge it read."""
+        a local guess would overclaim on the first edge it read.
+
+        The ladder: 0 mined, 1 attribution-supported, 2 the validated tier, 3
+        faithfulness-tested. Activation is GATED at 2 — anything lower is
+        refused unless a human explicitly acknowledges it, so read the rung
+        here before attempting to serve.
+
+        Edge OBSERVATION never moves a rung (see
+        `millm_circuit_sensing_events`); raising one requires a causal
+        intervention, which happens in miStudio."""
         return await millm.get("/api/circuits", limit=limit, offset=offset)
 
     @mcp.tool()
@@ -152,9 +166,15 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         """Dial the active circuit's global lambda.
 
         Refused while SEVERAL circuits serve: no single circuit's dial
-        describes the response. For a SLICE-FALLBACK circuit the steering
-        belongs to a cluster profile, which keeps its own intensity — this dial
-        is recorded but not applied, and the response says so."""
+        describes the response.
+
+        With NOTHING serving you get a 200 body carrying `NO_ACTIVE_CIRCUIT`.
+        That is the expected shape, not an error — activate a circuit first.
+
+        For a SLICE-FALLBACK circuit the steering belongs to a CLUSTER PROFILE,
+        which keeps its own intensity: this dial is recorded but NOT applied,
+        and the response says so. Adjust the slice's cluster instead — its dial
+        follows cluster rules, including the 0.5 floor."""
         return await millm.put(
             "/api/circuits/active/intensity", json_body={"intensity": intensity}
         )
@@ -239,9 +259,11 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
     async def millm_circuit_sensing_status() -> Any:
         """Edge-sensing runtime state for the armed circuit.
 
-        `unsensable_edges` names edges that CANNOT fire an observation — their
-        SAE is not attached, or their layer is dark. Read it before concluding
-        a circuit is quiet: absence of rows is not absence of firing.
+        `unsensable_edges` lists edges that CANNOT fire an observation, each
+        with a `reason` and `detail` — the actionable half. Report the reason,
+        not just the count: it tells the human whether to attach an SAE or
+        accept the gap. Read this before concluding a circuit is quiet;
+        absence of rows is not absence of firing.
 
         `requests_sensed == 0` means NO request reached sensing at all — a
         wiring or skip condition, not quiet traffic. `requests_truncated`
@@ -302,7 +324,12 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
 
         Enabled is operator INTENT and is reported distinctly from `armed`: a
         circuit can be enabled but not armed because it is not active, or
-        because its SAE set is not attached."""
+        because its SAE set is not attached.
+
+        If you enable sensing and see no events, call
+        `millm_circuit_sensing_status` — it says WHICH of those two it is, and
+        they have different remedies (activate the circuit vs attach the SAEs).
+        Do not poll `_events` waiting for something that cannot fire."""
         return await millm.post(f"/api/circuit-sensing/{circuit_id}/enable")
 
     @mcp.tool()
@@ -312,13 +339,36 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         return await millm.post(f"/api/circuit-sensing/{circuit_id}/disable")
 
     @mcp.tool()
-    @gated(gate, "millm")
-    async def millm_circuit_sensing_clear(circuit_id: Optional[str] = None) -> Any:
-        """Delete recorded edge observations.
+    # NO @gated: scope validation must run BEFORE the gate (R1-16).
+    async def millm_circuit_sensing_clear(
+        circuit_id: Optional[str] = None, all_circuits: bool = False
+    ) -> Any:
+        """Delete recorded edge observations. IRREVERSIBLE.
 
-        Scoped to one circuit when `circuit_id` is given, otherwise all. This
-        removes evidence of what was observed; it does not change any rung,
-        because observations never set one."""
+        Pass EITHER `circuit_id` (that circuit only) OR `all_circuits=true`.
+        Omitting both is refused rather than treated as "everything".
+
+        F20 R1-16: `circuit_id` alone defaulted to GLOBAL scope, so an agent
+        asked to "clear the events for this circuit" that omitted the argument
+        wiped every observation in the deployment. The destructive default was
+        the quiet one — `millm_release_circuit_claims` already explains why it
+        is deliberately not global, and that reasoning applies here.
+
+        This removes the record of what was observed. It does not change any
+        rung, because observations never set one."""
+        # Validation BEFORE the gate: a scope mistake is about the CALL, and
+        # reporting it as "millm is down" sends the agent to fix the wrong
+        # thing (same reason `millm_import_circuit` hand-rolls its gate).
+        if (circuit_id is None) == (not all_circuits):
+            return {
+                "error": "specify exactly one scope: `circuit_id` for one "
+                         "circuit, or `all_circuits=true` to delete EVERY "
+                         "recorded observation. This is irreversible, so "
+                         "there is no default."
+            }
+        ok, reason = await gate.check("millm")
+        if not ok:
+            return {"unavailable": "millm", "reason": reason}
         return await millm.delete(
             "/api/circuit-sensing/events", circuit_id=circuit_id
         )

@@ -245,7 +245,10 @@ EXPECTED_CALLS = {
         {"json_body": None},
     ),
     "millm_circuit_sensing_clear": (
-        "DELETE", "/api/circuit-sensing/events", {}, {"circuit_id": None},
+        # R1-16: scope is REQUIRED — an unscoped call is refused, not treated
+        # as "delete everything".
+        "DELETE", "/api/circuit-sensing/events", {"circuit_id": "c1"},
+        {"circuit_id": "c1"},
     ),
 }
 
@@ -404,4 +407,138 @@ class TestGateDegradation:
         text = str(result)
         assert "on_conflict" in text, (
             "a bad argument was reported as miLLM being unavailable"
+        )
+
+
+class TestDestructiveScopeIsExplicit:
+    """F20 R1-16. `millm_circuit_sensing_clear` defaulted to GLOBAL scope.
+
+    An agent asked to "clear the events for this circuit" that omitted the
+    argument wiped every observation in the deployment, irreversibly. The
+    destructive path was the quiet one.
+    """
+
+    def test_an_unscoped_call_is_REFUSED(self):
+        manager, client = _tools_by_name()
+        result = asyncio.run(manager.call_tool("millm_circuit_sensing_clear", {}))
+        assert "exactly one scope" in str(result)
+        assert not client.calls, (
+            "an unscoped clear reached the server — every recorded observation "
+            "in the deployment would be gone"
+        )
+
+    def test_BOTH_scopes_at_once_is_refused(self):
+        manager, client = _tools_by_name()
+        result = asyncio.run(
+            manager.call_tool(
+                "millm_circuit_sensing_clear",
+                {"circuit_id": "c1", "all_circuits": True},
+            )
+        )
+        assert "exactly one scope" in str(result)
+        assert not client.calls
+
+    def test_explicit_all_circuits_IS_allowed(self):
+        """The capability still exists — it just cannot be reached by
+        omission."""
+        manager, client = _tools_by_name()
+        asyncio.run(
+            manager.call_tool(
+                "millm_circuit_sensing_clear", {"all_circuits": True}
+            )
+        )
+        assert client.calls, "the deliberate global clear was blocked too"
+        assert client.calls[0][0] == "DELETE"
+
+    def test_scope_validation_runs_BEFORE_the_gate(self):
+        """A scope mistake is about the CALL. Reporting it as "millm is down"
+        sends the agent to fix the wrong thing."""
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.tools import millm_circuits
+
+        gate = MagicMock()
+        gate.check = AsyncMock(return_value=(False, "connection refused"))
+        mcp = FastMCP("t")
+        millm_circuits.register(mcp, RecordingClient(), gate)
+
+        result = asyncio.run(
+            mcp._tool_manager.call_tool("millm_circuit_sensing_clear", {})
+        )
+        assert "exactly one scope" in str(result), (
+            "a scope error was reported as miLLM being unavailable"
+        )
+
+
+class TestTheDescriptionsCarryWhatAnAgentNeeds:
+    """F20 R1-17..20. The descriptions ARE the product — an agent reads them
+    and relays them to a human.
+
+    Review found the three cardinal semantics each reaching exactly ONE tool,
+    while an agent typically calls one tool and sees only that third. And
+    several tools stated a problem without its next step, which is how an agent
+    ends up polling or guessing.
+
+    These assert on the REGISTERED descriptions, not the source, because that
+    is what `list_tools()` actually hands an agent.
+    """
+
+    def _descriptions(self):
+        manager, _ = _tools_by_name()
+        return {t.name: (t.description or "") for t in manager.list_tools()}
+
+    def test_the_rung_GATE_is_stated_where_rungs_are_listed(self):
+        """R1-17: an agent must know rung < 2 is refused BEFORE it tries to
+        activate, and `millm_list_circuits` is where it sees rungs."""
+        d = self._descriptions()["millm_list_circuits"]
+        assert "GATED at 2" in d or "gated at 2" in d.lower()
+        assert "never moves a rung" in d.lower() or "never raises" in d.lower(), (
+            "the observation/validation boundary reaches only the sensing "
+            "tools, and this is the tool an agent calls first"
+        )
+
+    def test_NO_ACTIVE_CIRCUIT_is_explained_where_it_is_hit(self):
+        """R1-18: it is a 200 body, not an error, and the remedy is to
+        activate something. An agent told neither will treat it as a fault."""
+        d = self._descriptions()["millm_set_circuit_intensity"]
+        assert "NO_ACTIVE_CIRCUIT" in d
+        assert "expected shape" in d
+
+    def test_the_slice_dial_names_what_DOES_govern_intensity(self):
+        """Telling an agent the write is inert without naming the alternative
+        leaves it retrying the same call."""
+        d = self._descriptions()["millm_set_circuit_intensity"]
+        assert "cluster" in d.lower() and "0.5 floor" in d
+
+    def test_enable_points_at_the_diagnostic(self):
+        """R1-19: 'enabled but no events' has two causes with different
+        remedies, and the tool that distinguishes them was never named."""
+        d = self._descriptions()["millm_circuit_sensing_enable"]
+        assert "millm_circuit_sensing_status" in d
+        assert "Do not poll" in d
+
+    def test_unsensable_edges_names_its_actionable_fields(self):
+        d = self._descriptions()["millm_circuit_sensing_status"]
+        assert "reason" in d and "detail" in d, (
+            "the field is described as a list of names, so an agent relays a "
+            "count and drops the half that tells the human what to do"
+        )
+
+    def test_status_warns_that_a_slice_is_not_the_whole_circuit(self):
+        """R1-20: reporting a slice serve with the circuit's own rung claims
+        evidence for something that is not being served."""
+        d = self._descriptions()["millm_circuit_status"]
+        assert "slice_fallback" in d
+        assert "does NOT describe" in d or "not describe" in d.lower()
+
+    def test_activate_covers_ALL_THREE_refusal_branches(self):
+        """The tool an agent reaches for first must resolve each case, or it
+        loops: overridable, collision (never retry), stuck claim (release)."""
+        d = self._descriptions()["millm_activate_circuit"]
+        assert "overridable" in d
+        assert "NEVER retry" in d
+        assert "millm_release_circuit_claims" in d
+        assert "one model, one fixture" in d, (
+            "the measured hazard's caveat must travel with it, or an agent "
+            "relays a single-fixture result as a general law"
         )
