@@ -214,10 +214,73 @@ def register(mcp: FastMCP, millm: MiLLMClient, gate: HealthGate) -> None:
         )
 
     @mcp.tool()
-    @gated(gate, "millm")
-    async def millm_delete_circuit(circuit_id: str) -> Any:
-        """Delete an imported circuit. Deactivates it first if it is serving."""
+    # NO @gated — same reason as millm_import_circuit below: the decorator runs
+    # the gate before the body, which would make the serving check unreachable
+    # while miLLM is down. Gate checked manually AFTER validation.
+    async def millm_delete_circuit(
+        circuit_id: str, acknowledge_serving: bool = False
+    ) -> Any:
+        """Delete an imported circuit permanently.
+
+        If the circuit is currently SERVING, this refuses unless
+        `acknowledge_serving=True`. Deleting a serving circuit tears down live
+        steering and destroys the definition — there is no undo, and the
+        exported artifact goes with it.
+
+        F20 R2-20: this was the only irreversible operation in the module with
+        no gating at all, while its sibling destructive tool
+        (`millm_circuit_sensing_clear`) requires an explicit scope opt-in. The
+        server deletes a live circuit unconditionally, so nothing anywhere in
+        the stack stood between a mistyped id and production steering going
+        down. An agent told to "clean up the old circuit" that passes a stale
+        id would deactivate and destroy a circuit actively steering traffic,
+        and the first symptom would be the model quietly behaving differently.
+
+        The check is best-effort and deliberately FAILS OPEN: if the serving
+        state cannot be read, the delete proceeds rather than becoming
+        unusable during an outage. It is a guard against the plausible mistake
+        (a stale id), not a lock against a determined caller.
+        """
+        ok, reason = await gate.check("millm")
+        if not ok:
+            return {"unavailable": "millm", "reason": reason}
+
+        if not acknowledge_serving:
+            serving = await _is_serving(circuit_id)
+            if serving is True:
+                return {
+                    "refused": "circuit_is_serving",
+                    "circuit_id": circuit_id,
+                    "reason": (
+                        f"Circuit {circuit_id} is serving live traffic. "
+                        "Deleting it stops steering AND destroys the "
+                        "definition — this cannot be undone. Export it first "
+                        "(millm_export_circuit) if you may need it back, then "
+                        "pass acknowledge_serving=true."
+                    ),
+                }
+
         return await millm.delete(f"/api/circuits/{circuit_id}")
+
+    async def _is_serving(circuit_id: str) -> Optional[bool]:
+        """True/False if known, None if the serving state could not be read.
+
+        Callers must treat None as "unknown" and NOT as "not serving" — see
+        the fail-open note in millm_delete_circuit.
+        """
+        try:
+            active = await millm.get("/api/circuits/active")
+        except Exception:
+            return None
+        # `/active` returns a LIST (F19: several circuits can serve at once).
+        circuits = active.get("data") if isinstance(active, dict) else active
+        if not isinstance(circuits, list):
+            return None
+        return any(
+            str(c.get("id")) == str(circuit_id)
+            for c in circuits
+            if isinstance(c, dict)
+        )
 
     # ── Import / export ────────────────────────────────────────────────────
 

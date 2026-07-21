@@ -213,7 +213,13 @@ EXPECTED_CALLS = {
         {"json_body": {"intensity": 1.0, "acknowledge_unvalidated": False}},
     ),
     "millm_delete_circuit": (
-        "DELETE", "/api/circuits/c1", {"circuit_id": "c1"}, {},
+        # `acknowledge_serving=True` so this exercises the TRANSMIT path in
+        # isolation. Without it the tool first reads /api/circuits/active to
+        # decide whether to refuse (R2-20), which is a second call — and the
+        # one-call assertion below is load-bearing, so it stays strict here.
+        # The guard itself is covered by TestDeletingAServingCircuitIsRefused.
+        "DELETE", "/api/circuits/c1",
+        {"circuit_id": "c1", "acknowledge_serving": True}, {},
     ),
     "millm_import_circuit": (
         "POST", "/api/circuits/import", {"definition": {"kind": "x"}},
@@ -600,3 +606,92 @@ class TestTheThreeFailureShapesAreDistinguishable:
         status = d["millm_circuit_status"]
         assert '{"error"' in status and "unavailable" in status
         assert "REFUSED" in status
+
+
+class TestDeletingAServingCircuitIsRefused:
+    """F20 R2-20. `millm_delete_circuit` was the only irreversible operation in
+    the module with no gating of any kind, while its sibling destructive tool
+    (`millm_circuit_sensing_clear`) requires an explicit scope opt-in. The
+    miLLM route deletes a live circuit unconditionally — it deactivates first
+    and proceeds — so NOTHING anywhere in the stack stood between a mistyped
+    id and production steering being torn down.
+
+    Failure scenario: an agent asked to "clean up the old circuit" passes a
+    stale id. Live steering stops, the definition is destroyed, and the first
+    symptom is the served model quietly behaving differently.
+    """
+
+    async def _call(self, active_payload, **kwargs):
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.tools import millm_circuits
+
+        class Client(RecordingClient):
+            async def get(self, path, **params):
+                self.calls.append(("GET", path, params))
+                if path == "/api/circuits/active":
+                    if isinstance(active_payload, Exception):
+                        raise active_payload
+                    return active_payload
+                return {"success": True, "data": {}}
+
+        mcp = FastMCP("t")
+        client = Client()
+        millm_circuits.register(mcp, client, _open_gate())
+        fn = mcp._tool_manager._tools["millm_delete_circuit"].fn
+        return await fn(circuit_id="c1", **kwargs), client
+
+    @pytest.mark.asyncio
+    async def test_a_serving_circuit_is_NOT_deleted(self):
+        result, client = await self._call({"data": [{"id": "c1"}]})
+        assert result["refused"] == "circuit_is_serving"
+        assert not any(m == "DELETE" for m, _, _ in client.calls), (
+            "the tool REFUSED and deleted anyway — the refusal was cosmetic"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_says_how_to_proceed_and_how_to_keep_it(self):
+        """A refusal an agent cannot act on becomes a retry loop or an
+        abandoned task. It must name both the override AND the export, because
+        the destructive half is unrecoverable."""
+        result, _ = await self._call({"data": [{"id": "c1"}]})
+        assert "acknowledge_serving=true" in result["reason"]
+        assert "millm_export_circuit" in result["reason"]
+
+    @pytest.mark.asyncio
+    async def test_a_circuit_that_is_NOT_serving_deletes_without_ceremony(self):
+        """The guard must not make ordinary cleanup require a flag."""
+        _, client = await self._call({"data": [{"id": "other"}]})
+        assert ("DELETE", "/api/circuits/c1", {}) in client.calls
+
+    @pytest.mark.asyncio
+    async def test_the_override_skips_the_check_entirely(self):
+        _, client = await self._call(
+            {"data": [{"id": "c1"}]}, acknowledge_serving=True
+        )
+        assert ("DELETE", "/api/circuits/c1", {}) in client.calls
+        assert not any(
+            p == "/api/circuits/active" for _, p, _ in client.calls
+        ), "the override should not pay for a check whose answer it ignores"
+
+    @pytest.mark.asyncio
+    async def test_it_FAILS_OPEN_when_the_serving_state_cannot_be_read(self):
+        """Deliberate, and the risky half of this design — so it is pinned.
+
+        If /active is unreachable the delete PROCEEDS. The alternative makes
+        cleanup impossible during exactly the outage when an operator most
+        needs it. This is a guard against the plausible mistake (a stale id),
+        not a lock against a determined caller.
+        """
+        _, client = await self._call(RuntimeError("boom"))
+        assert ("DELETE", "/api/circuits/c1", {}) in client.calls
+
+    @pytest.mark.asyncio
+    async def test_an_unrecognised_active_shape_is_UNKNOWN_not_not_serving(self):
+        """`/active` returns a LIST (F19: several circuits serve at once). If
+        it ever returns something else, the tool must not read that as
+        'nothing is serving' — it fails open by the rule above, but via the
+        UNKNOWN branch, and the distinction is what keeps a future shape
+        change from silently disabling the guard."""
+        _, client = await self._call({"data": {"id": "c1"}})
+        assert ("DELETE", "/api/circuits/c1", {}) in client.calls
