@@ -90,20 +90,25 @@ class FeatureService:
             # 2. Activation tokens (from feature_activations.tokens JSONB array)
             search_pattern = f'%{search_params.search}%'
 
-            # Subquery to check if any activation tokens match
-            # Join FeatureActivation with Feature to filter by training_id
-            token_subquery = (
-                select(FeatureActivation.feature_id)
-                .join(Feature, FeatureActivation.feature_id == Feature.id)
-                .where(Feature.training_id == training_id)
-                .where(func.cast(FeatureActivation.tokens, String).ilike(search_pattern))
-            )
-
+            # NAME + DESCRIPTION only, deliberately.
+            #
+            # This also ILIKE'd `CAST(feature_activations.tokens AS TEXT)` —
+            # a cast expression over 15.7M rows, which no index can serve. The
+            # planner had no choice but Parallel Seq Scan (cost ~4,009,222) and
+            # any SELECTIVE search timed out. It was fast only when the term
+            # matched nearly everything, because the OR short-circuited on the
+            # indexed half and never evaluated the subquery — fast when
+            # useless, timing out when useful.
+            #
+            # It was also undocumented: the tool contract says "search matches
+            # name/description" and never mentioned token contents. Searching
+            # tokens needs a real index (pg_trgm GIN on a materialised column,
+            # or tsvector) and an explicit opt-in — not a cast-and-scan
+            # silently attached to every query.
             query = query.where(
                 or_(
                     Feature.name.ilike(search_pattern),
-                    Feature.description.ilike(search_pattern),
-                    Feature.id.in_(token_subquery)
+                    Feature.description.ilike(search_pattern)
                 )
             )
 
@@ -129,19 +134,10 @@ class FeatureService:
         if search_params.search:
             search_pattern = f'%{search_params.search}%'
 
-            # Same token search subquery for count
-            token_subquery = (
-                select(FeatureActivation.feature_id)
-                .join(Feature, FeatureActivation.feature_id == Feature.id)
-                .where(Feature.training_id == training_id)
-                .where(func.cast(FeatureActivation.tokens, String).ilike(search_pattern))
-            )
-
             count_query = count_query.where(
                 or_(
                     Feature.name.ilike(search_pattern),
-                    Feature.description.ilike(search_pattern),
-                    Feature.id.in_(token_subquery)
+                    Feature.description.ilike(search_pattern)
                 )
             )
         if search_params.is_favorite is not None:
@@ -319,18 +315,10 @@ class FeatureService:
         if search_params.search:
             search_pattern = f'%{search_params.search}%'
 
-            token_subquery = (
-                select(FeatureActivation.feature_id)
-                .join(Feature, FeatureActivation.feature_id == Feature.id)
-                .where(Feature.extraction_job_id == extraction_job_id)
-                .where(func.cast(FeatureActivation.tokens, String).ilike(search_pattern))
-            )
-
             query = query.where(
                 or_(
                     Feature.name.ilike(search_pattern),
-                    Feature.description.ilike(search_pattern),
-                    Feature.id.in_(token_subquery)
+                    Feature.description.ilike(search_pattern)
                 )
             )
 
@@ -356,18 +344,10 @@ class FeatureService:
         if search_params.search:
             search_pattern = f'%{search_params.search}%'
 
-            token_subquery = (
-                select(FeatureActivation.feature_id)
-                .join(Feature, FeatureActivation.feature_id == Feature.id)
-                .where(Feature.extraction_job_id == extraction_job_id)
-                .where(func.cast(FeatureActivation.tokens, String).ilike(search_pattern))
-            )
-
             count_query = count_query.where(
                 or_(
                     Feature.name.ilike(search_pattern),
-                    Feature.description.ilike(search_pattern),
-                    Feature.id.in_(token_subquery)
+                    Feature.description.ilike(search_pattern)
                 )
             )
         if search_params.is_favorite is not None:
