@@ -68,6 +68,10 @@ class CalibrationResult:
     steps_used: int = 0
     converged: bool = True
     floor: float = 0.0
+    #: False when the judge called the UNSTEERED baseline broken — the judge
+    #: cannot grade this circuit's model, so the run is inconclusive (NOT
+    #: "no usable band", which would be a false claim about the circuit).
+    judge_reliable: bool = True
     #: every judged/measured generation, for the manifest.
     trace: List[Dict] = field(default_factory=list)
 
@@ -277,10 +281,30 @@ def calibrate(
     above onset), the result carries `usable_band=False` and onset==sweet==cliff;
     the caller must treat that as "no band found" and NOT clamp the served dial.
     """
+    # JUDGE SANITY GATE (hardware-informed): grade the UNSTEERED output first.
+    # If the judge calls the un-steered model broken, it cannot grade this
+    # circuit's model — every downstream verdict is untrustworthy, and reporting
+    # "no usable band" would be a FALSE claim about the circuit (the failure is
+    # the judge's). Surface judge_reliable=False so the caller reports an
+    # inconclusive run, not a broken circuit.
+    baseline_verdicts = []
+    for p in probes:
+        v = judge(gen_at(0.0, p["prompt"]), p["expected"])
+        baseline_verdicts.append({"dial": 0.0, "phase": "judge_sanity",
+                                  "probe": p["prompt"], "verdict": v})
+    if _worst([bv["verdict"] for bv in baseline_verdicts]) != "correct":
+        return CalibrationResult(
+            onset=lo, sweet_spot=lo, cliff=lo,
+            usable_band=False, judge_reliable=False,
+            steps_used=len(probes), converged=True, floor=0.0,
+            trace=baseline_verdicts,
+        )
+
     onset, floor, onset_trace = find_onset(
         gen_at=gen_at, baseline_at=baseline_at,
         divergence=divergence, lo=lo, hi=hi, probes=probes,
     )
+    onset_trace = baseline_verdicts + onset_trace
 
     cliff, usable, non_monotone, steps, converged, cliff_trace = find_cliff(
         gen_at=gen_at, judge=judge, lo=onset, hi=hi, probes=probes,

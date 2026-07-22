@@ -156,6 +156,7 @@ class CircuitCalibrationService:
             "band": {k: band[k] for k in ("onset", "sweet_spot", "cliff",
                                           "non_monotone")},
             "usable_band": result.usable_band,
+            "judge_reliable": result.judge_reliable,
             "trace": result.trace,
             "converged": result.converged,
             "steps_used": result.steps_used,
@@ -167,6 +168,7 @@ class CircuitCalibrationService:
         # NOT clamp the served dial to this degenerate band (badge, not gate —
         # a failed measurement must not disable the circuit).
         return {"band": band, "usable_band": result.usable_band,
+                "judge_reliable": result.judge_reliable,
                 "manifest_payload": manifest_payload}
 
     @classmethod
@@ -208,6 +210,19 @@ class CircuitCalibrationService:
         # build_band cannot produce. The no-usable-band case is NOT a failure:
         # we record the manifest and mark the run completed WITHOUT clamping.
         manifest_id = cls._persist_manifest(db, circuit_id, out["manifest_payload"])
+
+        if not out.get("judge_reliable", True):
+            # The judge called the UNSTEERED output broken — it can't grade this
+            # circuit's model. Inconclusive, NOT a claim about the circuit.
+            cls._mark_status(db, circuit_id, "judge_unreliable")
+            if progress_cb:
+                progress_cb(100)
+            return {"circuit_id": circuit_id, "band": None,
+                    "usable_band": False, "judge_reliable": False,
+                    "manifest_ref": manifest_id,
+                    "reason": "the judge graded the UNSTEERED baseline as not "
+                    "correct — it cannot reliably grade this circuit's model; "
+                    "use a stronger judge model"}
 
         if not out["usable_band"]:
             # No correct dial above onset — do NOT clamp (badge, not gate: a
@@ -301,15 +316,21 @@ class CircuitCalibrationService:
     @staticmethod
     def _mark_no_usable_band(db, circuit_id: str, manifest_id: str) -> None:
         """A run that found no usable band: clear the in-flight marker WITHOUT
-        clamping the dial or writing a calibration block. Uses a DISTINCT status
-        ("no_band") rather than "completed" so a consumer can tell the latest
-        measurement found nothing from a fresh successful calibration — and any
-        PRIOR band left on the circuit is not misrepresented as this run's result
-        (R3). The circuit still serves exactly as before."""
+        clamping the dial or writing a calibration block. Distinct "no_band"
+        status so a consumer can tell the latest measurement found nothing from a
+        fresh successful calibration — and any PRIOR band on the circuit is not
+        misrepresented as this run's result (R3). The circuit serves as before."""
+        CircuitCalibrationService._mark_status(db, circuit_id, "no_band")
+
+    @staticmethod
+    def _mark_status(db, circuit_id: str, status: str) -> None:
+        """Set the circuit's calibration_status without clamping or writing a
+        band. Used for the non-clamping terminal outcomes (no_band,
+        judge_unreliable)."""
         from ..models.circuit import Circuit
         circuit = db.query(Circuit).filter(Circuit.id == circuit_id).first()
         if circuit is not None:
-            circuit.calibration_status = "no_band"
+            circuit.calibration_status = status
             db.commit()
 
     @staticmethod
@@ -493,8 +514,13 @@ class CircuitCalibrationService:
             if dial > 0:
                 for L, hook in _make_hook(dial).items():
                     handles.append(hook_layers[L].register_forward_hook(hook))
-            gen_kwargs = dict(max_new_tokens=cls.GEN_MAX_TOKENS,
-                              do_sample=True, temperature=0.7)
+            # GREEDY (deterministic) generation. Hardware-informed (Feature 20
+            # E2E): with sampling, two UNSTEERED draws of a small instruct model
+            # diverge as much as a steered one (a Jaccard floor near 0.8 that no
+            # steering could clear), so onset never fired. Greedy makes
+            # baseline-vs-baseline ~0, so onset reflects only the circuit's tint —
+            # and makes the whole run reproducible (a stated goal).
+            gen_kwargs = dict(max_new_tokens=cls.GEN_MAX_TOKENS, do_sample=False)
             if disable_cache:
                 gen_kwargs["use_cache"] = False
             try:
@@ -507,11 +533,8 @@ class CircuitCalibrationService:
                                     skip_special_tokens=True)
             return text
 
-        # onset compares a STEERED draw against a baseline draw; both must use the
-        # SAME sampling seed (0) so the divergence reflects the circuit's tint, not
-        # a seed-induced sampling difference (Feature 20 R2). The cliff judge reads
-        # correctness, not divergence, so its dial-seed choice doesn't bias it; we
-        # use seed 0 throughout for reproducibility.
+        # Greedy ⇒ seed-independent; the seed arg is retained for interface
+        # compatibility (baseline_at(prompt, seed)) but does not change output.
         def gen_at(dial, prompt):
             return _generate(prompt, dial, 0)
 

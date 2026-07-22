@@ -181,6 +181,21 @@ class TestFullCalibrate:
             assert judge_dip(gen_at(res.sweet_spot, "q1"), "a1") == "correct", (
                 "the shipped sweet_spot must be a judge-correct dial")
 
+    def test_a_judge_that_fails_the_UNSTEERED_baseline_is_flagged_unreliable(self):
+        # Hardware-informed (E2E): a weak judge called the unsteered "capital of
+        # France" answer broken. That is a JUDGE failure, not "the circuit has no
+        # band" — must surface judge_reliable=False, NOT a false no-band claim.
+        bad_judge = lambda t, e: "broken"   # calls everything broken, incl. dial 0
+        res = calibrate(gen_at, baseline_at, bad_judge, divergence,
+                        probes=PROBES, lo=0.0, hi=1.0, max_steps=10)
+        assert res.judge_reliable is False
+        assert res.usable_band is False
+
+    def test_a_reliable_judge_is_not_flagged(self):
+        res = calibrate(gen_at, baseline_at, judge, divergence,
+                        probes=PROBES, lo=0.0, hi=1.0, max_steps=12)
+        assert res.judge_reliable is True
+
     def test_no_usable_band_when_broken_from_onset(self):
         # A judge that breaks everywhere above 0.05 — onset (drift) will land
         # above that, so lo is already broken → no usable band.
