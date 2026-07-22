@@ -420,6 +420,73 @@ async def reproduce_calibration(manifest_id: str,
     return {"reproduces": manifest_id, "task_id": task.id, "status": "queued"}
 
 
+class RecordArtifact(BaseModel):
+    kind: Literal["circuit", "cluster", "features"]
+    circuit_id: Optional[str] = None
+    cluster_profile_id: Optional[str] = None
+    features: Optional[List[Dict[str, Any]]] = None
+    model_id: Optional[str] = None
+
+
+class SteeringSamplesBody(BaseModel):
+    artifact: RecordArtifact
+    dials: List[float]
+    prompts: List[str]
+    max_tokens: Optional[int] = None
+    seed: int = 0
+
+
+@router.post("/steering-samples", status_code=202)
+async def start_steering_samples(body: SteeringSamplesBody,
+                                 db: AsyncSession = Depends(get_db)):
+    """Record (dial, prompt, unsteered, steered) transcripts for a circuit,
+    cluster, or ad-hoc feature set on the GPU — the raw material for a post-run
+    LLM meaning-analysis pass. Judge-free. GPU-guarded (shares the single-GPU
+    circuit guard). 422 on bad config/caps; 409 if the GPU is busy. Poll
+    get_task_status, then read the steering_samples manifest."""
+    from ....models.steering_record_run import SteeringRecordRun
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
+    from ....services.steering_recorder_service import (RecordConfigError,
+                                                        SteeringRecorderService)
+    from ....workers.circuit_record_tasks import run_circuit_record
+
+    config = {"artifact": body.artifact.model_dump(exclude_none=True),
+              "dials": body.dials, "prompts": body.prompts,
+              "max_tokens": body.max_tokens, "seed": body.seed}
+    try:
+        config = SteeringRecorderService.create_config(config)
+    except RecordConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    art = config["artifact"]
+    ref = (art.get("circuit_id") or art.get("cluster_profile_id"))
+    from ....api.v1.endpoints.circuit_discovery import _run_sync
+
+    def _guard_and_mark(sync_db):
+        # Under the advisory lock: refuse if the GPU is busy, else create the
+        # in-flight marker atomically so the guard-check and marker-set can't race.
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        row = SteeringRecordRun(status="pending", artifact_kind=art["kind"],
+                                artifact_ref=ref)
+        sync_db.add(row)
+        sync_db.commit()
+        sync_db.refresh(row)
+        return row.id
+
+    try:
+        record_run_id = await _run_sync(db, _guard_and_mark)
+    except CaptureConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    task = run_circuit_record.delay(record_run_id, config)
+    await db.execute(
+        SteeringRecordRun.__table__.update()
+        .where(SteeringRecordRun.id == record_run_id)
+        .values(task_id=task.id))
+    await db.commit()
+    return {"record_run_id": record_run_id, "task_id": task.id, "status": "queued"}
+
+
 @router.get("/{circuit_id}/export")
 async def export_circuit(circuit_id: str, db: AsyncSession = Depends(get_db)):
     circuit = await _get_or_404(db, circuit_id)

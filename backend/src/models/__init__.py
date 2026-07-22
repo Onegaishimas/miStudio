@@ -38,6 +38,7 @@ from .cluster_profile import ClusterProfile
 from .circuit import Circuit
 from .circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
 from .validation_manifest import ValidationManifest
+from .steering_record_run import SteeringRecordRun
 from .agent_approval import AgentApprovalRequest, ApprovalStatus
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "CircuitCaptureRun",
     "CircuitDiscoveryRun",
     "ValidationManifest",
+    "SteeringRecordRun",
     "Dataset",
     "DatasetStatus",
     "DatasetTokenization",

@@ -192,10 +192,11 @@ def find_cliff(
         nonlocal steps
         vs: List[Verdict] = []
         for p in probes:
-            v = judge(gen_at(dial, p["prompt"]), p["expected"])
+            gen = gen_at(dial, p["prompt"])          # keep the TEXT, not just the verdict
+            v = judge(gen, p["expected"])
             vs.append(v)
             trace.append({"dial": dial, "phase": "cliff", "probe": p["prompt"],
-                          "verdict": v})
+                          "verdict": v, "generation": gen})
         steps += 1
         return _worst(vs)
 
@@ -289,9 +290,11 @@ def calibrate(
     # inconclusive run, not a broken circuit.
     baseline_verdicts = []
     for p in probes:
-        v = judge(gen_at(0.0, p["prompt"]), p["expected"])
+        gen = gen_at(0.0, p["prompt"])           # the UNSTEERED transcript
+        v = judge(gen, p["expected"])
         baseline_verdicts.append({"dial": 0.0, "phase": "judge_sanity",
-                                  "probe": p["prompt"], "verdict": v})
+                                  "probe": p["prompt"], "verdict": v,
+                                  "generation": gen})
     if _worst([bv["verdict"] for bv in baseline_verdicts]) != "correct":
         return CalibrationResult(
             onset=lo, sweet_spot=lo, cliff=lo,

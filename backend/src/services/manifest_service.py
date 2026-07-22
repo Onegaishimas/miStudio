@@ -19,8 +19,16 @@ logger = logging.getLogger(__name__)
 # Fields a manifest payload MUST carry to be self-contained (no live refs).
 _REQUIRED_PAYLOAD_KEYS = {"intervention", "config", "seeds"}
 # A calibration manifest reproduces a band from its probes + config + the judged
-# trace — a different self-contained set than an intervention manifest.
-_REQUIRED_CALIBRATION_KEYS = {"probes", "config", "band", "trace"}
+# trace, and carries first-class `transcripts` (the generated text per dial/prompt)
+# so the manifest is analysis-ready for an LLM meaning pass. `transcripts` is
+# REQUIRED on NEW manifests; legacy calibration manifests written before this key
+# existed are never re-validated (validate_payload runs only on WRITE), so they
+# stay readable + reproducible — pinned by test_calibration_transcript back-compat.
+_REQUIRED_CALIBRATION_KEYS = {"probes", "config", "band", "trace", "transcripts"}
+# A steering-samples manifest is the recorder's self-contained transcript record:
+# which artifact + dials + prompts were run, and the generated text per
+# (prompt, dial) — the raw material for an LLM meaning-analysis pass.
+_REQUIRED_STEERING_SAMPLES_KEYS = {"artifact", "dials", "prompts", "transcripts", "config"}
 
 
 class ManifestError(ValueError):
@@ -29,13 +37,20 @@ class ManifestError(ValueError):
 
 def validate_payload(kind: str, payload: Dict[str, Any]) -> None:
     """A manifest with live refs that can drift is not reproducible."""
-    if kind not in ("edge_batch", "faithfulness", "reproduction", "calibration"):
+    if kind not in ("edge_batch", "faithfulness", "reproduction", "calibration",
+                    "steering_samples"):
         raise ManifestError(f"Unknown manifest kind {kind!r}")
     if kind == "calibration":
         missing = _REQUIRED_CALIBRATION_KEYS - set(payload or {})
         if missing:
             raise ManifestError(
                 "calibration manifest payload missing self-contained keys: "
+                f"{sorted(missing)}")
+    if kind == "steering_samples":
+        missing = _REQUIRED_STEERING_SAMPLES_KEYS - set(payload or {})
+        if missing:
+            raise ManifestError(
+                "steering_samples manifest payload missing self-contained keys: "
                 f"{sorted(missing)}")
     if kind in ("edge_batch", "faithfulness"):
         missing = _REQUIRED_PAYLOAD_KEYS - set(payload or {})

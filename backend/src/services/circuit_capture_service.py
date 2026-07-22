@@ -130,6 +130,16 @@ class CircuitCaptureService:
             raise CaptureConflictError(
                 f"Calibration pass on {calib.id} is {calib.calibration_status} "
                 f"— one GPU circuit task runs at a time; wait or cancel it first")
+        # Steered-transcript recording (circuit/cluster/feature) also loads a
+        # model on the single GPU — its marker lives in steering_record_runs
+        # (cluster/feature jobs have no circuit row).
+        from ..models.steering_record_run import SteeringRecordRun
+        rec = db.query(SteeringRecordRun).filter(
+            SteeringRecordRun.status.in_(("pending", "running"))).first()
+        if rec is not None:
+            raise CaptureConflictError(
+                f"A steering-record job ({rec.id}) is {rec.status} — one GPU "
+                f"task runs at a time; wait or cancel it first")
 
     # ── run creation / validation (called from the endpoint) ─────────────
 
