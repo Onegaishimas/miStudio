@@ -186,6 +186,70 @@ class TestOrchestration:
         assert calls["gen"] == 1
 
 
+class TestClusterModelIdResolution:
+    """The recorder loads the model via _artifact_model_id BEFORE _resolve, so
+    that path must ALSO derive a cluster's model from its SAE (CLUSTERS-arc
+    profiles store sae_id but model_id=None). Fixing only steering_core left this
+    parallel copy returning None → 'Model None not found' on hardware."""
+
+    def _db(self, prof, sae):
+        class _Q:
+            def __init__(self, obj):
+                self._obj = obj
+
+            def filter(self, *a, **k):
+                return self
+
+            def first(self):
+                return self._obj
+
+        class _DB:
+            def query(self, model):
+                name = getattr(model, "__name__", "")
+                return _Q(prof if name == "ClusterProfile" else sae)
+        return _DB()
+
+    def test_cluster_model_id_derived_from_sae(self):
+        class _Prof:
+            id = "clp_z"
+            model_id = None            # real-data shape
+            mistudio_sae_id = None
+            sae_id = "sae_real"
+            saes = None
+            members = [{"feature_idx": 3, "strength": 0.2}]
+
+        class _SAE:
+            model_id = "m_derived"
+            layer = 13
+
+        mid = SteeringRecorderService._artifact_model_id(
+            {"kind": "cluster", "cluster_profile_id": "clp_z"},
+            self._db(_Prof(), _SAE()))
+        assert mid == "m_derived"
+
+    def test_record_run_raises_on_model_id_path_mismatch(self, monkeypatch):
+        """The two resolution paths must agree — a divergence is a loud error,
+        not a silent steer against the wrong model."""
+        import src.services.steering_recorder_service as mod
+        from src.services.steering_recorder_service import RecordRunError
+
+        monkeypatch.setattr(mod, "load_model_and_structure",
+                            lambda mid, db: ("M", "T", "S", False, "cpu"))
+        monkeypatch.setattr(SteeringRecorderService, "_artifact_model_id",
+                            staticmethod(lambda art, db: "m_loaded"))
+        # _resolve disagrees → must raise, never generate.
+        monkeypatch.setattr(SteeringRecorderService, "_resolve",
+                            classmethod(lambda cls, art, db, dev: ("m_OTHER", [(1, 1, 1.0, "W")])))
+        monkeypatch.setattr(mod, "build_steer_generator",
+                            lambda *a, **k: (lambda d, p: "x", lambda p, s: "b"))
+
+        with pytest.raises(RecordRunError, match="mismatch"):
+            SteeringRecorderService.record_samples(
+                db=None, config=_cfg(artifact={"kind": "cluster",
+                                               "cluster_profile_id": "clp_z"},
+                                     dials=[1.0], prompts=["a"]))
+
+
 class TestManifestKind:
     def test_steering_samples_kind_validates(self):
         from src.services.manifest_service import validate_payload
