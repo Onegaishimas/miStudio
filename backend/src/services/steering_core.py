@@ -7,12 +7,13 @@ shared core: three resolvers turn each artifact type into a common
 `resolved_members` list, and `build_steer_generator` turns that plus a loaded
 model into `(gen_at(dial, prompt), baseline_at(prompt, seed))` closures.
 
-Two conventions, fixed here and shared by every caller (Feature 20 review +
-recorder design):
-  * HOOK TARGET = the discovered residual module
-    (`get_hookable_module(layer, "residual", structure)`), NOT the whole layer
-    output. This is what the calibrated band and miLLM serving measure against,
-    so a recorded transcript matches the band.
+Two conventions, fixed here and shared by every caller:
+  * HOOK TARGET = the WHOLE decoder-layer output (resid_post) — the same point
+    the live feature/cluster serving path steers at. Hardware E2E proved this is
+    required: the discovered "residual" module is a post-attention RMSNorm on
+    LFM2, and a vector added AT a normalization layer is renormalized away, so
+    steering had zero effect at every normal dial. Adding at the layer output
+    survives, so the transcript reflects real steering (and matches miLLM).
   * The RECORDER owns the dial multiply: `effective = dial · base_strength`.
     (Feature/cluster strengths are otherwise terminal; only the circuit path
     threads a dial.)
@@ -176,28 +177,32 @@ def build_steer_generator(model, tokenizer, structure, resolved_members,
     """Return (gen_at, baseline_at) closures over a loaded model.
 
     `gen_at(dial, prompt) -> str` applies `dial · base_strength · W_dec[:, idx]`
-    additively at each member's residual module and generates greedily.
+    additively at each member's decoder-layer output and generates greedily.
     `baseline_at(prompt, seed) -> str` generates unsteered.
 
-    Body moved verbatim from CircuitCalibrationService._build_generation_fns
-    (Feature 20). Hook target is the residual module; greedy + Gemma-cache-aware.
+    Greedy + Gemma-cache-aware. Hook target is the WHOLE layer output (resid_post
+    — see the module docstring for why the RMSNorm "residual" target was wrong).
     """
     import torch
 
-    from ..ml.layer_discovery import get_hookable_module
-
-    # Group members by layer and resolve each layer's residual hook target once.
+    # Group members by layer and resolve each layer's hook target once.
     by_layer: Dict[int, List[Tuple[int, float, Any]]] = {}
     for (L, idx, strength, wdec) in resolved_members:
         by_layer.setdefault(L, []).append((idx, strength, wdec))
 
+    # HOOK TARGET = the WHOLE decoder-layer output (resid_post), the same point
+    # the live feature/cluster serving path steers at. Hardware E2E proved this
+    # is REQUIRED: hooking the discovered "residual" module returns a
+    # post-attention RMSNorm on LFM2, and a vector added at a normalization layer
+    # is renormalized AWAY — steered output was byte-identical to the baseline at
+    # every normal dial (only leaking through at absurd dial 5.0). Adding at the
+    # layer OUTPUT survives, so the recorded transcript matches what miLLM serves.
     hook_layers: Dict[int, Any] = {}
     for L in by_layer:
-        layer_mod = structure.layers_module[L]
-        target = get_hookable_module(layer_mod, "residual", structure)
+        target = structure.layers_module[L]
         if target is None:
             raise SteeringCoreError(
-                f"No hookable residual module for layer {L} on this model")
+                f"No hookable layer module for layer {L} on this model")
         hook_layers[L] = target
 
     def _make_hook(dial):

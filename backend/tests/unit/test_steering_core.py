@@ -11,6 +11,29 @@ import inspect
 import pytest
 
 
+class TestHookTargetIsTheWholeLayerNotANormLayer:
+    """Hardware E2E (recorder) found that hooking the discovered "residual"
+    module — a post-attention RMSNorm on LFM2 — renormalized the steering vector
+    AWAY, so steered output was byte-identical to the baseline at every dial. The
+    fix hooks the WHOLE decoder-layer output (resid_post), where an added vector
+    survives. This is a GPU-only behaviour, so guard it structurally: the core
+    must NOT resolve the hook target via get_hookable_module(..., "residual")."""
+
+    def test_the_core_hooks_the_layer_output_not_get_hookable_module(self):
+        import inspect
+
+        from src.services import steering_core
+        src = inspect.getsource(steering_core.build_steer_generator)
+        assert "structure.layers_module[L]" in src, (
+            "the hook target must be the whole decoder-layer output (resid_post)")
+        # The bad pattern is resolving the target via get_hookable_module — that
+        # returns a RMSNorm on LFM2 and steering is renormalized away. (A comment
+        # may still mention "residual"; what must not recur is the CALL.)
+        assert "get_hookable_module(" not in src, (
+            "the core resolves the hook via get_hookable_module(...) again — on "
+            "LFM2 that yields a RMSNorm and steering is a hardware-confirmed no-op")
+
+
 class TestJudgeGateDidNotMigrate:
     """Part A regression pin: the calibration judge gate must still fire BEFORE
     the shared (judge-free) generation core is reached — proving the refactor

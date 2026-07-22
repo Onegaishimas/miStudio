@@ -43,8 +43,11 @@ meaning-analysis pass needs.
 - **BR-R1 Unified steering core.** One GPU generation core drives all three
   artifact types via per-type member resolvers; the circuit path (calibration's
   32-findings-hardened `_build_generation_fns`) is refactored to use it, byte-
-  identical. Standardized on the residual hook target — so a recorded transcript
-  matches the calibrated band. The recorder owns the dial multiply.
+  identical. Hooks the **whole decoder-layer output (resid_post)** — the point
+  the live serve path steers at, where an added vector survives (a hardware E2E
+  correction: the original "residual"-module target resolved to a post-attention
+  RMSNorm on LFM2 and renormalized the steering away — steered==unsteered at every
+  dial). The recorder owns the dial multiply.
 - **BR-R2 Recorder + store.** `record_samples(artifact, dials, prompts,
   max_tokens, seed)` records the transcripts to a new `steering_samples` manifest
   kind carrying the actual generated TEXT. Caps bound the one-GPU job: ≤8 dials,
@@ -66,8 +69,8 @@ meaning-analysis pass needs.
 
 ## 4. Non-goals
 
-- No change to the live feature/cluster SERVE path (only the recorder standardizes
-  the hook target).
+- No change to the live feature/cluster SERVE path (the recorder now steers at the
+  same whole-layer point the serve path already uses).
 - No re-running of cluster allocation (uses persisted tuned strengths).
 - The Opus meaning-analysis prompt/format is downstream (agent-driven); miStudio's
   job ends at analysis-ready transcripts.
