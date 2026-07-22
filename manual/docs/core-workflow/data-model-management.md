@@ -38,13 +38,14 @@ miStudio does not maintain an architecture whitelist. Layer discovery introspect
 
 | Mode | Bits | VRAM Savings | Quality Impact | Best For |
 |------|------|-------------|----------------|----------|
-| **FP16/BF16** | 16 | Baseline | None | Maximum precision SAE training |
-| **Q8 (INT8)** | 8 | ~50% | Minimal | Good balance of speed and accuracy |
-| **Q4 (NF4)** | 4 | ~75% | Moderate | Running large models on consumer GPUs |
-| **Q2** | 2 | ~87% | Significant | Maximum compression, research only |
+| **FP32** | 32 | None | None | Full precision (default); highest fidelity, largest footprint |
+| **FP16** | 16 | ~50% vs FP32 | None | Maximum precision SAE training that fits in VRAM |
+| **Q8 (INT8)** | 8 | ~50% vs FP16 | Minimal | Good balance of speed and accuracy |
+| **Q4 (NF4)** | 4 | ~75% vs FP16 | Moderate | Running large models on consumer GPUs |
+| **Q2** | 2 | ~87% vs FP16 | Significant | Maximum compression, research only |
 
 :::warning Quantization and SAE Quality
-For high-precision SAE training, use FP16/BF16 if VRAM allows. Quantized models add noise to activations, which propagates into the SAE's learned features. The SAE itself is always trained in full precision — only the base model is quantized.
+For high-precision SAE training, use FP32 or FP16 if VRAM allows. Quantized models add noise to activations, which propagates into the SAE's learned features. The SAE itself is always trained in full precision — only the base model is quantized.
 :::
 
 To change quantization after the fact, use **Redownload** on the model card — it re-fetches or re-quantizes the model with the new setting rather than requiring a delete-and-recreate.

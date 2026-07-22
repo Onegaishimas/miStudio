@@ -41,6 +41,7 @@ A label is a **hypothesis**; steering is the **proof**. Prefer steering-validate
 
 ## 2. Golden Rules
 
+0. **Call `mistudio_howto` first for any circuit or steering work.** The tool surface is 97 tools across 13 categories — more than this page or a tool list can carry inline. `mistudio_howto()` (no argument) returns the overview plus the topic list; `mistudio_howto("<topic>")` returns a focused workflow. Topics include `discovery_pipeline`, `circuit_authoring`, `strength_calibration`, `evidence_ladder`, `serving`, `troubleshooting`, `tool_map`, and `finding_features`. It holds the current workflows, the cross-plane document shapes, and the failure modes that look like something else — read it before improvising a circuit sequence.
 1. **Never enumerate everything.** List tools cap at `limit ≤ 100` and return `total` counts. Narrow with filters/search instead of paging through tens of thousands of features. Fetch detail only for features you're actively analyzing.
 2. **Start-tools return ids; poll — don't re-submit.** Any tool that starts work returns a `task_id` (or `run_id`/`approval_request_id`). Poll with the matching status tool. Ids are durable database records: they survive your disconnects, so record them and resume.
 3. **Poll with backoff.** Grouping on a large extraction takes minutes; steering generations take tens of seconds to minutes. Poll every 10–30 s, not in a tight loop.
@@ -141,6 +142,70 @@ update_feature_label(
 ```
 Repeat W2→W4 across groups. Then produce the session summary (§2 rule 7).
 
+### W5 — The circuits pipeline (each stage earns an evidence rung)
+
+Circuits are multi-layer graphs over several SAEs. Every circuit and edge carries an **evidence rung** and a server-rendered `rung_language` string — **use that language verbatim** and never describe a rung-0/1 artifact with causal words. Read `mistudio_howto("discovery_pipeline")` and `mistudio_howto("evidence_ladder")` before starting; this is the shape:
+
+```
+start_circuit_capture(dataset_id, layers=[{layer, sae_id}], confirm=false)   # probe → COST ESTIMATE
+start_circuit_capture(..., confirm=true)                                     # actually run
+list_circuit_captures … until status=completed                              # NOT get_task_status
+run_circuit_discovery(capture_run_id)                     # rung 0 — mined coactivation candidates
+get_discovery_results(run_id)                             # read the statistical report FIRST
+run_attribution_pass(run_id)                              # rung 1 — attribution, NOT causal proof
+   → get_discovery_results(run_id), read attribution_status  # NOT get_task_status
+validate_circuit_edges(run_id, ordering="coact"|"attr")   # rung 2 — the REAL causal tier
+   → get_task_status then get_discovery_results for per-edge verdicts
+build_circuit_from_discovery(run_id, name, candidate_keys=[…])  # EVIDENCE-PRESERVING build
+run_circuit_faithfulness(circuit_id)                      # rung 3 — highest tier (necessity/sufficiency)
+   → get_circuit, read faithfulness_status then circuit.faithfulness
+promote_circuit(circuit_id)                               # BADGE, not a gate — reversible
+calibrate_circuit_strength(circuit_id, judge_endpoint=…, judge_model=…)  # clamp the usable dial
+   → get_circuit, read calibration_status then circuit.calibration
+export_circuit_definition(circuit_id)                     # portable, lossless document
+```
+
+Discipline that keeps this honest:
+
+- **Prefer `build_circuit_from_discovery` over `create_circuit`** when the circuit came from a discovery run. It is the **evidence-preserving** path — it carries each edge's coactivation statistics, attribution, rung-2 effect size and `validation_manifest_ref`, and derives each edge's rung from what actually passed. `create_circuit` stores only the edges you hand it: the exported definition keeps the rung and loses the evidence behind it.
+- **Pass `discovery_run_id` if you have one** (`build_circuit_from_discovery` does this for you). Omitting it **permanently forfeits `run_circuit_faithfulness`**, which draws its prompts from that capture store and returns `409` without it. A hand-assembled circuit can never be faithfulness-tested.
+- **Capture / attribution / faithfulness / validation / calibration share ONE circuit-GPU advisory lock across unrelated circuits.** A `409` may name a run you do not own — poll and back off, **do not retry immediately**.
+- **Poll capture and attribution on their own status fields**, not `get_task_status`: these return a raw Celery id and create no task-queue row (`list_circuit_captures` for capture; `get_discovery_results` → `attribution_status` for attribution; `get_circuit` → `faithfulness_status` / `calibration_status`).
+- **Calibration** (`calibrate_circuit_strength`) finds a usable band by two different tests — **onset** (output-drift vs baseline, no judge) and the **correctness cliff** (an LLM judge on generated neutral-topic falsifiable probes) — then clamps `budget.intensity_range` to `[onset, cliff]` and sets the default `intensity` a `margin` below the cliff. It needs a `judge_endpoint` (an OpenAI-compatible `/v1`, e.g. the miLLM instance) and `judge_model`. A weak judge is reported as `judge_unreliable`, never a false `no_band`. It is a **badge, not a gate** — it never blocks promotion or steering. `reproduce_calibration(manifest_id)` re-runs the same probes and seed to prove the band reproduces (it does not re-clamp).
+- **`record_steering_samples` / `get_steering_samples`** are an **instrument, not a judge**: they record `(dial, prompt, unsteered, steered)` transcripts for a circuit, cluster, or ad-hoc feature set, for a **strong model to analyze after the run**. This path is judge-free and needs no judge endpoint.
+
+Steer a built circuit with `steer_combined` (per-member `sae_id`); `export_circuit_slices` produces per-layer `cluster-definition/v1` slices for today's single-SAE consumers (each slice is a **partial rendering** — never present it as the validated whole).
+
+### W6 — Cross-product plane: move a tuned artifact into production (miLLM)
+
+miStudio **discovers and calibrates** (it runs the model to *learn*); miLLM **serves** (it runs the model to *serve*, behind an OpenAI-compatible API). The boundary is a **portable document**, not a code dependency.
+
+The `millm_*` tool categories (`millm_runtime`, `millm_clusters`, `millm_circuits`, `millm_sensing`) are **opt-in and require `MILLM_API_URL` to be set** on the MCP server. When it is unset those categories are skipped at registration and their tools never appear in your tool list. When miLLM is configured but **down**, its tools return `{"unavailable": "millm", "reason": …}` — **report the reason, do not retry in a loop**.
+
+**Clusters:**
+```
+export_cluster_definition(profile_id)          # miStudio → portable mistudio.cluster-definition/v1
+millm_import_cluster(definition=…, activate=true)
+millm_set_intensity(intensity)  /  millm_activate_cluster(cluster_id)
+```
+
+**Circuits:**
+```
+export_circuit_definition(circuit_id)          # miStudio → portable mistudio.circuit-definition
+millm_import_circuit(definition=…)             # INLINE only — no hub import for circuits
+millm_activate_circuit(circuit_id)
+millm_set_circuit_intensity(intensity, …)      # body: {intensity, reapply, acknowledge_unvalidated}
+```
+
+Rules the cross-plane enforces:
+
+- **The `kind` string is bare `mistudio.circuit-definition`** (and `mistudio.cluster-definition`) — **NO `/v1` suffix**. The `/v1` names the schema *version*, never the kind.
+- **Activation is gated at rung 2.** A circuit below rung 2 (not causally validated) is **refused** with `UNVALIDATED_CIRCUIT` unless you pass `acknowledge_unvalidated=true` — send that **only on explicit human instruction, and report the rung phrase first**. It does not persist: `millm_set_circuit_intensity` re-applies the gate on every dial (each re-arm is fresh), so pass `acknowledge_unvalidated` there too.
+- **SAE ids are different namespaces.** A definition's `saes[].mistudio_sae_id` must be the id **miLLM** knows (e.g. `mistudio--sae-<model>--layer_12--width_8k--res`), not miStudio's internal `sae_xxxxxxxx` row id. No tool translates between them — read miLLM's ids from `millm_status`. A mismatched id imports fine and only fails at activation, as an unbound SAE.
+- **Circuit import is inline-only** (`millm_import_circuit(definition=…)`) — there is deliberately no hub import for circuits, because a circuit references several SAEs by id.
+- **`millm_status` answers "what is steering right now" in one call.** For circuits, `millm_circuit_status` lists everything serving (several circuits can serve at once when layers are disjoint) — trust its `steering` verdict, not `is_active`; `steering: null` means **not evaluated**, never "not steering".
+- **Three failure shapes, three responses:** `{"error": …}` = your call was wrong (fix the arguments); `{"unavailable": …}` = miLLM is down (report, don't loop); a tool error with a `code` (`UNVALIDATED_CIRCUIT`, `CIRCUIT_LAYER_CONTENTION`, `NO_ACTIVE_CIRCUIT`, `AMBIGUOUS_ACTIVE_CIRCUIT`) = the operation was **refused** for a stated reason — read the code and act on it; retrying unchanged is refused identically.
+
 ## 5. Async Pattern Cheat Sheet
 
 | You called | Poll with | Terminal states |
@@ -149,6 +214,12 @@ Repeat W2→W4 across groups. Then produce the session summary (§2 rule 7).
 | `steer_*` | `get_steering_result(task_id)` | `completed` / `failed` / `cancelled` |
 | `steer_*` under approval mode | `get_approval_status(approval_request_id)` → then `get_steering_result(steering_task_id)` | `approved` / `denied` / `expired` |
 | `run_enhanced_labeling` | `get_enhanced_label(feature_id)` | job status inside the response |
+| `start_circuit_capture` | `list_circuit_captures` (per-run `status`) | `completed` / `failed` |
+| `run_attribution_pass` | `get_discovery_results(run_id)` → `attribution_status` | terminal when it leaves pending/running |
+| `run_circuit_faithfulness` | `get_circuit(circuit_id)` → `faithfulness_status`, then `circuit.faithfulness` | terminal in the status field |
+| `calibrate_circuit_strength` | `get_circuit(circuit_id)` → `calibration_status`, then `circuit.calibration` | terminal in the status field |
+| `record_steering_samples` | `get_task_status(task_id)`, then `get_steering_samples` | `completed` / `failed` |
+| `validate_circuit_edges` / `reproduce_calibration` / `reproduce_validation` | `get_task_status(task_id)` | `completed` / `failed` |
 | anything else with a task id | `get_task_status(task_queue_id)` | `completed` / `failed` |
 
 ## 6. Label Write-Back Rules

@@ -17,7 +17,7 @@ Prefix: `/api/v1/datasets` · UI: [Dataset Management](/core-workflow/dataset-ma
 | `GET` | `/{id}` | Get dataset details |
 | `PATCH` | `/{id}` | Update dataset metadata / filter settings |
 | `DELETE` | `/{id}` | Delete dataset — cascades to its tokenizations (204) |
-| `POST` | `/download` | Start a HuggingFace download (202); body includes `hf_repo_id`, optional split/subset |
+| `POST` | `/download` | Start a HuggingFace download (202); body includes `repo_id`, optional `split`/`config` |
 | `DELETE` | `/{id}/cancel` | Cancel an in-progress download. During download: removes partial files; during processing: preserves raw files for retry |
 | `GET` | `/{id}/task-status` | Status of the dataset's current background task |
 | `GET` | `/{id}/samples` | Paginated raw samples (bytes fields sanitized to strings) |

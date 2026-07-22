@@ -65,6 +65,17 @@ GPU work is serialized through the worker and guarded:
 
 See [Multi-GPU Support](/advanced/multi-gpu) for what's implemented versus planned.
 
+## Runtime Serving: Multi-SAE Attach
+
+miStudio *discovers and calibrates* — it runs the model to learn. A separate plane, **miLLM**, *serves* — it runs the model behind an OpenAI-compatible API with SAEs attached at inference time. The boundary between them is a portable document (a circuit or cluster definition), not a code dependency.
+
+On the serving side, **multiple SAEs attach concurrently** — one is not resident at a time. Since Feature 12, miLLM's `attach_set()` loads a set of referenced SAEs (fp16) and installs one hook per `(sae_id, layer)`, so a single request can be steered across several layers at once:
+
+- **`GET /api/saes/attachments`** — the plural attachment status: every attached `(sae_id, layer)` entry, plus total VRAM against the multi-SAE envelope
+- **`POST /api/saes/attach-set`** — attach a set of SAEs for cross-layer circuit serving; idempotent per `(sae_id, layer)` key
+
+This is what makes **circuit** and **cluster** serving possible: a circuit spans features across multiple layers, so serving it means attaching every SAE the circuit touches, not just one. A cluster (a named, tuned group of features with a strength budget) serves the same way. A calibrated circuit exported from miStudio carries its usable-band into miLLM, where activating it attaches the right SAEs and applies the tuned intensity.
+
 ## Deployment Shapes
 
 The same containers run in two configurations:

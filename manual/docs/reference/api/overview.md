@@ -48,6 +48,7 @@ Through the standard nginx/ingress deployment this is same-origin with the front
 | SAE management | `/saes` | [SAEs](/reference/api/saes) |
 | Features & labeling | *(no prefix)* `/features`, `/extractions`, `/labeling` | [Features & Labeling](/reference/api/features-labeling) |
 | Steering | `/steering` | [Steering](/reference/api/steering) |
+| Circuits & clusters | `/circuits`, `/circuit-capture`, `/circuit-discovery`, `/validation-manifests`, `/cluster-profiles` | [Circuits & Clusters](/reference/api/circuits) |
 | Neuronpedia export & push | `/neuronpedia` | [Neuronpedia](/reference/api/neuronpedia) |
 | System monitoring & task queue | `/system`, `/task-queue`, `/workers` | [System](/reference/api/system) |
 | Templates & settings | `/*-templates`, `/settings` | [Templates & Settings](/reference/api/templates-settings) |
