@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 3.0 (Feature Clusters increment — IDL-28/29/30)
+**Version:** 3.1 (Feature 20 Circuit Strength Calibration — IDL-37)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -3173,12 +3173,30 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-37: Circuit strength calibration — usable-band search, probe-judged cliff, contract carriage
+
+**Date:** 2026-07-21
+
+**Context:** The circuits arc (IDL-31..36) discovers, validates, and makes a circuit portable, but the per-member steering strengths it ships are **uncalibrated placeholders**. Taking the first real circuit (`crc_124fd83d1f2a`) through to serving proved the gap empirically: a single-prompt strength sweep declared a "usable ceiling" (effective total 1.40) that, when served, produced fluent-but-FALSE output; a serving test across the dial found the actually-usable band was ~0.4–0.6 effective, narrow and off-center from where the sweep sampled. The strength that reads as on-theme sits well past the strength at which the answer stops being TRUE. Calibration is a discovery-plane act (miStudio runs the model to learn); it does NOT move to miLLM (which runs the model to serve). Feature status: **Planned** (doc chain 019). Normative behaviour observed, not yet from a supplement BRD.
+
+**Decision:**
+1. **Two thresholds, two detectors — never one metric.** *Onset* (min influence above none) is a DIFFERENCE test: smallest dial where steered output diverges from the unsteered baseline past a noise floor (embedding/output-distribution drift; no judge). *Correctness cliff* (max before facts break) is a PROPERTY test: largest dial where output is still TRUE, scored by an LLM judge against falsifiable probes. Perplexity/theme metrics are explicitly rejected as cliff detectors — they cannot see the cliff (the observed break was between two adjacent dial steps, one correct + lightly humorous, the next confidently false), and using them is the exact mistake that shipped 1.40.
+2. **Adaptive search, not a fixed grid.** Bisection locates both thresholds — walk up from 0 until divergence crosses the floor (onset); binary-search between last-correct and first-broken (cliff). A fixed linear sweep steps over narrow/off-center bands (the placeholder sweep sampled only the collapsed region). ~6–10 generations per circuit; step budget disclosed in the manifest.
+3. **Probes generated from the circuit's feature labels — on NEUTRAL topics.** No human authoring. The generator targets factual topics the steering should NOT touch, so degradation shows up as the circuit's tint corrupting UNRELATED facts (detectable and falsifiable). Probes *about* the circuit's own concept are rejected — their "right answer" is not falsifiable. Generated-probe bands are marked **provisional** (honest confidence; generated probes are the weakest link).
+4. **Contract carriage — ship the band, not a point.** A new `calibration: {onset, sweet_spot, cliff, probe_set, judge_metric_id, step_budget, provisional: bool, manifest_ref} | null` block on `mistudio.circuit-definition/v1` (additive, nullable — no migration of existing documents, same discipline as IDL-33's faithfulness field). Calibration CLAMPS `budget.intensity_range` to `[onset, cliff]` so a served dial physically cannot reach the nonsense zone, and defaults `budget.intensity` to the sweet-spot. Persisted like faithfulness: snapshot + parameters on the circuit, manifest as a first-class row (IDL-34 reproducibility discipline). **Badge, not gate** — never blocks promotion/steering/export.
+5. **Provisional across the plane boundary.** Strength measured on miStudio's model instance may sit slightly off from what miLLM serves (SAE attach, inference backend) — this is WHY a measure-only sweep misled. The band is a grounded STARTING point; the probe set travels in the contract so a one-shot re-verify at serve time is cheap. Cross-plane re-verification is recorded tech debt, NOT a claim of perfect transfer, and NOT a miLLM deliverable this increment.
+6. **Reuse, not new engines:** the §3.6 strength-sweep loop is the raw generation engine; the IDL-34 faithfulness service is the "run the model, measure a circuit property, persist a manifest + snapshot" pattern to mirror; the enhanced-labeling LLM-judge plumbing (§2.3) scores the cliff.
+
+**Tradeoffs:** generated probes are weaker than authored ones (mitigated: neutral-topic targeting + provisional marking + probes travel for re-verify); bisection assumes the correctness property is roughly monotone in strength (true in every observed case — humour tint grows then breaks; a non-monotone circuit would need denser sampling, recorded as a search-robustness follow-up); calibration adds GPU generations at promotion time (bounded to the step budget, sampled, and badge-not-gate so it is skippable).
+
+---
+
 ## Document Control
 
-**Version:** 3.0
+**Version:** 3.1
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-07-16
+**Last Updated:** 2026-07-21
 **Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
@@ -3207,6 +3225,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
 | 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
+| 3.1 | 2026-07-21 | IDL-37 (circuit strength calibration: two-detector usable-band search — onset by output-drift, correctness cliff by LLM judge on generated neutral-topic falsifiable probes; adaptive bisection not fixed grid; additive nullable `calibration` block clamps `intensity_range` to `[onset,cliff]` and defaults `intensity` to sweet-spot; badge not gate; provisional cross-plane, probes travel for serve-time re-verify) — Planned, from the served-circuit finding that placeholder strengths ship fluent-but-false |
 
 ---
 

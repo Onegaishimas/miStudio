@@ -1,8 +1,8 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.9 (Features 16–19 — Circuits arc from BRD-MIS-CIRCUITS-001 + BRD-MIS-CIRCUITS-002, Planned)
-**Last Updated:** 2026-07-19
+**Version:** 3.10 (Feature 20 — Circuit Strength Calibration; the circuits arc's served strengths were uncalibrated placeholders, Planned)
+**Last Updated:** 2026-07-21
 **Status:** Active
 
 ---
@@ -54,6 +54,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 - [x] Users can monitor each GPU individually (VRAM, utilization, temperature, power) via per-GPU WebSocket channels
 - [x] Users can route extraction jobs to a specific GPU via `gpu_id` parameter
 - [ ] Users can distribute SAE training across multiple GPUs simultaneously (DDP — planned)
+- [ ] A circuit self-calibrates its usable steering band (onset + correctness cliff) against generated falsifiable probes, and ships that band in its contract so a served dial cannot reach the nonsense zone (Feature 20 — planned)
 
 ---
 
@@ -82,6 +83,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 17 | Capture, Statistical Mining & Attribution | Position-carrying sparse capture; PMI/null-model/held-out statistics; feature- AND cluster-level (supernode) mining; Tier-2 gradient-attribution re-ranking; Tier-2.5 readiness | Planned |
 | 18 | Intervention, Validation & Faithfulness | Directional-subtraction intervention (error-preserving); effect-size-vs-null edge validation with manifests; circuit-level faithfulness; heuristic-ablation remediation | Planned |
 | 19 | Circuit Review, Ladder & Portability | Evidence-ladder claims discipline; edge typing (computed/persistence/attention-mediated); review/promotion; `mistudio.circuit-definition/v1` + per-layer v1 projection | Planned |
+| 20 | Circuit Strength Calibration | Automated search for the usable steering band — onset (min influence above none) and the correctness cliff (max before facts break) — judged against generated falsifiable probes; ships an intensity band + default into the circuit contract so a served dial cannot reach the nonsense zone | Planned |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -669,6 +671,56 @@ BRD-MIS-CIRCUITS-001 (BR-010..014) as amended by BRD-MIS-CIRCUITS-002 (BR-020, B
   track, no PPRD row) seeding BRD-MIS-SUBSTRATE-001 on GO.
 
 **Docs:** `018_FPRD|Circuit_Portability.md` → FTDD → FTID → FTASKS. ADR: IDL-33, IDL-35.
+
+---
+
+### 3.20 Circuit Strength Calibration (Planned)
+
+**Purpose:** Find the strength at which a circuit is actually *usable* when served, automatically. The
+circuits arc (16–19) discovers, validates, and makes a circuit portable — but the per-member steering
+strengths it ships are **uncalibrated placeholders**. Taking the first real circuit through to serving
+exposed the gap concretely: a hand-run single-prompt strength sweep declared a "usable ceiling" that,
+when actually served, produced fluent-but-false output. The strength that reads as on-theme is well past
+the strength at which the answer stops being *true*. Calibration is the discovery-plane act that closes
+this — and per the plane split, it belongs in miStudio (which runs the model to learn), not in miLLM
+(which runs the model to serve).
+
+**The two thresholds (found by opposite tests):**
+- **Onset — min influence above none.** The smallest dial where output *measurably diverges* from the
+  unsteered baseline. A *difference* test (embedding/distribution drift vs baseline crossing a noise
+  floor); no semantic judge needed. Below onset the circuit is inert.
+- **Correctness cliff — max before facts break.** The largest dial where output is *still correct*. A
+  *property* test: an LLM judge scores each generation "still true / degrading / broken" against
+  **falsifiable probes**. This is the threshold a perplexity/theme metric cannot see — the observed
+  cliff sat between two adjacent dial steps, one giving a correct answer with light humor, the next
+  inventing a plainly false claim in the same confident tone.
+
+**Capabilities:**
+- **Adaptive search, not a fixed grid.** Bisection locates onset (walk up until divergence crosses the
+  floor) and the cliff (binary-search between last-correct and first-broken), so it finds the band
+  wherever it sits and at whatever width — directly handling that optimum starting points differ per
+  circuit and the usable increments vary. A fixed linear sweep steps over narrow, off-center bands (the
+  hand sweep sampled only the collapsed region and missed the entire 0.4–0.6 usable band).
+- **Probes generated from the circuit's feature labels.** No human authoring required. The generator
+  targets **neutral factual topics the steering should NOT touch** (so degradation shows up as the
+  circuit's tint corrupting unrelated facts, which is detectable), not topics *about* the circuit's
+  concept (whose "right answer" is not falsifiable). Bands from generated probes are marked
+  **provisional** — honest about confidence, since generated probes are the weakest link.
+- **Ship the band, not a point.** Calibration writes `{onset, sweet_spot, cliff}` with per-step evidence
+  into the circuit contract, clamps `intensity_range` to `[onset, cliff]` so a served dial **physically
+  cannot** reach the nonsense zone, and defaults `intensity` to the sweet-spot. Snapshot + parameters
+  persist like faithfulness (badge, not gate).
+- **Provisional across the plane boundary.** Strength measured against miStudio's model instance may sit
+  slightly off from what miLLM actually serves (SAE attach, inference backend), which is *why* a
+  measure-only sweep misled. The band is a grounded **starting point**; the probes travel in the
+  contract so a one-shot re-verify at serve time is cheap when wanted. Recorded tech debt, not a claim
+  of perfect cross-plane transfer.
+
+**Reuses:** the existing strength-sweep engine (§3.6 steering) as the raw generation loop; the
+faithfulness service's "run the model to measure a circuit property, persist a manifest + snapshot"
+pattern (§3.18); the enhanced-labeling LLM-judge plumbing (§2.3) for cliff scoring.
+
+**Docs:** `019_FPRD|Circuit_Calibration.md` → FTDD → FTID → FTASKS. ADR: IDL-37 (proposed).
 
 ---
 

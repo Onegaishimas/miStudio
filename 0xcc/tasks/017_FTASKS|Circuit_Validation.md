@@ -2,7 +2,7 @@
 
 **Document ID:** 017_FTASKS|Circuit_Validation
 **Version:** 1.0
-**Status:** ⏳ IMPLEMENTING — Task 3.0 + Ph1-5 backend + MCP + remediation + manual DONE; Validation-tab UI in progress; then 3-round review. Phase 6 GPU-E2E at close-out.
+**Status:** ✅ CLOSED (2026-07-20, with the circuits arc 015–018) — backend + MCP + remediation + Validation-tab UI + manual DONE and 3-round-reviewed. **One deferred item:** Phase 6.1 GPU-E2E (planted-edge validation + a real necessity run) was NOT executed on hardware — it is the recorded "GPU close-out on k8s host" tech debt (two-SAE run + VRAM<200MB), the only unproven FPRD §8 criteria. Everything else is implemented and reviewed. *(Header corrected 2026-07-21: the checkboxes below lagged the arc closure — see per-task DONE commit refs.)*
 **Source:** 017_FPRD · 017_FTDD · 017_FTID · IDL-34 · CIRCUITS-002 A.5/A.7 normative
 
 | Phase | Tasks | Status |
@@ -55,15 +55,15 @@
 - [x] DONE (ac6c64f: validate_circuit_edges/get_validation_manifest/list_validation_manifests/reproduce_validation — rung-aware; smoke-pinned) `validate_circuit_edges`, `get_validation_manifest`, `reproduce_validation`, `run_circuit_faithfulness` (extend tools/circuits.py, same category) · rung-aware docstrings
 
 ### Task 5.3: Validation tab UI
-- [ ] Scope picker (ordering + K) + config · per-edge results (ES vs threshold, status chip, manifest link) · batch banner (survival per ordering + uplift) · ManifestDrawer (payload + Reproduce + verdict) · faithfulness display hooks for 018's circuit cards
+- [x] DONE (arc close-out; CircuitsPanel Validation tab + ManifestDrawer present, 3-round-reviewed) Scope picker (ordering + K) + config · per-edge results (ES vs threshold, status chip, manifest link) · batch banner (survival per ordering + uplift) · ManifestDrawer (payload + Reproduce + verdict) · faithfulness display hooks for 018's circuit cards
 
 ## Phase 6: Verification + acceptance
 
 ### Task 6.1: GPU integration + E2E
-- [ ] Planted-obvious edge validates (forward passes asserted; repeat-deterministic) · reproduction within tolerance · one necessity run on a small circuit · E2E: validate top-K of a real seeded run → manifests → faithfulness → scores displayed · cap `0xcc/caps/miStudio_Circuit_Validation_<date>.png`
+- [ ] **DEFERRED — recorded tech debt (GPU close-out on k8s host), NOT in progress.** Planted-obvious edge validates (forward passes asserted; repeat-deterministic) · reproduction within tolerance · one necessity run on a small circuit · E2E: validate top-K of a real seeded run → manifests → faithfulness → scores displayed · cap `0xcc/caps/miStudio_Circuit_Validation_<date>.png`. *(NB: `crc_124fd83d1f2a` has since exercised the real intervention/faithfulness/serving path end-to-end on hardware, 2026-07-21 — the formal planted-edge acceptance test is what remains.)*
 
 ### Task 6.2: Acceptance (per instruct 007)
-- [ ] FPRD §8 criteria 1–6 verified (incl. ε pin, reproduction test, copy audit) · suites green · manual sections · CLAUDE.md + PPRD row 18 status update
+- [x] DONE except the GPU-gated criteria (6.1). FPRD §8 criteria verified in the 3-round review (ε pin, reproduction test, copy audit, MCP loop) · suites green · manual sections · CLAUDE.md + PPRD row 18 status reflect closure. Remaining: the on-hardware planted-edge run (6.1 debt).
 
 ---
 
