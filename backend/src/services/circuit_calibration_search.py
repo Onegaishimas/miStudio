@@ -299,9 +299,18 @@ def calibrate(
         return CalibrationResult(
             onset=lo, sweet_spot=lo, cliff=lo,
             usable_band=False, judge_reliable=False,
-            steps_used=len(probes), converged=True, floor=0.0,
+            # ONE dial-batch (dial 0, all probes) — steps_used counts judged
+            # dial-batches everywhere, so this is 1, not len(probes) (R3: the
+            # sanity return used a per-probe unit inconsistent with every other
+            # return).
+            steps_used=1, converged=True, floor=0.0,
             trace=baseline_verdicts,
         )
+
+    # The judge-sanity gate above always ran ONE judged dial-batch (dial 0, all
+    # probes); its generations are in baseline_verdicts. Count it toward
+    # steps_used on every downstream return so the unit is consistent (R3).
+    sanity_steps = 1
 
     onset, floor, onset_trace = find_onset(
         gen_at=gen_at, baseline_at=baseline_at,
@@ -320,7 +329,7 @@ def calibrate(
         return CalibrationResult(
             onset=onset, sweet_spot=onset, cliff=onset,
             usable_band=False, non_monotone=non_monotone,
-            steps_used=steps, converged=converged, floor=floor,
+            steps_used=sanity_steps + steps, converged=converged, floor=floor,
             trace=onset_trace + cliff_trace,
         )
 
@@ -363,7 +372,7 @@ def calibrate(
         return CalibrationResult(
             onset=onset, sweet_spot=onset, cliff=onset,
             usable_band=False, non_monotone=non_monotone,
-            steps_used=steps + rejudge_steps[0], converged=converged,
+            steps_used=sanity_steps + steps + rejudge_steps[0], converged=converged,
             floor=floor, trace=onset_trace + cliff_trace,
         )
 
@@ -373,6 +382,6 @@ def calibrate(
     return CalibrationResult(
         onset=onset, sweet_spot=sweet, cliff=cliff,
         usable_band=True, non_monotone=non_monotone,
-        steps_used=steps + rejudge_steps[0], converged=converged, floor=floor,
+        steps_used=sanity_steps + steps + rejudge_steps[0], converged=converged, floor=floor,
         trace=onset_trace + cliff_trace,
     )

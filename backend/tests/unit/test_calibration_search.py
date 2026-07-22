@@ -219,10 +219,25 @@ class TestFullCalibrate:
         # the final re-check.
         assert res.steps_used >= 1
         # every judged dial recorded a generation; transcripts count == steps_used
-        # × probes for the judged phases (cliff + sweet_recheck), and steps_used
-        # is not a stale pre-recheck value.
-        judged = [t for t in res.trace if t.get("phase") in ("cliff", "sweet_recheck")]
+        # × probes across ALL judged phases (sanity + cliff + sweet_recheck) —
+        # steps_used counts judged dial-BATCHES in one consistent unit (R3).
+        judged = [t for t in res.trace
+                  if t.get("phase") in ("judge_sanity", "cliff", "sweet_recheck")]
         assert len(judged) == res.steps_used * len(PROBES)
+
+    def test_judge_sanity_failure_reports_ONE_batch_not_per_probe(self):
+        # R3: the judge-sanity return must use the same per-dial-batch unit as
+        # every other return (was len(probes) — a different unit that over-
+        # reported the search budget for weak-judge runs).
+        bad_judge = lambda t, e: "broken"   # fails the unsteered baseline
+        multi_probes = [{"prompt": f"q{i}", "expected": f"a{i}"} for i in range(4)]
+        res = calibrate(gen_at, baseline_at, bad_judge, divergence,
+                        probes=multi_probes, lo=0.0, hi=1.0, max_steps=10)
+        assert res.judge_reliable is False
+        assert res.steps_used == 1          # one dial-0 batch, NOT len(probes)=4
+        # and the invariant still holds for this return too
+        judged = [t for t in res.trace if t.get("phase") == "judge_sanity"]
+        assert len(judged) == res.steps_used * len(multi_probes)
 
     def test_no_usable_band_when_broken_from_onset(self):
         # A judge that breaks everywhere above 0.05 — onset (drift) will land

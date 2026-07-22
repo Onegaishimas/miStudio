@@ -51,6 +51,15 @@ class TestPerKindValidation:
                 artifact={"kind": "features", "model_id": "m",
                           "features": [{"layer": 1, "feature_idx": 2, "strength": 1.0}]}))
 
+    def test_features_reject_two_saes_at_one_layer_UP_FRONT(self):
+        # R3: the "one SAE per layer" consistency check must 422 at config time,
+        # not fail deep in the resolver after the GPU lock + model load.
+        with pytest.raises(RecordConfigError, match="two different SAEs"):
+            SteeringRecorderService.create_config(_cfg(
+                artifact={"kind": "features", "model_id": "m", "features": [
+                    {"layer": 2, "feature_idx": 7, "strength": 1.0, "sae_id": "sA"},
+                    {"layer": 2, "feature_idx": 8, "strength": 1.0, "sae_id": "sB"}]}))
+
     def test_non_numeric_dial_is_422_not_500(self):
         with pytest.raises(RecordConfigError, match="not a number"):
             SteeringRecorderService.create_config(_cfg(dials=["abc"]))

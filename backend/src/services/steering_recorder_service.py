@@ -66,11 +66,22 @@ class SteeringRecorderService:
             feats = artifact.get("features")
             if not isinstance(feats, list) or not feats:
                 raise RecordConfigError("features artifact needs a non-empty features list")
+            sae_by_layer: Dict[int, str] = {}
             for f in feats:
                 if not isinstance(f, dict) or f.get("layer") is None \
                         or f.get("feature_idx") is None or not f.get("sae_id"):
                     raise RecordConfigError(
                         "each feature needs {layer, feature_idx, strength, sae_id}")
+                # One SAE per layer — the resolver enforces this too, but check
+                # it HERE so a mismatched sae_id 422s before the GPU lock + model
+                # load, not deep in the task (R3: same class as the presence
+                # check).
+                L = int(f["layer"])
+                if L in sae_by_layer and sae_by_layer[L] != f["sae_id"]:
+                    raise RecordConfigError(
+                        f"layer {L} names two different SAEs "
+                        f"({sae_by_layer[L]} vs {f['sae_id']}); one SAE per layer")
+                sae_by_layer[L] = f["sae_id"]
 
         dials = cfg.get("dials") or []
         prompts = cfg.get("prompts") or []
