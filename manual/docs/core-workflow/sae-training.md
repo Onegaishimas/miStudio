@@ -81,7 +81,7 @@ Structural sparsity — exactly K features activate per input, no penalty needed
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `top_k` | 50 | Exact number of active features per sample |
+| `top_k` | 64 | Exact number of active features per sample |
 | `aux_loss_alpha` | 0.03125 | Auxiliary loss weight for dead feature prevention (1/32 per paper) |
 | `aux_k` | `top_k × 2` | Features used in auxiliary loss computation |
 | `adam_epsilon` | 6.25e-10 | Paper-specific Adam optimizer epsilon |
@@ -129,7 +129,7 @@ Beyond architecture-specific settings, these apply to all frameworks:
 
 | Parameter | Default | Range | Effect |
 |-----------|---------|-------|--------|
-| **Learning Rate** | 3e-4 | 1e-5 to 1e-2 | If loss spikes: too high. If loss barely moves: too low. |
+| **Learning Rate** | framework-dependent | 1e-5 to 1e-2 | If loss spikes: too high. If loss barely moves: too low. |
 | **Batch Size** | 4096 | 32–65536 | Larger = smoother gradients but more VRAM |
 | **Total Steps** | 30,000 | 1,000–1,000,000 | More steps = better features, longer training |
 | **Warmup Steps** | 1,000 | 0–10,000 | Linear LR warmup prevents early instability |
@@ -137,6 +137,10 @@ Beyond architecture-specific settings, these apply to all frameworks:
 | **Expansion Factor** | 8–32× | 2–128× | SAE width relative to model hidden dim. 8× is common (512 neurons → 4,096 features). |
 | **Weight Decay** | 0.0 | 0–0.1 | L2 regularization. Usually 0 for SAEs. |
 | **Gradient Clip Norm** | 1.0 | 0–10.0 | Prevents gradient explosions during training. |
+
+:::info Learning rate is per-framework
+Selecting a framework sets its paper-grounded learning rate automatically. The defaults are **4e-4** for Standard SAELens, Standard Anthropic, Skip, and Transcoder; **3e-4** for TopK; and **7e-5** for JumpReLU. Override the value only if you have a reason to — the defaults track each paper's recommended setup.
+:::
 
 ## Dead Neuron Management
 

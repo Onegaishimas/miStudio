@@ -15,7 +15,7 @@ Discovery is deliberately honest about what it has and hasn't proven. It produce
 1. **Capture** the per-token, multi-layer feature activations over an evaluation corpus.
 2. **Discover** candidate edges by mining that store with statistically sound methods.
 3. **Attribution-rank** the shortlist with a gradient pass before the expensive causal tier.
-4. (Feature 017) **Validate** the top edges causally; (Feature 018) review, promote, and steer them.
+4. **Validate** the top edges causally, then **review, promote, calibrate, and steer** them.
 
 ## Capture
 
@@ -52,7 +52,7 @@ All co-activation here is **same-token-position**. That finds within-position co
 
 ## Attribution pass
 
-A discovery candidate is a statistical association. The **Run attribution pass** action spends one forward + one backward per prompt (with the SAE reconstruction error held as a stop-gradient constant) to compute a **gradient-attribution score** per candidate — a second, independent evidence signal. It **re-ranks** the shortlist so the causal validation tier (017) is spent on the most promising edges, and it records both orderings so 017 can later report whether the re-ranking actually raised the validation survival rate.
+A discovery candidate is a statistical association. The **Run attribution pass** action spends one forward + one backward per prompt (with the SAE reconstruction error held as a stop-gradient constant) to compute a **gradient-attribution score** per candidate — a second, independent evidence signal. It **re-ranks** the shortlist so the causal validation tier is spent on the most promising edges, and it records both orderings so validation can report whether the re-ranking actually raised the survival rate.
 
 Attribution earns a candidate the **attribution-supported** rung — one step up the ladder, and explicitly *not* a causal claim. That rung comes only from intervention (below).
 
@@ -72,10 +72,40 @@ For a whole circuit, **faithfulness** asks whether its members are *necessary* a
 
 Every validation run writes a **manifest**: a self-contained record of the intervention config, baseline, prompts, seeds, null summary, and per-edge effect sizes — everything needed to **reproduce** it. The **Reproduce** button re-executes from the manifest and reports whether the effect sizes come back within tolerance. A rung-2 claim you can't reproduce isn't a rung-2 claim.
 
+## Circuit strength calibration
+
+A validated circuit still ships with an *arbitrary* steering dial. Calibration finds the **usable band** for that dial — the range where the circuit visibly acts *without* corrupting the model — and clamps the served dial to it. It runs two **different** detectors, because "the output changed" and "the facts still hold" are different questions:
+
+- **Onset** — the least dial that measurably changes the output versus baseline. This is a plain **output-drift** test with **no judge**: below onset the circuit is inert.
+- **Correctness cliff** — the most dial where the model's **facts still hold**, decided by an **LLM judge** against **generated neutral-topic falsifiable probes**. The probes are on topics the circuit should *not* touch, so degradation shows up as the circuit's tint corrupting unrelated facts. Perplexity or theme metrics can't find this — the cliff sits between two adjacent dials, one giving a correct answer and the next confidently false. An **adaptive bisection** narrows it within a small generation budget.
+
+On success, calibration **clamps** the served dial to `[onset, cliff]` — a served dial physically cannot reach the nonsense zone — and sets the default intensity a safety `margin` below the cliff. The band is recorded on the circuit (a `calibration` block, with `calibration_status`) and travels in the export so miLLM can re-verify it cheaply against the served model.
+
+Two disciplines matter:
+
+- **Badge, not gate.** Calibration never blocks promotion, steering, or export. It annotates the circuit with a measured band; the choice to respect it stays with the operator.
+- **A weak judge is reported, never guessed around.** If the judge model can't reliably tell correct from broken (it fails even the *unsteered* baseline), calibration reports **`judge_unreliable`** rather than inventing a cliff — and never emits a false **`no_band`**. A band you can't trust is labeled as such.
+
+The **Reproduce** action re-runs a calibration from its manifest — the same probes and seed — and records a band-delta verdict: do onset, sweet-spot, and cliff land within tolerance of the original? Reproduction only *checks* the number; it does not re-clamp the circuit.
+
+## Steered transcript recorder
+
+Calibration judges; the recorder does **not**. The **steered transcript recorder** is an **instrument, not a judge**: it records `(dial, prompt, unsteered_output, steered_output)` transcripts on the GPU and hands them, unlabeled, to a separate meaning-analysis pass — typically a **strong model reading the transcripts after the run** to say what steering this artifact semantically *did* across the dial. It carries no correctness verdict of its own and needs no judge endpoint.
+
+It works on any of three artifacts: a **circuit**, a **cluster** (profile), or an **ad-hoc feature set**. For each prompt it records the unsteered baseline plus the steered output at every requested dial, using the same steering core and residual hook as calibration — so what you read matches a calibrated band. Records are written as manifests; circuit-artifact records link back to their circuit, while cluster and feature records are fetched by manifest id.
+
 ## A note on the feature-level "ablation impact"
 
 The impact number in the Feature Detail view is a **statistical estimate** (from a feature's activation frequency, magnitude, and consistency) — it runs *no* model inference and is labeled as such. It is a quick heuristic, never causal evidence. For a real causal measurement, validate the circuit edge.
 
 ## Doing it from an agent
 
-The [MCP server](/advanced/mcp-server) exposes the whole loop in the `circuits` category: `start_circuit_capture`, `list_circuit_captures`, `run_circuit_discovery`, `get_discovery_results`, `run_attribution_pass`, and — for the causal tier — `validate_circuit_edges`, `get_validation_manifest`, `list_validation_manifests`, and `reproduce_validation`. Tool descriptions carry the same lag-0 and rung-language discipline the UI does: only `validate_circuit_edges` results earn causal language.
+The [MCP server](/advanced/mcp-server) exposes the whole loop in the `circuits` category (default-on):
+
+- **Capture & mine:** `start_circuit_capture`, `list_circuit_captures`, `run_circuit_discovery`, `get_discovery_results`, `run_attribution_pass`.
+- **Causal tier:** `validate_circuit_edges`, `get_validation_manifest`, `list_validation_manifests`, `reproduce_validation`.
+- **Circuit lifecycle:** `create_circuit`, `build_circuit_from_discovery`, `get_circuit`, `update_circuit`, `list_circuits`, `delete_circuit`, `run_circuit_faithfulness`, `promote_circuit`, `import_circuit_definition`, `export_circuit_definition`, `export_circuit_slices`.
+- **Calibration:** `calibrate_circuit_strength` and `reproduce_calibration` — calibrate the usable strength band and re-verify it from its manifest.
+- **Steered transcript recorder:** `record_steering_samples` and `get_steering_samples` — record `(dial, prompt, unsteered, steered)` transcripts for a circuit, cluster, or feature set, then read them back for post-run analysis.
+
+Tool descriptions carry the same lag-0 and rung-language discipline the UI does: only `validate_circuit_edges` results earn causal language. Start any agent circuit session with `mistudio_howto` — it holds the workflows and the failure modes.

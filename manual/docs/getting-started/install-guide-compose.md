@@ -271,7 +271,7 @@ sed -i "s|http://dev-mistudio\.hitsai\.local|http://$DOMAIN|g" docker-compose.ym
 docker compose pull
 ```
 
-This pulls `onegaionegai/mistudio-backend`, `onegaionegai/mistudio-frontend`, `postgres`, `redis`, `nginx`, and the Neuronpedia webapp. Expect several minutes on first run.
+This pulls `hitsai/mistudio-backend`, `hitsai/mistudio-frontend`, `postgres`, `redis`, `nginx`, and the Neuronpedia webapp. Expect several minutes on first run.
 
 ### Step 5 — Start all services
 
@@ -319,13 +319,13 @@ curl -sf http://$DOMAIN > /dev/null && echo "Frontend: OK" || echo "Frontend: FA
 docker compose exec backend nvidia-smi
 
 # Database migrations applied
-docker compose exec backend python -c "from src.db.session import engine; print('DB: OK')"
+docker compose exec backend python -c "from src.core.database import engine; print('DB: OK')"
 ```
 
 Print access summary:
 ```
 ✓ miStudio is running at: http://$DOMAIN
-✓ API docs:               http://localhost:8000/docs
+✓ API docs:               http://localhost:8000/api/docs
 ✓ Backend direct:         http://localhost:8000
 ✓ Frontend direct:        http://localhost:3000
 ```
@@ -342,4 +342,4 @@ Print access summary:
 | Frontend loads but API calls fail | `docker compose logs nginx` | Check nginx proxy_pass config |
 | Celery worker OOM on training | `docker compose logs celery-worker` | Reduce batch size in training config, or use a smaller model |
 | DB migration fails on startup | `docker compose logs backend \| grep alembic` | `docker compose exec backend alembic upgrade head` |
-| Image pull fails | `docker pull onegaionegai/mistudio-backend:latest` | Check internet access and Docker Hub status |
+| Image pull fails | `docker pull hitsai/mistudio-backend:latest` | Check internet access and Docker Hub status |

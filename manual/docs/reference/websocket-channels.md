@@ -34,6 +34,23 @@ For how emissions travel from Celery workers to your browser, see [System Archit
 | `extractions/{id}/feature-groups` | `feature_groups:progress`, `feature_groups:completed`, `feature_groups:failed` | Cross-feature clustering precompute |
 | `mcp/approvals` | `approval:created`, `approval:resolved` | Agent steering approval queue (operator-approval mode) |
 
+## Circuit runs
+
+Circuit discovery, validation, calibration, and steering-transcript jobs run asynchronously on Celery workers and stream progress over a **family** of channels sharing one shape: `circuit-{kind}/{id}`, with events `circuit_{kind}:progress`, `circuit_{kind}:completed`, and `circuit_{kind}:failed`. The `{kind}` slug appears in both the channel and the event name (the house namespaced-event convention). Every one is emitted by the `emit_circuit_run_*` helpers in `websocket_emitter.py`.
+
+`completed` and `failed` events are sent with delivery retries; `progress` events carry `progress` (0–100), `status`, and a human-readable `message`.
+
+| Channel | Events | `{id}` is | Emitted during |
+|---------|--------|-----------|----------------|
+| `circuit-capture/{id}` | `circuit_capture:progress`, `circuit_capture:completed`, `circuit_capture:failed` | capture run id | Per-token multi-layer SAE activation capture (rung 0 input) |
+| `circuit-discovery/{id}` | `circuit_discovery:progress`, `circuit_discovery:completed`, `circuit_discovery:failed` | discovery run id | Circuit discovery (rung 0) |
+| `circuit-attribution/{id}` | `circuit_attribution:progress`, `circuit_attribution:completed`, `circuit_attribution:failed` | discovery run id | Attribution pass (rung 1) |
+| `circuit-validation/{id}` | `circuit_validation:progress`, `circuit_validation:completed`, `circuit_validation:failed` | validation run id | Edge-intervention validation (rung 2) |
+| `circuit-faithfulness/{id}` | `circuit_faithfulness:progress`, `circuit_faithfulness:completed`, `circuit_faithfulness:failed` | circuit id | Circuit faithfulness scoring |
+| `circuit-calibration/{id}` | `circuit_calibration:progress`, `circuit_calibration:completed`, `circuit_calibration:failed` | circuit id | Usable-band strength calibration (onset + correctness cliff) |
+| `circuit-calibration-reproduce/{id}` | `circuit_calibration-reproduce:progress`, `circuit_calibration-reproduce:completed`, `circuit_calibration-reproduce:failed` | calibration-manifest id | Calibration reproduce-from-manifest run |
+| `circuit-steering-record/{id}` | `circuit_steering-record:progress`, `circuit_steering-record:completed`, `circuit_steering-record:failed` | record-run id | Steered Transcript Recorder (dial/prompt/unsteered/steered capture) |
+
 ## System monitoring
 
 Emitted every **2 seconds** by a Celery Beat task; all use the event `system:metrics`, and payloads carry a `metric_type` discriminator.

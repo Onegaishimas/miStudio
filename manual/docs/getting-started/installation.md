@@ -20,28 +20,50 @@ System RAM cannot compensate for low VRAM. Model weights and activations must re
 
 ## Software Installation
 
-miStudio is packaged as a Docker Compose project:
+miStudio is packaged as a Docker Compose project. The primary way to bring the stack up is `docker compose`:
 
 1. **Prerequisites:** Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 2. **Network Setup:** Add the domain to your hosts file:
    ```bash
    sudo bash -c 'echo "127.0.0.1  mistudio.hitsai.local" >> /etc/hosts'
    ```
-3. **Start all services:**
+3. **Start the stack:**
    ```bash
-   ./start-mistudio.sh
+   docker compose up -d
    ```
 
-This launches six services:
+Once the containers are healthy, open the dashboard at `http://mistudio.hitsai.local` (served by the Nginx container on port 80).
 
-| Service | Purpose |
-|---------|---------|
-| **PostgreSQL** | Stores all experiment metadata, labels, metrics, and settings |
-| **Redis** | Message broker for the Celery task queue |
-| **Celery Worker** | Performs GPU-intensive training, extraction, and labeling tasks |
-| **Celery Beat** | Schedules periodic tasks (system monitoring, cleanup) |
-| **FastAPI Backend** | API orchestrator with WebSocket support for real-time updates |
-| **React Frontend** | Interactive dashboard at `http://mistudio.hitsai.local` |
+:::tip start-mistudio.sh (dev convenience)
+`./start-mistudio.sh` is a **development-only convenience wrapper** that starts the Docker services and then launches the backend and frontend natively for hot-reload iteration. For a normal deployment — and for anything reproducible — use `docker compose up -d` as shown above.
+:::
+
+### Services
+
+`docker compose up -d` launches the full stack — roughly nine services:
+
+| Service | Container | Purpose |
+|---------|-----------|---------|
+| **PostgreSQL** | `mistudio-postgres` | Stores all experiment metadata, labels, metrics, and settings |
+| **Redis** | `mistudio-redis` | Message broker for the Celery task queue |
+| **FastAPI Backend** | `mistudio-backend` | API orchestrator with WebSocket support for real-time updates |
+| **React Frontend** | `mistudio-frontend` | Interactive dashboard (served behind Nginx) |
+| **Celery Worker** | `mistudio-celery-worker` | Performs GPU-intensive training, extraction, and labeling tasks |
+| **Celery Beat** | `mistudio-celery-beat` | Schedules periodic tasks (system monitoring, cleanup) |
+| **Nginx** | `mistudio-nginx` | Reverse proxy on port 80 — routes `/api`, `/ws`, and `/` to backend and frontend |
+| **Neuronpedia** | `mistudio-neuronpedia` | Feature dashboard webapp (port 3001) for browsing pushed activations |
+| **Neuronpedia PostgreSQL** | `mistudio-neuronpedia-postgres` | Dedicated database backing the Neuronpedia webapp |
+
+:::info Optional: MCP server profile
+The MCP server (for agent access) is **not** started by default. Enable it with the `mcp` Compose profile:
+
+```bash
+# MCP_AUTH_TOKEN is REQUIRED — the port is LAN-reachable by default
+MCP_AUTH_TOKEN=your-long-random-token docker compose --profile mcp up -d
+```
+
+It listens on port **8765** and requires `MCP_AUTH_TOKEN` to be set (the port is LAN-reachable, so firewall 8765 if agents are local-only). See the MCP server documentation for tool categories and configuration.
+:::
 
 :::info Why Docker?
 A MechInterp environment requires exact versions of PyTorch, Transformers, spaCy, and CUDA kernels. Docker freezes these into a reproducible image — miStudio runs identically on a Jetson Orin and a datacenter server.
@@ -218,7 +240,7 @@ kubectl logs -n mistudio deployment/mistudio-backend -c celery-beat --tail=50
 kubectl exec -n mistudio deployment/mistudio-backend -c backend -- nvidia-smi
 
 # Confirm API is responding
-curl http://k8s-mistudio.yourdomain.com/api/v1/health
+curl http://k8s-mistudio.yourdomain.com/api/v1/system/health
 ```
 
 ### Updating to New Images
