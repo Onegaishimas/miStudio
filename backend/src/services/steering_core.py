@@ -130,13 +130,20 @@ def resolve_cluster_members(cluster_profile_id: str, db, device
     if prof is None:
         raise SteeringCoreError(f"Cluster profile {cluster_profile_id} not found")
     members_raw = prof.members or []
-    # A cluster member carries feature_idx, strength, sign, and a layer — resolve
-    # the SAE per layer from the profile's sae refs.
-    sae_ids_by_layer = _cluster_sae_ids_by_layer(prof)
+    # Resolve the SAE per layer. CLUSTERS-arc profiles are single-layer: they
+    # store one profile-level `sae_id` and members carry only feature_idx +
+    # strength (NO per-member layer). The layer lives on the SAE row, so read it
+    # from there and apply it to layerless members.
+    sae_ids_by_layer = _cluster_sae_ids_by_layer(prof, db)
     wdec = _load_wdec_by_layer(sae_ids_by_layer, db, device)
+    # A single-layer profile has one layer; members with no `layer` inherit it.
+    default_layer = (next(iter(sae_ids_by_layer)) if len(sae_ids_by_layer) == 1
+                     else None)
     members: List[ResolvedMember] = []
     for m in members_raw:
         L, idx = m.get("layer"), m.get("feature_idx")
+        if L is None:
+            L = default_layer
         if L is None or idx is None:
             continue
         if L not in wdec:
@@ -150,19 +157,28 @@ def resolve_cluster_members(cluster_profile_id: str, db, device
     return _cluster_model_id(prof, sae_ids_by_layer, db), members
 
 
-def _cluster_sae_ids_by_layer(prof) -> Dict[int, str]:
-    """Per-layer SAE ids for a cluster profile. Profiles may carry a single
-    `mistudio_sae_id` (single-layer) or per-layer refs; support both."""
+def _cluster_sae_ids_by_layer(prof, db=None) -> Dict[int, str]:
+    """Per-layer SAE ids for a cluster profile. Profiles may carry a per-layer
+    `saes` list (multi-SAE), or a single `sae_id`/`mistudio_sae_id` whose layer
+    lives on the SAE row (single-layer CLUSTERS-arc profiles, whose members have
+    no per-member layer)."""
     # Per-layer saes list, if present (multi-SAE clusters).
     saes = getattr(prof, "saes", None) or []
     by_layer = {int(s["layer"]): s.get("mistudio_sae_id")
                 for s in saes if isinstance(s, dict) and s.get("layer") is not None}
     if by_layer:
         return by_layer
-    # Fall back to a single sae id applied to whatever layers the members use.
     single = getattr(prof, "mistudio_sae_id", None) or getattr(prof, "sae_id", None)
+    if not single:
+        return {}
+    # Layer from the members if they carry one, else from the SAE row itself.
     layers = {int(m["layer"]) for m in (prof.members or [])
               if m.get("layer") is not None}
+    if not layers and db is not None:
+        from ..models.external_sae import ExternalSAE
+        sae = db.query(ExternalSAE).filter(ExternalSAE.id == single).first()
+        if sae is not None and getattr(sae, "layer", None) is not None:
+            layers = {int(sae.layer)}
     return {L: single for L in layers}
 
 
