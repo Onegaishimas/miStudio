@@ -397,6 +397,9 @@ async def reproduce_calibration(manifest_id: str,
     circuit = await _get_or_404(db, m.circuit_id)
     if circuit.calibration_status in ("pending", "running"):
         raise HTTPException(409, "A calibration pass is already in flight")
+    # Reproduce holds the GPU (sets 'pending') but does NOT re-calibrate, so we
+    # remember the circuit's real status and restore it when the task finishes.
+    prior_status = circuit.calibration_status
     from ....api.v1.endpoints.circuit_discovery import _run_sync
 
     def _guard_and_mark(sync_db):
@@ -409,7 +412,7 @@ async def reproduce_calibration(manifest_id: str,
         await _run_sync(db, _guard_and_mark)
     except CaptureConflictError as e:
         raise HTTPException(409, str(e))
-    task = reproduce_circuit_calibration.delay(manifest_id)
+    task = reproduce_circuit_calibration.delay(manifest_id, prior_status)
     await db.execute(
         Circuit.__table__.update().where(Circuit.id == m.circuit_id)
         .values(calibration_task_id=task.id))
