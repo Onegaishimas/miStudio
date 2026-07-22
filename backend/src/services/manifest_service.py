@@ -74,6 +74,16 @@ _TEXT_KEYS = frozenset({
 })
 
 
+def _is_free_text(v: Any) -> bool:
+    """A string, or a list of strings — free user/model text with no nested
+    structure that could hide a ref."""
+    if isinstance(v, str):
+        return True
+    if isinstance(v, (list, tuple)):
+        return all(isinstance(x, str) for x in v)
+    return False
+
+
 def _assert_no_paths(obj: Any, _depth: int = 0, text_keys: frozenset = frozenset()) -> None:
     if _depth > 12:
         return
@@ -82,8 +92,12 @@ def _assert_no_paths(obj: Any, _depth: int = 0, text_keys: frozenset = frozenset
             raise ManifestError("manifest payload must not embed filesystem paths")
     elif isinstance(obj, dict):
         for k, v in obj.items():
-            if k in text_keys:
-                continue   # free user/model text — not a ref
+            # Exempt a text key's value when it is free TEXT — a string, or a
+            # list of strings (e.g. `prompts`). A DICT (or a list containing
+            # dicts) under a text-named key is still walked, so a ref can't hide
+            # nested inside it (R2 hardening).
+            if k in text_keys and _is_free_text(v):
+                continue
             _assert_no_paths(v, _depth + 1, text_keys)
     elif isinstance(obj, (list, tuple)):
         for v in obj:

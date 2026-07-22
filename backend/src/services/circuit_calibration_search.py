@@ -358,7 +358,6 @@ def calibrate(
         non_monotone = True   # a break inside [onset, cliff] — flag it
         sweet = round(max(onset, sweet - margin), 4)
         tries += 1
-    total_steps = steps + rejudge_steps[0]
     if sweet <= onset and _judge_worst(onset) != "correct":
         # even onset broke on re-check → no usable band.
         return CalibrationResult(
@@ -368,9 +367,12 @@ def calibrate(
             floor=floor, trace=onset_trace + cliff_trace,
         )
 
+    # steps_used counted FRESH here (not a pre-line-362 snapshot) so the final
+    # _judge_worst(onset) re-check above is included — its generation lands in
+    # the trace, so the count must match (R2).
     return CalibrationResult(
         onset=onset, sweet_spot=sweet, cliff=cliff,
         usable_band=True, non_monotone=non_monotone,
-        steps_used=total_steps, converged=converged, floor=floor,
+        steps_used=steps + rejudge_steps[0], converged=converged, floor=floor,
         trace=onset_trace + cliff_trace,
     )

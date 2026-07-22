@@ -451,6 +451,9 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         cluster/feature records, which carry the artifact in the payload and are
         not circuit-linked (the record_steering_samples result returns the
         manifest_ref). Exactly one of circuit_id / manifest_id."""
+        if manifest_id and circuit_id:
+            return {"error": "pass EXACTLY one of circuit_id or manifest_id, "
+                    "not both"}
         if manifest_id:
             return await client.get(f"/validation-manifests/{manifest_id}")
         if not circuit_id:

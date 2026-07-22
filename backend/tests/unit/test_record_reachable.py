@@ -69,16 +69,29 @@ class TestTheRecorderToolsAreReachable:
         assert body["dials"] == [0.4, 0.6] and body["prompts"] == ["p1"]
         assert body["max_tokens"] == 80 and body["seed"] == 3
 
-    def test_get_filters_to_steering_samples_kind(self):
+    def test_get_by_circuit_id_filters_to_steering_samples_kind(self):
         fake = _FakeClient()
         mcp = _register(fake)
-        out = asyncio.run(mcp.call_tool("get_steering_samples", {"circuit_id": "crc_x"}))
-        # call_tool returns (content, structured) in this MCP version; assert the
-        # underlying GET happened with the right query and only steering_samples
-        # kinds are returned.
+        asyncio.run(mcp.call_tool("get_steering_samples", {"circuit_id": "crc_x"}))
         method, path, params = fake.calls[0]
         assert method == "GET" and path == "/validation-manifests"
         assert params.get("circuit_id") == "crc_x"
+
+    def test_get_by_manifest_id_fetches_that_manifest(self):
+        # R2: the manifest_id branch is the PRIMARY path for cluster/feature
+        # records (not circuit-linked). It must be wired, not just present.
+        fake = _FakeClient()
+        mcp = _register(fake)
+        asyncio.run(mcp.call_tool("get_steering_samples", {"manifest_id": "vman_x"}))
+        method, path, _params = fake.calls[0]
+        assert method == "GET" and path == "/validation-manifests/vman_x"
+
+    def test_get_with_both_args_errors_without_calling(self):
+        fake = _FakeClient()
+        mcp = _register(fake)
+        asyncio.run(mcp.call_tool("get_steering_samples",
+                                  {"circuit_id": "crc_x", "manifest_id": "vman_x"}))
+        assert fake.calls == []   # "exactly one" — refuses, issues no request
 
     def test_every_parameter_is_described(self):
         for name in ("record_steering_samples", "get_steering_samples"):

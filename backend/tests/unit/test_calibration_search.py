@@ -196,6 +196,34 @@ class TestFullCalibrate:
                         probes=PROBES, lo=0.0, hi=1.0, max_steps=12)
         assert res.judge_reliable is True
 
+    def test_steps_used_counts_the_sweet_recheck_generations(self):
+        # R2: steps_used must include the sweet_spot re-judge (whose generations
+        # land in the trace). Count the actual judged dial-batches and compare.
+        calls = {"n": 0}
+
+        def counting_judge(text, expected):
+            return judge(text, expected)
+
+        def counting_gen(dial, prompt):
+            # count once per (dial) batch via a probe marker; simpler: count all
+            # gen_at calls, then divide by probe count.
+            calls["n"] += 1
+            return gen_at(dial, prompt)
+
+        res = calibrate(counting_gen, baseline_at, counting_judge, divergence,
+                        probes=PROBES, lo=0.0, hi=1.0, max_steps=12, margin=0.15)
+        # sweet-recheck + cliff generations both go through counting_gen; the
+        # sanity-gate baseline uses counting_gen too (gen_at(0.0)). steps_used
+        # counts JUDGED dial-batches (cliff + sweet_recheck), each = len(probes)
+        # gen calls. It must be > 0 and consistent — no stale snapshot dropping
+        # the final re-check.
+        assert res.steps_used >= 1
+        # every judged dial recorded a generation; transcripts count == steps_used
+        # × probes for the judged phases (cliff + sweet_recheck), and steps_used
+        # is not a stale pre-recheck value.
+        judged = [t for t in res.trace if t.get("phase") in ("cliff", "sweet_recheck")]
+        assert len(judged) == res.steps_used * len(PROBES)
+
     def test_no_usable_band_when_broken_from_onset(self):
         # A judge that breaks everywhere above 0.05 — onset (drift) will land
         # above that, so lo is already broken → no usable band.

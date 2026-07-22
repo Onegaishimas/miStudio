@@ -43,6 +43,14 @@ class TestPerKindValidation:
                 artifact={"kind": "features", "model_id": "m",
                           "features": [{"strength": 1.0}]}))
 
+    def test_features_each_needs_sae_id(self):
+        # R2: a feature with layer+feature_idx but no sae_id used to pass here and
+        # fail deep in the task AFTER the GPU lock + model load.
+        with pytest.raises(RecordConfigError, match="sae_id"):
+            SteeringRecorderService.create_config(_cfg(
+                artifact={"kind": "features", "model_id": "m",
+                          "features": [{"layer": 1, "feature_idx": 2, "strength": 1.0}]}))
+
     def test_non_numeric_dial_is_422_not_500(self):
         with pytest.raises(RecordConfigError, match="not a number"):
             SteeringRecorderService.create_config(_cfg(dials=["abc"]))
@@ -202,5 +210,18 @@ class TestManifestKind:
         bad = {"artifact": {"kind": "circuit", "circuit_id": "/data/leak"},
                "dials": [0.5], "prompts": ["p"], "config": {},
                "transcripts": []}
+        with pytest.raises(ManifestError, match="path"):
+            validate_payload("steering_samples", bad)
+
+    def test_a_path_NESTED_under_a_text_key_is_still_caught(self):
+        """R2 hardening: the exemption is only for STRING values under a text
+        key. A dict/list nested under a text-named key is still walked, so a ref
+        can't hide inside it."""
+        from src.services.manifest_service import ManifestError, validate_payload
+        bad = {"artifact": {"kind": "circuit", "circuit_id": "c"},
+               "dials": [0.5], "prompts": ["p"], "config": {},
+               # 'generation' is a text key, but here its value is a DICT hiding
+               # a path — the walker must not skip the whole subtree.
+               "transcripts": [{"generation": {"ref": "/data/leak"}}]}
         with pytest.raises(ManifestError, match="path"):
             validate_payload("steering_samples", bad)

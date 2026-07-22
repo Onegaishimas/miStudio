@@ -68,7 +68,7 @@ class SteeringRecorderService:
                 raise RecordConfigError("features artifact needs a non-empty features list")
             for f in feats:
                 if not isinstance(f, dict) or f.get("layer") is None \
-                        or f.get("feature_idx") is None:
+                        or f.get("feature_idx") is None or not f.get("sae_id"):
                     raise RecordConfigError(
                         "each feature needs {layer, feature_idx, strength, sae_id}")
 
@@ -183,9 +183,11 @@ class SteeringRecorderService:
                 progress_cb(5 + int(90 * done / total))
             samples = []
             for dial in cfg["dials"]:
-                steered = (unsteered if dial == 0.0
-                           else gen_at(dial, prompt))
-                samples.append({"dial": dial, "steered_output": steered})
+                # dials never contains 0.0 (create_config drops it; baseline is
+                # recorded separately as unsteered_output), so every dial here is
+                # a real steered generation.
+                samples.append({"dial": dial,
+                                "steered_output": gen_at(dial, prompt)})
                 done += 1
                 if progress_cb:
                     progress_cb(5 + int(90 * done / total))
