@@ -195,3 +195,39 @@ class TestClusterResolver:
             "clp_x", db=_DB(), device="cpu")
         assert model_id == "m_z"
         assert resolved == [(6, 11, -0.5, "W6")]   # sign folded into strength
+
+    def test_derives_model_from_sae_when_profile_has_no_model_id(self, monkeypatch):
+        """Every CLUSTERS-arc profile persists sae_id but NOT model_id — the
+        recorder must derive the model from the SAE, else no existing cluster is
+        steerable. (Hardware E2E surfaced this: all 35 profiles had model_id=None.)"""
+        from src.services import steering_core
+
+        monkeypatch.setattr(steering_core, "_load_wdec_by_layer",
+                            lambda ids, db, device: {L: f"W{L}" for L in ids})
+
+        class _Prof:
+            id = "clp_y"
+            model_id = None                       # ← the real-data case
+            mistudio_sae_id = None
+            sae_id = "sae_real"                   # single-SAE profile
+            saes = None
+            members = [{"layer": 13, "feature_idx": 7, "strength": 0.2, "sign": 1}]
+
+        class _SAE:
+            model_id = "m_88d55564"
+
+        class _DB:
+            def query(self, model):
+                name = getattr(model, "__name__", "")
+                class _Q:
+                    def filter(self, *a, **k):
+                        return self
+
+                    def first(self_inner):
+                        return _Prof() if name == "ClusterProfile" else _SAE()
+                return _Q()
+
+        model_id, resolved = steering_core.resolve_cluster_members(
+            "clp_y", db=_DB(), device="cpu")
+        assert model_id == "m_88d55564"           # derived from the SAE
+        assert resolved == [(13, 7, 0.2, "W13")]
