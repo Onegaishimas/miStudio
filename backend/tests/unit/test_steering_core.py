@@ -211,10 +211,13 @@ class TestClusterResolver:
             mistudio_sae_id = None
             sae_id = "sae_real"                   # single-SAE profile
             saes = None
-            members = [{"layer": 13, "feature_idx": 7, "strength": 0.2, "sign": 1}]
+            # Real CLUSTERS-arc members carry NO per-member layer — the layer
+            # lives on the SAE row. All 35 existing profiles look like this.
+            members = [{"feature_idx": 7, "strength": 0.2, "sign": 1}]
 
         class _SAE:
             model_id = "m_88d55564"
+            layer = 13
 
         class _DB:
             def query(self, model):
@@ -230,4 +233,5 @@ class TestClusterResolver:
         model_id, resolved = steering_core.resolve_cluster_members(
             "clp_y", db=_DB(), device="cpu")
         assert model_id == "m_88d55564"           # derived from the SAE
+        # layer 13 inherited from the SAE row, NOT the (layerless) member
         assert resolved == [(13, 7, 0.2, "W13")]
