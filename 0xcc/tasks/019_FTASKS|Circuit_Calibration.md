@@ -2,7 +2,7 @@
 
 **Document ID:** 019_FTASKS|Circuit_Calibration
 **Version:** 1.0
-**Status:** ⏳ IMPLEMENTING (2026-07-21) — Phases 1–5 DONE (contract/schema/migration, probe generator, adaptive search + load-bearing-judge control, service/task/manifest/write-back, endpoint + MCP tool + GPU-guard/cleanup wiring). Deferred to close-out (tracked debt, like 017 Phase 6): the on-hardware GPU generation loop (`_build_generation_fns`) + E2E on `crc_124fd83d1f2a` + the frontend Calibration UI. In 3-round review next.
+**Status:** ✅ IMPLEMENTED + 3-ROUND-REVIEWED + HARDWARE-VERIFIED + UI (2026-07-22). All phases done incl. the REAL GPU `_build_generation_fns` and the Calibration UI. Ran end-to-end on k8s (crc_124fd83d1f2a, k8s miLLM judge): the pipeline works, the judge-sanity gate + greedy generation + badge-not-gate all verified on hardware. **Review:** 3 rounds (15+8+6 findings) + a hardware round (3 findings) = 32 total, all fixed; the R2 round caught a FATAL get_hookable_module arg-order crash that only the "runs on hardware" framing surfaced. **One tracked follow-up (not a blocker):** proving the band lands near ground-truth needs a stronger judge than the 1.2B model this k8s deployment serves — the feature correctly reports `judge_unreliable` rather than fabricating a band. Commits: schema/probes/search 33e5b07, service/task/endpoint/MCP 65cb42c, R1 582ab86, R2 12a7a62, R3 f73d4cd, hardware-R4 d592ac0, UI ac86c6e.
 **Source:** 019_FPRD · 019_FTDD · 019_FTID · IDL-37 · grounded in the served-circuit finding on `crc_124fd83d1f2a`
 
 | Phase | Tasks | Status |
