@@ -12,7 +12,7 @@ import remarkGfm from 'remark-gfm';
 import {
   GitBranch, ArrowUpRight, ArrowDownRight, Trash2, Download, Layers,
   Pencil, Check, X as XIcon, FileDown, Upload, Plus, Camera, Search,
-  AlertTriangle, RotateCcw, ShieldCheck, FileText, RefreshCw, Microscope,
+  AlertTriangle, RotateCcw, ShieldCheck, FileText, RefreshCw, Microscope, Gauge,
   Wand2,
 } from 'lucide-react';
 import { circuitsApi } from '../../api/circuits';
@@ -107,6 +107,13 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
   const [faithMode, setFaithMode] = useState<'necessity' | 'both'>('necessity');
   const [faithBusy, setFaithBusy] = useState(false);
   const [faithError, setFaithError] = useState<string | null>(null);
+  // Calibration (Feature 20) trigger + poll lifecycle. The judge endpoint/model
+  // are entered by the operator (an OpenAI-compatible endpoint — the served
+  // miLLM works, a stronger model grades better).
+  const [judgeEndpoint, setJudgeEndpoint] = useState('');
+  const [judgeModel, setJudgeModel] = useState('');
+  const [calibBusy, setCalibBusy] = useState(false);
+  const [calibError, setCalibError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     circuitsApi.get(id).then(setCircuit).catch((e) => setError(String(e.message ?? e)));
@@ -131,6 +138,27 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
       .then(() => load())
       .catch((e) => setFaithError(String(e.detail ?? e.message ?? e)))
       .finally(() => setFaithBusy(false));
+  };
+
+  // Poll while a calibration run is in flight (its own lifecycle, like faithfulness).
+  useEffect(() => {
+    const s = circuit?.calibration_status;
+    if (s !== 'pending' && s !== 'running') return;
+    const t = setInterval(load, 2500);
+    return () => clearInterval(t);
+  }, [circuit?.calibration_status, load]);
+
+  const runCalibration = () => {
+    if (!circuit) return;
+    setCalibError(null);
+    setCalibBusy(true);
+    circuitsApi.startCalibration(circuit.id, {
+      judge_endpoint: judgeEndpoint.trim(),
+      judge_model: judgeModel.trim(),
+    })
+      .then(() => load())
+      .catch((e) => setCalibError(String(e.detail ?? e.message ?? e)))
+      .finally(() => setCalibBusy(false));
   };
 
   if (error && !circuit) return <p className="text-xs text-red-300 mt-2">{error}</p>;
@@ -339,6 +367,120 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
                   ` (k=${circuit.faithfulness.sufficiency_k})`}
                 {' '}— the circuit is causally faithful to the degree these effects hold.
               </p>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Calibration (Feature 20): the usable steering band + dial clamp ── */}
+      {(() => {
+        const cs = circuit.calibration_status;
+        const running = cs === 'pending' || cs === 'running';
+        const canRun = circuit.members.length > 0;
+        const cal = circuit.calibration;
+        const dialFmt = (n: number) => n.toFixed(2);
+        return (
+          <div className="border-t border-slate-700/60 pt-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="text-xs font-medium text-slate-400 flex items-center gap-1">
+                <Gauge className="w-3.5 h-3.5 text-amber-300" />
+                Strength calibration
+              </h4>
+              <button
+                onClick={runCalibration}
+                disabled={calibBusy || running || !canRun
+                  || !judgeEndpoint.trim() || !judgeModel.trim()}
+                className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                title="Find the usable dial band (onset + correctness cliff) and clamp the served dial to it"
+              >
+                {running
+                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                  : <Gauge className="w-3 h-3" />}
+                {running ? 'calibrating…'
+                  : cal ? 'Re-calibrate strength' : 'Calibrate strength'}
+              </button>
+            </div>
+
+            {/* Judge endpoint/model — the correctness judge (OpenAI-compatible). */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                value={judgeEndpoint}
+                onChange={(e) => setJudgeEndpoint(e.target.value)}
+                disabled={running}
+                placeholder="judge endpoint (…/v1)"
+                aria-label="Judge endpoint"
+                className="flex-1 min-w-[160px] rounded bg-slate-800 border border-slate-700 px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-500 disabled:opacity-50"
+              />
+              <input
+                value={judgeModel}
+                onChange={(e) => setJudgeModel(e.target.value)}
+                disabled={running}
+                placeholder="judge model"
+                aria-label="Judge model"
+                className="w-40 rounded bg-slate-800 border border-slate-700 px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-500 disabled:opacity-50"
+              />
+            </div>
+
+            {calibError && <p className="text-[11px] text-red-300">{calibError}</p>}
+            {cs === 'failed' && !running && (
+              <p className="text-[11px] text-red-300">Calibration run failed.</p>
+            )}
+            {cs === 'judge_unreliable' && !running && (
+              <p className="text-[11px] text-amber-300">
+                The judge graded the un-steered output as not correct — it can't
+                reliably grade this circuit's model. Use a stronger judge model.
+              </p>
+            )}
+            {cs === 'no_band' && !running && !cal && (
+              <p className="text-[11px] text-amber-300">
+                No usable band found — no dial above onset stayed correct. The
+                circuit's served dial was left unchanged.
+              </p>
+            )}
+
+            {cal && (
+              <div className="space-y-1.5">
+                {/* band-on-a-dial readout: onset — sweet — cliff over the range */}
+                {(() => {
+                  const rng = ((circuit.budget?.intensity_range as number[]) ?? [0, 2]);
+                  const lo = rng[0] ?? 0; const hi = rng[1] ?? 2;
+                  const span = Math.max(hi - lo, 1e-6);
+                  const pct = (v: number) => `${Math.min(100, Math.max(0, ((v - lo) / span) * 100))}%`;
+                  return (
+                    <div className="relative h-6" title="usable band (shaded) with the sweet-spot dial">
+                      <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-slate-700" />
+                      <div
+                        className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-amber-500/40"
+                        style={{ left: pct(cal.onset), right: `calc(100% - ${pct(cal.cliff)})` }}
+                      />
+                      <div
+                        className="absolute top-1/2 w-1.5 h-3 -translate-y-1/2 -translate-x-1/2 rounded bg-amber-300"
+                        style={{ left: pct(cal.sweet_spot) }}
+                        title={`sweet-spot ${dialFmt(cal.sweet_spot)}`}
+                      />
+                    </div>
+                  );
+                })()}
+                <p className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                  <span>onset <b className="text-slate-200">{dialFmt(cal.onset)}</b></span>
+                  <span>· sweet-spot <b className="text-amber-200">{dialFmt(cal.sweet_spot)}</b></span>
+                  <span>· cliff <b className="text-slate-200">{dialFmt(cal.cliff)}</b></span>
+                  {cal.provisional && (
+                    <span className="rounded bg-amber-900/40 border border-amber-700/50 px-1.5 py-0.5 text-[10px] text-amber-200">
+                      provisional
+                    </span>
+                  )}
+                  {cal.non_monotone && (
+                    <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">
+                      non-monotone
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  The served dial is clamped to [{dialFmt(cal.onset)}, {dialFmt(cal.cliff)}]
+                  and defaults to the sweet-spot — it can't reach the nonsense zone above the cliff.
+                </p>
+              </div>
             )}
           </div>
         );
