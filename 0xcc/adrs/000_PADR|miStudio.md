@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 3.1 (Feature 20 Circuit Strength Calibration — IDL-37)
+**Version:** 3.2 (Steered Transcript Recorder — IDL-38)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -3191,12 +3191,29 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-38: Steered transcript recorder — one steering core, general recorder, transcript-carrying manifests
+
+**Date:** 2026-07-22
+
+**Context:** IDL-37's calibration judges steered outputs, but the served k8s model (LFM2.5-1.2B) is too weak to grade its own correctness — it fails the UNSTEERED baseline, so calibration correctly reports `judge_unreliable`. The reframe (BRD-MIS-RECORDER-001): the run is the INSTRUMENT, not the judge. Steering already produces the raw material worth analysing — prompt, unsteered baseline, steered response per dial — and the interpretation ("what did steering DO across the dial?") belongs to a STRONG model (Opus 4.8), driven by the agent AFTER the run. The blocker was that the calibration manifest stored the verdict but not the generated TEXT. Feature status: **Implemented** (3-round-reviewed; hardware E2E at close-out).
+
+**Decision:**
+1. **One unified steering core + three per-type resolvers.** The circuit, cluster, and feature steering paths are the same additive residual-stream math (`Σ strength·W_dec[:,idx]`), differing only in member resolution. A shared `steering_core.build_steer_generator` + `resolve_circuit/cluster/feature_members` drives all three; calibration's `_build_generation_fns` is refactored to use it, BYTE-IDENTICAL (verified: the judge gate stays before model load, the 5-tuple is preserved, generation logic moved not rewritten). Two conventions fixed here: the hook target is the discovered RESIDUAL module (what the calibrated band + miLLM measure against, so a recorded transcript matches the band), and the RECORDER owns the dial multiply (feature/cluster strengths are otherwise terminal).
+2. **General recorder, judge-free.** `record_samples(artifact, dials, prompts, max_tokens, seed)` for a circuit / cluster profile / ad-hoc feature set. Records `(dial, prompt, unsteered_output, steered_output)` to a new `steering_samples` manifest kind carrying the actual generated TEXT. Config validated UP FRONT (per-kind required refs, one-SAE-per-layer) so a malformed artifact 422s BEFORE the GPU lock — not deep in the task after a model load. Caps bound the single GPU: ≤8 dials, ≤8 prompts, ≤200 tokens, dial ≤2.0, prompts×(1+dials) ≤64.
+3. **First-class calibration transcripts.** The search trace stores the generated text per (dial, prompt) incl. the shipped sweet-spot re-judge; the calibration manifest carries a REQUIRED `transcripts` field. Back-compat: `validate_payload` runs only on WRITE, so legacy calibration manifests (no transcripts) stay readable + reproducible — pinned structurally.
+4. **Uniform GPU-lifecycle marker.** A dedicated `steering_record_runs` table (not the Circuit row — cluster/feature jobs have no circuit row) is the in-flight marker for ALL record jobs; the single-GPU guard checks it and cleanup reclaims a stuck one.
+5. **Contract additions are additive.** New manifest kind (`kind` is a String, no enum migration); new marker table (migration `5cede2a1b3f7`); the calibration `transcripts` key. No change to `mistudio.circuit-definition/v1` — the recorder uses the manifest store, not the portable contract.
+
+**Tradeoffs:** the recorder standardizes on the circuit hook target, which differs from the live feature/cluster SERVE path on models with a residual-norm module (accepted: a transcript must match the calibrated band, and the serve path is unchanged); transcripts grow manifest size (bounded by the caps); cluster/feature records are not circuit-linked so they are retrieved by manifest_id, returned in the record result.
+
+---
+
 ## Document Control
 
-**Version:** 3.1
+**Version:** 3.2
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-22
 **Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
@@ -3225,6 +3242,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
 | 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
+| 3.2 | 2026-07-22 | IDL-38 (steered transcript recorder: one unified steering core + 3 per-type resolvers with calibration refactored byte-identical; general judge-free recorder for circuit/cluster/feature → `steering_samples` manifest carrying generated TEXT; first-class calibration `transcripts`; `steering_record_runs` GPU-guard marker) — Implemented, from BRD-MIS-RECORDER-001 |
 | 3.1 | 2026-07-21 | IDL-37 (circuit strength calibration: two-detector usable-band search — onset by output-drift, correctness cliff by LLM judge on generated neutral-topic falsifiable probes; adaptive bisection not fixed grid; additive nullable `calibration` block clamps `intensity_range` to `[onset,cliff]` and defaults `intensity` to sweet-spot; badge not gate; provisional cross-plane, probes travel for serve-time re-verify) — Planned, from the served-circuit finding that placeholder strengths ship fluent-but-false |
 
 ---
