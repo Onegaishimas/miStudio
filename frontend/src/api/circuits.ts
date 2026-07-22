@@ -160,4 +160,20 @@ export const circuitsApi = {
     fetchAPI<{ circuit_id: string; task_id: string; status: string }>(
       `/circuits/${id}/faithfulness`,
       { method: 'POST', body: JSON.stringify(body ?? {}) }),
+
+  // Feature 20: calibrate the usable steering band + clamp the served dial.
+  startCalibration: (
+    id: string,
+    body: {
+      judge_endpoint: string;
+      judge_model: string;
+      step_budget?: number;
+      probe_count?: number;
+      margin?: number;
+      seed?: number;
+    },
+  ) =>
+    fetchAPI<{ circuit_id: string; task_id: string; status: string }>(
+      `/circuits/${id}/calibration`,
+      { method: 'POST', body: JSON.stringify(body) }),
 };

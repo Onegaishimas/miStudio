@@ -68,6 +68,20 @@ export interface Circuit extends CircuitSummary {
   } | null;
   // Lifecycle of a faithfulness run (pending|running|completed|failed|null).
   faithfulness_status?: string | null;
+  // Calibration (Feature 20) — the usable steering band. When present, the
+  // served dial is clamped to [onset, cliff] and defaults to sweet_spot.
+  // `provisional` = generated probes / discovery-plane measurement.
+  calibration?: {
+    onset: number;
+    sweet_spot: number;
+    cliff: number;
+    provisional?: boolean;
+    non_monotone?: boolean;
+    judge_metric_id?: string | null;
+    manifest_ref?: string | null;
+  } | null;
+  // Lifecycle: pending|running|completed|no_band|judge_unreliable|failed|null.
+  calibration_status?: string | null;
   discovery: Record<string, unknown> | null;
   // Producing discovery run, if any — a faithfulness run needs it for prompts.
   discovery_run_id?: string | null;
