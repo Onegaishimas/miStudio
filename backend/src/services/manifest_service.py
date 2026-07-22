@@ -58,22 +58,36 @@ def validate_payload(kind: str, payload: Dict[str, Any]) -> None:
             raise ManifestError(
                 f"{kind} manifest payload missing self-contained keys: "
                 f"{sorted(missing)}")
-    # No secrets/filesystem paths leak into a portable manifest.
-    _assert_no_paths(payload)
+    # No secrets/filesystem paths leak into a portable manifest — but the guard
+    # is about internal REFS, not free text. A user prompt or a model generation
+    # is legitimately arbitrary text that may begin with "/data/" or "/home/";
+    # scanning it would false-positive and discard a completed GPU run (R1). So
+    # keys holding user/model TEXT are exempt from the path scan.
+    _assert_no_paths(payload, text_keys=_TEXT_KEYS)
 
 
-def _assert_no_paths(obj: Any, _depth: int = 0) -> None:
+# Payload keys whose VALUES are free user/model text (not internal refs) — exempt
+# from the filesystem-path scan. Applied at any depth.
+_TEXT_KEYS = frozenset({
+    "prompt", "prompts", "generation", "unsteered_output", "steered_output",
+    "expected", "narrative",
+})
+
+
+def _assert_no_paths(obj: Any, _depth: int = 0, text_keys: frozenset = frozenset()) -> None:
     if _depth > 12:
         return
     if isinstance(obj, str):
         if obj.startswith("/data/") or obj.startswith("/home/"):
             raise ManifestError("manifest payload must not embed filesystem paths")
     elif isinstance(obj, dict):
-        for v in obj.values():
-            _assert_no_paths(v, _depth + 1)
+        for k, v in obj.items():
+            if k in text_keys:
+                continue   # free user/model text — not a ref
+            _assert_no_paths(v, _depth + 1, text_keys)
     elif isinstance(obj, (list, tuple)):
         for v in obj:
-            _assert_no_paths(v, _depth + 1)
+            _assert_no_paths(v, _depth + 1, text_keys)
 
 
 class ManifestService:

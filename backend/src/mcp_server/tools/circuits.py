@@ -439,13 +439,23 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
 
     @mcp.tool()
     async def get_steering_samples(
-        circuit_id: Annotated[str, Field(description="miStudio circuit id (crc_...) to fetch recorded steering-sample transcripts for (circuit-artifact records are linked to their circuit; cluster/feature records carry the artifact in the payload)")]
+        circuit_id: Annotated[Optional[str], Field(description="miStudio circuit id (crc_...) to fetch CIRCUIT-artifact steering-sample records for (they link to their circuit)")] = None,
+        manifest_id: Annotated[Optional[str], Field(description="A specific steering_samples manifest id (vman_...) — REQUIRED for CLUSTER/FEATURE records, which are not linked to a circuit. The record_steering_samples result and get_task_status carry the manifest_ref")] = None,
     ) -> Any:
-        """Fetch recorded steering-sample transcripts for a circuit: per prompt,
-        the unsteered baseline output plus the steered output at each recorded
-        dial — the raw material for an Opus meaning-analysis pass. Filters the
-        circuit's manifests to kind='steering_samples' (newest first). For a
-        cluster/feature record, or a known manifest id, use get_validation_manifest."""
+        """Fetch recorded steering-sample transcripts: per prompt, the unsteered
+        baseline plus the steered output at each recorded dial — the raw material
+        for an Opus meaning-analysis pass.
+
+        Pass `circuit_id` for a circuit-artifact record (they link to the
+        circuit), or `manifest_id` for a specific record — REQUIRED for
+        cluster/feature records, which carry the artifact in the payload and are
+        not circuit-linked (the record_steering_samples result returns the
+        manifest_ref). Exactly one of circuit_id / manifest_id."""
+        if manifest_id:
+            return await client.get(f"/validation-manifests/{manifest_id}")
+        if not circuit_id:
+            return {"error": "pass circuit_id (circuit records) or manifest_id "
+                    "(cluster/feature records)"}
         resp = await client.get("/validation-manifests", circuit_id=circuit_id)
         manifests = (resp or {}).get("manifests", []) if isinstance(resp, dict) else []
         return {"circuit_id": circuit_id,

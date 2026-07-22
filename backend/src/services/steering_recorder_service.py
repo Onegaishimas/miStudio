@@ -51,6 +51,26 @@ class SteeringRecorderService:
                 "circuit", "cluster", "features"):
             raise RecordConfigError(
                 "artifact must be {kind: 'circuit'|'cluster'|'features', ...}")
+        # Per-kind required refs — validate HERE so a malformed artifact 422s at
+        # the endpoint, BEFORE the GPU lock is taken and a job dispatched (R1: a
+        # missing ref otherwise surfaced as an opaque KeyError deep in the task,
+        # after the guard was held and — for features — a model was loaded).
+        kind = artifact["kind"]
+        if kind == "circuit" and not artifact.get("circuit_id"):
+            raise RecordConfigError("circuit artifact needs a circuit_id")
+        if kind == "cluster" and not artifact.get("cluster_profile_id"):
+            raise RecordConfigError("cluster artifact needs a cluster_profile_id")
+        if kind == "features":
+            if not artifact.get("model_id"):
+                raise RecordConfigError("features artifact needs a model_id")
+            feats = artifact.get("features")
+            if not isinstance(feats, list) or not feats:
+                raise RecordConfigError("features artifact needs a non-empty features list")
+            for f in feats:
+                if not isinstance(f, dict) or f.get("layer") is None \
+                        or f.get("feature_idx") is None:
+                    raise RecordConfigError(
+                        "each feature needs {layer, feature_idx, strength, sae_id}")
 
         dials = cfg.get("dials") or []
         prompts = cfg.get("prompts") or []
@@ -58,17 +78,28 @@ class SteeringRecorderService:
             raise RecordConfigError("dials must be a non-empty list")
         if not isinstance(prompts, list) or not prompts:
             raise RecordConfigError("prompts must be a non-empty list")
-        # Dedupe dials preserving order; validate range.
+        # Dedupe dials preserving order; validate range. A 0.0 dial is dropped —
+        # the baseline is ALWAYS recorded separately, so a "steered" sample at
+        # dial 0 would just duplicate the baseline and waste a budget slot (R1).
         seen, uniq = set(), []
         for d in dials:
-            fd = float(d)
+            try:
+                fd = float(d)
+            except (TypeError, ValueError):
+                raise RecordConfigError(f"dial {d!r} is not a number")
             if not (0.0 <= fd <= MAX_DIAL):
                 raise RecordConfigError(
                     f"dial {fd} outside [0, {MAX_DIAL}] (the servable ceiling)")
+            if fd == 0.0:
+                continue   # baseline covers it
             if fd not in seen:
                 seen.add(fd)
                 uniq.append(fd)
         dials = uniq
+        if not dials:
+            raise RecordConfigError(
+                "dials must include at least one steering strength above 0 "
+                "(the unsteered baseline is always recorded)")
         prompts = [str(p) for p in prompts]
         if any(not p.strip() for p in prompts):
             raise RecordConfigError("prompts must be non-empty strings")
@@ -77,9 +108,16 @@ class SteeringRecorderService:
         if len(prompts) > MAX_RECORD_PROMPTS:
             raise RecordConfigError(f"at most {MAX_RECORD_PROMPTS} prompts")
 
-        max_tokens = int(cfg.get("max_tokens") or DEFAULT_RECORD_TOKENS)
+        try:
+            max_tokens = int(cfg.get("max_tokens") or DEFAULT_RECORD_TOKENS)
+        except (TypeError, ValueError):
+            raise RecordConfigError("max_tokens must be an integer")
         if not (1 <= max_tokens <= MAX_RECORD_TOKENS):
             raise RecordConfigError(f"max_tokens must be in [1, {MAX_RECORD_TOKENS}]")
+        try:
+            seed = int(cfg.get("seed", 0))
+        except (TypeError, ValueError):
+            raise RecordConfigError("seed must be an integer")
 
         # Hard product cap: baseline (1) + one per dial, per prompt.
         generations = len(prompts) * (1 + len(dials))
@@ -90,7 +128,7 @@ class SteeringRecorderService:
                 "prompts")
 
         return {"artifact": artifact, "dials": dials, "prompts": prompts,
-                "max_tokens": max_tokens, "seed": int(cfg.get("seed", 0))}
+                "max_tokens": max_tokens, "seed": seed}
 
     @classmethod
     def _resolve(cls, artifact: Dict[str, Any], db, device):

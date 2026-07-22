@@ -71,6 +71,15 @@ def _set_status(db, record_run_id, status, error=None):
 
 def _complete(db, record_run_id, manifest_ref):
     from ..models.steering_record_run import SteeringRecordRun
+    # record_samples committed the manifest, so the session is clean here — but
+    # roll back defensively so a lingering aborted state can't block the status
+    # write (a completed job whose marker stays 'running' would wedge the GPU
+    # guard until cleanup; R1).
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Rollback before record completion failed for %s",
+                         record_run_id)
     try:
         row = db.query(SteeringRecordRun).filter(
             SteeringRecordRun.id == record_run_id).first()

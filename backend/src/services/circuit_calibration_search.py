@@ -340,7 +340,17 @@ def calibrate(
 
     def _judge_worst(dial):
         rejudge_steps[0] += 1
-        vs = [judge(gen_at(dial, p["prompt"]), p["expected"]) for p in probes]
+        vs = []
+        for p in probes:
+            gen = gen_at(dial, p["prompt"])
+            v = judge(gen, p["expected"])
+            vs.append(v)
+            # Record the re-judged generation in the trace so the manifest's
+            # transcripts include the SHIPPED sweet_spot dial — often a dial the
+            # coarse cliff grid never sampled (R1: it was silently omitted).
+            cliff_trace.append({"dial": dial, "phase": "sweet_recheck",
+                                "probe": p["prompt"], "verdict": v,
+                                "generation": gen})
         return _worst(vs)
 
     tries = 0

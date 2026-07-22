@@ -17,6 +17,49 @@ def _cfg(**over):
     return base
 
 
+class TestPerKindValidation:
+    """R1: a malformed artifact must 422 up front, before the GPU lock is taken —
+    not surface as an opaque KeyError deep in the task."""
+
+    def test_circuit_needs_circuit_id(self):
+        with pytest.raises(RecordConfigError, match="circuit_id"):
+            SteeringRecorderService.create_config(_cfg(artifact={"kind": "circuit"}))
+
+    def test_cluster_needs_profile_id(self):
+        with pytest.raises(RecordConfigError, match="cluster_profile_id"):
+            SteeringRecorderService.create_config(_cfg(artifact={"kind": "cluster"}))
+
+    def test_features_needs_model_id_and_features(self):
+        with pytest.raises(RecordConfigError, match="model_id"):
+            SteeringRecorderService.create_config(_cfg(
+                artifact={"kind": "features", "features": [{"layer": 1, "feature_idx": 2}]}))
+        with pytest.raises(RecordConfigError, match="features list"):
+            SteeringRecorderService.create_config(_cfg(
+                artifact={"kind": "features", "model_id": "m"}))
+
+    def test_features_each_needs_layer_and_idx(self):
+        with pytest.raises(RecordConfigError, match="layer, feature_idx"):
+            SteeringRecorderService.create_config(_cfg(
+                artifact={"kind": "features", "model_id": "m",
+                          "features": [{"strength": 1.0}]}))
+
+    def test_non_numeric_dial_is_422_not_500(self):
+        with pytest.raises(RecordConfigError, match="not a number"):
+            SteeringRecorderService.create_config(_cfg(dials=["abc"]))
+
+    def test_non_numeric_max_tokens_is_422(self):
+        with pytest.raises(RecordConfigError, match="max_tokens"):
+            SteeringRecorderService.create_config(_cfg(max_tokens="lots"))
+
+    def test_dial_zero_is_dropped_baseline_covers_it(self):
+        c = SteeringRecorderService.create_config(_cfg(dials=[0.0, 0.5]))
+        assert c["dials"] == [0.5]   # 0.0 dropped — baseline recorded separately
+
+    def test_all_zero_dials_rejected(self):
+        with pytest.raises(RecordConfigError, match="above 0"):
+            SteeringRecorderService.create_config(_cfg(dials=[0.0]))
+
+
 class TestConfigCaps:
     def test_rejects_unknown_artifact(self):
         with pytest.raises(RecordConfigError, match="artifact"):
@@ -141,10 +184,23 @@ class TestManifestKind:
         with pytest.raises(ManifestError, match="steering_samples"):
             validate_payload("steering_samples", {"dials": [0.5]})
 
-    def test_path_safety_applies(self):
+    def test_free_text_may_contain_pathlike_strings(self):
+        """R1: a prompt or GENERATION that starts with /data//home/ is legit free
+        text, NOT an internal ref — it must not discard a completed GPU run."""
+        from src.services.manifest_service import validate_payload
+        ok = {"artifact": {"kind": "circuit", "circuit_id": "c"},
+              "dials": [0.5], "prompts": ["/home/user please advise"], "config": {},
+              "transcripts": [{"unsteered_output": "/data/ is where I keep things",
+                               "samples": [{"dial": 0.5,
+                                            "steered_output": "/data/x"}]}]}
+        validate_payload("steering_samples", ok)  # must NOT raise
+
+    def test_a_real_path_in_a_REF_field_is_still_rejected(self):
+        """Specificity: the exemption is only for text fields; a path in a
+        non-text field (e.g. an artifact ref) is still caught."""
         from src.services.manifest_service import ManifestError, validate_payload
-        bad = {"artifact": {"kind": "circuit", "circuit_id": "c"},
+        bad = {"artifact": {"kind": "circuit", "circuit_id": "/data/leak"},
                "dials": [0.5], "prompts": ["p"], "config": {},
-               "transcripts": [{"unsteered_output": "/data/secret/path"}]}
+               "transcripts": []}
         with pytest.raises(ManifestError, match="path"):
             validate_payload("steering_samples", bad)

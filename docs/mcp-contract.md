@@ -44,7 +44,7 @@ require `MILLM_API_URL` and are never enabled by default.
 | `export_circuit_slices` | `POST /circuits/{…}/export-slices` | Export per-layer cluster-definition/v1 slices (BR-014) for today's single-SAE consumers (miLLM). |
 | `get_circuit` | `GET /circuits/{…}` | One circuit: members by layer, typed edges with full evidence (statistics, attribution, validation manifest refs), budget, faithfulness, rung + rung_language +  |
 | `get_discovery_results` | `GET /circuit-discovery/{…}` | A discovery run + its report (null-model summary, FDR discipline, held-out replication RATE, stage counts, caps, uncovered seeds, lag-0 disclosure) + ranked can |
-| `get_steering_samples` | `GET /validation-manifests`<br>`GET kind`<br>`GET manifests` | Fetch recorded steering-sample transcripts for a circuit: per prompt, the unsteered baseline output plus the steered output at each recorded dial — the raw mate |
+| `get_steering_samples` | `GET /validation-manifests`<br>`GET /validation-manifests/{…}`<br>`GET kind`<br>`GET manifests` | Fetch recorded steering-sample transcripts: per prompt, the unsteered baseline plus the steered output at each recorded dial — the raw material for an Opus mean |
 | `get_validation_manifest` | `GET /validation-manifests/{…}` | A validation manifest — the SELF-CONTAINED, reproducible record of a validation run (intervention config, baseline, prompts, seeds, null summary, per-edge effec |
 | `import_circuit_definition` | `POST /circuits/import` | Import a mistudio.circuit-definition/v1 document (the BR-013 round-trip). |
 | `list_circuit_captures` | `GET /circuit-capture` | List capture runs (status, corpus, layers, split, size, stale flag). |
