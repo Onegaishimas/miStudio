@@ -48,7 +48,8 @@ class CircuitService:
     def _validate(name: str, narrative: Optional[str], saes: list, members: list,
                   edges: list, budget: Optional[dict],
                   faithfulness: Optional[dict] = None,
-                  discovery: Optional[dict] = None) -> CircuitDefinitionV1:
+                  discovery: Optional[dict] = None,
+                  calibration: Optional[dict] = None) -> CircuitDefinitionV1:
         """Round-trip through the contract model — its validators are the law."""
         # An SAE entry that names no id becomes `mistudio_sae_id: null`, which
         # exports clean and only fails at miLLM as an unbound SAE. The contract
@@ -97,6 +98,7 @@ class CircuitService:
                 edges=edges,
                 budget=budget,
                 faithfulness=faithfulness,
+                calibration=calibration,
                 discovery=discovery,
             )
         except Exception as e:  # pydantic ValidationError → domain error
@@ -207,6 +209,7 @@ class CircuitService:
             data["name"], data.get("narrative"), data.get("saes", []),
             data.get("members", []), data.get("edges", []), data.get("budget"),
             data.get("faithfulness"), data.get("discovery"),
+            data.get("calibration"),
         )
         # hf_id is the cross-instance-stable model identifier (R3-B2). When
         # the caller didn't supply one but referenced a local model, fill it
@@ -228,6 +231,8 @@ class CircuitService:
             budget=defn.budget.model_dump(mode="json") if defn.budget else None,
             faithfulness=(defn.faithfulness.model_dump(mode="json")
                           if defn.faithfulness else None),
+            calibration=(defn.calibration.model_dump(mode="json")
+                         if defn.calibration else None),
             discovery=(defn.discovery.model_dump(mode="json")
                        if defn.discovery else None),
             rung=int(defn.displayed_rung()),
@@ -291,11 +296,12 @@ class CircuitService:
             "edges": data.get("edges", circuit.edges),
             "budget": data.get("budget", circuit.budget),
             "faithfulness": data.get("faithfulness", circuit.faithfulness),
+            "calibration": data.get("calibration", circuit.calibration),
         }
         defn = CircuitService._validate(
             merged["name"], merged["narrative"], merged["saes"],
             merged["members"], merged["edges"], merged["budget"],
-            merged["faithfulness"],
+            merged["faithfulness"], calibration=merged["calibration"],
         )
         if "granularity" in data and data["granularity"] is not None:
             circuit.granularity = data["granularity"]
@@ -307,6 +313,8 @@ class CircuitService:
         circuit.budget = defn.budget.model_dump(mode="json") if defn.budget else None
         circuit.faithfulness = (defn.faithfulness.model_dump(mode="json")
                                 if defn.faithfulness else None)
+        circuit.calibration = (defn.calibration.model_dump(mode="json")
+                               if defn.calibration else None)
         circuit.rung = int(defn.displayed_rung())
         circuit.version = (circuit.version or 1) + 1  # optimistic-lock bump
         await db.commit()
@@ -334,6 +342,47 @@ class CircuitService:
                 e.update(edge_updates[key])
         return await CircuitService.update(
             db, circuit, {"edges": edges}, expected_version=expected_version)
+
+    @staticmethod
+    async def apply_calibration(
+            db: AsyncSession, circuit: Circuit, band: Dict[str, Any],
+            expected_version: Optional[int] = None) -> Circuit:
+        """Write a completed calibration band onto the circuit AND clamp the
+        serving dial to it (IDL-37) — the "ship the band, not a point" step.
+
+        Two effects, atomically through update() (validators + version bump):
+          1. `calibration` = the band.
+          2. `budget.intensity_range` = [onset, cliff] and `budget.intensity` =
+             sweet_spot — so a served dial physically cannot reach the nonsense
+             zone above the cliff.
+
+        Badge, not gate: a circuit with no calibration serves exactly as before;
+        this only runs on a COMPLETED search. A partial/failed search must NOT
+        call this — narrowing the range off a bad measurement would silently
+        disable a working circuit.
+        """
+        # The band model already guarantees onset ≤ sweet_spot ≤ cliff, but the
+        # clamp's whole promise is that the SERVED dial cannot exceed the cliff,
+        # and CircuitBudget does not (yet) enforce intensity ∈ intensity_range
+        # (a pre-existing gap — tracked debt, not widened here to avoid a
+        # shared-contract change touching every stored budget). So this one
+        # path, which makes that promise, checks it itself.
+        onset, sweet, cliff = band["onset"], band["sweet_spot"], band["cliff"]
+        if not (onset <= sweet <= cliff):
+            raise CircuitValidationError(
+                f"calibration band is not ordered (onset={onset}, "
+                f"sweet_spot={sweet}, cliff={cliff}); refusing to clamp the dial "
+                "to an inverted range")
+        # Merge the clamp into the EXISTING budget (keep formula_id, per-layer
+        # budgets); only the dial envelope changes.
+        budget = dict(circuit.budget or {})
+        budget["intensity_range"] = [onset, cliff]
+        budget["intensity"] = sweet
+        return await CircuitService.update(
+            db, circuit,
+            {"budget": budget, "calibration": band},
+            expected_version=expected_version,
+        )
 
     @staticmethod
     async def delete(db: AsyncSession, circuit: Circuit) -> None:
@@ -378,6 +427,7 @@ class CircuitService:
             circuit.name, circuit.narrative, circuit.saes, circuit.members,
             circuit.edges, circuit.budget, circuit.faithfulness,
             getattr(circuit, "discovery", None),
+            getattr(circuit, "calibration", None),
         )
         defn.model = DefinitionModelRef(
             mistudio_model_id=circuit.model_id,

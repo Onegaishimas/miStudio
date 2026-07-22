@@ -45,6 +45,7 @@ class Circuit(Base):
     edges = Column(JSONB, nullable=False, default=list)     # [CircuitEdge]
     budget = Column(JSONB, nullable=True)                    # CircuitBudget
     faithfulness = Column(JSONB, nullable=True)              # CircuitFaithfulness
+    calibration = Column(JSONB, nullable=True)               # CircuitCalibration (IDL-37)
     discovery = Column(JSONB, nullable=True)                 # CircuitDiscoveryProvenance
 
     # Denormalized display rung (min over edges; recomputed on every write).
@@ -65,6 +66,11 @@ class Circuit(Base):
     # cleanup reclaims a stuck one, and two runs can't race.
     faithfulness_status = Column(String(16), nullable=True)  # pending|running|completed|failed
     faithfulness_task_id = Column(String(155), nullable=True)
+    # Calibration (IDL-37) runs on the CIRCUIT and holds the GPU like
+    # faithfulness — same in-flight lifecycle so the single-GPU guard sees it,
+    # cleanup can reclaim a stuck one, and two calibrations can't race.
+    calibration_status = Column(String(16), nullable=True)  # pending|running|completed|failed
+    calibration_task_id = Column(String(155), nullable=True)
     schema_version = Column(String(8), nullable=False, default="1")
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

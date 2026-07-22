@@ -171,6 +171,55 @@ class CircuitFaithfulness(BaseModel):
     manifest_ref: Optional[str] = None
 
 
+class CalibrationProbe(BaseModel):
+    """One falsifiable correctness probe used to find the cliff (IDL-37).
+
+    Deliberately a NEUTRAL factual question — a topic the circuit should NOT
+    influence — so that degradation shows up as the circuit's tint corrupting an
+    unrelated fact (detectable), rather than as a change to output on the
+    circuit's own concept (whose "right answer" is not falsifiable). The probe
+    travels in the contract so a serve-time re-verify is one cheap pass.
+    """
+
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    expected: str = Field(..., min_length=1, max_length=2000)
+
+
+class CircuitCalibration(BaseModel):
+    """Calibrated usable-strength band for the circuit's serving dial (IDL-37).
+
+    Badge, not gate. When present, its `[onset, cliff]` is what
+    `CircuitBudget.intensity_range` is clamped to (a served dial cannot reach
+    the nonsense zone) and `sweet_spot` is the default `intensity`.
+
+    `provisional` is True whenever the probes were GENERATED (not authored) or
+    the band was measured on the discovery-plane model rather than re-verified
+    against the served model — an honest confidence marker, never a blocker.
+    """
+
+    onset: float = Field(..., ge=0.0, description="min dial with influence above baseline noise")
+    sweet_spot: float = Field(..., ge=0.0, description="usable dial: strongest still-correct point, with margin")
+    cliff: float = Field(..., ge=0.0, description="max dial still correct; above this the judge flips to broken")
+    provisional: bool = True
+    probe_set: List[CalibrationProbe] = Field(default_factory=list)
+    judge_metric_id: Optional[str] = None
+    step_budget: Optional[int] = Field(None, ge=1)
+    non_monotone: bool = False
+    manifest_ref: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "CircuitCalibration":
+        # onset ≤ sweet_spot ≤ cliff, or the band is meaningless and the clamp
+        # would produce an inverted/empty intensity_range.
+        if not (self.onset <= self.sweet_spot <= self.cliff):
+            raise ValueError(
+                f"calibration band must satisfy onset ≤ sweet_spot ≤ cliff; "
+                f"got onset={self.onset}, sweet_spot={self.sweet_spot}, "
+                f"cliff={self.cliff}"
+            )
+        return self
+
+
 class CircuitDiscoveryProvenance(BaseModel):
     mode: Optional[Literal["seeded", "open"]] = None
     granularity: Optional[Literal["feature", "cluster"]] = None
@@ -193,6 +242,7 @@ class CircuitDefinitionV1(BaseModel):
     edges: List[CircuitEdge] = Field(default_factory=list, max_length=MAX_EDGES)
     budget: Optional[CircuitBudget] = None
     faithfulness: Optional[CircuitFaithfulness] = None
+    calibration: Optional[CircuitCalibration] = None
     provenance: DefinitionProvenance = Field(default_factory=DefinitionProvenance)
     discovery: Optional[CircuitDiscoveryProvenance] = None
 
