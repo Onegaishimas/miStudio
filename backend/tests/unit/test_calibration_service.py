@@ -201,10 +201,19 @@ class TestJudgeVerdictParsing:
         assert _parse_verdict("broken") == "broken"
         assert _parse_verdict("Degrading") == "degrading"
 
-    def test_negated_broken_is_correct(self):
+    def test_unambiguously_negated_broken_is_correct(self):
         from src.services.circuit_calibration_service import _parse_verdict
         assert _parse_verdict("not broken") == "correct"
         assert _parse_verdict("The response is not broken.") == "correct"
+
+    def test_terse_NO_broken_is_broken_not_correct(self):
+        """R3 negative control: 'No, broken.' means no[t correct], BROKEN — the
+        'no' must NOT negate the following 'broken'. The R2 fix over-reached by
+        treating 'no' as a negator, shipping a broken dial as usable."""
+        from src.services.circuit_calibration_service import _parse_verdict
+        assert _parse_verdict("No, broken.") == "broken"
+        assert _parse_verdict("No — broken") == "broken"
+        assert _parse_verdict("No. Broken.") == "broken"
 
     def test_correct_wins_when_it_appears_first(self):
         from src.services.circuit_calibration_service import _parse_verdict

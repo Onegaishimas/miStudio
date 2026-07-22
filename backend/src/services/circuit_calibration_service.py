@@ -96,6 +96,14 @@ class CircuitCalibrationService:
             lo, hi = 0.0, cls.MAX_DIAL
         if hi <= lo:
             lo, hi = 0.0, cls.MAX_DIAL
+        # An authored lo ABOVE the servable ceiling can't be calibrated — capping
+        # it would collapse the range to a point and every run would silently
+        # return no-usable-band with no explanation. Fail loudly instead (R3).
+        if lo >= cls.MAX_DIAL:
+            raise CalibrationConfigError(
+                f"intensity_range lower bound {lo} is at/above the servable "
+                f"ceiling {cls.MAX_DIAL}; nothing to calibrate. Lower the "
+                "authored intensity_range.")
         # Never search (or clamp) above what the budget can hold — an authored
         # range like [0, 3.0] would otherwise yield a cliff the contract rejects.
         hi = min(hi, cls.MAX_DIAL)
@@ -205,7 +213,7 @@ class CircuitCalibrationService:
             # No correct dial above onset — do NOT clamp (badge, not gate: a
             # failed measurement must not disable the circuit). Record the
             # outcome so an agent can see WHY there is no band.
-            cls._mark_no_usable_band(db, circuit_id)
+            cls._mark_no_usable_band(db, circuit_id, manifest_id)
             if progress_cb:
                 progress_cb(100)
             return {"circuit_id": circuit_id, "band": None,
@@ -291,14 +299,17 @@ class CircuitCalibrationService:
                 "verdict": verdict}
 
     @staticmethod
-    def _mark_no_usable_band(db, circuit_id: str) -> None:
-        """A completed run that found no usable band: clear the in-flight marker
-        WITHOUT clamping the dial or writing a calibration block. The circuit
-        serves exactly as before."""
+    def _mark_no_usable_band(db, circuit_id: str, manifest_id: str) -> None:
+        """A run that found no usable band: clear the in-flight marker WITHOUT
+        clamping the dial or writing a calibration block. Uses a DISTINCT status
+        ("no_band") rather than "completed" so a consumer can tell the latest
+        measurement found nothing from a fresh successful calibration — and any
+        PRIOR band left on the circuit is not misrepresented as this run's result
+        (R3). The circuit still serves exactly as before."""
         from ..models.circuit import Circuit
         circuit = db.query(Circuit).filter(Circuit.id == circuit_id).first()
         if circuit is not None:
-            circuit.calibration_status = "completed"
+            circuit.calibration_status = "no_band"
             db.commit()
 
     @staticmethod
@@ -422,8 +433,19 @@ class CircuitCalibrationService:
             L = m.get("layer")
             idx = feat.get("feature_idx")
             strength = float(feat.get("strength") or 0.0)
-            if L in wdec_by_layer and idx is not None:
-                steer.append((int(L), int(idx), strength, wdec_by_layer[L]))
+            if idx is None:
+                continue
+            if L not in wdec_by_layer:
+                # Silently dropping a member would calibrate a PARTIAL circuit,
+                # so the served (full) circuit steers harder than the measured
+                # band — the served dial could exceed the true cliff. Refuse.
+                # (Contract-valid circuits can't hit this; a raw/legacy JSONB
+                # circuit can — CLAUDE.md's silent-drop class.)
+                raise CalibrationRunError(
+                    f"Member at layer {L} has no SAE decoder weight — the "
+                    "circuit cannot be calibrated as it would be served. Add an "
+                    f"SAE ref for layer {L} (update_circuit saes=...).")
+            steer.append((int(L), int(idx), strength, wdec_by_layer[L]))
 
         # Correct signature: get_hookable_module(layer_module, hook_type, structure)
         # — mirror faithfulness/steering. The residual is where additive steering
@@ -532,12 +554,15 @@ def _parse_verdict(raw: str) -> str:
 
     text = (raw or "").strip().lower()
     tokens = re.split(r"[^a-z]+", text)
-    # Drop a "not"/"n't"-style negator immediately before a verdict word so
-    # "not broken" reads as CORRECT, not broken.
+    # Only UNAMBIGUOUS negators count. "no" is deliberately EXCLUDED (R3): a terse
+    # judge reply "No, broken." means "no[t correct], broken" — treating the "no"
+    # as negating the following "broken" would ship a broken dial as usable, the
+    # exact inverse of the invariant. "not"/"isn't"/"aren't" directly before a
+    # verdict word are the only safe negations ("not broken" = correct).
     verdict_words = {"correct", "degrading", "degrade", "degraded", "broken"}
     for i, tok in enumerate(tokens):
         if tok in verdict_words:
-            negated = i > 0 and tokens[i - 1] in ("not", "isnt", "arent", "no")
+            negated = i > 0 and tokens[i - 1] in ("not", "isnt", "arent")
             if tok == "correct":
                 return "correct"
             if tok.startswith("degrad"):

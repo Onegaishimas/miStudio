@@ -307,7 +307,12 @@ def calibrate(
     # the ONE dial we recommend as the default must be re-judged directly. If it
     # is broken (a dip sits at the sweet_spot), walk down toward onset until a
     # correct dial is found; if none is, there is no usable band after all.
+    # Each re-judge is a real judge call — count it in steps_used so the manifest
+    # reports every judged dial honestly (R3), not just the find_cliff steps.
+    rejudge_steps = [0]
+
     def _judge_worst(dial):
+        rejudge_steps[0] += 1
         vs = [judge(gen_at(dial, p["prompt"]), p["expected"]) for p in probes]
         return _worst(vs)
 
@@ -316,18 +321,19 @@ def calibrate(
         non_monotone = True   # a break inside [onset, cliff] — flag it
         sweet = round(max(onset, sweet - margin), 4)
         tries += 1
+    total_steps = steps + rejudge_steps[0]
     if sweet <= onset and _judge_worst(onset) != "correct":
         # even onset broke on re-check → no usable band.
         return CalibrationResult(
             onset=onset, sweet_spot=onset, cliff=onset,
             usable_band=False, non_monotone=non_monotone,
-            steps_used=steps, converged=converged, floor=floor,
-            trace=onset_trace + cliff_trace,
+            steps_used=steps + rejudge_steps[0], converged=converged,
+            floor=floor, trace=onset_trace + cliff_trace,
         )
 
     return CalibrationResult(
         onset=onset, sweet_spot=sweet, cliff=cliff,
         usable_band=True, non_monotone=non_monotone,
-        steps_used=steps, converged=converged, floor=floor,
+        steps_used=total_steps, converged=converged, floor=floor,
         trace=onset_trace + cliff_trace,
     )

@@ -11,7 +11,7 @@ guard is asserted at the endpoint (advisory lock) before dispatch.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ..core.celery_app import celery_app
 from .base_task import DatabaseTask
@@ -53,9 +53,16 @@ def run_circuit_calibration(self, circuit_id: str,
 @celery_app.task(bind=True, base=DatabaseTask,
                  name="src.workers.circuit_calibration_tasks.reproduce_circuit_calibration",
                  max_retries=0)
-def reproduce_circuit_calibration(self, manifest_id: str) -> Dict[str, Any]:
+def reproduce_circuit_calibration(self, manifest_id: str,
+                                  prior_status: Optional[str] = None
+                                  ) -> Dict[str, Any]:
     """Re-run a calibration from a stored manifest and record a reproduction
-    manifest with the band-delta verdict. Holds the GPU like a fresh run."""
+    manifest with the band-delta verdict. Holds the GPU like a fresh run.
+
+    Reproduction only CHECKS the number — it does not re-calibrate the circuit —
+    so it must RESTORE the circuit's prior calibration_status rather than stamp
+    'completed' over it (R3: a circuit whose last real run failed must not be
+    relabeled completed by a reproduce)."""
     from ..services.circuit_calibration_service import CircuitCalibrationService
 
     with self.get_db() as db:
@@ -65,16 +72,19 @@ def reproduce_circuit_calibration(self, manifest_id: str) -> Dict[str, Any]:
                 db, manifest_id,
                 progress_cb=lambda pct: emit_circuit_run_progress(
                     "calibration-reproduce", manifest_id, pct))
-            # Reproduce marked the circuit in-flight (endpoint) — clear it.
+            # Restore the circuit's real status (the endpoint set it 'pending'
+            # only to hold the GPU guard); reproduce changed nothing on it.
             if circuit_id:
-                _set_status(db, circuit_id, "completed")
+                _set_status(db, circuit_id, prior_status)
             emit_circuit_run_completed("calibration-reproduce", manifest_id,
                                        summary=result)
             return result
         except Exception as e:
             logger.exception("Calibration reproduce %s failed", manifest_id)
+            # The reproduce failed, not the circuit's calibration — restore its
+            # prior status (still clears the in-flight 'pending' marker).
             if circuit_id:
-                _set_status(db, circuit_id, "failed")
+                _set_status(db, circuit_id, prior_status)
             emit_circuit_run_failed("calibration-reproduce", manifest_id,
                                     str(e)[:500])
             raise
