@@ -2,7 +2,7 @@
 
 **Document ID:** 019_FTASKS|Circuit_Calibration
 **Version:** 1.0
-**Status:** ❌ PLANNED — not started. Doc chain complete (PPRD §3.20 · IDL-37 · FPRD/FTDD/FTID). Execute Phases 1–7 via instruct 007.
+**Status:** ⏳ IMPLEMENTING (2026-07-21) — Phases 1–5 DONE (contract/schema/migration, probe generator, adaptive search + load-bearing-judge control, service/task/manifest/write-back, endpoint + MCP tool + GPU-guard/cleanup wiring). Deferred to close-out (tracked debt, like 017 Phase 6): the on-hardware GPU generation loop (`_build_generation_fns`) + E2E on `crc_124fd83d1f2a` + the frontend Calibration UI. In 3-round review next.
 **Source:** 019_FPRD · 019_FTDD · 019_FTID · IDL-37 · grounded in the served-circuit finding on `crc_124fd83d1f2a`
 
 | Phase | Tasks | Status |

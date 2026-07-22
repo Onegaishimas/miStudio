@@ -362,6 +362,43 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
                 "seed": seed})
 
     @mcp.tool()
+    async def calibrate_circuit_strength(
+        circuit_id: Annotated[str, Field(description="miStudio circuit id (circ_xxxxxxxx) from list_circuits — NOT a miLLM circuit id")],
+        step_budget: Annotated[int, Field(ge=2, le=40, description="Max generations the bisection may spend finding the cliff; ~10 is plenty. Higher = tighter cliff, more GPU")] = 10,
+        probe_count: Annotated[int, Field(ge=1, le=10, description="How many neutral-topic falsifiable probes to generate and judge at each dial")] = 3,
+        margin: Annotated[float, Field(ge=0.0, le=1.0, description="Safety gap below the cliff for the sweet-spot (the shipped default intensity). 0.15 = default intensity sits 0.15 dial below where facts break")] = 0.15,
+        seed: Annotated[int, Field(description="RNG seed for probe generation + sampling; fix it to reproduce a band")] = 0,
+    ) -> Any:
+        """Calibrate a circuit's usable steering STRENGTH and clamp its served
+        dial to it (Feature 20). Finds two thresholds by two DIFFERENT tests:
+
+          ONSET — the least dial that measurably changes output vs baseline
+          (a drift test, no judge). Below it the circuit is inert.
+
+          CORRECTNESS CLIFF — the most dial where the model's FACTS still hold,
+          judged by an LLM against generated NEUTRAL-topic probes (topics the
+          circuit should not touch, so degradation shows as the circuit's tint
+          corrupting unrelated facts). Perplexity/theme metrics cannot find this
+          — the cliff sits between adjacent dials one giving a correct answer,
+          the next confidently false.
+
+        On success it CLAMPS `budget.intensity_range` to [onset, cliff] (a served
+        dial physically cannot reach the nonsense zone) and sets the default
+        `intensity` to a sweet-spot `margin` below the cliff. The band is marked
+        `provisional` because the probes are generated and it is measured on the
+        discovery-plane model — the probes travel in the export so miLLM can
+        re-verify cheaply. Badge, not gate: it never blocks promotion/steering.
+
+        Holds the shared circuit-GPU lock (same guard as faithfulness); a 409 may
+        name unrelated circuit work — poll and back off, do NOT retry. Returns a
+        task id; POLL `get_circuit` and read `calibration_status`, then
+        `circuit.calibration` for the band (NOT get_task_status — raw Celery id)."""
+        return await client.post(
+            f"/circuits/{circuit_id}/calibration", json_body={
+                "step_budget": step_budget, "probe_count": probe_count,
+                "margin": margin, "seed": seed})
+
+    @mcp.tool()
     async def get_validation_manifest(manifest_id: Annotated[str, Field(description="Validation manifest id from list_validation_manifests")]) -> Any:
         """A validation manifest — the SELF-CONTAINED, reproducible record of a
         validation run (intervention config, baseline, prompts, seeds, null

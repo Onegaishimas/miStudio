@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**93 tools across 13 categories.**
+**94 tools across 13 categories.**
 
 
 ## `admin` (2 tools)
@@ -32,11 +32,12 @@ require `MILLM_API_URL` and are never enabled by default.
 | `delete_experiment` ⚠️ | `DELETE /steering/experiments/{…}` | DESTRUCTIVE: permanently delete a saved steering experiment. |
 | `delete_extraction` ⚠️ | `DELETE /extractions/{…}` | DESTRUCTIVE: permanently delete an extraction job AND every feature, label, and activation example derived from it. |
 
-## `circuits` (20 tools)
+## `circuits` (21 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
 | `build_circuit_from_discovery` | `POST /circuit-discovery/{…}/build-circuit` | Build a circuit from a discovery run's candidates — PREFER THIS over create_circuit when the circuit came from discovery. |
+| `calibrate_circuit_strength` | `POST /circuits/{…}/calibration` | Calibrate a circuit's usable steering STRENGTH and clamp its served dial to it (Feature 20). |
 | `create_circuit` | `POST /circuits` | Create a circuit from hand assembly. |
 | `delete_circuit` ⚠️ | `DELETE /circuits/{…}` | Delete a circuit permanently (its manifests survive — they are first-class records). |
 | `export_circuit_definition` | `GET /circuits/{…}/export` | Export the portable circuit-definition JSON (lossless: rungs, edge types, attribution, manifest refs, provenance all travel). |

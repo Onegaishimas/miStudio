@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Fields a manifest payload MUST carry to be self-contained (no live refs).
 _REQUIRED_PAYLOAD_KEYS = {"intervention", "config", "seeds"}
+# A calibration manifest reproduces a band from its probes + config + the judged
+# trace — a different self-contained set than an intervention manifest.
+_REQUIRED_CALIBRATION_KEYS = {"probes", "config", "band", "trace"}
 
 
 class ManifestError(ValueError):
@@ -26,8 +29,14 @@ class ManifestError(ValueError):
 
 def validate_payload(kind: str, payload: Dict[str, Any]) -> None:
     """A manifest with live refs that can drift is not reproducible."""
-    if kind not in ("edge_batch", "faithfulness", "reproduction"):
+    if kind not in ("edge_batch", "faithfulness", "reproduction", "calibration"):
         raise ManifestError(f"Unknown manifest kind {kind!r}")
+    if kind == "calibration":
+        missing = _REQUIRED_CALIBRATION_KEYS - set(payload or {})
+        if missing:
+            raise ManifestError(
+                "calibration manifest payload missing self-contained keys: "
+                f"{sorted(missing)}")
     if kind in ("edge_batch", "faithfulness"):
         missing = _REQUIRED_PAYLOAD_KEYS - set(payload or {})
         if missing:

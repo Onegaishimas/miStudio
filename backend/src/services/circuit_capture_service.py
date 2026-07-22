@@ -121,6 +121,15 @@ class CircuitCaptureService:
             raise CaptureConflictError(
                 f"Faithfulness pass on {faith.id} is {faith.faithfulness_status} "
                 f"— one GPU circuit task runs at a time; wait or cancel it first")
+        # Calibration (Feature 20) also runs on a circuit and loads a model —
+        # same single-GPU guard, or a calibration could race a capture/
+        # faithfulness and OOM as an opaque task failure.
+        calib = db.query(Circuit).filter(
+            Circuit.calibration_status.in_(("pending", "running"))).first()
+        if calib is not None:
+            raise CaptureConflictError(
+                f"Calibration pass on {calib.id} is {calib.calibration_status} "
+                f"— one GPU circuit task runs at a time; wait or cancel it first")
 
     # ── run creation / validation (called from the endpoint) ─────────────
 
