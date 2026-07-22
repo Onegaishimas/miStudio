@@ -177,7 +177,15 @@ class SteeringRecorderService:
             model_id = cls._artifact_model_id(artifact, db)
             model, tokenizer, structure, disable_cache, device = \
                 load_model_and_structure(model_id, db)
-            _mid, resolved = cls._resolve(artifact, db, device)
+            resolved_mid, resolved = cls._resolve(artifact, db, device)
+            # The two resolution paths (model load vs member resolve) MUST agree —
+            # they used to diverge silently (one fixed, one stale). Steer only
+            # against the model we actually loaded.
+            if resolved_mid != model_id:
+                raise RecordRunError(
+                    f"model id mismatch: loaded {model_id!r} but members resolve "
+                    f"to {resolved_mid!r} — the two cluster resolution paths "
+                    "disagree")
             gen_at, baseline_at = build_steer_generator(
                 model, tokenizer, structure, resolved,
                 disable_cache=disable_cache, max_tokens=cfg["max_tokens"])
@@ -235,12 +243,22 @@ class SteeringRecorderService:
             return c.model_id
         if kind == "cluster":
             from ..models.cluster_profile import ClusterProfile
+            from .steering_core import (SteeringCoreError, _cluster_model_id,
+                                        _cluster_sae_ids_by_layer)
             p = db.query(ClusterProfile).filter(
                 ClusterProfile.id == artifact["cluster_profile_id"]).first()
             if p is None:
                 raise RecordRunError(
                     f"Cluster profile {artifact['cluster_profile_id']} not found")
-            return getattr(p, "model_id", None) or getattr(p, "mistudio_model_id", None)
+            # SAME authority the resolver uses: CLUSTERS-arc profiles store
+            # sae_id but NOT model_id, so derive it from the SAE. (Fixing only
+            # steering_core left this parallel copy returning None — the recorder
+            # loads the model HERE, before _resolve, so a stale copy = "Model
+            # None not found".)
+            try:
+                return _cluster_model_id(p, _cluster_sae_ids_by_layer(p, db), db)
+            except SteeringCoreError as e:
+                raise RecordRunError(str(e)) from e
         raise RecordRunError(f"unknown artifact kind {kind!r}")
 
     @staticmethod
