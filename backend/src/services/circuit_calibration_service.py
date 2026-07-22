@@ -22,7 +22,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from ..core.config import settings
 from .circuit_calibration_search import calibrate
 from .circuit_probe_generator import generate_probes
 
@@ -150,11 +149,22 @@ class CircuitCalibrationService:
             "step_budget": cfg["step_budget"],
             "non_monotone": result.non_monotone,
         }
+        # First-class transcripts: every (dial, prompt) generation the search
+        # produced, so the manifest is analysis-ready for an Opus meaning pass
+        # (not just verdict-only). Lifted from the trace entries that carry a
+        # `generation`.
+        transcripts = [
+            {"dial": t.get("dial"), "prompt": t.get("probe"),
+             "phase": t.get("phase"), "verdict": t.get("verdict"),
+             "generation": t.get("generation")}
+            for t in result.trace if t.get("generation") is not None
+        ]
         manifest_payload = {
             "probes": probes,
             "config": cfg,
             "band": {k: band[k] for k in ("onset", "sweet_spot", "cliff",
                                           "non_monotone")},
+            "transcripts": transcripts,
             "usable_band": result.usable_band,
             "judge_reliable": result.judge_reliable,
             "trace": result.trace,
@@ -400,8 +410,6 @@ class CircuitCalibrationService:
         not in unit tests). The orchestration that consumes these callables
         (build_band, the clamp, the manifest) is fully unit-tested via injection.
         """
-        import torch
-
         seed = int(cfg.get("seed", 0))
         judge_endpoint = cfg.get("judge_endpoint")
         judge_model = cfg.get("judge_model")
@@ -411,135 +419,29 @@ class CircuitCalibrationService:
                 "(an OpenAI-compatible endpoint, e.g. the miLLM instance). Without "
                 "a judge the correctness cliff cannot be found.")
 
-        from ..ml.layer_discovery import (discover_transformer_structure,
-                                          get_hookable_module)
-        from ..ml.model_loader import load_model_from_hf
-        from ..models.external_sae import ExternalSAE
-        from ..models.model import Model, QuantizationFormat
-        from .circuit_capture_service import _load_sae_sync
         from .enhanced_labeling_service import EnhancedLabelingService
-        from .steering_service import resolve_decoder_weight
+        from .steering_core import (SteeringCoreError, build_steer_generator,
+                                    load_model_and_structure,
+                                    resolve_circuit_members)
 
-        # Resolve model + per-layer SAEs + decoder weights + member strengths.
-        model_rec = db.query(Model).filter(Model.id == circuit.model_id).first()
-        if model_rec is None:
-            raise CalibrationRunError(
-                f"Circuit's model {circuit.model_id} not found — cannot generate")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        resolved = (settings.resolve_data_path(model_rec.file_path)
-                    if model_rec.file_path else None)
-        model, tokenizer, _c, _m = load_model_from_hf(
-            repo_id=model_rec.repo_id,
-            quant_format=QuantizationFormat(model_rec.quantization),
-            cache_dir=resolved, device_map=device,
-            local_files_only=bool(resolved and resolved.exists()))
-        model.eval()
-        structure = discover_transformer_structure(model)
-
-        sae_id_by_layer = {int(s["layer"]): s.get("mistudio_sae_id")
-                           for s in (circuit.saes or []) if s.get("layer") is not None}
-        # Per member: (layer, feature_idx, strength). Steering is additive:
-        # residual += dial × strength × W_dec[:, idx].
-        steer = []  # (layer, idx, strength, decoder_weight)
-        wdec_by_layer = {}
-        for L, sid in sae_id_by_layer.items():
-            sae_rec = db.query(ExternalSAE).filter(ExternalSAE.id == sid).first()
-            if sae_rec is None:
-                raise CalibrationRunError(
-                    f"SAE {sid} for layer {L} not found — cannot steer")
-            sae = _load_sae_sync(sae_rec, device)
-            wdec_by_layer[L] = resolve_decoder_weight(sae)
-        for m in (circuit.members or []):
-            feat = m.get("feature") or {}
-            L = m.get("layer")
-            idx = feat.get("feature_idx")
-            strength = float(feat.get("strength") or 0.0)
-            if idx is None:
-                continue
-            if L not in wdec_by_layer:
-                # Silently dropping a member would calibrate a PARTIAL circuit,
-                # so the served (full) circuit steers harder than the measured
-                # band — the served dial could exceed the true cliff. Refuse.
-                # (Contract-valid circuits can't hit this; a raw/legacy JSONB
-                # circuit can — CLAUDE.md's silent-drop class.)
-                raise CalibrationRunError(
-                    f"Member at layer {L} has no SAE decoder weight — the "
-                    "circuit cannot be calibrated as it would be served. Add an "
-                    f"SAE ref for layer {L} (update_circuit saes=...).")
-            steer.append((int(L), int(idx), strength, wdec_by_layer[L]))
-
-        # Correct signature: get_hookable_module(layer_module, hook_type, structure)
-        # — mirror faithfulness/steering. The residual is where additive steering
-        # is applied. (A wrong arg order silently returns None and crashes at the
-        # first hook registration — Feature 20 R2.)
-        hook_layers = {}
-        for L in wdec_by_layer:
-            layer_mod = structure.layers_module[L]
-            hook_layers[L] = get_hookable_module(layer_mod, "residual", structure)
-            if hook_layers[L] is None:
-                raise CalibrationRunError(
-                    f"No hookable residual module for layer {L} on this model")
-
-        # Gemma-2 and other hook-hostile architectures corrupt output under a
-        # forward hook unless the KV cache is disabled — reuse the steering
-        # service's marker check so calibration doesn't measure a garbage band.
-        _marker_hay = f"{model_rec.repo_id} {type(model).__name__}".lower()
-        from .steering_service import _CACHE_INCOMPATIBLE_MARKERS
-        disable_cache = any(mk in _marker_hay
-                            for mk in _CACHE_INCOMPATIBLE_MARKERS)
-
-        def _make_hook(dial):
-            layer_members = {}
-            for (L, idx, strength, wdec) in steer:
-                layer_members.setdefault(L, []).append((idx, strength, wdec))
-
-            def _hook_for(L):
-                def hook(module, inp, output):
-                    is_tuple = isinstance(output, tuple)
-                    hidden = output[0] if is_tuple else output
-                    if hidden.dim() != 3:
-                        return output
-                    with torch.no_grad():
-                        for (idx, strength, wdec) in layer_members[L]:
-                            vec = wdec[:, idx].to(hidden.dtype)
-                            hidden.add_(dial * strength * vec)
-                    return output
-                return hook
-            return {L: _hook_for(L) for L in layer_members}
-
-        def _generate(prompt: str, dial: float, gseed: int) -> str:
-            torch.manual_seed(gseed)
-            inputs = tokenizer(prompt, return_tensors="pt").to(device)
-            handles = []
-            if dial > 0:
-                for L, hook in _make_hook(dial).items():
-                    handles.append(hook_layers[L].register_forward_hook(hook))
-            # GREEDY (deterministic) generation. Hardware-informed (Feature 20
-            # E2E): with sampling, two UNSTEERED draws of a small instruct model
-            # diverge as much as a steered one (a Jaccard floor near 0.8 that no
-            # steering could clear), so onset never fired. Greedy makes
-            # baseline-vs-baseline ~0, so onset reflects only the circuit's tint —
-            # and makes the whole run reproducible (a stated goal).
-            gen_kwargs = dict(max_new_tokens=cls.GEN_MAX_TOKENS, do_sample=False)
-            if disable_cache:
-                gen_kwargs["use_cache"] = False
-            try:
-                with torch.no_grad():
-                    out = model.generate(**inputs, **gen_kwargs)
-            finally:
-                for h in handles:
-                    h.remove()
-            text = tokenizer.decode(out[0, inputs["input_ids"].shape[1]:],
-                                    skip_special_tokens=True)
-            return text
-
-        # Greedy ⇒ seed-independent; the seed arg is retained for interface
-        # compatibility (baseline_at(prompt, seed)) but does not change output.
-        def gen_at(dial, prompt):
-            return _generate(prompt, dial, 0)
-
-        def baseline_at(prompt, s):
-            return _generate(prompt, 0.0, s)
+        # The GENERATION half (model + SAEs + additive residual hook + greedy
+        # gen_at/baseline_at) is the shared steering core — the same code the
+        # recorder uses. Only member RESOLUTION differs per artifact type; for
+        # calibration it is the circuit resolver. SteeringCoreError (missing
+        # model/SAE, silent-drop refusal) surfaces as a CalibrationRunError so
+        # the task's status/lifecycle is unchanged.
+        try:
+            # Load the model FIRST so member resolution puts the decoder weights
+            # on the model's real device (the hook needs W_dec and hidden on the
+            # same device).
+            model, tokenizer, structure, disable_cache, device = \
+                load_model_and_structure(circuit.model_id, db)
+            _model_id, resolved = resolve_circuit_members(circuit, db, device)
+            gen_at, baseline_at = build_steer_generator(
+                model, tokenizer, structure, resolved,
+                disable_cache=disable_cache, max_tokens=cls.GEN_MAX_TOKENS)
+        except SteeringCoreError as e:
+            raise CalibrationRunError(str(e)) from e
 
         # Judge + probe-generation LLM: the enhanced-labeling client, same
         # endpoint/key config as labeling (reasoning-model quirks handled there).

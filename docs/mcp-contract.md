@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**95 tools across 13 categories.**
+**97 tools across 13 categories.**
 
 
 ## `admin` (2 tools)
@@ -32,7 +32,7 @@ require `MILLM_API_URL` and are never enabled by default.
 | `delete_experiment` ⚠️ | `DELETE /steering/experiments/{…}` | DESTRUCTIVE: permanently delete a saved steering experiment. |
 | `delete_extraction` ⚠️ | `DELETE /extractions/{…}` | DESTRUCTIVE: permanently delete an extraction job AND every feature, label, and activation example derived from it. |
 
-## `circuits` (22 tools)
+## `circuits` (24 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
@@ -44,12 +44,14 @@ require `MILLM_API_URL` and are never enabled by default.
 | `export_circuit_slices` | `POST /circuits/{…}/export-slices` | Export per-layer cluster-definition/v1 slices (BR-014) for today's single-SAE consumers (miLLM). |
 | `get_circuit` | `GET /circuits/{…}` | One circuit: members by layer, typed edges with full evidence (statistics, attribution, validation manifest refs), budget, faithfulness, rung + rung_language +  |
 | `get_discovery_results` | `GET /circuit-discovery/{…}` | A discovery run + its report (null-model summary, FDR discipline, held-out replication RATE, stage counts, caps, uncovered seeds, lag-0 disclosure) + ranked can |
+| `get_steering_samples` | `GET /validation-manifests`<br>`GET /validation-manifests/{…}`<br>`GET kind`<br>`GET manifests` | Fetch recorded steering-sample transcripts: per prompt, the unsteered baseline plus the steered output at each recorded dial — the raw material for an Opus mean |
 | `get_validation_manifest` | `GET /validation-manifests/{…}` | A validation manifest — the SELF-CONTAINED, reproducible record of a validation run (intervention config, baseline, prompts, seeds, null summary, per-edge effec |
 | `import_circuit_definition` | `POST /circuits/import` | Import a mistudio.circuit-definition/v1 document (the BR-013 round-trip). |
 | `list_circuit_captures` | `GET /circuit-capture` | List capture runs (status, corpus, layers, split, size, stale flag). |
 | `list_circuits` | `GET /circuits` | List circuits with rung + rung_language on every row. |
 | `list_validation_manifests` | `GET /validation-manifests` | List validation manifests for a discovery run or a circuit. |
 | `promote_circuit` | `POST /circuits/{…}/promote` | Promote a circuit into a loadable multi-layer steering profile — or unpromote it (promoted=false). |
+| `record_steering_samples` | `POST /circuits/steering-samples` | Record (dial, prompt, unsteered_output, steered_output) transcripts on the GPU for a circuit, cluster, or ad-hoc feature set — the raw material for a SEPARATE,  |
 | `reproduce_calibration` | `POST /circuits/calibration-manifests/{…}/reproduce` | Re-run a calibration from its manifest — the SAME probes and seed — and record a reproduction manifest with the band-delta verdict (does the re-measured onset/s |
 | `reproduce_validation` | `POST /validation-manifests/{…}/reproduce` | Re-execute an edge_batch manifest from its payload and compare — the test that a rung-2 claim is reproducible, not a one-off. |
 | `run_attribution_pass` | `POST /circuit-discovery/{…}/attribution` | Tier-2 gradient-attribution pass over a discovery run's candidates: re-ranks the shortlist before 017's causal validation and gates rung-1 (attribution_supporte |

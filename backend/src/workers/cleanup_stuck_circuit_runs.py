@@ -91,6 +91,15 @@ def cleanup_stuck_circuit_runs_task(self):
             if not _task_is_active(circuit.calibration_task_id):
                 circuit.calibration_status = "failed"
                 cleaned += 1
+        # ── steered-transcript recording (own marker table) — Recorder ──
+        # A crashed record job wedges the single-GPU guard just like calibration.
+        from src.models.steering_record_run import SteeringRecordRun
+        for rec in db.query(SteeringRecordRun).filter(
+                SteeringRecordRun.status.in_(("pending", "running")),
+                SteeringRecordRun.updated_at < threshold).all():
+            if not _task_is_active(rec.task_id):
+                rec.status = "failed"
+                cleaned += 1
         if cleaned:
             db.commit()
             logger.info("Reclaimed %d stuck circuit run(s)", cleaned)

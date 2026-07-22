@@ -415,6 +415,57 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             f"/circuits/calibration-manifests/{manifest_id}/reproduce")
 
     @mcp.tool()
+    async def record_steering_samples(
+        artifact: Annotated[dict, Field(description="What to steer: {'kind':'circuit','circuit_id':'crc_...'} | {'kind':'cluster','cluster_profile_id':'clp_...'} | {'kind':'features','model_id':'m_...','features':[{layer,feature_idx,strength,sae_id}]}")],
+        dials: Annotated[list[float], Field(description="Steering strengths to record, e.g. [0.4,0.6,1.0]. Baseline (dial 0) is recorded per prompt automatically. Max 8, each in [0, 2.0]")],
+        prompts: Annotated[list[str], Field(description="Prompts to generate on (max 8). prompts × (1+dials) ≤ 64 total generations")],
+        max_tokens: Annotated[Optional[int], Field(description="Max new tokens per greedy generation. Default 80, max 200")] = None,
+        seed: Annotated[int, Field(description="Generation seed (greedy ⇒ deterministic; kept for reproducibility)")] = 0,
+    ) -> Any:
+        """Record (dial, prompt, unsteered_output, steered_output) transcripts on
+        the GPU for a circuit, cluster, or ad-hoc feature set — the raw material
+        for a SEPARATE, post-run meaning-analysis pass (hand the transcripts to a
+        strong model like Opus 4.8 to read what steering this artifact
+        semantically DID across the dial). NOT a correctness judge — this path is
+        judge-free and needs no judge endpoint. Uses the same steering core and
+        residual hook as calibration, so the transcripts match a calibrated band.
+        Holds the shared single-GPU circuit lock (a 409 may name unrelated work —
+        poll and back off, do NOT retry). Returns a record_run_id + task id; poll
+        get_task_status, then get_steering_samples to read the transcripts."""
+        return await client.post(
+            "/circuits/steering-samples", json_body={
+                "artifact": artifact, "dials": dials, "prompts": prompts,
+                "max_tokens": max_tokens, "seed": seed})
+
+    @mcp.tool()
+    async def get_steering_samples(
+        circuit_id: Annotated[Optional[str], Field(description="miStudio circuit id (crc_...) to fetch CIRCUIT-artifact steering-sample records for (they link to their circuit)")] = None,
+        manifest_id: Annotated[Optional[str], Field(description="A specific steering_samples manifest id (vman_...) — REQUIRED for CLUSTER/FEATURE records, which are not linked to a circuit. The record_steering_samples result and get_task_status carry the manifest_ref")] = None,
+    ) -> Any:
+        """Fetch recorded steering-sample transcripts: per prompt, the unsteered
+        baseline plus the steered output at each recorded dial — the raw material
+        for an Opus meaning-analysis pass.
+
+        Pass `circuit_id` for a circuit-artifact record (they link to the
+        circuit), or `manifest_id` for a specific record — REQUIRED for
+        cluster/feature records, which carry the artifact in the payload and are
+        not circuit-linked (the record_steering_samples result returns the
+        manifest_ref). Exactly one of circuit_id / manifest_id."""
+        if manifest_id and circuit_id:
+            return {"error": "pass EXACTLY one of circuit_id or manifest_id, "
+                    "not both"}
+        if manifest_id:
+            return await client.get(f"/validation-manifests/{manifest_id}")
+        if not circuit_id:
+            return {"error": "pass circuit_id (circuit records) or manifest_id "
+                    "(cluster/feature records)"}
+        resp = await client.get("/validation-manifests", circuit_id=circuit_id)
+        manifests = (resp or {}).get("manifests", []) if isinstance(resp, dict) else []
+        return {"circuit_id": circuit_id,
+                "manifests": [m for m in manifests
+                              if m.get("kind") == "steering_samples"]}
+
+    @mcp.tool()
     async def get_validation_manifest(manifest_id: Annotated[str, Field(description="Validation manifest id from list_validation_manifests")]) -> Any:
         """A validation manifest — the SELF-CONTAINED, reproducible record of a
         validation run (intervention config, baseline, prompts, seeds, null

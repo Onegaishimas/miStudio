@@ -192,10 +192,11 @@ def find_cliff(
         nonlocal steps
         vs: List[Verdict] = []
         for p in probes:
-            v = judge(gen_at(dial, p["prompt"]), p["expected"])
+            gen = gen_at(dial, p["prompt"])          # keep the TEXT, not just the verdict
+            v = judge(gen, p["expected"])
             vs.append(v)
             trace.append({"dial": dial, "phase": "cliff", "probe": p["prompt"],
-                          "verdict": v})
+                          "verdict": v, "generation": gen})
         steps += 1
         return _worst(vs)
 
@@ -289,9 +290,11 @@ def calibrate(
     # inconclusive run, not a broken circuit.
     baseline_verdicts = []
     for p in probes:
-        v = judge(gen_at(0.0, p["prompt"]), p["expected"])
+        gen = gen_at(0.0, p["prompt"])           # the UNSTEERED transcript
+        v = judge(gen, p["expected"])
         baseline_verdicts.append({"dial": 0.0, "phase": "judge_sanity",
-                                  "probe": p["prompt"], "verdict": v})
+                                  "probe": p["prompt"], "verdict": v,
+                                  "generation": gen})
     if _worst([bv["verdict"] for bv in baseline_verdicts]) != "correct":
         return CalibrationResult(
             onset=lo, sweet_spot=lo, cliff=lo,
@@ -337,7 +340,17 @@ def calibrate(
 
     def _judge_worst(dial):
         rejudge_steps[0] += 1
-        vs = [judge(gen_at(dial, p["prompt"]), p["expected"]) for p in probes]
+        vs = []
+        for p in probes:
+            gen = gen_at(dial, p["prompt"])
+            v = judge(gen, p["expected"])
+            vs.append(v)
+            # Record the re-judged generation in the trace so the manifest's
+            # transcripts include the SHIPPED sweet_spot dial — often a dial the
+            # coarse cliff grid never sampled (R1: it was silently omitted).
+            cliff_trace.append({"dial": dial, "phase": "sweet_recheck",
+                                "probe": p["prompt"], "verdict": v,
+                                "generation": gen})
         return _worst(vs)
 
     tries = 0
@@ -345,7 +358,6 @@ def calibrate(
         non_monotone = True   # a break inside [onset, cliff] — flag it
         sweet = round(max(onset, sweet - margin), 4)
         tries += 1
-    total_steps = steps + rejudge_steps[0]
     if sweet <= onset and _judge_worst(onset) != "correct":
         # even onset broke on re-check → no usable band.
         return CalibrationResult(
@@ -355,9 +367,12 @@ def calibrate(
             floor=floor, trace=onset_trace + cliff_trace,
         )
 
+    # steps_used counted FRESH here (not a pre-line-362 snapshot) so the final
+    # _judge_worst(onset) re-check above is included — its generation lands in
+    # the trace, so the count must match (R2).
     return CalibrationResult(
         onset=onset, sweet_spot=sweet, cliff=cliff,
         usable_band=True, non_monotone=non_monotone,
-        steps_used=total_steps, converged=converged, floor=floor,
+        steps_used=steps + rejudge_steps[0], converged=converged, floor=floor,
         trace=onset_trace + cliff_trace,
     )
