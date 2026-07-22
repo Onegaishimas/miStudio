@@ -24,8 +24,8 @@ def _gen_at(dial, prompt):
     return f"dial={dial}|{prompt}"
 
 
-def _baseline_at(prompt):
-    return f"dial=0.0|{prompt}"
+def _baseline_at(prompt, seed=0):
+    return f"dial=0.0|seed={seed}|{prompt}"
 
 
 def _judge(text, expected):
@@ -36,7 +36,10 @@ def _judge(text, expected):
 def _divergence(a, b):
     da = float(a.split("|", 1)[0].split("=")[1])
     db_ = float(b.split("|", 1)[0].split("=")[1])
-    return abs(da - db_)
+    sa = a.split("seed=")[1].split("|")[0] if "seed=" in a else "x"
+    sb = b.split("seed=")[1].split("|")[0] if "seed=" in b else "x"
+    jitter = 0.02 if sa != sb else 0.0
+    return abs(da - db_) + jitter
 
 
 def _fixed_probes_llm(prompt, max_tokens):

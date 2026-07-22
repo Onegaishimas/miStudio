@@ -348,25 +348,20 @@ class CircuitService:
             db: AsyncSession, circuit: Circuit, band: Dict[str, Any],
             expected_version: Optional[int] = None) -> Circuit:
         """Write a completed calibration band onto the circuit AND clamp the
-        serving dial to it (IDL-37) — the "ship the band, not a point" step.
+        serving dial to it (IDL-37) — the ASYNC "ship the band" path, through
+        update() (validators + version bump + optimistic-concurrency 409).
 
-        Two effects, atomically through update() (validators + version bump):
-          1. `calibration` = the band.
-          2. `budget.intensity_range` = [onset, cliff] and `budget.intensity` =
-             sweet_spot — so a served dial physically cannot reach the nonsense
-             zone above the cliff.
+        Calibration itself runs in a SYNC Celery task, which uses the sync
+        sibling `CircuitCalibrationService._write_calibration`. This async
+        method is the entry a future async caller (e.g. an inline API apply, or
+        the eventual serve-time re-verify) would use; both share the invariant
+        checks. Kept — and tested — as the async contract-routed writer so the
+        two never silently diverge; `test_calibration_service` pins that
+        `_write_calibration` produces the same clamp this does.
 
-        Badge, not gate: a circuit with no calibration serves exactly as before;
-        this only runs on a COMPLETED search. A partial/failed search must NOT
-        call this — narrowing the range off a bad measurement would silently
-        disable a working circuit.
+        Badge, not gate: only a COMPLETED, usable band reaches here — a
+        no-usable-band run never clamps (CircuitCalibrationService.run).
         """
-        # The band model already guarantees onset ≤ sweet_spot ≤ cliff, but the
-        # clamp's whole promise is that the SERVED dial cannot exceed the cliff,
-        # and CircuitBudget does not (yet) enforce intensity ∈ intensity_range
-        # (a pre-existing gap — tracked debt, not widened here to avoid a
-        # shared-contract change touching every stored budget). So this one
-        # path, which makes that promise, checks it itself.
         onset, sweet, cliff = band["onset"], band["sweet_spot"], band["cliff"]
         if not (onset <= sweet <= cliff):
             raise CircuitValidationError(
@@ -374,7 +369,9 @@ class CircuitService:
                 f"sweet_spot={sweet}, cliff={cliff}); refusing to clamp the dial "
                 "to an inverted range")
         # Merge the clamp into the EXISTING budget (keep formula_id, per-layer
-        # budgets); only the dial envelope changes.
+        # budgets); only the dial envelope changes. The intensity∈range invariant
+        # is now enforced by CircuitBudget itself, so update()'s contract
+        # validation catches any bad clamp for BOTH this and the sync path.
         budget = dict(circuit.budget or {})
         budget["intensity_range"] = [onset, cliff]
         budget["intensity"] = sweet

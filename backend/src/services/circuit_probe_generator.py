@@ -62,14 +62,36 @@ def _build_prompt(concept: str, n: int) -> str:
     )
 
 
+def _extract_array(raw: str):
+    """Find the first JSON ARRAY OF OBJECTS in the text, tolerant of stray
+    brackets in the surrounding prose (a greedy [...] span breaks on '[1]'
+    footnotes or trailing '[end]' notes; a naive first-array match would return
+    the footnote '[1]'). Scans each '[', raw_decodes, and prefers an array that
+    actually contains dicts — falling back to any list only if none qualifies.
+    """
+    decoder = json.JSONDecoder()
+    first_list = None
+    for i, ch in enumerate(raw):
+        if ch != "[":
+            continue
+        try:
+            obj, _end = decoder.raw_decode(raw[i:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, list):
+            if any(isinstance(x, dict) for x in obj):
+                return obj                      # the real probe array
+            if first_list is None:
+                first_list = obj                # remember, but keep looking
+    if first_list is not None:
+        return first_list
+    raise ValueError("no JSON array in probe-generator response")
+
+
 def _parse(raw: str) -> List[Dict[str, str]]:
     """Extract the JSON array from an LLM response; tolerant of code fences and
-    surrounding prose."""
-    # Prefer a fenced block, else the first [...] span.
-    m = re.search(r"\[.*\]", raw, re.DOTALL)
-    if not m:
-        raise ValueError("no JSON array in probe-generator response")
-    data = json.loads(m.group(0))
+    stray brackets in surrounding prose."""
+    data = _extract_array(raw)
     probes: List[Dict[str, str]] = []
     for item in data:
         if not isinstance(item, dict):
@@ -83,17 +105,56 @@ def _parse(raw: str) -> List[Dict[str, str]]:
     return probes
 
 
-def _looks_on_concept(probe: Dict[str, str], member_labels: List[str]) -> bool:
-    """True if the probe mentions the circuit's concept — which would make it
-    NON-falsifiable for cliff detection. A word-boundary substring check over
-    the label tokens; conservative (better to drop a borderline probe than to
-    calibrate against an undetectable cliff)."""
-    hay = (probe.get("prompt", "") + " " + probe.get("expected", "")).lower()
+#: Generic words that carry no concept signal. A label token in this set is NOT
+#: used to flag a probe on-concept — otherwise a neutral geography/science probe
+#: that happens to contain "language"/"state"/"time" would be wrongly dropped,
+#: and if a common word recurred it could nuke EVERY probe and silently defeat
+#: the LLM generator. Distinctive short words ("pun", "war", "wit") are NOT here,
+#: so they still match — which the old len>=4 gate wrongly skipped.
+_STOPWORDS = frozenset("""
+a an the of to in on at for and or but with without within into onto from by as
+is are was were be been being do does did has have had will would can could may
+might must should this that these those it its their his her they them we you i
+about above after again against all am any because before below between both
+each few more most other some such only own same so than too very s t just
+language languages word words phrase phrases text texts term terms tone style
+reference references context contexts pattern patterns kind type form forms
+sense meaning related informal formal general specific common usage use used
+character characters situation situations thing things part parts group groups
+feature features concept concepts topic topics subject content example examples
+""".split())
+
+#: A label token must be at least this long to be considered a concept signal —
+#: but ONLY as a floor below which even non-stopwords are too generic to trust.
+#: Kept at 3 so genuine short concepts ("pun", "gag", "war", "wit") still count.
+_MIN_CONCEPT_LEN = 3
+
+
+def _concept_tokens(member_labels: List[str]) -> set:
+    """The distinctive tokens that identify the circuit's concept — label words
+    that are neither stopwords nor too short."""
+    toks = set()
     for label in member_labels:
         for tok in re.split(r"[^a-z0-9]+", str(label).lower()):
-            if len(tok) >= 4 and re.search(rf"\b{re.escape(tok)}", hay):
-                return True
-    return False
+            if len(tok) >= _MIN_CONCEPT_LEN and tok not in _STOPWORDS:
+                toks.add(tok)
+    return toks
+
+
+def _looks_on_concept(probe: Dict[str, str], member_labels: List[str]) -> bool:
+    """True if the probe mentions a DISTINCTIVE concept token (whole word) —
+    which would make it non-falsifiable for cliff detection.
+
+    Whole-word match against the concept tokens only (stopwords excluded), so a
+    neutral probe containing a generic label word is NOT dropped, while a probe
+    genuinely about the concept (including short concepts like "pun") IS.
+    """
+    concept = _concept_tokens(member_labels)
+    if not concept:
+        return False
+    hay = (probe.get("prompt", "") + " " + probe.get("expected", "")).lower()
+    hay_tokens = set(re.split(r"[^a-z0-9]+", hay))
+    return bool(concept & hay_tokens)
 
 
 def generate_probes(

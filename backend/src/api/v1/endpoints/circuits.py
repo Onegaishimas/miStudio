@@ -319,6 +319,11 @@ class CalibrationBody(BaseModel):
     probe_count: int = Field(3, ge=1, le=10)
     margin: float = Field(0.15, ge=0.0, le=1.0)
     seed: int = 0
+    # The judge / probe-generation LLM (OpenAI-compatible), carried per request
+    # like an enhanced-labeling job. Required for a real run — the correctness
+    # cliff cannot be found without a judge.
+    judge_endpoint: Optional[str] = None
+    judge_model: Optional[str] = None
 
 
 @router.post("/{circuit_id}/calibration", status_code=202)

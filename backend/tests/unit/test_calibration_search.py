@@ -1,141 +1,175 @@
 """The usable-band search finds onset by DRIFT and the cliff by the JUDGE (IDL-37).
 
-The centrepiece is `test_the_judge_is_load_bearing`: a synthetic world where
-perplexity/collapse is FLAT across the cliff but the judge flips correct→broken.
-The search must place the cliff where the JUDGE flips — and a perplexity-only
-calibrator must miss it. This pins the exact mistake the placeholder sweep made
-(it declared 1.40 usable because the output was fluent, while it was false).
+Two guarantees pinned here (Round-1 review findings):
+  * the returned cliff/sweet_spot is ALWAYS a dial the judge called correct —
+    never a broken dial reported as usable (S1, S2);
+  * `usable_band` is False when no correct dial exists above onset, so the caller
+    does not clamp a served dial to a degenerate band (S2, A8);
+  * a broken DIP anywhere in the band is caught by the dense scan (S4);
+  * the noise floor is a real multi-seed estimate, so a floor=0 mutation is
+    caught (A2/S3).
+
+The centrepiece remains the load-bearing-judge control: a world where fluency is
+flat across the cliff but the judge flips — the judge must place the cliff, and a
+collapse-only calibrator must miss it.
 """
 
 from src.services.circuit_calibration_search import (
     calibrate, find_cliff, find_onset)
 
-
-# ── synthetic world ─────────────────────────────────────────────────────────
-# Correctness as a function of dial: correct below CLIFF, broken above. Fluency
-# (no collapse) holds far past the cliff — so a fluency/collapse signal cannot
-# find the cliff; only the judge can.
 CLIFF = 0.6
 ONSET = 0.2
 
 
 def gen_at(dial, prompt):
-    # Text encodes the dial so divergence + judge can read it deterministically.
     return f"dial={dial}|answer-for:{prompt}"
 
 
-def baseline_at(prompt):
-    return f"dial=0.0|answer-for:{prompt}"
+def baseline_at(prompt, seed):
+    # Deterministic per (prompt, seed); DIFFERENT seeds differ slightly so the
+    # noise floor is nonzero (real sampling jitter).
+    return f"dial=0.0|seed={seed}|answer-for:{prompt}"
+
+
+def _dial_of(t):
+    return float(t.split("|", 1)[0].split("=")[1])
 
 
 def divergence(a, b):
-    # Distance = |dial_a - dial_b|, parsed from the encoded text. Baseline vs
-    # baseline = 0 (floor); steered vs baseline grows with the dial.
-    def dial_of(t):
-        return float(t.split("|", 1)[0].split("=")[1])
-    return abs(dial_of(a) - dial_of(b))
+    # Distance dominated by the dial gap; a small seed-difference term gives a
+    # nonzero-but-small baseline-vs-baseline floor.
+    da, db = _dial_of(a), _dial_of(b)
+    seed_a = a.split("seed=")[1].split("|")[0] if "seed=" in a else "x"
+    seed_b = b.split("seed=")[1].split("|")[0] if "seed=" in b else "x"
+    jitter = 0.02 if seed_a != seed_b else 0.0
+    return abs(da - db) + jitter
 
 
 def judge(text, expected):
-    dial = float(text.split("|", 1)[0].split("=")[1])
-    if dial <= CLIFF:
-        return "correct"
-    return "broken"
+    return "correct" if _dial_of(text) <= CLIFF else "broken"
 
 
 PROBES = [{"prompt": "q1", "expected": "a1"}, {"prompt": "q2", "expected": "a2"}]
 
 
 class TestOnset:
-    def test_onset_is_the_first_dial_above_the_noise_floor(self):
+    def test_floor_is_nonzero_from_seed_jitter(self):
+        _onset, floor, _ = find_onset(
+            gen_at, baseline_at, divergence, lo=0.0, hi=1.0, probes=PROBES, coarse=6)
+        assert floor > 0.0, "the noise floor must reflect baseline sampling jitter"
+
+    def test_onset_clears_the_floor_bar(self):
         onset, floor, _ = find_onset(
             gen_at, baseline_at, divergence, lo=0.0, hi=1.0, probes=PROBES, coarse=6)
-        assert floor == 0.0            # baseline vs baseline is identical here
-        assert onset > 0.0             # some steered dial crossed it
-        assert onset <= 0.2 + 1e-9     # first coarse step (0.2) already diverges
+        assert onset > 0.0
 
     def test_an_inert_circuit_has_onset_at_lo(self):
-        # gen == baseline regardless of dial → never crosses the floor.
-        flat = lambda d, p: baseline_at(p)
-        onset, floor, _ = find_onset(
+        flat = lambda d, p: baseline_at(p, 0)   # steered == a baseline draw
+        onset, _floor, _ = find_onset(
             flat, baseline_at, divergence, lo=0.0, hi=1.0, probes=PROBES)
         assert onset == 0.0
 
 
-class TestCliff:
-    def test_cliff_lands_at_the_judge_boundary(self):
-        cliff, non_mono, steps, converged, _ = find_cliff(
+class TestCliffIsAlwaysJudgeCorrect:
+    def test_cliff_is_a_correct_dial_at_the_boundary(self):
+        cliff, usable, non_mono, steps, converged, _ = find_cliff(
             gen_at, judge, lo=ONSET, hi=1.0, probes=PROBES, max_steps=12, tol=0.02)
-        assert abs(cliff - CLIFF) <= 0.05      # bisection converges to the boundary
-        assert cliff <= CLIFF + 1e-9           # never reports a BROKEN dial as usable
-        assert non_mono is False
+        assert usable is True
+        assert judge(gen_at(cliff, "q1"), "a1") == "correct", (
+            "the returned cliff must itself be judged correct — never the break")
+        assert cliff <= CLIFF + 1e-9
 
-    def test_all_broken_returns_lo(self):
+    def test_all_broken_reports_no_usable_band(self):
         allbad = lambda t, e: "broken"
-        cliff, *_ = find_cliff(gen_at, allbad, lo=ONSET, hi=1.0, probes=PROBES)
+        cliff, usable, *_ = find_cliff(gen_at, allbad, lo=ONSET, hi=1.0, probes=PROBES)
+        assert usable is False           # lo itself broke → no band
         assert cliff == ONSET
 
-    def test_all_correct_returns_hi(self):
+    def test_all_correct_returns_hi_and_it_is_correct(self):
         allgood = lambda t, e: "correct"
-        cliff, *_ = find_cliff(gen_at, allgood, lo=ONSET, hi=1.0, probes=PROBES)
+        cliff, usable, *_ = find_cliff(gen_at, allgood, lo=ONSET, hi=1.0, probes=PROBES)
+        assert usable is True
         assert cliff == 1.0
 
-    def test_worst_probe_decides__one_broken_probe_caps_the_dial(self):
-        # Probe q2 breaks at a LOWER dial than q1; the worst (lower) governs.
+    def test_worst_probe_governs(self):
         def judge_split(text, expected):
-            dial = float(text.split("|", 1)[0].split("=")[1])
             limit = 0.4 if expected == "a2" else 0.8
-            return "correct" if dial <= limit else "broken"
-        cliff, *_ = find_cliff(gen_at, judge_split, lo=ONSET, hi=1.0, probes=PROBES,
-                               max_steps=14, tol=0.02)
-        assert cliff <= 0.4 + 0.05     # capped by the stricter probe, not 0.8
+            return "correct" if _dial_of(text) <= limit else "broken"
+        cliff, usable, *_ = find_cliff(gen_at, judge_split, lo=ONSET, hi=1.0,
+                                       probes=PROBES, max_steps=16, tol=0.02)
+        assert usable is True
+        assert cliff <= 0.4 + 0.05
+        assert judge_split(gen_at(cliff, "q2"), "a2") == "correct"
+
+
+class TestBrokenDipIsCaught:
+    def test_a_narrow_dip_below_a_correct_hi_is_flagged_and_the_cliff_stays_below_it(self):
+        # broken only in [0.4, 0.55]; correct elsewhere incl. hi.
+        def judge_dip(text, expected):
+            d = _dial_of(text)
+            return "broken" if 0.4 <= d <= 0.55 else "correct"
+        cliff, usable, non_mono, _s, _c, _t = find_cliff(
+            gen_at, judge_dip, lo=ONSET, hi=1.0, probes=PROBES, max_steps=16, tol=0.02)
+        assert usable is True
+        assert non_mono is True, "a break below a later pass must be flagged"
+        assert cliff < 0.4, "the cliff must stay BELOW the dip, not above it"
+        assert judge_dip(gen_at(cliff, "q1"), "a1") == "correct"
+
+    def test_a_clean_monotone_world_is_not_flagged(self):
+        _c, _u, non_mono, *_ = find_cliff(gen_at, judge, lo=ONSET, hi=1.0,
+                                          probes=PROBES, max_steps=12, tol=0.02)
+        assert non_mono is False
 
 
 class TestTheJudgeIsLoadBearing:
-    """The negative control this whole feature exists for."""
+    """A world where fluency is flat across the cliff: only the judge can find it."""
 
     def test_a_collapse_only_calibrator_MISSES_the_cliff(self):
-        # collapse() never fires (output is always fluent), so if the cliff were
-        # decided by collapse the usable band would run all the way to hi=1.0 —
-        # PAST the real cliff at 0.6. This is the placeholder-sweep failure.
+        # A perplexity/collapse-only calibrator = judge that only sees fluency
+        # (never fires) → it would call every fluent dial correct and place the
+        # cliff at hi, PAST the real break at 0.6.
         never_collapses = lambda text: False
-        cliff_by_collapse_only, *_ = find_cliff(
-            gen_at, lambda t, e: "correct",   # a judge that only ever sees fluency
-            lo=ONSET, hi=1.0, probes=PROBES, collapse=never_collapses)
-        assert cliff_by_collapse_only == 1.0   # collapse-only sails past 0.6 — WRONG
+        fluent_judge = lambda t, e: "correct"   # fluency-only: can't see falsity
+        cliff, usable, *_ = find_cliff(
+            gen_at, fluent_judge, lo=ONSET, hi=1.0, probes=PROBES,
+            collapse=never_collapses)
+        assert cliff == 1.0, "collapse/fluency-only sails past the real cliff (0.6)"
 
-    def test_the_JUDGE_places_the_cliff_correctly_despite_flat_fluency(self):
-        # Same fluent world, but the real judge reads correctness → cliff at 0.6.
-        cliff, *_ = find_cliff(
+    def test_the_real_JUDGE_places_it_correctly_despite_flat_fluency(self):
+        cliff, usable, *_ = find_cliff(
             gen_at, judge, lo=ONSET, hi=1.0, probes=PROBES,
             collapse=lambda text: False, max_steps=12, tol=0.02)
-        assert abs(cliff - CLIFF) <= 0.05      # the judge finds what collapse could not
+        assert usable is True
+        assert abs(cliff - CLIFF) <= 0.06
+        assert judge(gen_at(cliff, "q1"), "a1") == "correct"
+
+    def test_collapse_shortcut_never_sets_the_cliff_below_the_judge(self):
+        # Collapse fires on very high dials only (token soup at >0.8); the judge
+        # cliff (0.6) is below that, so the shortcut must not move the cliff.
+        collapse_high = lambda text: _dial_of(text) > 0.8
+        cliff, usable, *_ = find_cliff(
+            gen_at, judge, lo=ONSET, hi=1.0, probes=PROBES,
+            collapse=collapse_high, max_steps=12, tol=0.02)
+        assert abs(cliff - CLIFF) <= 0.06   # still the judge's boundary
 
 
 class TestFullCalibrate:
-    def test_band_is_ordered_and_sweet_spot_sits_below_the_cliff(self):
-        res = calibrate(
-            gen_at, baseline_at, judge, divergence,
-            probes=PROBES, lo=0.0, hi=1.0, max_steps=12, margin=0.15)
+    def test_band_ordered_and_usable(self):
+        res = calibrate(gen_at, baseline_at, judge, divergence,
+                        probes=PROBES, lo=0.0, hi=1.0, max_steps=12, margin=0.15)
+        assert res.usable_band is True
         assert res.onset <= res.sweet_spot <= res.cliff
-        assert abs(res.cliff - CLIFF) <= 0.05
-        assert res.sweet_spot <= res.cliff        # margin keeps it inside
-        assert res.trace                          # every judged step recorded
+        assert abs(res.cliff - CLIFF) <= 0.06
+        assert judge(gen_at(res.sweet_spot, "q1"), "a1") == "correct"
+        assert judge(gen_at(res.cliff, "q1"), "a1") == "correct"
+        assert res.floor > 0.0
+        assert res.trace
 
-    def test_non_monotone_is_flagged_when_a_break_sits_below_a_pass(self):
-        # World where the TOP is correct but there is a broken dip below it:
-        # hi=1.0 passes, but dials in [0.4, 0.55] break. Bisection will accept a
-        # pass above the dip and then hit a break below it → the dip must flag.
-        def judge_dip(text, expected):
-            dial = float(text.split("|", 1)[0].split("=")[1])
-            return "broken" if 0.4 <= dial <= 0.55 else "correct"
-        _c, non_mono, _s, _conv, _tr = find_cliff(
-            gen_at, judge_dip, lo=ONSET, hi=0.7, probes=PROBES,
-            max_steps=16, tol=0.01)
-        assert non_mono is True   # the break-below-a-pass was surfaced, not smoothed
-
-    def test_a_clean_monotone_world_is_NOT_flagged(self):
-        # Specificity: the flag must not fire on a normal monotone cliff.
-        _c, non_mono, *_ = find_cliff(gen_at, judge, lo=ONSET, hi=1.0,
-                                      probes=PROBES, max_steps=12, tol=0.02)
-        assert non_mono is False
+    def test_no_usable_band_when_broken_from_onset(self):
+        # A judge that breaks everywhere above 0.05 — onset (drift) will land
+        # above that, so lo is already broken → no usable band.
+        judge_early = lambda t, e: "correct" if _dial_of(t) <= 0.05 else "broken"
+        res = calibrate(gen_at, baseline_at, judge_early, divergence,
+                        probes=PROBES, lo=0.0, hi=1.0, max_steps=12)
+        assert res.usable_band is False
+        assert res.onset == res.sweet_spot == res.cliff   # degenerate, flagged

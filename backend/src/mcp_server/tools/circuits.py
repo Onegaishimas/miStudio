@@ -368,6 +368,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         probe_count: Annotated[int, Field(ge=1, le=10, description="How many neutral-topic falsifiable probes to generate and judge at each dial")] = 3,
         margin: Annotated[float, Field(ge=0.0, le=1.0, description="Safety gap below the cliff for the sweet-spot (the shipped default intensity). 0.15 = default intensity sits 0.15 dial below where facts break")] = 0.15,
         seed: Annotated[int, Field(description="RNG seed for probe generation + sampling; fix it to reproduce a band")] = 0,
+        judge_endpoint: Annotated[Optional[str], Field(description="OpenAI-compatible endpoint for the correctness JUDGE + probe generation (e.g. the miLLM instance's /v1). REQUIRED for a real run — the cliff cannot be found without a judge")] = None,
+        judge_model: Annotated[Optional[str], Field(description="Model name the judge_endpoint serves (e.g. the served model id from millm_status)")] = None,
     ) -> Any:
         """Calibrate a circuit's usable steering STRENGTH and clamp its served
         dial to it (Feature 20). Finds two thresholds by two DIFFERENT tests:
@@ -396,7 +398,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.post(
             f"/circuits/{circuit_id}/calibration", json_body={
                 "step_budget": step_budget, "probe_count": probe_count,
-                "margin": margin, "seed": seed})
+                "margin": margin, "seed": seed,
+                "judge_endpoint": judge_endpoint, "judge_model": judge_model})
 
     @mcp.tool()
     async def get_validation_manifest(manifest_id: Annotated[str, Field(description="Validation manifest id from list_validation_manifests")]) -> Any:

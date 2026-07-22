@@ -52,6 +52,15 @@ def run_circuit_calibration(self, circuit_id: str,
 
 def _set_status(db, circuit_id, status):
     from ..models.circuit import Circuit
+    # If the run failed on a DB error, `db` is in an aborted transaction and any
+    # query on it raises "current transaction is aborted". Roll back FIRST so the
+    # status write lands — otherwise the in-flight marker is never cleared and the
+    # single-GPU guard stays wedged until the 60-min cleanup.
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Rollback before calibration_status write failed for %s",
+                         circuit_id)
     try:
         row = db.query(Circuit).filter(Circuit.id == circuit_id).first()
         if row is not None:

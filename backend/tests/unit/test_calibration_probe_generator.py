@@ -51,6 +51,58 @@ class TestNeutrality:
             assert not _looks_on_concept(p, ["parody", "humor", "comedians"])
 
 
+class TestNeutralityDoesNotOverMatch:
+    """Round-1: the old length>=4 prefix match dropped neutral probes containing
+    generic label words, and MISSED short concept words. Fixed via a stopword
+    set + whole-word match."""
+
+    def test_a_generic_label_word_does_NOT_drop_a_neutral_probe(self):
+        # Labels contain the generic word "language"; a neutral geography probe
+        # legitimately mentions "language" and must NOT be flagged on-concept.
+        assert _looks_on_concept(
+            {"prompt": "What language is spoken in Brazil?", "expected": "Portuguese"},
+            ["informal language and tone", "references to jokes"]) is False
+
+    def test_generic_labels_do_not_nuke_all_neutral_probes(self):
+        import json
+        def fake_llm(prompt, max_tokens):
+            return json.dumps([
+                {"prompt": "What language is spoken in Brazil?", "expected": "Portuguese"},
+                {"prompt": "What is the capital of Japan?", "expected": "Tokyo"},
+            ])
+        probes = generate_probes(
+            ["informal language and tone", "general references"],
+            llm_call=fake_llm, n=3)
+        # Both survive — neither was wrongly flagged — so the LLM output is used,
+        # NOT the static fallback.
+        assert len(probes) == 2
+        assert probes != _FALLBACK_PROBES[:2]
+
+    def test_a_SHORT_concept_word_is_still_detected(self):
+        # 'pun' (3 chars) was skipped by the old len>=4 gate → on-concept probes
+        # survived → undetectable cliff. Now caught.
+        assert _looks_on_concept(
+            {"prompt": "Tell me a pun about cats", "expected": "n/a"},
+            ["pun", "gag", "wit"]) is True
+
+    def test_a_neutral_probe_with_short_concepts_present_is_kept(self):
+        assert _looks_on_concept(
+            {"prompt": "What is the capital of Peru?", "expected": "Lima"},
+            ["pun", "gag", "wit"]) is False
+
+
+class TestParseToleratesStrayBrackets:
+    def test_footnote_brackets_before_the_array(self):
+        raw = 'See [1] for context. Here: [{"prompt":"Q","expected":"A"}]'
+        probes = generate_probes(["parody"], llm_call=lambda p, m: raw, n=1)
+        assert probes == [{"prompt": "Q", "expected": "A"}]
+
+    def test_trailing_bracket_note_after_the_array(self):
+        raw = '[{"prompt":"What is 2+2?","expected":"4"}] and a note [end]'
+        probes = generate_probes(["parody"], llm_call=lambda p, m: raw, n=1)
+        assert probes == [{"prompt": "What is 2+2?", "expected": "4"}]
+
+
 class TestRobustness:
     def test_no_llm_uses_neutral_fallback(self):
         probes = generate_probes(["parody"], llm_call=None, n=2)

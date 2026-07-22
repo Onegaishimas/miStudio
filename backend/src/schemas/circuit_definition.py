@@ -160,6 +160,29 @@ class CircuitBudget(BaseModel):
     intensity: float = Field(1.0, ge=0.0, le=2.0)
     intensity_range: List[float] = Field(default_factory=lambda: [0.0, 2.0])
 
+    @model_validator(mode="after")
+    def _dial_within_range(self) -> "CircuitBudget":
+        # The whole calibration guarantee ("a served dial cannot exceed the
+        # cliff") rests on intensity_range being the true envelope AND intensity
+        # sitting inside it. Enforce that here so it holds for EVERY write/import,
+        # not just the clamp path (Feature 20 review). Kept permissive on shape
+        # (2 ordered elements) so it can't reject a pre-existing document that
+        # already satisfied the invariant — the default [0,2] with intensity 1.0
+        # passes, as do all calibrated bands.
+        r = self.intensity_range
+        if len(r) != 2:
+            raise ValueError(
+                f"intensity_range must be [lo, hi]; got {r!r}")
+        lo, hi = r
+        if lo > hi:
+            raise ValueError(
+                f"intensity_range must be ordered [lo, hi]; got [{lo}, {hi}]")
+        if not (lo <= self.intensity <= hi):
+            raise ValueError(
+                f"intensity {self.intensity} is outside its intensity_range "
+                f"[{lo}, {hi}] — a served dial would start outside the envelope")
+        return self
+
 
 class CircuitFaithfulness(BaseModel):
     """Circuit-level faithfulness snapshot (CIRCUITS-002 A.7); badge, not gate."""
