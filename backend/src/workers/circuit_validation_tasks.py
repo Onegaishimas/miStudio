@@ -88,6 +88,15 @@ def run_circuit_faithfulness(self, circuit_id: str,
 
 def _set_faithfulness_status(db, circuit_id, status):
     from ..models.circuit import Circuit
+    # Roll back FIRST: if the run failed on a DB error, `db` is in an aborted
+    # transaction and the status write below would itself raise, leaving the
+    # in-flight marker set and wedging the single-GPU guard (Feature 20 review —
+    # pre-existing, same shape as the calibration task).
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Rollback before faithfulness_status write failed for %s",
+                         circuit_id)
     try:
         row = db.query(Circuit).filter(Circuit.id == circuit_id).first()
         if row is not None:

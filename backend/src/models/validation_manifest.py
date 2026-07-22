@@ -29,7 +29,7 @@ class ValidationManifest(Base):
     __tablename__ = "validation_manifests"
 
     id = Column(String(36), primary_key=True, default=_vman_id)
-    kind = Column(String(24), nullable=False)  # edge_batch | faithfulness | reproduction
+    kind = Column(String(24), nullable=False)  # edge_batch | faithfulness | reproduction | calibration
 
     # Soft parent refs (prunable working data — the manifest is the record).
     discovery_run_id = Column(String(36), nullable=True)

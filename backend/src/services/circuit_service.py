@@ -48,7 +48,8 @@ class CircuitService:
     def _validate(name: str, narrative: Optional[str], saes: list, members: list,
                   edges: list, budget: Optional[dict],
                   faithfulness: Optional[dict] = None,
-                  discovery: Optional[dict] = None) -> CircuitDefinitionV1:
+                  discovery: Optional[dict] = None,
+                  calibration: Optional[dict] = None) -> CircuitDefinitionV1:
         """Round-trip through the contract model — its validators are the law."""
         # An SAE entry that names no id becomes `mistudio_sae_id: null`, which
         # exports clean and only fails at miLLM as an unbound SAE. The contract
@@ -97,6 +98,7 @@ class CircuitService:
                 edges=edges,
                 budget=budget,
                 faithfulness=faithfulness,
+                calibration=calibration,
                 discovery=discovery,
             )
         except Exception as e:  # pydantic ValidationError → domain error
@@ -207,6 +209,7 @@ class CircuitService:
             data["name"], data.get("narrative"), data.get("saes", []),
             data.get("members", []), data.get("edges", []), data.get("budget"),
             data.get("faithfulness"), data.get("discovery"),
+            data.get("calibration"),
         )
         # hf_id is the cross-instance-stable model identifier (R3-B2). When
         # the caller didn't supply one but referenced a local model, fill it
@@ -228,6 +231,8 @@ class CircuitService:
             budget=defn.budget.model_dump(mode="json") if defn.budget else None,
             faithfulness=(defn.faithfulness.model_dump(mode="json")
                           if defn.faithfulness else None),
+            calibration=(defn.calibration.model_dump(mode="json")
+                         if defn.calibration else None),
             discovery=(defn.discovery.model_dump(mode="json")
                        if defn.discovery else None),
             rung=int(defn.displayed_rung()),
@@ -291,11 +296,12 @@ class CircuitService:
             "edges": data.get("edges", circuit.edges),
             "budget": data.get("budget", circuit.budget),
             "faithfulness": data.get("faithfulness", circuit.faithfulness),
+            "calibration": data.get("calibration", circuit.calibration),
         }
         defn = CircuitService._validate(
             merged["name"], merged["narrative"], merged["saes"],
             merged["members"], merged["edges"], merged["budget"],
-            merged["faithfulness"],
+            merged["faithfulness"], calibration=merged["calibration"],
         )
         if "granularity" in data and data["granularity"] is not None:
             circuit.granularity = data["granularity"]
@@ -307,6 +313,8 @@ class CircuitService:
         circuit.budget = defn.budget.model_dump(mode="json") if defn.budget else None
         circuit.faithfulness = (defn.faithfulness.model_dump(mode="json")
                                 if defn.faithfulness else None)
+        circuit.calibration = (defn.calibration.model_dump(mode="json")
+                               if defn.calibration else None)
         circuit.rung = int(defn.displayed_rung())
         circuit.version = (circuit.version or 1) + 1  # optimistic-lock bump
         await db.commit()
@@ -334,6 +342,44 @@ class CircuitService:
                 e.update(edge_updates[key])
         return await CircuitService.update(
             db, circuit, {"edges": edges}, expected_version=expected_version)
+
+    @staticmethod
+    async def apply_calibration(
+            db: AsyncSession, circuit: Circuit, band: Dict[str, Any],
+            expected_version: Optional[int] = None) -> Circuit:
+        """Write a completed calibration band onto the circuit AND clamp the
+        serving dial to it (IDL-37) — the ASYNC "ship the band" path, through
+        update() (validators + version bump + optimistic-concurrency 409).
+
+        Calibration itself runs in a SYNC Celery task, which uses the sync
+        sibling `CircuitCalibrationService._write_calibration`. This async
+        method is the entry a future async caller (e.g. an inline API apply, or
+        the eventual serve-time re-verify) would use; both share the invariant
+        checks. Kept — and tested — as the async contract-routed writer so the
+        two never silently diverge; `test_calibration_service` pins that
+        `_write_calibration` produces the same clamp this does.
+
+        Badge, not gate: only a COMPLETED, usable band reaches here — a
+        no-usable-band run never clamps (CircuitCalibrationService.run).
+        """
+        onset, sweet, cliff = band["onset"], band["sweet_spot"], band["cliff"]
+        if not (onset <= sweet <= cliff):
+            raise CircuitValidationError(
+                f"calibration band is not ordered (onset={onset}, "
+                f"sweet_spot={sweet}, cliff={cliff}); refusing to clamp the dial "
+                "to an inverted range")
+        # Merge the clamp into the EXISTING budget (keep formula_id, per-layer
+        # budgets); only the dial envelope changes. The intensity∈range invariant
+        # is now enforced by CircuitBudget itself, so update()'s contract
+        # validation catches any bad clamp for BOTH this and the sync path.
+        budget = dict(circuit.budget or {})
+        budget["intensity_range"] = [onset, cliff]
+        budget["intensity"] = sweet
+        return await CircuitService.update(
+            db, circuit,
+            {"budget": budget, "calibration": band},
+            expected_version=expected_version,
+        )
 
     @staticmethod
     async def delete(db: AsyncSession, circuit: Circuit) -> None:
@@ -378,6 +424,7 @@ class CircuitService:
             circuit.name, circuit.narrative, circuit.saes, circuit.members,
             circuit.edges, circuit.budget, circuit.faithfulness,
             getattr(circuit, "discovery", None),
+            getattr(circuit, "calibration", None),
         )
         defn.model = DefinitionModelRef(
             mistudio_model_id=circuit.model_id,

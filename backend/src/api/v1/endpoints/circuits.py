@@ -314,6 +314,109 @@ async def start_faithfulness(circuit_id: str, body: FaithfulnessBody,
     return {"circuit_id": circuit_id, "task_id": task.id, "status": "queued"}
 
 
+class CalibrationBody(BaseModel):
+    step_budget: int = Field(10, ge=2, le=40)
+    probe_count: int = Field(3, ge=1, le=10)
+    margin: float = Field(0.15, ge=0.0, le=1.0)
+    seed: int = 0
+    # The judge / probe-generation LLM (OpenAI-compatible), carried per request
+    # like an enhanced-labeling job. Required for a real run — the correctness
+    # cliff cannot be found without a judge.
+    judge_endpoint: Optional[str] = None
+    judge_model: Optional[str] = None
+
+
+@router.post("/{circuit_id}/calibration", status_code=202)
+async def start_calibration(circuit_id: str, body: CalibrationBody,
+                            db: AsyncSession = Depends(get_db)):
+    """Launch a strength-calibration pass (Feature 20 / IDL-37) on a circuit:
+    find the usable dial band — onset (min influence above baseline noise) and
+    the correctness cliff (max before the model's facts break, judged against
+    generated neutral-topic probes) — then clamp the served dial to it. GPU-
+    guarded (shares the single-GPU circuit guard, like faithfulness). Badge, not
+    gate. 404 if the circuit is missing; 409 if it has no members or a pass is
+    already in flight. Poll get_task_status, then get_circuit for the band."""
+    from ....services.circuit_calibration_service import CalibrationConfigError
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
+    from ....workers.circuit_calibration_tasks import run_circuit_calibration
+
+    circuit = await _get_or_404(db, circuit_id)
+    if not circuit.members:
+        raise HTTPException(status_code=409, detail="Circuit has no members")
+    try:
+        from ....services.circuit_calibration_service import (
+            CircuitCalibrationService)
+        config = CircuitCalibrationService.create_config(body.model_dump())
+    except CalibrationConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    if circuit.calibration_status in ("pending", "running"):
+        raise HTTPException(status_code=409,
+                            detail="A calibration pass is already in flight")
+    from ....api.v1.endpoints.circuit_discovery import _run_sync
+
+    def _guard_and_mark(sync_db):
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        row = sync_db.query(Circuit).filter(Circuit.id == circuit_id).first()
+        row.calibration_status = "pending"
+        sync_db.commit()
+
+    try:
+        await _run_sync(db, _guard_and_mark)
+    except CaptureConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    task = run_circuit_calibration.delay(circuit_id, config)
+    await db.execute(
+        Circuit.__table__.update().where(Circuit.id == circuit_id)
+        .values(calibration_task_id=task.id))
+    await db.commit()
+    return {"circuit_id": circuit_id, "task_id": task.id, "status": "queued"}
+
+
+@router.post("/calibration-manifests/{manifest_id}/reproduce", status_code=202)
+async def reproduce_calibration(manifest_id: str,
+                                db: AsyncSession = Depends(get_db)):
+    """Re-run a calibration from its manifest and record a reproduction manifest
+    with the band-delta verdict (FPRD §8.5). GPU pass — shares the single-GPU
+    guard. 404 if the manifest is missing; 409 if it is not a calibration
+    manifest or a pass is already in flight on its circuit."""
+    from ....services.circuit_calibration_service import CircuitCalibrationService
+    from ....services.circuit_capture_service import (
+        CaptureConflictError, CircuitCaptureService)
+    from ....services.manifest_service import ManifestService
+    from ....workers.circuit_calibration_tasks import reproduce_circuit_calibration
+
+    m = await ManifestService.get(db, manifest_id)
+    if m is None:
+        raise HTTPException(404, f"Manifest {manifest_id} not found")
+    if m.kind != "calibration":
+        raise HTTPException(
+            409, f"Manifest {manifest_id} is {m.kind!r}, not a calibration "
+            "manifest — nothing to reproduce")
+    circuit = await _get_or_404(db, m.circuit_id)
+    if circuit.calibration_status in ("pending", "running"):
+        raise HTTPException(409, "A calibration pass is already in flight")
+    from ....api.v1.endpoints.circuit_discovery import _run_sync
+
+    def _guard_and_mark(sync_db):
+        CircuitCaptureService.assert_no_active_gpu_run(sync_db)
+        row = sync_db.query(Circuit).filter(Circuit.id == m.circuit_id).first()
+        row.calibration_status = "pending"
+        sync_db.commit()
+
+    try:
+        await _run_sync(db, _guard_and_mark)
+    except CaptureConflictError as e:
+        raise HTTPException(409, str(e))
+    task = reproduce_circuit_calibration.delay(manifest_id)
+    await db.execute(
+        Circuit.__table__.update().where(Circuit.id == m.circuit_id)
+        .values(calibration_task_id=task.id))
+    await db.commit()
+    return {"reproduces": manifest_id, "task_id": task.id, "status": "queued"}
+
+
 @router.get("/{circuit_id}/export")
 async def export_circuit(circuit_id: str, db: AsyncSession = Depends(get_db)):
     circuit = await _get_or_404(db, circuit_id)

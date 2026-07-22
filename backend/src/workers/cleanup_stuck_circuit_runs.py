@@ -82,6 +82,15 @@ def cleanup_stuck_circuit_runs_task(self):
             if not _task_is_active(circuit.faithfulness_task_id):
                 circuit.faithfulness_status = "failed"
                 cleaned += 1
+        # ── calibration (also runs on a circuit + holds the GPU) — Feature 20 ──
+        # A crashed calibration would otherwise wedge the single-GPU guard for
+        # every circuit task, since assert_no_active_gpu_run checks this status.
+        for circuit in db.query(Circuit).filter(
+                Circuit.calibration_status.in_(("pending", "running")),
+                Circuit.updated_at < threshold).all():
+            if not _task_is_active(circuit.calibration_task_id):
+                circuit.calibration_status = "failed"
+                cleaned += 1
         if cleaned:
             db.commit()
             logger.info("Reclaimed %d stuck circuit run(s)", cleaned)

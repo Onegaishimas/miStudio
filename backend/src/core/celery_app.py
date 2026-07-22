@@ -121,6 +121,11 @@ celery_app.conf.update(
         "src.workers.circuit_validation_tasks.*": {
             "queue": "extraction",
         },
+        # Circuit calibration (Feature 20): GPU (loads the model to generate) —
+        # same extraction queue + single-GPU circuit guard as validation.
+        "src.workers.circuit_calibration_tasks.*": {
+            "queue": "extraction",
+        },
         # Circuit discovery is CPU-only (statistical mining) — route to the
         # CPU processing queue so it never head-of-line-blocks GPU work
         # behind a multi-minute mine (R1 QA-P1).
@@ -365,6 +370,7 @@ celery_app.autodiscover_tasks(
         "src.workers.circuit_capture_tasks",  # Circuit capture/discovery/attribution (Feature 016)
         "src.workers.cleanup_stuck_circuit_runs",  # Reclaim stuck circuit runs (Feature 016)
         "src.workers.circuit_validation_tasks",  # Circuit edge validation (Feature 017)
+        "src.workers.circuit_calibration_tasks",  # Circuit strength calibration (Feature 20)
     ],
     force=True,
 )

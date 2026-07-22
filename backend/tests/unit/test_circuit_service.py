@@ -76,6 +76,53 @@ class TestCRUD:
         c = await CircuitService.recompute_rung(db, c)
         assert c.rung == 3
 
+
+class TestCalibration:
+    """IDL-37: apply_calibration ships the band AND clamps the dial — the
+    guarantee that a served dial cannot reach the nonsense zone above the cliff."""
+
+    _BAND = {
+        "onset": 0.2, "sweet_spot": 0.5, "cliff": 0.6, "provisional": True,
+        "probe_set": [{"prompt": "Capital of France?", "expected": "Paris"}],
+        "judge_metric_id": "correctness/v1", "step_budget": 10,
+    }
+
+    @pytest.mark.asyncio
+    async def test_apply_calibration_clamps_the_dial_and_persists_the_band(self, db):
+        c = await CircuitService.create(db, _payload())
+        c = await CircuitService.apply_calibration(db, c, self._BAND)
+        # The band is stored…
+        assert c.calibration["sweet_spot"] == 0.5
+        assert c.calibration["provisional"] is True
+        # …AND the served dial is clamped so it cannot exceed the cliff.
+        assert c.budget["intensity_range"] == [0.2, 0.6]
+        assert c.budget["intensity"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_the_clamp_preserves_the_rest_of_the_budget(self, db):
+        c = await CircuitService.create(db, _payload())  # budget has per-layer B
+        c = await CircuitService.apply_calibration(db, c, self._BAND)
+        # per-layer budgets and formula are NOT wiped — only the dial envelope moves.
+        assert c.budget["layers"]["13"]["B"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_an_inverted_band_is_REFUSED_not_clamped(self, db):
+        c = await CircuitService.create(db, _payload())
+        with pytest.raises(CircuitValidationError):
+            await CircuitService.apply_calibration(
+                db, c, {**self._BAND, "onset": 0.7, "sweet_spot": 0.5, "cliff": 0.6})
+
+    @pytest.mark.asyncio
+    async def test_calibration_survives_the_export_projection(self, db):
+        """The export path (to_definition) must carry calibration — it round-
+        trips through _validate, which had to be threaded at that site too."""
+        c = await CircuitService.create(db, _payload())
+        c = await CircuitService.apply_calibration(db, c, self._BAND)
+        defn = CircuitService.to_definition(c)
+        assert defn.calibration is not None
+        assert defn.calibration.cliff == 0.6
+        assert defn.model_dump(mode="json")["calibration"]["onset"] == 0.2
+
     @pytest.mark.asyncio
     async def test_list_filters(self, db):
         a = await CircuitService.create(db, _payload(name="A"))

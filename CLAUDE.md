@@ -353,10 +353,23 @@ pgrep -f celery  # Celery worker should be running
 ### Feature 014 — Cluster Authoring & Portable Definitions (✅ Complete 2026-07-16)
 - ✅ 0xcc/prds/014_FPRD|Cluster_Definitions.md · ✅ 0xcc/tdds/014_FTDD|Cluster_Definitions.md · ✅ 0xcc/tids/014_FTID|Cluster_Definitions.md · ✅ 0xcc/tasks/014_FTASKS|Cluster_Definitions.md
 
-### Circuits arc — BRDs + Features 015–018 (Planned 2026-07-19)
+> **⚠️ FILE-NUMBER ↔ PPRD-ROW OFFSET (read before adding a feature).** For features **1–14** the
+> file number equals the PPRD inventory row (file `014_` = row 14). Starting with the circuits arc a
+> **+1 offset** exists: **file number N = PPRD row N+1** for features 15 onward — file `015_` = row 16,
+> `018_` = row 19, `019_` = row 20. The PPRD inventory (§2.1) and detail sections (§3.x) are the
+> authority on the product feature number; filenames keep the `015_`… sequence. This is deliberate (kept
+> to avoid renaming shipped files); do NOT "fix" a doc by renumbering it. The next feature is file `020_`
+> = PPRD row 21.
+
+### Circuits arc — BRDs + Features 015–018 (= PPRD rows 16–19) (Planned 2026-07-19)
 - ✅ 0xcc/prds/BRD-MIS-CIRCUITS-001.md · ✅ 0xcc/prds/BRD-MIS-CIRCUITS-002.md (supplement; Appendix A normative) · 📌 0xcc/prds/BRD-MIS-SUBSTRATE-001.seed.md (seed only)
 - ✅ 015_FPRD/FTDD/FTID/FTASKS|MultiSAE_Steering · ✅ 016_…|Circuit_Discovery (v2.0) · ✅ 017_…|Circuit_Validation · ✅ 018_…|Circuit_Portability
 - ✅ PPRD v3.9 (§3.16–3.19) · ✅ PADR v3.0 (IDL-31..36)
+
+### Feature 020 (= files 019_*) — Circuit Strength Calibration (doc chain COMPLETE, impl PLANNED 2026-07-21)
+- ✅ 019_FPRD/FTDD/FTID/FTASKS|Circuit_Calibration — **files are `019_*`, product feature is PPRD row 20** (the +1 offset above; not an error). The arc's next step. Grounded in the served-circuit finding: placeholder strengths shipped fluent-but-FALSE at "usable" 1.40; usable band was ~0.4–0.6 effective.
+- ✅ PPRD v3.10 (row 20, §3.20) · ✅ PADR v3.1 (IDL-37: two-detector usable-band search — onset by output-drift, correctness cliff by LLM judge on generated NEUTRAL-topic falsifiable probes; adaptive bisection; additive nullable `calibration` block clamps intensity_range to [onset,cliff]; badge not gate; provisional cross-plane)
+- Next: execute 019 Phase 1 (schema/contract) via 007_process-task-list.md. Contract crosses to miLLM (additive nullable) — schema-sync + vendored-identity guards are acceptance-blocking.
 
 ### Feature Documents
 *[Add as features are identified and developed]*
