@@ -147,7 +147,7 @@ def resolve_cluster_members(cluster_profile_id: str, db, device
         members.append((int(L), int(idx), strength, wdec[L]))
     if not members:
         raise SteeringCoreError("Cluster profile resolved to no steerable members")
-    return _cluster_model_id(prof), members
+    return _cluster_model_id(prof, sae_ids_by_layer, db), members
 
 
 def _cluster_sae_ids_by_layer(prof) -> Dict[int, str]:
@@ -166,8 +166,26 @@ def _cluster_sae_ids_by_layer(prof) -> Dict[int, str]:
     return {L: single for L in layers}
 
 
-def _cluster_model_id(prof):
-    return getattr(prof, "model_id", None) or getattr(prof, "mistudio_model_id", None)
+def _cluster_model_id(prof, sae_ids_by_layer=None, db=None):
+    """The model a cluster profile steers. Profiles saved by the CLUSTERS arc
+    persist `sae_id` but NOT `model_id` (it was derivable at serve time from the
+    SAE), so fall back to the SAE's own model when the profile has none —
+    otherwise the recorder cannot resolve a model for ANY existing profile."""
+    direct = getattr(prof, "model_id", None) or getattr(prof, "mistudio_model_id", None)
+    if direct:
+        return direct
+    # Derive from the profile's SAE(s): every ExternalSAE carries its model_id.
+    if db is not None and sae_ids_by_layer:
+        from ..models.external_sae import ExternalSAE
+        for sae_id in sae_ids_by_layer.values():
+            if not sae_id:
+                continue
+            sae = db.query(ExternalSAE).filter(ExternalSAE.id == sae_id).first()
+            if sae is not None and getattr(sae, "model_id", None):
+                return sae.model_id
+    raise SteeringCoreError(
+        "Cluster profile has no model_id and none could be derived from its SAE — "
+        "cannot resolve a model to steer")
 
 
 # ── the generation core (moved verbatim from calibration) ────────────────────
