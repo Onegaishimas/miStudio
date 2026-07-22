@@ -90,6 +90,38 @@ class TestTheCalibrationToolIsReachable:
             "the description does not say the served dial gets clamped — the whole point"
         )
 
+    def test_reproduce_calibration_is_registered_and_posts_correctly(self):
+        assert "reproduce_calibration" in _tools(), (
+            "reproduce_calibration is unreachable — FPRD §8.5 reproduction has no "
+            "agent-facing surface")
+        calls = []
+
+        class _FakeClient:
+            async def post(self, path, json_body=None):
+                calls.append((path, json_body))
+                return {"ok": True}
+
+            async def get(self, *a, **k):
+                return {}
+
+            async def patch(self, *a, **k):
+                return {}
+
+            async def delete(self, *a, **k):
+                return {}
+
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.config import MCPSettings
+        from src.mcp_server.tools import circuits as mod
+
+        mcp = FastMCP("test")
+        mod.register(mcp, _FakeClient(), MCPSettings(allow_anonymous=True))
+        asyncio.run(mcp.call_tool("reproduce_calibration", {"manifest_id": "vman_x"}))
+        assert calls == [
+            ("/circuits/calibration-manifests/vman_x/reproduce", None)], (
+            f"reproduce_calibration posted {calls}, not the reproduce endpoint")
+
 
 class TestCalibrationSharesTheSingleGPUGuard:
     """Calibration loads a model and holds the GPU like faithfulness. If the

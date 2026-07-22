@@ -66,7 +66,8 @@ class CircuitCalibrationService:
         return {"step_budget": step_budget, "probe_count": probe_count,
                 "seed": seed, "margin": margin,
                 "judge_endpoint": cfg.get("judge_endpoint"),
-                "judge_model": cfg.get("judge_model")}
+                "judge_model": cfg.get("judge_model"),
+                "judge_api_key": cfg.get("judge_api_key")}
 
     @staticmethod
     def _member_labels(circuit) -> List[str]:
@@ -219,6 +220,76 @@ class CircuitCalibrationService:
         return {"circuit_id": circuit_id, "band": band,
                 "usable_band": True, "manifest_ref": manifest_id}
 
+    @classmethod
+    def reproduce(cls, db, manifest_id: str, *,
+                  progress_cb: Optional[Callable[[int], None]] = None
+                  ) -> Dict[str, Any]:
+        """Re-run calibration from a stored manifest's config + probes and store
+        a `reproduction` manifest with the band-delta verdict (FPRD §8.5). Uses
+        the SAME probes and seed as the original, so a reproducible measurement
+        lands within tolerance. Does NOT clamp the circuit — reproduction only
+        checks the number, it doesn't re-ship the band.
+        """
+        from ..models.circuit import Circuit
+        from ..models.validation_manifest import ValidationManifest
+        from .manifest_service import ManifestService
+
+        original = db.query(ValidationManifest).filter(
+            ValidationManifest.id == manifest_id).first()
+        if original is None:
+            raise CalibrationRunError(f"Manifest {manifest_id} not found")
+        if original.kind != "calibration":
+            raise CalibrationRunError(
+                f"Manifest {manifest_id} is {original.kind!r}, not calibration")
+        payload = original.payload or {}
+        circuit = db.query(Circuit).filter(
+            Circuit.id == original.circuit_id).first()
+        if circuit is None:
+            raise CalibrationRunError(
+                "Original circuit is gone — cannot reproduce")
+
+        cfg = cls.create_config(payload.get("config") or {})
+        stored_probes = payload.get("probes") or []
+        if progress_cb:
+            progress_cb(5)
+        gen_at, baseline_at, judge, divergence, _llm = \
+            cls._build_generation_fns(circuit, db, cfg)
+
+        # Reuse the EXACT stored probes — reproduction must not re-generate them.
+        lo, hi = cls._dial_bounds(circuit)
+        result = calibrate(
+            gen_at, baseline_at, judge, divergence,
+            probes=stored_probes, lo=lo, hi=hi,
+            max_steps=cfg["step_budget"], margin=cfg["margin"])
+        if progress_cb:
+            progress_cb(80)
+
+        repro_payload = {
+            "probes": stored_probes,
+            "config": cfg,
+            "band": {"onset": result.onset, "sweet_spot": result.sweet_spot,
+                     "cliff": result.cliff, "non_monotone": result.non_monotone},
+            "usable_band": result.usable_band,
+            "trace": result.trace,
+        }
+        verdict = ManifestService.calibration_reproduction_verdict(
+            payload, repro_payload)
+        repro_payload["reproduction_verdict"] = verdict
+        repro_payload["reproduces"] = manifest_id
+
+        from .manifest_service import validate_payload
+        validate_payload("reproduction", repro_payload)  # path-safety
+        man = ValidationManifest(kind="reproduction", payload=repro_payload,
+                                 circuit_id=circuit.id,
+                                 parent_manifest_id=manifest_id)
+        db.add(man)
+        db.commit()
+        db.refresh(man)
+        if progress_cb:
+            progress_cb(100)
+        return {"reproduces": manifest_id, "reproduction_manifest": man.id,
+                "verdict": verdict}
+
     @staticmethod
     def _mark_no_usable_band(db, circuit_id: str) -> None:
         """A completed run that found no usable band: clear the in-flight marker
@@ -354,8 +425,25 @@ class CircuitCalibrationService:
             if L in wdec_by_layer and idx is not None:
                 steer.append((int(L), int(idx), strength, wdec_by_layer[L]))
 
-        hook_layers = {L: get_hookable_module(model, structure, L)
-                       for L in wdec_by_layer}
+        # Correct signature: get_hookable_module(layer_module, hook_type, structure)
+        # — mirror faithfulness/steering. The residual is where additive steering
+        # is applied. (A wrong arg order silently returns None and crashes at the
+        # first hook registration — Feature 20 R2.)
+        hook_layers = {}
+        for L in wdec_by_layer:
+            layer_mod = structure.layers_module[L]
+            hook_layers[L] = get_hookable_module(layer_mod, "residual", structure)
+            if hook_layers[L] is None:
+                raise CalibrationRunError(
+                    f"No hookable residual module for layer {L} on this model")
+
+        # Gemma-2 and other hook-hostile architectures corrupt output under a
+        # forward hook unless the KV cache is disabled — reuse the steering
+        # service's marker check so calibration doesn't measure a garbage band.
+        _marker_hay = f"{model_rec.repo_id} {type(model).__name__}".lower()
+        from .steering_service import _CACHE_INCOMPATIBLE_MARKERS
+        disable_cache = any(mk in _marker_hay
+                            for mk in _CACHE_INCOMPATIBLE_MARKERS)
 
         def _make_hook(dial):
             layer_members = {}
@@ -383,11 +471,13 @@ class CircuitCalibrationService:
             if dial > 0:
                 for L, hook in _make_hook(dial).items():
                     handles.append(hook_layers[L].register_forward_hook(hook))
+            gen_kwargs = dict(max_new_tokens=cls.GEN_MAX_TOKENS,
+                              do_sample=True, temperature=0.7)
+            if disable_cache:
+                gen_kwargs["use_cache"] = False
             try:
                 with torch.no_grad():
-                    out = model.generate(
-                        **inputs, max_new_tokens=cls.GEN_MAX_TOKENS,
-                        do_sample=True, temperature=0.7)
+                    out = model.generate(**inputs, **gen_kwargs)
             finally:
                 for h in handles:
                     h.remove()
@@ -395,8 +485,13 @@ class CircuitCalibrationService:
                                     skip_special_tokens=True)
             return text
 
+        # onset compares a STEERED draw against a baseline draw; both must use the
+        # SAME sampling seed (0) so the divergence reflects the circuit's tint, not
+        # a seed-induced sampling difference (Feature 20 R2). The cliff judge reads
+        # correctness, not divergence, so its dial-seed choice doesn't bias it; we
+        # use seed 0 throughout for reproducibility.
         def gen_at(dial, prompt):
-            return _generate(prompt, dial, seed)
+            return _generate(prompt, dial, 0)
 
         def baseline_at(prompt, s):
             return _generate(prompt, 0.0, s)
@@ -411,22 +506,47 @@ class CircuitCalibrationService:
             return labeler._call_llm(prompt, max_tokens)
 
         def judge(generation, expected):
-            verdict = labeler._call_llm(
+            raw = labeler._call_llm(
                 "You are grading whether a model response is factually CORRECT.\n"
                 f"Question context: the correct answer is: {expected}\n"
                 f"Model response: {generation}\n"
                 "Reply with EXACTLY one word: CORRECT (the facts are right), "
                 "DEGRADING (partly wrong/rambling), or BROKEN (confidently false "
-                "or incoherent).", 8).strip().lower()
-            if "broken" in verdict:
-                return "broken"
-            if "degrad" in verdict:
-                return "degrading"
-            return "correct"
+                "or incoherent).", 8)
+            return _parse_verdict(raw)
 
         divergence = cosine_text_divergence(embed=None)  # Jaccard; no embed dep
 
         return gen_at, baseline_at, judge, divergence, llm_call
+
+
+def _parse_verdict(raw: str) -> str:
+    """Map a judge LLM reply to correct | degrading | broken, robustly.
+
+    Guards against negation ("not broken", "correct, not broken") which a naive
+    `"broken" in text` misclassifies as broken and truncates the band (Feature 20
+    R2). Strategy: find the FIRST verdict WORD (whole-token), ignoring one leading
+    negation, and prefer an explicit CORRECT/DEGRADING before falling to BROKEN.
+    """
+    import re
+
+    text = (raw or "").strip().lower()
+    tokens = re.split(r"[^a-z]+", text)
+    # Drop a "not"/"n't"-style negator immediately before a verdict word so
+    # "not broken" reads as CORRECT, not broken.
+    verdict_words = {"correct", "degrading", "degrade", "degraded", "broken"}
+    for i, tok in enumerate(tokens):
+        if tok in verdict_words:
+            negated = i > 0 and tokens[i - 1] in ("not", "isnt", "arent", "no")
+            if tok == "correct":
+                return "correct"
+            if tok.startswith("degrad"):
+                return "degrading"
+            # tok == "broken"
+            return "correct" if negated else "broken"
+    # No recognizable verdict word: default to the CONSERVATIVE reading so an
+    # unparseable judge reply does not silently pass a dial as usable.
+    return "broken"
 
 
 def cosine_text_divergence(embed: Callable[[str], List[float]]):

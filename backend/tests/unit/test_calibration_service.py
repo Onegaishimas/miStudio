@@ -167,6 +167,77 @@ class TestWriteCalibrationClampsThroughTheContract:
         assert c.calibration is None                   # nothing written on refusal
 
 
+class TestReproductionVerdict:
+    """FPRD §8.5: reproducing a calibration compares the band within tolerance."""
+
+    def test_identical_band_is_within_tolerance(self):
+        from src.services.manifest_service import ManifestService
+        orig = {"band": {"onset": 0.2, "sweet_spot": 0.5, "cliff": 0.6}}
+        repro = {"band": {"onset": 0.21, "sweet_spot": 0.49, "cliff": 0.62}}
+        v = ManifestService.calibration_reproduction_verdict(orig, repro, tolerance=0.1)
+        assert v["within_tolerance"] is True
+        assert v["max_delta"] <= 0.1
+
+    def test_a_divergent_band_fails(self):
+        from src.services.manifest_service import ManifestService
+        orig = {"band": {"onset": 0.2, "sweet_spot": 0.5, "cliff": 0.6}}
+        repro = {"band": {"onset": 0.2, "sweet_spot": 0.5, "cliff": 0.95}}
+        v = ManifestService.calibration_reproduction_verdict(orig, repro, tolerance=0.1)
+        assert v["within_tolerance"] is False
+        assert v["max_delta"] > 0.1
+
+    def test_nothing_to_compare_is_not_a_pass(self):
+        from src.services.manifest_service import ManifestService
+        v = ManifestService.calibration_reproduction_verdict({}, {}, tolerance=0.1)
+        assert v["within_tolerance"] is None   # reproducing nothing is not reproducing
+
+
+class TestJudgeVerdictParsing:
+    """R2: `'broken' in verdict` matched 'not broken' → truncated the band."""
+
+    def test_plain_verdicts(self):
+        from src.services.circuit_calibration_service import _parse_verdict
+        assert _parse_verdict("CORRECT") == "correct"
+        assert _parse_verdict("broken") == "broken"
+        assert _parse_verdict("Degrading") == "degrading"
+
+    def test_negated_broken_is_correct(self):
+        from src.services.circuit_calibration_service import _parse_verdict
+        assert _parse_verdict("not broken") == "correct"
+        assert _parse_verdict("The response is not broken.") == "correct"
+
+    def test_correct_wins_when_it_appears_first(self):
+        from src.services.circuit_calibration_service import _parse_verdict
+        assert _parse_verdict("correct, not broken") == "correct"
+
+    def test_unparseable_is_conservative_broken(self):
+        from src.services.circuit_calibration_service import _parse_verdict
+        assert _parse_verdict("hmmmm") == "broken"
+
+
+class TestBudgetInvariantIsBackwardCompatible:
+    """R2: the intensity∈range invariant must CLAMP legacy budgets, not reject —
+    a stored budget with a narrowed range and the default intensity=1.0 must
+    still round-trip."""
+
+    def test_legacy_narrow_range_with_default_intensity_is_clamped(self):
+        from src.schemas.circuit_definition import CircuitBudget
+        b = CircuitBudget(intensity_range=[0.0, 0.5])  # intensity defaults to 1.0
+        assert b.intensity == 0.5   # clamped into range, not rejected
+
+    def test_intensity_below_range_is_raised_to_lo(self):
+        from src.schemas.circuit_definition import CircuitBudget
+        b = CircuitBudget(intensity=0.1, intensity_range=[0.3, 0.8])
+        assert b.intensity == 0.3
+
+    def test_a_malformed_range_is_still_rejected(self):
+        from pydantic import ValidationError
+
+        from src.schemas.circuit_definition import CircuitBudget
+        with pytest.raises(ValidationError):
+            CircuitBudget(intensity_range=[0.8, 0.3])   # inverted → real error
+
+
 class TestDivergence:
     def test_embedder_cosine(self):
         div = cosine_text_divergence(embed=lambda t: [1.0, 0.0] if "a" in t else [0.0, 1.0])

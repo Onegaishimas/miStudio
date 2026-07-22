@@ -162,25 +162,26 @@ class CircuitBudget(BaseModel):
 
     @model_validator(mode="after")
     def _dial_within_range(self) -> "CircuitBudget":
-        # The whole calibration guarantee ("a served dial cannot exceed the
-        # cliff") rests on intensity_range being the true envelope AND intensity
-        # sitting inside it. Enforce that here so it holds for EVERY write/import,
-        # not just the clamp path (Feature 20 review). Kept permissive on shape
-        # (2 ordered elements) so it can't reject a pre-existing document that
-        # already satisfied the invariant — the default [0,2] with intensity 1.0
-        # passes, as do all calibrated bands.
+        # The calibration guarantee ("a served dial cannot exceed the cliff")
+        # rests on intensity_range being the true envelope AND intensity sitting
+        # inside it. We enforce the SHAPE strictly (2 ordered elements — a
+        # malformed range is a real error) but CLAMP intensity into the range
+        # rather than reject it. Rejecting would break backward compatibility:
+        # a legacy/hand-authored budget could carry a narrowed range (e.g.
+        # [0, 0.5]) while intensity kept its default 1.0 — those documents must
+        # still round-trip. Clamping normalizes them to a servable state instead
+        # of failing every subsequent update/import/write-back (Feature 20 R2).
         r = self.intensity_range
         if len(r) != 2:
-            raise ValueError(
-                f"intensity_range must be [lo, hi]; got {r!r}")
+            raise ValueError(f"intensity_range must be [lo, hi]; got {r!r}")
         lo, hi = r
         if lo > hi:
             raise ValueError(
                 f"intensity_range must be ordered [lo, hi]; got [{lo}, {hi}]")
-        if not (lo <= self.intensity <= hi):
-            raise ValueError(
-                f"intensity {self.intensity} is outside its intensity_range "
-                f"[{lo}, {hi}] — a served dial would start outside the envelope")
+        if self.intensity < lo:
+            self.intensity = lo
+        elif self.intensity > hi:
+            self.intensity = hi
         return self
 
 

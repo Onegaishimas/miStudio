@@ -210,21 +210,23 @@ def find_cliff(
     if verdict_at(lo) != "correct":
         return lo, False, False, steps, True, trace
 
-    # Dense monotonicity scan: judge every coarse dial from lo→hi. The cliff is
-    # the last CORRECT dial before the first break; a break followed by a later
-    # pass flags non_monotone. A dense scan (not a 3-point spot-check) is what
-    # makes the "no broken dial in the band" guarantee actually hold — a sparse
-    # check misses a narrow dip. This bounds judge calls to `coarse`, and the
-    # bisection below refines only the final interval.
-    grid = _coarse_steps(lo, hi, max(4, min(max_steps, 8)))
+    # Monotonicity scan: judge coarse dials from lo→hi. The cliff is the last
+    # CORRECT dial before the first break; a break followed by a later pass flags
+    # non_monotone. Density scales with the remaining step budget (NOT a hard
+    # cap) so more budget = finer scan and a better chance of catching a narrow
+    # dip. This is best-effort: a finite judge budget cannot PROVE no broken dial
+    # exists in a continuous band (a sub-grid dip can hide between samples). What
+    # IS guaranteed is that the RETURNED cliff/sweet_spot are re-judged correct
+    # (below) — so the values shipped to the clamp are never broken, even if an
+    # unsampled dip exists inside the range.
+    grid_n = max(4, min(max_steps - steps, 12))
+    grid = _coarse_steps(lo, hi, grid_n)
     last_correct = lo
     first_break: Optional[float] = None
     non_monotone = False
     for dial in grid:
-        if dial <= lo:
+        if dial <= lo or steps >= max_steps:
             continue
-        if steps >= max_steps:
-            break
         v = verdict_at(dial)
         if v == "correct":
             if first_break is not None:
@@ -299,6 +301,29 @@ def calibrate(
     # cliff, never below onset. Guaranteed onset ≤ sweet ≤ cliff.
     sweet = max(onset, round(cliff - margin, 4))
     sweet = min(sweet, cliff)
+
+    # RE-CONFIRM the shipped sweet_spot is actually judged correct (Feature 20
+    # R2). The scan is best-effort — a sub-grid dip can hide between samples — so
+    # the ONE dial we recommend as the default must be re-judged directly. If it
+    # is broken (a dip sits at the sweet_spot), walk down toward onset until a
+    # correct dial is found; if none is, there is no usable band after all.
+    def _judge_worst(dial):
+        vs = [judge(gen_at(dial, p["prompt"]), p["expected"]) for p in probes]
+        return _worst(vs)
+
+    tries = 0
+    while sweet > onset and tries < 4 and _judge_worst(sweet) != "correct":
+        non_monotone = True   # a break inside [onset, cliff] — flag it
+        sweet = round(max(onset, sweet - margin), 4)
+        tries += 1
+    if sweet <= onset and _judge_worst(onset) != "correct":
+        # even onset broke on re-check → no usable band.
+        return CalibrationResult(
+            onset=onset, sweet_spot=onset, cliff=onset,
+            usable_band=False, non_monotone=non_monotone,
+            steps_used=steps, converged=converged, floor=floor,
+            trace=onset_trace + cliff_trace,
+        )
 
     return CalibrationResult(
         onset=onset, sweet_spot=sweet, cliff=cliff,

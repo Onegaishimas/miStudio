@@ -165,6 +165,22 @@ class TestFullCalibrate:
         assert res.floor > 0.0
         assert res.trace
 
+    def test_shipped_sweet_spot_is_re_judged_correct_even_over_a_missed_dip(self):
+        # A dip the coarse scan can miss: broken only in a narrow window that the
+        # grid may straddle. Whatever the scan does, the RETURNED sweet_spot must
+        # be re-judged correct (never a broken dial shipped as the default).
+        def judge_dip(text, expected):
+            d = _dial_of(text)
+            # cliff at 0.9, but a broken dip right where sweet would land.
+            if 0.72 <= d <= 0.77:
+                return "broken"
+            return "correct" if d <= 0.9 else "broken"
+        res = calibrate(gen_at, baseline_at, judge_dip, divergence,
+                        probes=PROBES, lo=0.0, hi=1.0, max_steps=10, margin=0.15)
+        if res.usable_band:
+            assert judge_dip(gen_at(res.sweet_spot, "q1"), "a1") == "correct", (
+                "the shipped sweet_spot must be a judge-correct dial")
+
     def test_no_usable_band_when_broken_from_onset(self):
         # A judge that breaks everywhere above 0.05 — onset (drift) will land
         # above that, so lo is already broken → no usable band.

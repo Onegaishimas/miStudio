@@ -402,6 +402,19 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
                 "judge_endpoint": judge_endpoint, "judge_model": judge_model})
 
     @mcp.tool()
+    async def reproduce_calibration(manifest_id: Annotated[str, Field(description="A calibration manifest id (from list_validation_manifests, kind='calibration') to re-run")]) -> Any:
+        """Re-run a calibration from its manifest — the SAME probes and seed —
+        and record a reproduction manifest with the band-delta verdict (does the
+        re-measured onset/sweet_spot/cliff land within tolerance of the
+        original?). Proves the band is reproducible, not a one-off of model
+        nondeterminism. Does NOT re-clamp the circuit — reproduction only checks
+        the number. GPU pass; shares the single-GPU circuit guard, so a 409 may
+        name unrelated work. Returns a task id; poll get_task_status, then read
+        the reproduction manifest for the verdict."""
+        return await client.post(
+            f"/circuits/calibration-manifests/{manifest_id}/reproduce")
+
+    @mcp.tool()
     async def get_validation_manifest(manifest_id: Annotated[str, Field(description="Validation manifest id from list_validation_manifests")]) -> Any:
         """A validation manifest — the SELF-CONTAINED, reproducible record of a
         validation run (intervention config, baseline, prompts, seeds, null

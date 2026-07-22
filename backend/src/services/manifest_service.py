@@ -123,6 +123,36 @@ class ManifestService:
                 "within_tolerance": max_delta <= tolerance,
                 "tolerance": tolerance}
 
+    @staticmethod
+    def calibration_reproduction_verdict(
+            original: Dict[str, Any], repro: Dict[str, Any],
+            tolerance: float = 0.1) -> Dict[str, Any]:
+        """Compare the band (onset/sweet_spot/cliff) between an original
+        calibration manifest payload and a re-executed one. A seeded search over
+        the same probes should reproduce the band within tolerance; a large delta
+        means the measurement is not reproducible (model nondeterminism, or a
+        judge that answers inconsistently)."""
+        o = original.get("band") or {}
+        r = repro.get("band") or {}
+        keys = ("onset", "sweet_spot", "cliff")
+        deltas = {}
+        max_delta = 0.0
+        compared = 0
+        for k in keys:
+            if o.get(k) is None or r.get(k) is None:
+                continue
+            d = abs(float(r[k]) - float(o[k]))
+            deltas[k] = round(d, 5)
+            max_delta = max(max_delta, d)
+            compared += 1
+        if compared == 0:
+            return {"deltas": {}, "max_delta": None, "within_tolerance": None,
+                    "tolerance": tolerance,
+                    "reason": "no band values to compare"}
+        return {"deltas": deltas, "max_delta": round(max_delta, 5),
+                "within_tolerance": max_delta <= tolerance,
+                "tolerance": tolerance}
+
 
 def _edge_key(e: Dict[str, Any]):
     up, down = e.get("up", {}), e.get("down", {})
