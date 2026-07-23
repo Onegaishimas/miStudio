@@ -151,7 +151,9 @@ describe('ProgressBar', () => {
 
       expect(bgBar?.className).toContain('w-full');
       expect(bgBar?.className).toContain('h-2');
-      expect(bgBar?.className).toContain('bg-slate-800');
+      // theme-aware track: slate-200 in light, slate-800 in dark
+      expect(bgBar?.className).toContain('bg-slate-200');
+      expect(bgBar?.className).toContain('dark:bg-slate-800');
       expect(bgBar?.className).toContain('rounded-full');
       expect(bgBar?.className).toContain('overflow-hidden');
     });
@@ -187,7 +189,7 @@ describe('ProgressBar', () => {
       expect(outer).toBeInTheDocument();
 
       // Background bar
-      const bgBar = outer.querySelector('.bg-slate-800');
+      const bgBar = outer.querySelector('.bg-slate-200');
       expect(bgBar).toBeInTheDocument();
 
       // Fill bar inside background
@@ -350,7 +352,7 @@ describe('ProgressBar', () => {
       // Visual indicator should have distinct color
       expect(fill?.className).toContain('bg-emerald-500');
       // Container should have distinct background
-      expect(container.querySelector('.bg-slate-800')).toBeInTheDocument();
+      expect(container.querySelector('.bg-slate-200')).toBeInTheDocument();
     });
   });
 

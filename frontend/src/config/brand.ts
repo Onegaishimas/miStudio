@@ -194,7 +194,7 @@ export const COMPONENTS = {
 
   // Progress bar
   progress: {
-    container: 'w-full h-2 bg-slate-200 dark:bg-slate-200 rounded-full overflow-hidden',
+    container: 'w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden',
     bar: 'h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out',
     percentage: 'text-right text-xs text-slate-600 dark:text-slate-600',
   },
