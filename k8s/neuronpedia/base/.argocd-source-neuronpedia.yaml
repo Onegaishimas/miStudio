@@ -1,0 +1,3 @@
+kustomize:
+  images:
+  - hitsai/neuronpedia-webapp=docker.io/hitsai/neuronpedia-webapp:latest@sha256:02bc227497eed849ef4e2fac10a584b7506f21f332621034affb5281924bc7e6
