@@ -55,8 +55,8 @@ export function ExtractionTemplateList({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader className="w-8 h-8 text-slate-400 animate-spin" />
-        <span className="ml-3 text-slate-400">Loading templates...</span>
+        <Loader className="w-8 h-8 text-slate-600 dark:text-slate-400 animate-spin" />
+        <span className="ml-3 text-slate-600 dark:text-slate-400">Loading templates...</span>
       </div>
     );
   }
@@ -64,10 +64,10 @@ export function ExtractionTemplateList({
   if (templates.length === 0) {
     return (
       <div className="text-center py-12">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800 mb-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white dark:bg-slate-800 mb-4">
           <Search className="w-8 h-8 text-slate-500" />
         </div>
-        <h3 className="text-lg font-semibold text-slate-300 mb-2">No templates found</h3>
+        <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">No templates found</h3>
         <p className="text-sm text-slate-500">
           Create your first extraction template to get started.
         </p>
@@ -86,15 +86,15 @@ export function ExtractionTemplateList({
               value={localSearchQuery}
               onChange={(e) => setLocalSearchQuery(e.target.value)}
               placeholder="Search templates..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
           </div>
         </div>
         <div className="text-center py-12">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800 mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white dark:bg-slate-800 mb-4">
             <Search className="w-8 h-8 text-slate-500" />
           </div>
-          <h3 className="text-lg font-semibold text-slate-300 mb-2">
+          <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">
             No templates match your search
           </h3>
           <p className="text-sm text-slate-500">
@@ -102,7 +102,7 @@ export function ExtractionTemplateList({
           </p>
           <button
             onClick={() => setLocalSearchQuery('')}
-            className="mt-4 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+            className="mt-4 px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded transition-colors"
           >
             Clear search
           </button>
@@ -122,7 +122,7 @@ export function ExtractionTemplateList({
             value={localSearchQuery}
             onChange={(e) => setLocalSearchQuery(e.target.value)}
             placeholder="Search templates by name or description..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
           />
         </div>
         <button
@@ -130,7 +130,7 @@ export function ExtractionTemplateList({
           className={`p-2 rounded transition-colors ${
             showFilters
               ? 'bg-emerald-600 text-white'
-              : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
           }`}
           title="Toggle filters"
         >
@@ -140,15 +140,15 @@ export function ExtractionTemplateList({
 
       {/* Filter Panel (placeholder for future expansion) */}
       {showFilters && (
-        <div className="p-4 bg-slate-800 border border-slate-700 rounded">
-          <p className="text-sm text-slate-400">
+        <div className="p-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
             Additional filters can be added here (sort order, hook types, etc.)
           </p>
         </div>
       )}
 
       {/* Results Count */}
-      <div className="text-sm text-slate-400">
+      <div className="text-sm text-slate-600 dark:text-slate-400">
         Showing {filteredTemplates.length} of {templates.length} template
         {templates.length !== 1 ? 's' : ''}
       </div>
@@ -174,17 +174,17 @@ export function ExtractionTemplateList({
           <button
             onClick={() => onPageChange(currentPage - 1)}
             disabled={!hasPrev}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-300 disabled:text-slate-600 rounded transition-colors"
+            className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 disabled:text-slate-600 rounded transition-colors"
           >
             Previous
           </button>
-          <span className="text-sm text-slate-400">
+          <span className="text-sm text-slate-600 dark:text-slate-400">
             Page {currentPage} of {totalPages}
           </span>
           <button
             onClick={() => onPageChange(currentPage + 1)}
             disabled={!hasNext}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-300 disabled:text-slate-600 rounded transition-colors"
+            className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 disabled:text-slate-600 rounded transition-colors"
           >
             Next
           </button>

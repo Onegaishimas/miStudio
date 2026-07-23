@@ -49,21 +49,21 @@ export function ExtractionTemplateCard({
 
   return (
     <div
-      className={`bg-slate-900/50 border border-slate-800 rounded-lg p-6 transition-all ${
-        onClick ? 'cursor-pointer hover:bg-slate-900/70 hover:border-slate-700' : 'cursor-default'
+      className={`bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-6 transition-all ${
+        onClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/70 hover:border-slate-300 dark:hover:border-slate-700' : 'cursor-default'
       }`}
       onClick={onClick}
     >
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0">
-          <Layers className="w-8 h-8 text-slate-400" />
+          <Layers className="w-8 h-8 text-slate-600 dark:text-slate-400" />
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold text-slate-100 truncate">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
                   {template.name}
                 </h3>
                 {template.is_favorite && (
@@ -71,7 +71,7 @@ export function ExtractionTemplateCard({
                 )}
               </div>
               {template.description && (
-                <p className="text-sm text-slate-400 mt-1 line-clamp-2">{template.description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">{template.description}</p>
               )}
             </div>
 
@@ -81,7 +81,7 @@ export function ExtractionTemplateCard({
                 className={`p-1.5 rounded transition-colors ${
                   template.is_favorite
                     ? 'text-yellow-400 hover:bg-yellow-500/10'
-                    : 'text-slate-500 hover:bg-slate-700'
+                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
                 }`}
                 title={template.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
               >
@@ -91,20 +91,20 @@ export function ExtractionTemplateCard({
               {onDuplicate && (
                 <button
                   onClick={handleDuplicate}
-                  className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                   title="Duplicate template"
                 >
-                  <Copy className="w-4 h-4 text-slate-400" />
+                  <Copy className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
               )}
 
               {onEdit && (
                 <button
                   onClick={handleEdit}
-                  className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                   title="Edit template"
                 >
-                  <Edit2 className="w-4 h-4 text-slate-400" />
+                  <Edit2 className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
               )}
 
@@ -120,7 +120,7 @@ export function ExtractionTemplateCard({
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-400">
+          <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600 dark:text-slate-400">
             <div>
               <span className="font-medium">Layer(s):</span> {template.layer_indices.length} layer
               {template.layer_indices.length !== 1 ? 's' : ''}
@@ -148,7 +148,7 @@ export function ExtractionTemplateCard({
           </div>
 
           {template.extra_metadata && (
-            <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-400">
               {template.extra_metadata.filter_special !== undefined && (
                 <span>
                   Filters: {[

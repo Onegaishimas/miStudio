@@ -31,10 +31,10 @@ export function ComparisonPreview({
       </h4>
       <div className="flex flex-wrap gap-2">
         {/* Unsteered baseline card - always shown */}
-        <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg">
+        <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
           <div className="w-2.5 h-2.5 rounded-full bg-slate-500" />
           <div className="text-sm">
-            <span className="text-slate-400">Unsteered</span>
+            <span className="text-slate-600 dark:text-slate-400">Unsteered</span>
             <span className="text-slate-600 ml-1">(baseline)</span>
           </div>
         </div>
@@ -68,7 +68,7 @@ export function ComparisonPreview({
         {canAddMore && onAddFeature && (
           <button
             onClick={onAddFeature}
-            className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-700 rounded-lg text-slate-500 hover:text-slate-400 hover:border-slate-600 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-slate-500 hover:text-slate-600 dark:hover:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
           >
             <Plus className="w-4 h-4" />
             <span className="text-sm">Add Feature</span>

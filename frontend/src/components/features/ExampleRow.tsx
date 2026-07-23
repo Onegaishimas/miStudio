@@ -132,7 +132,7 @@ export const ExampleRow: React.FC<ExampleRowProps> = ({
   };
 
   return (
-    <div className="flex items-start gap-3 py-3 border-b border-slate-800 last:border-b-0 hover:bg-slate-800/30 transition-colors group">
+    <div className="flex items-start gap-3 py-3 border-b border-slate-200 dark:border-slate-800 last:border-b-0 hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors group">
       {/* Left column: Prime word + activation (fixed width) */}
       <div className="flex-shrink-0 w-24 flex flex-col items-center text-center">
         {/* Prime word (reconstructed from BPE tokens) */}
@@ -147,7 +147,7 @@ export const ExampleRow: React.FC<ExampleRowProps> = ({
         </div>
         {/* Fragment indicator - shows if prime token was part of a larger word */}
         {isFragment && (
-          <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-full" title={`Token: "${rawPrimeToken}"`}>
+          <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 truncate max-w-full" title={`Token: "${rawPrimeToken}"`}>
             ← {rawPrimeToken}
           </div>
         )}
@@ -205,7 +205,7 @@ export const ExampleRow: React.FC<ExampleRowProps> = ({
           className={`p-1.5 rounded transition-colors ${
             copyStatus === 'success'
               ? 'bg-emerald-600 text-white'
-              : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700 opacity-0 group-hover:opacity-100'
+              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 opacity-0 group-hover:opacity-100'
           }`}
           title="Copy example"
         >

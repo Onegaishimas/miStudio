@@ -168,8 +168,8 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
         className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
         onClick={handleBackdropClick}
       >
-        <div className="bg-slate-900 rounded-lg p-8">
-          <div className="flex items-center gap-3 text-slate-400">
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-8">
+          <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
             <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
             <span>Loading feature details...</span>
           </div>
@@ -185,17 +185,17 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
       onClick={handleBackdropClick}
     >
-      <div className="bg-slate-900 rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="border-b border-slate-800 p-6 flex items-start justify-between">
+        <div className="border-b border-slate-200 dark:border-slate-800 p-6 flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-2xl font-bold text-white">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 Feature #{selectedFeature.neuron_index}
               </h2>
               <button
                 onClick={handleToggleFavorite}
-                className="p-1 hover:bg-slate-800 rounded transition-colors"
+                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
               >
                 <Star
                   className={`w-5 h-5 ${
@@ -215,31 +215,31 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
             {isEditing ? (
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Feature Name</label>
+                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Feature Name</label>
                   <input
                     type="text"
                     value={editedName}
                     onChange={(e) => setEditedName(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:border-emerald-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
                     placeholder="Enter feature name..."
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Description</label>
+                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Description</label>
                   <textarea
                     value={editedDescription}
                     onChange={(e) => setEditedDescription(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:border-emerald-500 focus:outline-none resize-none"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none resize-none"
                     rows={2}
                     placeholder="Enter description..."
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Notes</label>
+                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Notes</label>
                   <textarea
                     value={editedNotes}
                     onChange={(e) => setEditedNotes(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:border-emerald-500 focus:outline-none resize-none"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none resize-none"
                     rows={3}
                     placeholder="Add notes..."
                   />
@@ -247,46 +247,46 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-lg text-white">{selectedFeature.name}</p>
+                <p className="text-lg text-slate-900 dark:text-white">{selectedFeature.name}</p>
                 {selectedFeature.description && (
-                  <p className="text-sm text-slate-400">{selectedFeature.description}</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{selectedFeature.description}</p>
                 )}
                 {selectedFeature.notes && (
-                  <div className="mt-2 bg-slate-800/50 rounded">
+                  <div className="mt-2 bg-slate-100 dark:bg-slate-800/50 rounded">
                     <button
                       onClick={() => setNotesExpanded((v) => !v)}
-                      className="flex items-center justify-between w-full px-3 py-2 text-xs text-slate-400 hover:text-slate-300 transition-colors"
+                      className="flex items-center justify-between w-full px-3 py-2 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                     >
                       <span>Notes</span>
                       <ChevronDown className={`w-3 h-3 transition-transform ${notesExpanded ? 'rotate-180' : ''}`} />
                     </button>
                     {notesExpanded && (
-                      <div className="px-3 pb-3 max-h-96 overflow-y-auto text-sm text-slate-300">
+                      <div className="px-3 pb-3 max-h-96 overflow-y-auto text-sm text-slate-700 dark:text-slate-300">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           components={{
                             // Compact, dark-theme-aware markdown rendering
                             p: ({ children }) => <p className="mb-3 leading-relaxed">{children}</p>,
-                            h1: ({ children }) => <h3 className="text-base font-semibold text-slate-200 mt-3 mb-2">{children}</h3>,
-                            h2: ({ children }) => <h4 className="text-sm font-semibold text-slate-200 mt-3 mb-1">{children}</h4>,
-                            h3: ({ children }) => <h4 className="text-sm font-semibold text-slate-200 mt-2 mb-1">{children}</h4>,
-                            strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
+                            h1: ({ children }) => <h3 className="text-base font-semibold text-slate-800 dark:text-slate-200 mt-3 mb-2">{children}</h3>,
+                            h2: ({ children }) => <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-3 mb-1">{children}</h4>,
+                            h3: ({ children }) => <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-2 mb-1">{children}</h4>,
+                            strong: ({ children }) => <strong className="font-semibold text-slate-900 dark:text-slate-100">{children}</strong>,
                             ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
                             ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
-                            li: ({ children }) => <li className="text-slate-300">{children}</li>,
-                            code: ({ children }) => <code className="px-1 py-0.5 rounded bg-slate-900 text-slate-200 font-mono text-xs">{children}</code>,
-                            pre: ({ children }) => <pre className="p-2 my-2 rounded bg-slate-900 overflow-x-auto text-xs">{children}</pre>,
-                            hr: () => <hr className="my-3 border-slate-700" />,
+                            li: ({ children }) => <li className="text-slate-700 dark:text-slate-300">{children}</li>,
+                            code: ({ children }) => <code className="px-1 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono text-xs">{children}</code>,
+                            pre: ({ children }) => <pre className="p-2 my-2 rounded bg-white dark:bg-slate-900 overflow-x-auto text-xs">{children}</pre>,
+                            hr: () => <hr className="my-3 border-slate-300 dark:border-slate-700" />,
                             table: ({ children }) => (
                               <div className="my-3 overflow-x-auto">
-                                <table className="text-xs border border-slate-700 border-collapse">{children}</table>
+                                <table className="text-xs border border-slate-300 dark:border-slate-700 border-collapse">{children}</table>
                               </div>
                             ),
-                            thead: ({ children }) => <thead className="bg-slate-900">{children}</thead>,
+                            thead: ({ children }) => <thead className="bg-white dark:bg-slate-900">{children}</thead>,
                             tbody: ({ children }) => <tbody>{children}</tbody>,
-                            tr: ({ children }) => <tr className="border-b border-slate-800">{children}</tr>,
-                            th: ({ children }) => <th className="px-2 py-1 text-left font-semibold text-slate-200 border-r border-slate-800 last:border-r-0">{children}</th>,
-                            td: ({ children }) => <td className="px-2 py-1 text-slate-300 border-r border-slate-800 last:border-r-0 align-top">{children}</td>,
+                            tr: ({ children }) => <tr className="border-b border-slate-200 dark:border-slate-800">{children}</tr>,
+                            th: ({ children }) => <th className="px-2 py-1 text-left font-semibold text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-800 last:border-r-0">{children}</th>,
+                            td: ({ children }) => <td className="px-2 py-1 text-slate-700 dark:text-slate-300 border-r border-slate-200 dark:border-slate-800 last:border-r-0 align-top">{children}</td>,
                           }}
                         >
                           {selectedFeature.notes}
@@ -325,7 +325,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                       setEditedDescription(selectedFeature.description || '');
                       setEditedNotes(selectedFeature.notes || '');
                     }}
-                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
+                    className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white rounded transition-colors"
                   >
                     Cancel
                   </button>
@@ -334,14 +334,14 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                 <>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
+                    className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white rounded transition-colors"
                   >
                     Edit Details
                   </button>
 
                   {/* Enhanced Label button / in-progress indicator */}
                   {enhancedJob?.status === 'running' || enhancedJob?.status === 'queued' ? (
-                    <div className="flex items-center gap-2 text-sm text-slate-400 px-2">
+                    <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 px-2">
                       <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
                       <span className="text-violet-300">{progressPhrase ?? 'Queued...'}</span>
                     </div>
@@ -373,35 +373,35 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
           {/* Close button */}
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-800 rounded transition-colors"
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
           >
-            <X className="w-6 h-6 text-slate-400" />
+            <X className="w-6 h-6 text-slate-600 dark:text-slate-400" />
           </button>
         </div>
 
         {/* Statistics Grid */}
-        <div className="border-b border-slate-800 p-6">
+        <div className="border-b border-slate-200 dark:border-slate-800 p-6">
           <div className="grid grid-cols-4 gap-4">
             <div>
-              <p className="text-xs text-slate-400 mb-1">Activation Frequency</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Activation Frequency</p>
               <p className="text-xl font-semibold text-emerald-400">
                 {(selectedFeature.activation_frequency * 100).toFixed(2)}%
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 mb-1">Interpretability</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Interpretability</p>
               <p className="text-xl font-semibold text-blue-400">
                 {(selectedFeature.interpretability_score * 100).toFixed(1)}%
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 mb-1">Max Activation</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Max Activation</p>
               <p className="text-xl font-semibold text-purple-400">
                 {formatActivation(selectedFeature.max_activation)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400 mb-1">Active Samples</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Active Samples</p>
               <p className="text-xl font-semibold text-orange-400">
                 {selectedFeature.active_samples}
               </p>
@@ -410,14 +410,14 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-slate-800 px-6">
+        <div className="border-b border-slate-200 dark:border-slate-800 px-6">
           <div className="flex gap-1">
             <button
               onClick={() => setActiveTab('examples')}
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'examples'
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <Activity className="w-4 h-4" />
@@ -428,7 +428,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'logit-lens'
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <Info className="w-4 h-4" />
@@ -439,7 +439,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'token-analysis'
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <Hash className="w-4 h-4" />
@@ -450,7 +450,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'nlp-analysis'
                   ? 'border-cyan-500 text-cyan-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <Brain className="w-4 h-4" />
@@ -461,7 +461,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'correlations'
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <GitBranch className="w-4 h-4" />
@@ -472,7 +472,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'ablation'
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <Zap className="w-4 h-4" />
@@ -486,9 +486,9 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
           {activeTab === 'examples' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white">Max-Activating Examples</h3>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Max-Activating Examples</h3>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-slate-400">
+                  <span className="text-sm text-slate-600 dark:text-slate-400">
                     Showing {featureExamples.length} examples
                   </span>
 
@@ -499,7 +499,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                       <select
                         value={copyCount === 'all' ? 'all' : copyCount.toString()}
                         onChange={(e) => setCopyCount(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-                        className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300 focus:border-emerald-500 focus:outline-none cursor-pointer"
+                        className="px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-700 dark:text-slate-300 focus:border-emerald-500 focus:outline-none cursor-pointer"
                       >
                         <option value="5">5</option>
                         <option value="10">10</option>
@@ -513,28 +513,28 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                       <div className="relative">
                         <button
                           onClick={() => setShowCopyDropdown(!showCopyDropdown)}
-                          className="flex items-center gap-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300 hover:border-slate-600 focus:border-emerald-500 focus:outline-none"
+                          className="flex items-center gap-1 px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 focus:border-emerald-500 focus:outline-none"
                         >
                           {copyFormat === 'text' ? 'Text' : copyFormat === 'markdown' ? 'Markdown' : 'JSON'}
                           <ChevronDown className="w-3 h-3" />
                         </button>
                         {showCopyDropdown && (
-                          <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-lg z-10">
+                          <div className="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded shadow-lg z-10">
                             <button
                               onClick={() => { setCopyFormat('text'); setShowCopyDropdown(false); }}
-                              className={`block w-full px-3 py-1.5 text-sm text-left hover:bg-slate-700 ${copyFormat === 'text' ? 'text-emerald-400' : 'text-slate-300'}`}
+                              className={`block w-full px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-700 ${copyFormat === 'text' ? 'text-emerald-400' : 'text-slate-700 dark:text-slate-300'}`}
                             >
                               Text
                             </button>
                             <button
                               onClick={() => { setCopyFormat('markdown'); setShowCopyDropdown(false); }}
-                              className={`block w-full px-3 py-1.5 text-sm text-left hover:bg-slate-700 ${copyFormat === 'markdown' ? 'text-emerald-400' : 'text-slate-300'}`}
+                              className={`block w-full px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-700 ${copyFormat === 'markdown' ? 'text-emerald-400' : 'text-slate-700 dark:text-slate-300'}`}
                             >
                               Markdown
                             </button>
                             <button
                               onClick={() => { setCopyFormat('json'); setShowCopyDropdown(false); }}
-                              className={`block w-full px-3 py-1.5 text-sm text-left hover:bg-slate-700 ${copyFormat === 'json' ? 'text-emerald-400' : 'text-slate-300'}`}
+                              className={`block w-full px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-700 ${copyFormat === 'json' ? 'text-emerald-400' : 'text-slate-700 dark:text-slate-300'}`}
                             >
                               JSON
                             </button>
@@ -551,7 +551,7 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                             ? 'bg-emerald-600 text-white'
                             : copyStatus === 'error'
                             ? 'bg-red-600 text-white'
-                            : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                            : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300'
                         }`}
                       >
                         {copyStatus === 'success' ? (
@@ -578,17 +578,17 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
 
               {isLoadingExamples ? (
                 <div className="flex items-center justify-center py-12">
-                  <div className="flex items-center gap-3 text-slate-400">
+                  <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
                     <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
                     <span>Loading examples...</span>
                   </div>
                 </div>
               ) : featureExamples.length === 0 ? (
-                <div className="text-center py-12 text-slate-400">
+                <div className="text-center py-12 text-slate-600 dark:text-slate-400">
                   No examples available for this feature.
                 </div>
               ) : (
-                <div className="bg-slate-800 rounded-lg divide-y divide-slate-700/50">
+                <div className="bg-white dark:bg-slate-800 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/50">
                   {featureExamples.map((example, index) => (
                     <ExampleRow
                       key={index}
@@ -604,21 +604,21 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
 
           {activeTab === 'logit-lens' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-4">Logit Lens Analysis</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Logit Lens Analysis</h3>
               <LogitLensView featureId={featureId} />
             </div>
           )}
 
           {activeTab === 'token-analysis' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-4">Token Analysis</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Token Analysis</h3>
               <FeatureTokenAnalysis featureId={featureId} />
             </div>
           )}
 
           {activeTab === 'nlp-analysis' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-4">NLP Analysis</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">NLP Analysis</h3>
               <NLPAnalysisView
                 nlpAnalysis={selectedFeature?.nlp_analysis || null}
                 nlpProcessedAt={selectedFeature?.nlp_processed_at || null}
@@ -629,14 +629,14 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
 
           {activeTab === 'correlations' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-4">Feature Correlations</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Feature Correlations</h3>
               <FeatureCorrelations featureId={featureId} />
             </div>
           )}
 
           {activeTab === 'ablation' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-4">Ablation Analysis</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Ablation Analysis</h3>
               <AblationAnalysis featureId={featureId} />
             </div>
           )}

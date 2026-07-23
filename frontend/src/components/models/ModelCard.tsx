@@ -96,7 +96,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
       case ModelStatus.ERROR:
         return <AlertCircle className="w-5 h-5 text-red-400" />;
       default:
-        return <Cpu className="w-5 h-5 text-slate-400" />;
+        return <Cpu className="w-5 h-5 text-slate-600 dark:text-slate-400" />;
     }
   };
 
@@ -136,7 +136,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
         );
       default:
         return (
-          <span className={`${baseClasses} bg-slate-800 text-slate-300`}>
+          <span className={`${baseClasses} bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300`}>
             Unknown
           </span>
         );
@@ -164,7 +164,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
   };
 
   return (
-    <div className={`${COMPONENTS.card.base} p-4 hover:border-slate-700 transition-colors`}>
+    <div className={`${COMPONENTS.card.base} p-4 hover:border-slate-300 dark:hover:border-slate-700 transition-colors`}>
       <div className="flex items-center justify-between">
         {/* Model Info */}
         <div
@@ -173,8 +173,8 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
         >
           <Cpu className="w-6 h-6 text-purple-400 flex-shrink-0" />
           <div className="min-w-0">
-            <h3 className="font-semibold text-base text-slate-100 truncate">{model.name}</h3>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <h3 className="font-semibold text-base text-slate-900 dark:text-slate-100 truncate">{model.name}</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
               {formatParams(model.params_count)} params • {model.quantization} quantization
               {model.memory_required_bytes && ` • ${formatMemory(model.memory_required_bytes)} memory`}
             </p>
@@ -255,7 +255,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
       {isActive && model.progress !== undefined && (
         <div className="mt-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-400">
+            <span className="text-slate-600 dark:text-slate-400">
               {model.status === ModelStatus.DOWNLOADING && 'Download Progress'}
               {model.status === ModelStatus.LOADING && 'Loading Model'}
               {model.status === ModelStatus.QUANTIZING && 'Quantizing Model'}
@@ -264,7 +264,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
               {model.progress > 0 ? `${model.progress.toFixed(1)}%` : 'Starting...'}
             </span>
           </div>
-          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
             {model.progress > 0 ? (
               <div
                 className="h-full bg-gradient-to-r from-purple-500 to-purple-400 transition-all duration-500"
@@ -281,7 +281,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
       {isExtracting && (
         <div className="mt-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-400 flex items-center gap-2">
+            <span className="text-slate-600 dark:text-slate-400 flex items-center gap-2">
               {model.extraction_status === 'starting' && 'Starting Extraction'}
               {model.extraction_status === 'loading' && 'Loading Model'}
               {model.extraction_status === 'extracting' && 'Extracting Activations'}
@@ -300,7 +300,7 @@ export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDele
                 : 'Starting...'}
             </span>
           </div>
-          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
             {model.extraction_progress !== undefined && model.extraction_progress > 0 ? (
               <div
                 className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"

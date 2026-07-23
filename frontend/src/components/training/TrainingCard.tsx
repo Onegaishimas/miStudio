@@ -506,7 +506,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
       case TrainingStatus.FAILED:
         return <StopCircle className="w-5 h-5 text-red-400" />;
       default:
-        return <Loader className="w-5 h-5 text-slate-400" />;
+        return <Loader className="w-5 h-5 text-slate-600 dark:text-slate-400" />;
     }
   };
 
@@ -519,17 +519,17 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             type="checkbox"
             checked={isSelected}
             onChange={() => onToggleSelect(training.id)}
-            className="w-4 h-4 shrink-0 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+            className="w-4 h-4 shrink-0 rounded bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
           />
-          <h4 className="font-semibold text-sm text-slate-100 shrink-0">
+          <h4 className="font-semibold text-sm text-slate-900 dark:text-slate-100 shrink-0">
             Training {training.id.slice(0, 8)}
           </h4>
           <span className="text-xs text-slate-500">•</span>
-          <span className="text-xs text-slate-300 truncate">{modelName}</span>
+          <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{modelName}</span>
           <span className="text-xs text-slate-500">+</span>
-          <span className="text-xs text-slate-300 truncate">{datasetName}</span>
+          <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{datasetName}</span>
           <span className="text-xs text-slate-500">•</span>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-600 dark:text-slate-400">
             {training.hyperparameters?.architecture_type ? getFrameworkDisplayName(training.hyperparameters.architecture_type) : 'N/A'}
           </span>
           {training.hyperparameters?.training_layers && training.hyperparameters.training_layers.length > 0 && (
@@ -565,26 +565,26 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             <Sliders size={14} />
           </button>
           <StatusIcon />
-          <span className="capitalize px-2 py-0.5 bg-slate-800 rounded-full text-xs text-slate-100">
+          <span className="capitalize px-2 py-0.5 bg-white dark:bg-slate-800 rounded-full text-xs text-slate-900 dark:text-slate-100">
             {training.status}
           </span>
         </div>
       </div>
 
       {/* Compact Parameters Row */}
-      <div className="flex items-center gap-4 text-xs text-slate-400 px-6">
-        <span>Latent <span className="text-slate-200">{training.hyperparameters?.latent_dim?.toLocaleString() || '?'}</span></span>
-        <span>Hidden <span className="text-slate-200">{training.hyperparameters?.hidden_dim?.toLocaleString() || '?'}</span></span>
-        <span>LR <span className="text-slate-200">{training.hyperparameters?.learning_rate ?? '?'}</span></span>
-        <span>Batch <span className="text-slate-200">{training.hyperparameters?.batch_size ?? '?'}</span></span>
-        <span>Steps <span className="text-slate-200">{training.hyperparameters?.total_steps?.toLocaleString() || '?'}</span></span>
+      <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 px-6">
+        <span>Latent <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.latent_dim?.toLocaleString() || '?'}</span></span>
+        <span>Hidden <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.hidden_dim?.toLocaleString() || '?'}</span></span>
+        <span>LR <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.learning_rate ?? '?'}</span></span>
+        <span>Batch <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.batch_size ?? '?'}</span></span>
+        <span>Steps <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.total_steps?.toLocaleString() || '?'}</span></span>
         <span>
           {(() => {
             const archType = training.hyperparameters?.architecture_type || 'standard_saelens';
             const fw = getFrameworkConfig(archType);
-            if (fw.sparsityType === 'l0') return <>λ <span className="text-slate-200">{training.hyperparameters?.sparsity_coeff ?? '?'}</span></>;
+            if (fw.sparsityType === 'l0') return <>λ <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.sparsity_coeff ?? '?'}</span></>;
             if (fw.sparsityType === 'topk') return <>K <span className="text-emerald-400">{training.hyperparameters?.top_k ?? 64}</span></>;
-            return <>L1 <span className="text-slate-200">{training.hyperparameters?.l1_alpha ?? '?'}</span></>;
+            return <>L1 <span className="text-slate-800 dark:text-slate-200">{training.hyperparameters?.l1_alpha ?? '?'}</span></>;
           })()}
         </span>
       </div>
@@ -602,7 +602,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 <span className={`font-medium ${trainingPhase.color}`}>{trainingPhase.name}</span>
               </div>
             )}
-            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
                 style={{ width: `${training.progress}%` }}
@@ -618,9 +618,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
 
           {/* Inline Metrics Row */}
           <div className="flex items-center gap-4 text-xs px-6">
-            <span className="text-slate-400">Loss <span className="text-emerald-400 font-semibold">{hasMetrics ? currentLoss.toFixed(6) : '—'}</span></span>
-            <span className="text-slate-400">L0 <span className={`font-semibold ${
-              !hasMetrics ? 'text-slate-400'
+            <span className="text-slate-600 dark:text-slate-400">Loss <span className="text-emerald-400 font-semibold">{hasMetrics ? currentLoss.toFixed(6) : '—'}</span></span>
+            <span className="text-slate-600 dark:text-slate-400">L0 <span className={`font-semibold ${
+              !hasMetrics ? 'text-slate-600 dark:text-slate-400'
                 : l0Sparsity > 0.15 ? 'text-red-400'
                 : l0Sparsity > 0.08 ? 'text-yellow-400'
                 : 'text-emerald-400'
@@ -629,8 +629,8 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 ? formatL0Absolute(l0Sparsity, training.hyperparameters.latent_dim)
                 : (l0Sparsity * 100).toFixed(2) + '%'
               : '—'}</span></span>
-            <span className="text-slate-400">Dead <span className="text-red-400 font-semibold">{hasMetrics ? Math.floor(deadNeurons) : '—'}</span></span>
-            <span className="text-slate-400">LR <span className="text-purple-400 font-semibold">{hasMetrics ? learningRate.toExponential(2) : '—'}</span></span>
+            <span className="text-slate-600 dark:text-slate-400">Dead <span className="text-red-400 font-semibold">{hasMetrics ? Math.floor(deadNeurons) : '—'}</span></span>
+            <span className="text-slate-600 dark:text-slate-400">LR <span className="text-purple-400 font-semibold">{hasMetrics ? learningRate.toExponential(2) : '—'}</span></span>
           </div>
 
           {/* Action Buttons */}
@@ -692,16 +692,16 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
 
           {/* Checkpoint Management Section */}
           {showCheckpoints && (
-            <div className="border-t border-slate-700 pt-3 mt-3 space-y-2">
+            <div className="border-t border-slate-300 dark:border-slate-700 pt-3 mt-3 space-y-2">
               <div className="flex items-center justify-between">
-                <h5 className="text-sm font-medium text-slate-300">
+                <h5 className="text-sm font-medium text-slate-700 dark:text-slate-300">
                   Checkpoint Management
                 </h5>
                 <button
                   type="button"
                   onClick={handleSaveCheckpoint}
                   disabled={isSavingCheckpoint}
-                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 rounded text-sm flex items-center gap-1 transition-colors"
+                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded text-sm flex items-center gap-1 transition-colors"
                 >
                   {isSavingCheckpoint ? (
                     <Loader className="w-4 h-4 animate-spin" />
@@ -718,13 +718,13 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   {checkpoints.map((cp: any) => (
                     <div
                       key={cp.id}
-                      className="flex items-center justify-between bg-slate-800/30 p-2 rounded"
+                      className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/30 p-2 rounded"
                     >
                       <div>
-                        <div className="font-medium text-sm text-slate-100">
+                        <div className="font-medium text-sm text-slate-900 dark:text-slate-100">
                           Step {cp.step.toLocaleString()}
                         </div>
-                        <div className="text-xs text-slate-400">
+                        <div className="text-xs text-slate-600 dark:text-slate-400">
                           Loss: {cp.loss.toFixed(4)}
                           {cp.l0_sparsity && ` • L0: ${cp.l0_sparsity.toFixed(3)}`}
                           {' • '}
@@ -738,7 +738,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                             // Download checkpoint (future implementation)
                             console.log('Download checkpoint', cp.id);
                           }}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-slate-100 transition-colors"
+                          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
                           title="Download"
                         >
                           <Download className="w-4 h-4" />
@@ -762,9 +762,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               )}
 
               {/* Auto-save Configuration */}
-              <div className="border-t border-slate-700 pt-2 space-y-2">
+              <div className="border-t border-slate-300 dark:border-slate-700 pt-2 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm text-slate-300">
+                  <label className="text-sm text-slate-700 dark:text-slate-300">
                     Auto-save every N steps
                   </label>
                   <button
@@ -791,7 +791,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                     max="10000"
                     step="100"
                     aria-label="Auto-save interval in steps"
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                     placeholder="Interval (steps)"
                   />
                 )}
@@ -801,10 +801,10 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
 
           {/* Live Metrics Section - Two column layout: Logs left, Charts right */}
           {showMetrics && training.status === TrainingStatus.RUNNING && (
-            <div className="border-t border-slate-700 pt-3 mt-3">
+            <div className="border-t border-slate-300 dark:border-slate-700 pt-3 mt-3">
               {/* Loading State */}
               {isLoadingMetrics && (
-                <div className="flex items-center justify-center py-4 text-slate-400">
+                <div className="flex items-center justify-center py-4 text-slate-600 dark:text-slate-400">
                   <Loader className="w-5 h-5 animate-spin mr-2" />
                   <span className="text-sm">Loading metrics history...</span>
                 </div>
@@ -813,15 +813,15 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               {/* Two Column Layout */}
               <div className="flex gap-3">
                 {/* Training Logs - Left Column (50%) */}
-                <div className="w-1/2 bg-slate-950 rounded-lg p-3 font-mono text-xs">
+                <div className="w-1/2 bg-slate-50 dark:bg-slate-950 rounded-lg p-3 font-mono text-xs">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-slate-400">Training Logs</span>
+                    <span className="text-slate-600 dark:text-slate-400">Training Logs</span>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={handleCopyLogs}
                         disabled={metricsHistory.loss.length === 0}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title={logsCopied ? 'Copied!' : 'Copy logs to clipboard'}
                       >
                         {logsCopied ? (
@@ -850,7 +850,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                         const hasDecomposition = reconLoss > 0 || l1Loss > 0;
 
                         return (
-                          <div key={step} className="text-slate-300">
+                          <div key={step} className="text-slate-700 dark:text-slate-300">
                             <span className="text-slate-500">[{time}]</span>{' '}
                             loss={loss.toFixed(6)}
                             {hasDecomposition && (
@@ -874,9 +874,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 {/* Stacked Line Charts - Right Column (50%) */}
                 <div className="w-1/2 flex flex-col gap-2">
                   {/* Loss Chart */}
-                  <div className="bg-slate-800/30 rounded-lg p-2">
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-400">Loss</span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Loss</span>
                       <span className="text-xs text-emerald-400 font-mono">
                         {metricsHistory.loss.length > 0 ? metricsHistory.loss[metricsHistory.loss.length - 1].toFixed(2) : '—'}
                       </span>
@@ -925,9 +925,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   </div>
 
                   {/* L0 Sparsity Chart */}
-                  <div className="bg-slate-800/30 rounded-lg p-2">
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-400">L0 Sparsity</span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">L0 Sparsity</span>
                       <span className="text-xs text-blue-400 font-mono">
                         {metricsHistory.l0_sparsity.length > 0
                           ? (metricsHistory.l0_sparsity[metricsHistory.l0_sparsity.length - 1] * 100).toFixed(1) + '%'
@@ -978,16 +978,16 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   </div>
 
                   {/* Dead Neurons Chart */}
-                  <div className="bg-slate-800/30 rounded-lg p-2">
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-400">Dead Neurons</span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Dead Neurons</span>
                       <span className="text-xs text-red-400 font-mono">
                         {Math.floor(deadNeurons).toLocaleString()}/{training.hyperparameters?.latent_dim?.toLocaleString() || '?'}
                       </span>
                     </div>
                     <div className="h-10 flex items-center">
                       {/* Dead neurons bar */}
-                      <div className="flex-1 h-3 bg-slate-700 rounded-full overflow-hidden">
+                      <div className="flex-1 h-3 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-red-500 transition-all"
                           style={{
@@ -1013,7 +1013,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
 
       {/* Control Buttons */}
       {training.status !== TrainingStatus.COMPLETED && (
-        <div className="border-t border-slate-700 pt-3 flex gap-2">
+        <div className="border-t border-slate-300 dark:border-slate-700 pt-3 flex gap-2">
           {/* Training Status: Show Pause and Stop */}
           {training.status === TrainingStatus.RUNNING && (
             <>
@@ -1021,7 +1021,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 type="button"
                 onClick={handlePause}
                 disabled={isControlling}
-                className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 {isControlling ? (
                   <Loader className="w-4 h-4 animate-spin" />
@@ -1034,7 +1034,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 type="button"
                 onClick={handleStop}
                 disabled={isControlling}
-                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 {isControlling ? (
                   <Loader className="w-4 h-4 animate-spin" />
@@ -1066,7 +1066,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                 type="button"
                 onClick={handleStop}
                 disabled={isControlling}
-                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 {isControlling ? (
                   <Loader className="w-4 h-4 animate-spin" />
@@ -1085,7 +1085,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               type="button"
               onClick={handleRetry}
               disabled={isControlling}
-              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
             >
               {isControlling ? (
                 <Loader className="w-4 h-4 animate-spin" />
@@ -1101,15 +1101,15 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
       {/* Hyperparameters Modal */}
       {showHyperparameters && training.hyperparameters && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 border border-slate-700 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-100">
+            <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-300 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                 Training Hyperparameters
               </h3>
               <button
                 onClick={() => setShowHyperparameters(false)}
-                className="text-slate-400 hover:text-slate-300 transition-colors"
+                className="text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
               >
                 <X size={20} />
               </button>
@@ -1121,43 +1121,43 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               <div>
                 <h4 className="text-sm font-semibold text-emerald-400 mb-2">SAE Architecture</h4>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Training Framework</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Training Framework</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {getFrameworkDisplayName(training.hyperparameters.architecture_type)}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Training Layer(s)</div>
-                    <div className="text-sm text-slate-100 font-medium font-mono">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Training Layer(s)</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium font-mono">
                       {training.hyperparameters.training_layers && training.hyperparameters.training_layers.length > 0
                         ? training.hyperparameters.training_layers.map(l => `L${l}`).join(', ')
                         : 'L0'}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Hook Types</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Hook Types</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {training.hyperparameters.hook_types && training.hyperparameters.hook_types.length > 0
                         ? training.hyperparameters.hook_types.join(', ')
                         : 'residual'}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Hidden Dimension</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Hidden Dimension</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {training.hyperparameters.hidden_dim.toLocaleString()}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Latent Dimension</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Latent Dimension</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {training.hyperparameters.latent_dim.toLocaleString()}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Expansion Ratio</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Expansion Ratio</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {(training.hyperparameters.latent_dim / training.hyperparameters.hidden_dim).toFixed(1)}x
                     </div>
                   </div>
@@ -1175,24 +1175,24 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                     if (fw.sparsityType === 'topk') {
                       return (
                         <>
-                          <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
-                            <div className="text-xs text-slate-400 mb-1">Top-K Active Features</div>
+                          <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
+                            <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Top-K Active Features</div>
                             <div className="text-sm text-emerald-400 font-medium">
                               K = {(training.hyperparameters as any).top_k ?? 64}
                             </div>
                           </div>
                           {(training.hyperparameters as any).aux_loss_alpha != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2">
-                              <div className="text-xs text-slate-400 mb-1">Aux Loss Alpha</div>
-                              <div className="text-sm text-slate-100 font-medium">
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Aux Loss Alpha</div>
+                              <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                                 {(training.hyperparameters as any).aux_loss_alpha}
                               </div>
                             </div>
                           )}
                           {(training.hyperparameters as any).adam_epsilon != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2">
-                              <div className="text-xs text-slate-400 mb-1">Adam Epsilon</div>
-                              <div className="text-sm text-slate-100 font-medium">
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Adam Epsilon</div>
+                              <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                                 {(training.hyperparameters as any).adam_epsilon}
                               </div>
                             </div>
@@ -1203,33 +1203,33 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                       return (
                         <>
                           {training.hyperparameters.sparsity_coeff != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
-                              <div className="text-xs text-slate-400 mb-1">Sparsity Coeff (L0)</div>
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2 border border-emerald-500/30">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Sparsity Coeff (L0)</div>
                               <div className="text-sm text-emerald-400 font-medium">
                                 {training.hyperparameters.sparsity_coeff}
                               </div>
                             </div>
                           )}
                           {training.hyperparameters.initial_threshold != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2">
-                              <div className="text-xs text-slate-400 mb-1">Initial Threshold</div>
-                              <div className="text-sm text-slate-100 font-medium">
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Initial Threshold</div>
+                              <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                                 {training.hyperparameters.initial_threshold}
                               </div>
                             </div>
                           )}
                           {training.hyperparameters.bandwidth != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2">
-                              <div className="text-xs text-slate-400 mb-1">Bandwidth</div>
-                              <div className="text-sm text-slate-100 font-medium">
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Bandwidth</div>
+                              <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                                 {training.hyperparameters.bandwidth}
                               </div>
                             </div>
                           )}
                           {training.hyperparameters.normalize_decoder != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2">
-                              <div className="text-xs text-slate-400 mb-1">Normalize Decoder</div>
-                              <div className="text-sm text-slate-100 font-medium">
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Normalize Decoder</div>
+                              <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                                 {training.hyperparameters.normalize_decoder ? 'Yes' : 'No'}
                               </div>
                             </div>
@@ -1240,16 +1240,16 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                       // L1 frameworks
                       return (
                         <>
-                          <div className="bg-slate-800/50 rounded-lg p-2">
-                            <div className="text-xs text-slate-400 mb-1">L1 Alpha</div>
-                            <div className="text-sm text-slate-100 font-medium">
+                          <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                            <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">L1 Alpha</div>
+                            <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                               {training.hyperparameters.l1_alpha ?? 'N/A'}
                             </div>
                           </div>
                           {training.hyperparameters.target_l0 != null && (
-                            <div className="bg-slate-800/50 rounded-lg p-2">
-                              <div className="text-xs text-slate-400 mb-1">Target L0</div>
-                              <div className="text-sm text-slate-100 font-medium">
+                            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                              <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Target L0</div>
+                              <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                                 {training.hyperparameters.target_l0}
                               </div>
                             </div>
@@ -1265,36 +1265,36 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               <div>
                 <h4 className="text-sm font-semibold text-emerald-400 mb-2">Training Configuration</h4>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Learning Rate</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Learning Rate</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {training.hyperparameters.learning_rate}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Batch Size</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Batch Size</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {training.hyperparameters.batch_size}
                     </div>
                   </div>
-                  <div className="bg-slate-800/50 rounded-lg p-2">
-                    <div className="text-xs text-slate-400 mb-1">Total Steps</div>
-                    <div className="text-sm text-slate-100 font-medium">
+                  <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Total Steps</div>
+                    <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                       {training.hyperparameters.total_steps.toLocaleString()}
                     </div>
                   </div>
                   {training.hyperparameters.warmup_steps != null && (
-                    <div className="bg-slate-800/50 rounded-lg p-2">
-                      <div className="text-xs text-slate-400 mb-1">Warmup Steps</div>
-                      <div className="text-sm text-slate-100 font-medium">
+                    <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                      <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Warmup Steps</div>
+                      <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                         {training.hyperparameters.warmup_steps.toLocaleString()}
                       </div>
                     </div>
                   )}
                   {training.hyperparameters.sparsity_warmup_steps != null && training.hyperparameters.sparsity_warmup_steps > 0 && (
-                    <div className="bg-slate-800/50 rounded-lg p-2">
-                      <div className="text-xs text-slate-400 mb-1">Sparsity Warmup</div>
-                      <div className="text-sm text-slate-100 font-medium">
+                    <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                      <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Sparsity Warmup</div>
+                      <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                         {training.hyperparameters.sparsity_warmup_steps.toLocaleString()} steps
                       </div>
                     </div>
@@ -1308,17 +1308,17 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   <h4 className="text-sm font-semibold text-emerald-400 mb-2">Optimization</h4>
                   <div className="grid grid-cols-2 gap-3">
                     {training.hyperparameters.weight_decay != null && (
-                      <div className="bg-slate-800/50 rounded-lg p-2">
-                        <div className="text-xs text-slate-400 mb-1">Weight Decay</div>
-                        <div className="text-sm text-slate-100 font-medium">
+                      <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Weight Decay</div>
+                        <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                           {training.hyperparameters.weight_decay}
                         </div>
                       </div>
                     )}
                     {training.hyperparameters.grad_clip_norm != null && (
-                      <div className="bg-slate-800/50 rounded-lg p-2">
-                        <div className="text-xs text-slate-400 mb-1">Gradient Clip Norm</div>
-                        <div className="text-sm text-slate-100 font-medium">
+                      <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Gradient Clip Norm</div>
+                        <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                           {training.hyperparameters.grad_clip_norm}
                         </div>
                       </div>
@@ -1333,17 +1333,17 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   <h4 className="text-sm font-semibold text-emerald-400 mb-2">Checkpointing & Logging</h4>
                   <div className="grid grid-cols-2 gap-3">
                     {training.hyperparameters.checkpoint_interval && (
-                      <div className="bg-slate-800/50 rounded-lg p-2">
-                        <div className="text-xs text-slate-400 mb-1">Checkpoint Interval</div>
-                        <div className="text-sm text-slate-100 font-medium">
+                      <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Checkpoint Interval</div>
+                        <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                           Every {training.hyperparameters.checkpoint_interval.toLocaleString()} steps
                         </div>
                       </div>
                     )}
                     {training.hyperparameters.log_interval && (
-                      <div className="bg-slate-800/50 rounded-lg p-2">
-                        <div className="text-xs text-slate-400 mb-1">Log Interval</div>
-                        <div className="text-sm text-slate-100 font-medium">
+                      <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Log Interval</div>
+                        <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                           Every {training.hyperparameters.log_interval.toLocaleString()} steps
                         </div>
                       </div>
@@ -1359,17 +1359,17 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                   <h4 className="text-sm font-semibold text-emerald-400 mb-2">Dead Neuron Handling</h4>
                   <div className="grid grid-cols-2 gap-3">
                     {training.hyperparameters.dead_neuron_threshold !== undefined && (
-                      <div className="bg-slate-800/50 rounded-lg p-2">
-                        <div className="text-xs text-slate-400 mb-1">Dead Neuron Threshold</div>
-                        <div className="text-sm text-slate-100 font-medium">
+                      <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Dead Neuron Threshold</div>
+                        <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                           {training.hyperparameters.dead_neuron_threshold.toLocaleString()} steps
                         </div>
                       </div>
                     )}
                     {training.hyperparameters.resample_dead_neurons !== undefined && (
-                      <div className="bg-slate-800/50 rounded-lg p-2">
-                        <div className="text-xs text-slate-400 mb-1">Resample Dead Neurons</div>
-                        <div className="text-sm text-slate-100 font-medium">
+                      <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Resample Dead Neurons</div>
+                        <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">
                           {training.hyperparameters.resample_dead_neurons ? 'Enabled' : 'Disabled'}
                         </div>
                       </div>
@@ -1380,10 +1380,10 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-slate-900 border-t border-slate-700 px-4 py-3">
+            <div className="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-slate-300 dark:border-slate-700 px-4 py-3">
               <button
                 onClick={() => setShowHyperparameters(false)}
-                className="w-full px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-lg transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 rounded-lg transition-colors"
               >
                 Close
               </button>

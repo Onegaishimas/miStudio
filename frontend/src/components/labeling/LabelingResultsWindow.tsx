@@ -146,8 +146,8 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
 
   if (!labelingJobId || results.length === 0) {
     return (
-      <div className="bg-slate-900 border border-slate-700 rounded p-3" style={{ height }}>
-        <h3 className="text-xs font-medium text-slate-300 mb-2">Recent Labeling Results</h3>
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded p-3" style={{ height }}>
+        <h3 className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">Recent Labeling Results</h3>
         <div className="flex items-center justify-center h-full text-slate-500 text-xs">
           {labelingJobId ? 'Waiting for results...' : 'Start a labeling job to see live results'}
         </div>
@@ -156,23 +156,23 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
   }
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded">
-      <div className="p-2 border-b border-slate-700 flex items-center justify-between">
+    <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded">
+      <div className="p-2 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
         <div>
-          <h3 className="text-xs font-medium text-slate-300">Recent Labeling Results</h3>
+          <h3 className="text-xs font-medium text-slate-700 dark:text-slate-300">Recent Labeling Results</h3>
           <p className="text-xs text-slate-500 mt-0.5">Last {results.length} features</p>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={toggleMaximize}
-            className="p-1.5 rounded hover:bg-slate-800 transition-colors text-slate-400 hover:text-slate-200"
+            className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             title={isMaximized ? 'Restore default height' : 'Maximize height'}
           >
             {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
           <button
             onClick={handleCopyResults}
-            className="p-1.5 rounded hover:bg-slate-800 transition-colors text-slate-400 hover:text-slate-200"
+            className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             title="Copy results to clipboard"
           >
             <Copy className="w-4 h-4" />
@@ -187,12 +187,12 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
           return (
             <div
               key={`${result.feature_id}-${index}`}
-              className="p-2 border-b border-slate-800 hover:bg-slate-850 transition-colors"
+              className="p-2 border-b border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-850 transition-colors"
             >
               <div className="flex items-start justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-mono text-emerald-400">#{result.feature_id}</span>
-                  <span className="text-xs font-medium text-slate-200">{result.label}</span>
+                  <span className="text-xs font-medium text-slate-800 dark:text-slate-200">{result.label}</span>
                 </div>
                 <span className={`text-xs px-1.5 py-0.5 rounded ${getCategoryColor(result.category)}`}>
                   {result.category}
@@ -200,7 +200,7 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
               </div>
 
               {result.description && (
-                <p className="text-xs text-slate-400 mb-1 line-clamp-2">{result.description}</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-1 line-clamp-2">{result.description}</p>
               )}
 
               {/* Display numbered list of examples with prefix, prime, and suffix tokens */}
@@ -217,13 +217,13 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
                     const cleanPrime = prime.replace(/^Ġ/, '').trim() || prime;
 
                     return (
-                      <div key={idx} className="text-xs font-mono text-slate-300">
+                      <div key={idx} className="text-xs font-mono text-slate-700 dark:text-slate-300">
                         <span className="text-slate-500">{String(idx + 1).padStart(2, '0')}:</span>{' '}
-                        <span className="text-slate-400">{prefix}</span>
+                        <span className="text-slate-600 dark:text-slate-400">{prefix}</span>
                         {spaceBeforePrime && prefix && <span> </span>}
                         <span className="text-emerald-400 font-semibold">{cleanPrime}</span>
                         {spaceBeforeSuffix && suffix && <span> </span>}
-                        <span className="text-slate-400">{suffix}</span>
+                        <span className="text-slate-600 dark:text-slate-400">{suffix}</span>
                       </div>
                     );
                   })}
@@ -242,7 +242,7 @@ export const LabelingResultsWindow: React.FC<LabelingResultsWindowProps> = ({
       {/* Resize handle */}
       <div
         onMouseDown={handleResizeStart}
-        className="flex items-center justify-center h-3 cursor-row-resize border-t border-slate-700 hover:bg-slate-700/50 transition-colors group"
+        className="flex items-center justify-center h-3 cursor-row-resize border-t border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors group"
       >
         <GripHorizontal className="w-4 h-3 text-slate-600 group-hover:text-slate-400" />
       </div>
@@ -259,5 +259,5 @@ function getCategoryColor(category: string): string {
     morphological: 'bg-pink-900/30 text-pink-300',
     mixed: 'bg-orange-900/30 text-orange-300',
   };
-  return colors[category] || 'bg-slate-700 text-slate-300';
+  return colors[category] || 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300';
 }

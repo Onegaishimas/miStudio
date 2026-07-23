@@ -80,7 +80,7 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
           {groupDetail.members.map((member: FeatureGroupMember) => (
             <tr
               key={member.feature_id}
-              className="border-t border-slate-800 hover:bg-slate-800/40"
+              className="border-t border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800/40"
             >
               <td className="py-1.5">
                 <input
@@ -101,13 +101,13 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                   aria-label={`Select feature ${member.neuron_index}`}
                 />
               </td>
-              <td className="py-1.5 pr-3 text-slate-400 font-mono text-xs">
+              <td className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 font-mono text-xs">
                 {member.neuron_index}
               </td>
               <td className="py-1.5 pr-3">
                 <button
                   onClick={() => onOpenFeature(member.feature_id)}
-                  className="text-left text-slate-200 hover:text-emerald-400 flex items-center gap-1.5"
+                  className="text-left text-slate-800 dark:text-slate-200 hover:text-emerald-400 flex items-center gap-1.5"
                 >
                   {member.star_color && (
                     <Star
@@ -124,7 +124,7 @@ export function GroupMembersTable({ onOpenFeature }: GroupMembersTableProps) {
                   {cleanDisplayText(member.context_snippet)}
                 </span>
               </td>
-              <td className="py-1.5 pr-3 text-right text-xs text-slate-400">
+              <td className="py-1.5 pr-3 text-right text-xs text-slate-600 dark:text-slate-400">
                 {member.similarity.toFixed(2)}
               </td>
               <td className="py-1.5 text-right">

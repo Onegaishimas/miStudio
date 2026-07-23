@@ -35,8 +35,8 @@ export function TemperatureChart({ data, maxTemp = 95 }: TemperatureChartProps) 
       }
 
       return (
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-lg">
-          <p className="text-slate-400 text-xs mb-2">
+        <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 shadow-lg">
+          <p className="text-slate-600 dark:text-slate-400 text-xs mb-2">
             {formatTime(payload[0].payload.timestamp)}
           </p>
           <p className="text-sm" style={{ color: payload[0].color }}>
@@ -52,8 +52,8 @@ export function TemperatureChart({ data, maxTemp = 95 }: TemperatureChartProps) 
   };
 
   return (
-    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6">
-      <h3 className="text-lg font-semibold text-slate-100 mb-4">
+    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-6">
+      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
         Temperature Over Time
       </h3>
       {data.length === 0 ? (
@@ -97,7 +97,7 @@ export function TemperatureChart({ data, maxTemp = 95 }: TemperatureChartProps) 
         </ResponsiveContainer>
       )}
       {/* Legend for zones */}
-      <div className="flex items-center gap-6 mt-4 text-xs text-slate-400">
+      <div className="flex items-center gap-6 mt-4 text-xs text-slate-600 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
           <span>Normal (&lt;70°C)</span>

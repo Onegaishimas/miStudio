@@ -39,7 +39,7 @@ function StatusBadge({ status }: { status: string }) {
   const tone =
     status === 'completed' ? 'bg-emerald-500/10 text-emerald-300'
     : status === 'failed' ? 'bg-red-500/10 text-red-300'
-    : status === 'cancelled' ? 'bg-slate-700/60 text-slate-400'
+    : status === 'cancelled' ? 'bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400'
     : status === 'estimated' ? 'bg-sky-500/10 text-sky-300'
     : 'bg-violet-500/10 text-violet-300';
   return (
@@ -52,7 +52,7 @@ function ProgressBar({ value }: { value: number | null }) {
   // real 1% must not be rescaled to 100%.
   const pct = Math.max(0, Math.min(100, Math.round(value ?? 0)));
   return (
-    <div className="h-1.5 w-full rounded bg-slate-700/60 overflow-hidden">
+    <div className="h-1.5 w-full rounded bg-slate-100 dark:bg-slate-700/60 overflow-hidden">
       <div className="h-full bg-violet-500 transition-all" style={{ width: `${pct}%` }} />
     </div>
   );
@@ -63,19 +63,19 @@ function EdgeRow({ edge }: { edge: CircuitEdge }) {
     n.kind === 'cluster' ? `cluster:${n.cluster_profile_id}` : `#${n.feature_idx}`;
   return (
     <tr className={`text-xs ${edge.type === 'persistence' ? 'opacity-60' : ''}`}>
-      <td className="py-1 pr-3 font-mono text-slate-300 whitespace-nowrap">
+      <td className="py-1 pr-3 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
         L{edge.up.layer} {label(edge.up)} → L{edge.down.layer} {label(edge.down)}
       </td>
       <td className="py-1 pr-3">
         <span className={`rounded px-1 py-0.5 text-[10px] ${
           edge.type === 'persistence' ? 'bg-amber-500/10 text-amber-300'
           : edge.type === 'attention_mediated' ? 'bg-violet-500/10 text-violet-300'
-          : 'bg-slate-700/60 text-slate-300'}`}>
+          : 'bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-300'}`}>
           {edge.type}
         </span>
       </td>
-      <td className="py-1 pr-3 font-mono text-slate-400">R{edge.rung}</td>
-      <td className="py-1 pr-3 text-slate-400">
+      <td className="py-1 pr-3 font-mono text-slate-600 dark:text-slate-400">R{edge.rung}</td>
+      <td className="py-1 pr-3 text-slate-600 dark:text-slate-400">
         {[
           edge.coactivation?.pmi != null ? `PMI ${edge.coactivation.pmi.toFixed(2)}` : null,
           edge.coactivation?.support != null ? `n=${edge.coactivation.support}` : null,
@@ -184,17 +184,17 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
   };
 
   return (
-    <div className="mt-3 border-t border-slate-700/60 pt-3 space-y-3">
+    <div className="mt-3 border-t border-slate-200 dark:border-slate-700/60 pt-3 space-y-3">
       {editing ? (
         <div className="space-y-2">
           <input
-            className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1 text-sm text-slate-100"
+            className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1 text-sm text-slate-900 dark:text-slate-100"
             value={draftName}
             onChange={(e) => setDraftName(e.target.value)}
             aria-label="Circuit name"
           />
           <textarea
-            className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1 text-sm text-slate-100"
+            className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1 text-sm text-slate-900 dark:text-slate-100"
             rows={4}
             value={draftNarrative}
             onChange={(e) => setDraftNarrative(e.target.value)}
@@ -210,7 +210,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
               <Check className="w-3 h-3" /> Save
             </button>
             <button onClick={() => setEditing(false)}
-              className="flex items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-200">
+              className="flex items-center gap-1 rounded bg-slate-100 dark:bg-slate-700 px-2 py-1 text-xs text-slate-800 dark:text-slate-200">
               <XIcon className="w-3 h-3" /> Cancel
             </button>
           </div>
@@ -219,24 +219,24 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             {circuit.narrative ? (
-              <div className="text-sm text-slate-400">
+              <div className="text-sm text-slate-600 dark:text-slate-400">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
                     // House dark-theme markdown mapping (no typography plugin — R2 B10)
                     p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
-                    strong: ({ children }) => <strong className="font-semibold text-slate-200">{children}</strong>,
+                    strong: ({ children }) => <strong className="font-semibold text-slate-800 dark:text-slate-200">{children}</strong>,
                     ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
                     ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
-                    li: ({ children }) => <li className="text-slate-300">{children}</li>,
-                    code: ({ children }) => <code className="px-1 py-0.5 rounded bg-slate-900 text-slate-200 font-mono text-xs">{children}</code>,
+                    li: ({ children }) => <li className="text-slate-700 dark:text-slate-300">{children}</li>,
+                    code: ({ children }) => <code className="px-1 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono text-xs">{children}</code>,
                     table: ({ children }) => (
                       <div className="my-2 overflow-x-auto">
-                        <table className="text-xs border border-slate-700 border-collapse">{children}</table>
+                        <table className="text-xs border border-slate-300 dark:border-slate-700 border-collapse">{children}</table>
                       </div>
                     ),
-                    th: ({ children }) => <th className="px-2 py-1 border border-slate-700 text-slate-200">{children}</th>,
-                    td: ({ children }) => <td className="px-2 py-1 border border-slate-800 text-slate-300">{children}</td>,
+                    th: ({ children }) => <th className="px-2 py-1 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200">{children}</th>,
+                    td: ({ children }) => <td className="px-2 py-1 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300">{children}</td>,
                   }}
                 >
                   {circuit.narrative}
@@ -248,7 +248,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
           </div>
           <button
             onClick={() => { setDraftName(circuit.name); setDraftNarrative(circuit.narrative ?? ''); setEditing(true); }}
-            className="p-1 rounded hover:bg-white/10 text-slate-400 shrink-0"
+            className="p-1 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400 shrink-0"
             title="Edit name & narrative"
           >
             <Pencil className="w-3.5 h-3.5" />
@@ -257,13 +257,13 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
       )}
 
       <div>
-        <h4 className="text-xs font-medium text-slate-400 mb-1">Members by layer</h4>
+        <h4 className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Members by layer</h4>
         {[...new Set(circuit.members.map((m) => m.layer))].sort((a, b) => a - b).map((layer) => {
           const layerMembers = circuit.members.filter((m) => m.layer === layer);
           const count = layerMembers.reduce(
             (n, m) => n + (m.member_kind === 'cluster_ref' ? (m.expanded_members?.length ?? 0) : 1), 0);
           return (
-            <div key={layer} className="text-xs text-slate-300 mb-1">
+            <div key={layer} className="text-xs text-slate-700 dark:text-slate-300 mb-1">
               <span className="font-mono text-slate-500 mr-2">L{layer}</span>
               <span className="text-slate-500 mr-2">({count}/20)</span>
               {layerMembers.map((m, i) => (
@@ -281,7 +281,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
       {circuit.edges.length > 0 && (
         <div className="overflow-x-auto">
           <div className="flex items-center gap-3 mb-1">
-            <h4 className="text-xs font-medium text-slate-400">Edges</h4>
+            <h4 className="text-xs font-medium text-slate-600 dark:text-slate-400">Edges</h4>
             {hiddenCount > 0 && !showPersistence && (
               <button onClick={() => setShowPersistence(true)}
                 className="text-[10px] text-amber-300/80 hover:text-amber-300">
@@ -290,7 +290,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
             )}
             {showPersistence && (
               <button onClick={() => setShowPersistence(false)}
-                className="text-[10px] text-slate-500 hover:text-slate-300">
+                className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
                 hide persistence
               </button>
             )}
@@ -308,21 +308,21 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
         // for its ablation prompts (the backend 409s otherwise).
         const canRun = circuit.members.length > 0 && circuit.discovery_run_id != null;
         return (
-          <div className="border-t border-slate-700/60 pt-3 space-y-2">
+          <div className="border-t border-slate-200 dark:border-slate-700/60 pt-3 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h4 className="text-xs font-medium text-slate-400 flex items-center gap-1">
+              <h4 className="text-xs font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1">
                 <Microscope className="w-3.5 h-3.5 text-violet-300" />
                 Faithfulness (rung 3)
               </h4>
               {/* mode toggle — necessity only, or necessity + sufficiency */}
-              <div className="inline-flex rounded bg-slate-800 border border-slate-700 p-0.5">
+              <div className="inline-flex rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 p-0.5">
                 {(['necessity', 'both'] as const).map((m) => (
                   <button
                     key={m}
                     onClick={() => setFaithMode(m)}
                     disabled={running}
                     className={`px-2 py-0.5 text-[11px] rounded disabled:opacity-50 ${
-                      faithMode === m ? 'bg-violet-600 text-white' : 'text-slate-300 hover:text-white'}`}
+                      faithMode === m ? 'bg-violet-600 text-white' : 'text-slate-700 dark:text-slate-300 hover:text-white'}`}
                   >
                     {m === 'necessity' ? 'necessity' : 'both'}
                   </button>
@@ -331,7 +331,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
               <button
                 onClick={runFaithfulness}
                 disabled={faithBusy || running || !canRun}
-                className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-2.5 py-1 text-[11px] text-slate-900 dark:text-slate-100 disabled:opacity-50"
                 title={canRun
                   ? 'Ablate the circuit and test necessity/sufficiency of its members'
                   : 'Needs circuit members and a producing discovery run'}
@@ -359,7 +359,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
             )}
 
             {circuit.faithfulness && (
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 Necessity {circuit.faithfulness.necessity?.toFixed(2) ?? '—'}
                 {circuit.faithfulness.sufficiency != null &&
                   ` · sufficiency ${circuit.faithfulness.sufficiency.toFixed(2)}`}
@@ -380,9 +380,9 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
         const cal = circuit.calibration;
         const dialFmt = (n: number) => n.toFixed(2);
         return (
-          <div className="border-t border-slate-700/60 pt-3 space-y-2">
+          <div className="border-t border-slate-200 dark:border-slate-700/60 pt-3 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h4 className="text-xs font-medium text-slate-400 flex items-center gap-1">
+              <h4 className="text-xs font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1">
                 <Gauge className="w-3.5 h-3.5 text-amber-300" />
                 Strength calibration
               </h4>
@@ -390,7 +390,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
                 onClick={runCalibration}
                 disabled={calibBusy || running || !canRun
                   || !judgeEndpoint.trim() || !judgeModel.trim()}
-                className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-2.5 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-2.5 py-1 text-[11px] text-slate-900 dark:text-slate-100 disabled:opacity-50"
                 title="Find the usable dial band (onset + correctness cliff) and clamp the served dial to it"
               >
                 {running
@@ -409,7 +409,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
                 disabled={running}
                 placeholder="judge endpoint (…/v1)"
                 aria-label="Judge endpoint"
-                className="flex-1 min-w-[160px] rounded bg-slate-800 border border-slate-700 px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-500 disabled:opacity-50"
+                className="flex-1 min-w-[160px] rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-2 py-1 text-[11px] text-slate-800 dark:text-slate-200 placeholder:text-slate-500 disabled:opacity-50"
               />
               <input
                 value={judgeModel}
@@ -417,7 +417,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
                 disabled={running}
                 placeholder="judge model"
                 aria-label="Judge model"
-                className="w-40 rounded bg-slate-800 border border-slate-700 px-2 py-1 text-[11px] text-slate-200 placeholder:text-slate-500 disabled:opacity-50"
+                className="w-40 rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-2 py-1 text-[11px] text-slate-800 dark:text-slate-200 placeholder:text-slate-500 disabled:opacity-50"
               />
             </div>
 
@@ -448,7 +448,7 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
                   const pct = (v: number) => `${Math.min(100, Math.max(0, ((v - lo) / span) * 100))}%`;
                   return (
                     <div className="relative h-6" title="usable band (shaded) with the sweet-spot dial">
-                      <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-slate-700" />
+                      <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-slate-100 dark:bg-slate-700" />
                       <div
                         className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-amber-500/40"
                         style={{ left: pct(cal.onset), right: `calc(100% - ${pct(cal.cliff)})` }}
@@ -461,17 +461,17 @@ function CircuitDetail({ id, onChanged }: { id: string; onChanged: () => void })
                     </div>
                   );
                 })()}
-                <p className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
-                  <span>onset <b className="text-slate-200">{dialFmt(cal.onset)}</b></span>
+                <p className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2 flex-wrap">
+                  <span>onset <b className="text-slate-800 dark:text-slate-200">{dialFmt(cal.onset)}</b></span>
                   <span>· sweet-spot <b className="text-amber-200">{dialFmt(cal.sweet_spot)}</b></span>
-                  <span>· cliff <b className="text-slate-200">{dialFmt(cal.cliff)}</b></span>
+                  <span>· cliff <b className="text-slate-800 dark:text-slate-200">{dialFmt(cal.cliff)}</b></span>
                   {cal.provisional && (
                     <span className="rounded bg-amber-900/40 border border-amber-700/50 px-1.5 py-0.5 text-[10px] text-amber-200">
                       provisional
                     </span>
                   )}
                   {cal.non_monotone && (
-                    <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">
+                    <span className="rounded bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-700 dark:text-slate-300">
                       non-monotone
                     </span>
                   )}
@@ -582,7 +582,7 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
-        <p className="text-slate-400 text-sm">
+        <p className="text-slate-600 dark:text-slate-400 text-sm">
           Cross-layer feature circuits with graded evidence. Every artifact shows its rung —
           discovery results are Tier-1 (same-token) associations until validated.
         </p>
@@ -599,7 +599,7 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
         />
         <button
           onClick={() => fileInput.current?.click()}
-          className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-200 shrink-0"
+          className="flex items-center gap-1.5 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 shrink-0"
           title="Import a mistudio.circuit-definition/v1 file"
         >
           <Upload className="w-3.5 h-3.5" /> Import
@@ -617,7 +617,7 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
       ) : rows.length === 0 ? (
         <div className={`${COMPONENTS.card.base} p-8 text-center`}>
           <Layers className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-slate-300 font-medium mb-1">No circuits yet</h3>
+          <h3 className="text-slate-700 dark:text-slate-300 font-medium mb-1">No circuits yet</h3>
           <p className="text-slate-500 text-sm">
             Circuits arrive from discovery runs (coming with the mining feature), via the
             MCP <span className="font-mono">create_circuit</span> /{' '}
@@ -634,7 +634,7 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
                 onClick={() => setExpanded(expanded === c.id ? null : c.id)}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-slate-100 font-medium truncate">{c.name}</span>
+                  <span className="text-slate-900 dark:text-slate-100 font-medium truncate">{c.name}</span>
                   <RungChip rung={c.rung} language={c.rung_language} nextStep={c.rung_next_step} />
                   {c.promoted && (
                     <span className="rounded bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 text-[10px]">
@@ -661,7 +661,7 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
               {c.promoted ? (
                 <button
                   onClick={() => setPromoted(c.id, false)}
-                  className="flex items-center gap-1 rounded bg-slate-700 hover:bg-slate-600 px-2.5 py-1.5 text-xs text-slate-200"
+                  className="flex items-center gap-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200"
                   title="Unpromote (removes the loadable-profile badge)"
                 >
                   <ArrowDownRight className="w-3.5 h-3.5" /> Unpromote
@@ -677,21 +677,21 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
               )}
               <a
                 href={circuitsApi.exportUrl(c.id)}
-                className="p-1.5 rounded hover:bg-white/10 text-slate-400"
+                className="p-1.5 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400"
                 title="Export circuit-definition/v1"
               >
                 <Download className="w-4 h-4" />
               </a>
               <button
                 onClick={() => downloadSlices(c.id, c.name)}
-                className="p-1.5 rounded hover:bg-white/10 text-slate-400"
+                className="p-1.5 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400"
                 title="Export per-layer v1 slices (partial renderings for single-SAE consumers)"
               >
                 <FileDown className="w-4 h-4" />
               </button>
               <button
                 onClick={() => remove(c.id)}
-                className="p-1.5 rounded hover:bg-white/10 text-slate-400"
+                className="p-1.5 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400"
                 title="Delete circuit"
               >
                 <Trash2 className="w-4 h-4" />
@@ -823,7 +823,7 @@ function CaptureTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-slate-400 text-sm">
+      <p className="text-slate-600 dark:text-slate-400 text-sm">
         Capture co-activation events across layers on a held-out split. Run an estimate first,
         then confirm to launch the full pass.
       </p>
@@ -836,9 +836,9 @@ function CaptureTab() {
 
       <div className={`${COMPONENTS.card.base} p-4 space-y-3`}>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Dataset</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Dataset</label>
           <select
-            className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
             value={datasetId}
             onChange={(e) => setDatasetId(e.target.value)}
           >
@@ -848,7 +848,7 @@ function CaptureTab() {
         </div>
 
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Layers &amp; SAEs</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Layers &amp; SAEs</label>
           <div className="space-y-2">
             {layerRows.map((row, i) => {
               // The SAE knows its own layer (trained one-layer-per-SAE), so
@@ -866,8 +866,8 @@ function CaptureTab() {
                   placeholder="layer"
                   className={`w-20 rounded border px-2 py-1.5 text-sm ${
                     layerLocked
-                      ? 'bg-slate-800/50 border-slate-700 text-slate-400 cursor-not-allowed'
-                      : 'bg-slate-800 border-slate-600 text-slate-100'}`}
+                      ? 'bg-slate-100 border-slate-300 text-slate-600 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-400 cursor-not-allowed'
+                      : 'bg-white border-slate-300 text-slate-900 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100'}`}
                   value={shownLayer}
                   readOnly={layerLocked}
                   title={layerLocked
@@ -876,7 +876,7 @@ function CaptureTab() {
                   onChange={(e) => setLayerRows((rs) => rs.map((r, j) => j === i ? { ...r, layer: e.target.value } : r))}
                 />
                 <select
-                  className="flex-1 rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                  className="flex-1 rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
                   value={row.sae_id}
                   onChange={(e) => {
                     const sae = readySaes.find((s) => s.id === e.target.value);
@@ -896,7 +896,7 @@ function CaptureTab() {
                 </select>
                 <button
                   onClick={() => setLayerRows((rs) => rs.length > 1 ? rs.filter((_, j) => j !== i) : rs)}
-                  className="p-1.5 rounded hover:bg-white/10 text-slate-400 disabled:opacity-30"
+                  className="p-1.5 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400 disabled:opacity-30"
                   disabled={layerRows.length <= 1}
                   title="Remove layer"
                 >
@@ -918,19 +918,19 @@ function CaptureTab() {
 
         <div className="flex gap-3">
           <div className="flex-1">
-            <label className="block text-xs text-slate-400 mb-1">Epsilon</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Epsilon</label>
             <input
               type="number" step="0.01"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={epsilon}
               onChange={(e) => setEpsilon(e.target.value)}
             />
           </div>
           <div className="flex-1">
-            <label className="block text-xs text-slate-400 mb-1">Sample cap</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Sample cap</label>
             <input
               type="number"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={sampleCap}
               onChange={(e) => setSampleCap(e.target.value)}
             />
@@ -938,26 +938,26 @@ function CaptureTab() {
         </div>
 
         <div>
-          <label className="flex items-center gap-2 text-xs text-slate-300">
+          <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
             <input type="checkbox" checked={attnEnabled} onChange={(e) => setAttnEnabled(e.target.checked)} />
             Capture attention (top-k per head)
           </label>
           {attnEnabled && (
             <div className="flex gap-3 mt-2">
               <div className="flex-1">
-                <label className="block text-xs text-slate-400 mb-1">Attention layers (comma-sep)</label>
+                <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Attention layers (comma-sep)</label>
                 <input
-                  className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                  className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
                   placeholder="e.g. 4, 6, 8"
                   value={attnLayers}
                   onChange={(e) => setAttnLayers(e.target.value)}
                 />
               </div>
               <div className="w-24">
-                <label className="block text-xs text-slate-400 mb-1">top_k</label>
+                <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">top_k</label>
                 <input
                   type="number"
-                  className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                  className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
                   value={attnTopK}
                   onChange={(e) => setAttnTopK(e.target.value)}
                 />
@@ -969,7 +969,7 @@ function CaptureTab() {
         <button
           onClick={runEstimate}
           disabled={submitting}
-          className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-sm text-slate-100 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100 disabled:opacity-50"
         >
           <Search className="w-4 h-4" /> Estimate
         </button>
@@ -977,7 +977,7 @@ function CaptureTab() {
         {estimateFor && estimateFor.status === 'estimated' && estimateFor.estimate && (
           <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 space-y-2">
             <h4 className="text-xs font-medium text-sky-200">Cost estimate</h4>
-            <div className="text-xs text-slate-300 flex flex-wrap gap-x-4 gap-y-1">
+            <div className="text-xs text-slate-700 dark:text-slate-300 flex flex-wrap gap-x-4 gap-y-1">
               <span>{estimateFor.estimate.events ?? '—'} events</span>
               <span>{fmtBytes(estimateFor.estimate.bytes)}</span>
               <span>{estimateFor.estimate.minutes != null ? `~${estimateFor.estimate.minutes} min` : '—'}</span>
@@ -998,7 +998,7 @@ function CaptureTab() {
       </div>
 
       <div className="space-y-2">
-        <h3 className="text-sm font-medium text-slate-300">Capture runs</h3>
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Capture runs</h3>
         {captures.length === 0 ? (
           <p className="text-xs text-slate-500">No capture runs yet.</p>
         ) : captures.map((c) => (
@@ -1014,10 +1014,10 @@ function CaptureTab() {
               <div className="flex-1" />
               {isActive(c.status) && (
                 <button onClick={() => cancelRun(c.id)}
-                  className="text-[11px] text-slate-400 hover:text-slate-200">cancel</button>
+                  className="text-[11px] text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">cancel</button>
               )}
               <button onClick={() => deleteRun(c.id)}
-                className="p-1 rounded hover:bg-white/10 text-slate-400" title="Delete">
+                className="p-1 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400" title="Delete">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1065,12 +1065,12 @@ export function RunReportCard({ report }: { report: DiscoveryReport }) {
           </div>
         </div>
         <div className="flex-1" />
-        <span className="rounded bg-slate-700/60 text-slate-300 px-2 py-0.5 text-[10px]">
+        <span className="rounded bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-300 px-2 py-0.5 text-[10px]">
           {report.granularity} · {report.mode}
         </span>
       </div>
 
-      <div className="text-xs text-slate-400 grid grid-cols-2 gap-x-4 gap-y-1">
+      <div className="text-xs text-slate-600 dark:text-slate-400 grid grid-cols-2 gap-x-4 gap-y-1">
         <span>null: {report.null_summary.method} ({report.null_summary.shuffles}× · p{report.null_summary.percentile})</span>
         <span>
           FDR: {report.fdr.discipline} · q={report.fdr.q} · {report.fdr.passed}/{report.fdr.tested} passed
@@ -1083,8 +1083,8 @@ export function RunReportCard({ report }: { report: DiscoveryReport }) {
       </div>
 
       <div>
-        <h4 className="text-[11px] font-medium text-slate-400 mb-1">Stage counts</h4>
-        <div className="text-xs text-slate-300 flex flex-wrap gap-x-3 gap-y-0.5">
+        <h4 className="text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">Stage counts</h4>
+        <div className="text-xs text-slate-700 dark:text-slate-300 flex flex-wrap gap-x-3 gap-y-0.5">
           <span>considered {report.counts_by_stage.pairs_considered}</span>
           <span>→ support {report.counts_by_stage.post_support}</span>
           <span>→ null-tested {report.counts_by_stage.null_tested}</span>
@@ -1107,15 +1107,15 @@ export function RunReportCard({ report }: { report: DiscoveryReport }) {
       )}
 
       {report.uncovered_seeds?.length > 0 && (
-        <div className="text-[11px] text-slate-400">
-          <span className="font-medium text-slate-300">Uncovered seeds:</span>{' '}
+        <div className="text-[11px] text-slate-600 dark:text-slate-400">
+          <span className="font-medium text-slate-700 dark:text-slate-300">Uncovered seeds:</span>{' '}
           {report.uncovered_seeds.map((u, i) => (
             <span key={i} className="mr-2">L{u.layer} ({u.reason})</span>
           ))}
         </div>
       )}
 
-      <div className="rounded border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-400 italic">
+      <div className="rounded border border-slate-300 dark:border-slate-700/60 bg-slate-100 dark:bg-slate-900/40 px-3 py-2 text-[11px] text-slate-600 dark:text-slate-400 italic">
         {report.lag0_disclosure}
       </div>
     </div>
@@ -1182,7 +1182,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
   });
 
   return (
-    <div className="mt-3 border-t border-slate-700/60 pt-3 space-y-3">
+    <div className="mt-3 border-t border-slate-200 dark:border-slate-700/60 pt-3 space-y-3">
       {error && <p className="text-xs text-red-300">{error}</p>}
       {isActive(run.status) && <ProgressBar value={run.progress} />}
       {run.report && <RunReportCard report={run.report} />}
@@ -1192,7 +1192,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
           <button
             onClick={startAttribution}
             disabled={attrBusy || attrActive}
-            className="flex items-center gap-1.5 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-100 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-50"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             {run.attribution_status === 'completed' ? 'Re-run attribution pass'
@@ -1205,7 +1205,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
               {run.attribution_progress != null
                 && ` · ${Math.round(run.attribution_progress)}%`}
               <button onClick={cancelAttribution}
-                className="rounded bg-slate-700 hover:bg-slate-600 px-2 py-0.5 text-slate-200">
+                className="rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-2 py-0.5 text-slate-800 dark:text-slate-200">
                 cancel
               </button>
             </span>
@@ -1220,7 +1220,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
             </span>
           )}
           {run.attribution_status === 'cancelled' && (
-            <span className="text-[11px] text-slate-400">attribution cancelled</span>
+            <span className="text-[11px] text-slate-600 dark:text-slate-400">attribution cancelled</span>
           )}
         </div>
       )}
@@ -1241,7 +1241,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
             </thead>
             <tbody>
               {candidates.map((c, i) => (
-                <tr key={i} className="text-slate-300 border-t border-slate-800">
+                <tr key={i} className="text-slate-700 dark:text-slate-300 border-t border-slate-200 dark:border-slate-800">
                   <td className="py-1 pr-3 font-mono whitespace-nowrap">
                     {nodeLabel(c.up)} → {nodeLabel(c.down)}
                   </td>
@@ -1262,7 +1262,7 @@ function DiscoveryRunDetail({ runId, onChanged }: { runId: string; onChanged: ()
                     ) : '—'}
                   </td>
                   {attributed && (
-                    <td className="py-1 pr-3 font-mono text-slate-400">
+                    <td className="py-1 pr-3 font-mono text-slate-600 dark:text-slate-400">
                       {c.orderings?.coact_rank != null && c.orderings?.attr_rank != null
                         ? `${c.orderings.coact_rank + 1}→${c.orderings.attr_rank + 1}`
                         : '—'}
@@ -1370,13 +1370,13 @@ function DiscoveryTab() {
   const Toggle = <T extends string>(
     { value, options, onChange }: { value: T; options: { v: T; label: string }[]; onChange: (v: T) => void },
   ) => (
-    <div className="inline-flex rounded bg-slate-800 border border-slate-700 p-0.5">
+    <div className="inline-flex rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 p-0.5">
       {options.map((o) => (
         <button
           key={o.v}
           onClick={() => onChange(o.v)}
           className={`px-2.5 py-1 text-xs rounded ${
-            value === o.v ? 'bg-violet-600 text-white' : 'text-slate-300 hover:text-white'}`}
+            value === o.v ? 'bg-violet-600 text-white' : 'text-slate-700 dark:text-slate-300 hover:text-white'}`}
         >
           {o.label}
         </button>
@@ -1386,7 +1386,7 @@ function DiscoveryTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-slate-400 text-sm">
+      <p className="text-slate-600 dark:text-slate-400 text-sm">
         Mine candidate associations from a capture. Discovery produces graded evidence
         (rungs 0–1) — candidates and attribution support, never proof.
       </p>
@@ -1399,9 +1399,9 @@ function DiscoveryTab() {
 
       <div className={`${COMPONENTS.card.base} p-4 space-y-3`}>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Capture run</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Capture run</label>
           <select
-            className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
             value={captureId}
             onChange={(e) => setCaptureId(e.target.value)}
           >
@@ -1413,7 +1413,7 @@ function DiscoveryTab() {
               </option>
             ))}
           </select>
-          <label className="flex items-center gap-2 text-[11px] text-slate-400 mt-1.5">
+          <label className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400 mt-1.5">
             <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
             Force — allow mining a stale capture store
           </label>
@@ -1421,7 +1421,7 @@ function DiscoveryTab() {
 
         <div className="flex flex-wrap gap-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Mode</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Mode</label>
             <Toggle
               value={mode}
               onChange={onModeChange}
@@ -1429,7 +1429,7 @@ function DiscoveryTab() {
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Granularity</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Granularity</label>
             <Toggle
               value={granularity}
               onChange={setGranularity}
@@ -1440,13 +1440,13 @@ function DiscoveryTab() {
 
         {mode === 'seeded' && (
           <div>
-            <label className="block text-xs text-slate-400 mb-1">
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
               Seed refs (one per line: <span className="font-mono">layer:feature_idx</span> or{' '}
               <span className="font-mono">layer:cluster:profile_id</span>)
             </label>
             <textarea
               rows={3}
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 font-mono"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100 font-mono"
               placeholder={'6:1234\n8:cluster:abc123'}
               value={seedRefsText}
               onChange={(e) => setSeedRefsText(e.target.value)}
@@ -1456,21 +1456,21 @@ function DiscoveryTab() {
 
         <div className="flex gap-3">
           <div className="flex-1">
-            <label className="block text-xs text-slate-400 mb-1">s_min</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">s_min</label>
             <input type="number"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={sMin} onChange={(e) => setSMin(e.target.value)} />
           </div>
           <div className="flex-1">
-            <label className="block text-xs text-slate-400 mb-1">null shuffles</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">null shuffles</label>
             <input type="number"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={nullShuffles} onChange={(e) => setNullShuffles(e.target.value)} />
           </div>
           <div className="flex-1">
-            <label className="block text-xs text-slate-400 mb-1">FDR q</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">FDR q</label>
             <input type="number" step="0.01"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={fdrQ} onChange={(e) => setFdrQ(e.target.value)} />
           </div>
         </div>
@@ -1485,7 +1485,7 @@ function DiscoveryTab() {
       </div>
 
       <div className="space-y-2">
-        <h3 className="text-sm font-medium text-slate-300">Discovery runs</h3>
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Discovery runs</h3>
         {runs.length === 0 ? (
           <p className="text-xs text-slate-500">No discovery runs yet.</p>
         ) : runs.map((r) => (
@@ -1497,14 +1497,14 @@ function DiscoveryTab() {
               >
                 <StatusBadge status={r.status} />
                 <span className="text-xs font-mono text-slate-500">{r.id.slice(0, 8)}</span>
-                <span className="text-xs text-slate-400">{r.candidate_count} candidates</span>
+                <span className="text-xs text-slate-600 dark:text-slate-400">{r.candidate_count} candidates</span>
               </button>
               {isActive(r.status) && (
                 <button onClick={() => cancelRun(r.id)}
-                  className="text-[11px] text-slate-400 hover:text-slate-200">cancel</button>
+                  className="text-[11px] text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">cancel</button>
               )}
               <button onClick={() => deleteRun(r.id)}
-                className="p-1 rounded hover:bg-white/10 text-slate-400" title="Delete">
+                className="p-1 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400" title="Delete">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1566,16 +1566,16 @@ export function ValidationResults({
             ? attr!.survival - coact!.survival
             : null);
         const upliftPct = uplift != null ? Math.round(uplift * 100) : null;
-        const tone = upliftPct == null ? 'text-slate-300'
+        const tone = upliftPct == null ? 'text-slate-700 dark:text-slate-300'
           : upliftPct > 0 ? 'text-emerald-300'
           : upliftPct < 0 ? 'text-amber-300'
-          : 'text-slate-300';
+          : 'text-slate-700 dark:text-slate-300';
         const sign = upliftPct != null && upliftPct > 0 ? '+' : '';
         return (
-          <div className="rounded border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[11px] text-slate-300 space-y-1">
+          <div className="rounded border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[11px] text-slate-700 dark:text-slate-300 space-y-1">
             <div className="flex items-center gap-3 flex-wrap">
-              <span>co-activation ordering: <span className="font-mono text-slate-200">{pct(coact!.survival)}</span> survival</span>
-              <span>attribution ordering: <span className="font-mono text-slate-200">{pct(attr!.survival)}</span> survival</span>
+              <span>co-activation ordering: <span className="font-mono text-slate-800 dark:text-slate-200">{pct(coact!.survival)}</span> survival</span>
+              <span>attribution ordering: <span className="font-mono text-slate-800 dark:text-slate-200">{pct(attr!.survival)}</span> survival</span>
               <span className={`font-medium ${tone}`}>
                 attribution re-ranking uplift: {upliftPct != null ? `${sign}${upliftPct}%` : '—'}
               </span>
@@ -1615,11 +1615,11 @@ export function ValidationResults({
               const failHist = c.tested_and_failed_history?.find(
                 (h) => h.ordering === v.ordering);
               return (
-                <tr key={i} className="border-t border-slate-800 text-slate-300">
+                <tr key={i} className="border-t border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300">
                   <td className="py-1 pr-3 font-mono whitespace-nowrap">
                     {nodeLabel(c.up)} → {nodeLabel(c.down)}
                   </td>
-                  <td className="py-1 pr-3 font-mono text-slate-400">{v.ordering}</td>
+                  <td className="py-1 pr-3 font-mono text-slate-600 dark:text-slate-400">{v.ordering}</td>
                   <td className="py-1 pr-3 font-mono">{v.effect_size.toFixed(3)}</td>
                   <td className="py-1 pr-3">
                     {v.passed && c.validated_rung === 2 ? (
@@ -1628,7 +1628,7 @@ export function ValidationResults({
                       </span>
                     ) : (
                       <span
-                        className="rounded bg-slate-700/60 text-slate-400 px-1.5 py-0.5 text-[10px] whitespace-nowrap"
+                        className="rounded bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400 px-1.5 py-0.5 text-[10px] whitespace-nowrap"
                         title={failHist?.reason}
                       >
                         tested, did not validate
@@ -1727,13 +1727,13 @@ function ValidationTab() {
   const Toggle = <T extends string>(
     { value, options, onChange }: { value: T; options: { v: T; label: string }[]; onChange: (v: T) => void },
   ) => (
-    <div className="inline-flex rounded bg-slate-800 border border-slate-700 p-0.5">
+    <div className="inline-flex rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 p-0.5">
       {options.map((o) => (
         <button
           key={o.v}
           onClick={() => onChange(o.v)}
           className={`px-2.5 py-1 text-xs rounded ${
-            value === o.v ? 'bg-violet-600 text-white' : 'text-slate-300 hover:text-white'}`}
+            value === o.v ? 'bg-violet-600 text-white' : 'text-slate-700 dark:text-slate-300 hover:text-white'}`}
         >
           {o.label}
         </button>
@@ -1743,7 +1743,7 @@ function ValidationTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-slate-400 text-sm">
+      <p className="text-slate-600 dark:text-slate-400 text-sm">
         Validation is the rung-2 causal tier: it intervenes on each top-K edge and
         tests the downstream effect against a support-matched null. A passing edge is
         causally validated (rung 2); a failing edge is tested but did not validate.
@@ -1757,9 +1757,9 @@ function ValidationTab() {
 
       <div className={`${COMPONENTS.card.base} p-4 space-y-3`}>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Discovery run</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Discovery run</label>
           <select
-            className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
             value={runId}
             onChange={(e) => setRunId(e.target.value)}
           >
@@ -1774,7 +1774,7 @@ function ValidationTab() {
 
         <div className="flex flex-wrap gap-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Ordering</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Ordering</label>
             <Toggle
               value={ordering}
               onChange={setOrdering}
@@ -1787,7 +1787,7 @@ function ValidationTab() {
             )}
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Baseline</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Baseline</label>
             <Toggle
               value={baseline}
               onChange={setBaseline}
@@ -1798,27 +1798,27 @@ function ValidationTab() {
 
         <div className="flex flex-wrap gap-3">
           <div className="flex-1 min-w-[120px]">
-            <label className="block text-xs text-slate-400 mb-1">Top-K</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Top-K</label>
             <input type="number"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={k} onChange={(e) => setK(e.target.value)} />
           </div>
           <div className="flex-1 min-w-[120px]">
-            <label className="block text-xs text-slate-400 mb-1">Prompts / edge</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Prompts / edge</label>
             <input type="number"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={promptsPerEdge} onChange={(e) => setPromptsPerEdge(e.target.value)} />
           </div>
           <div className="flex-1 min-w-[120px]">
-            <label className="block text-xs text-slate-400 mb-1">Null samples</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Null samples</label>
             <input type="number"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={nullSamples} onChange={(e) => setNullSamples(e.target.value)} />
           </div>
           <div className="flex-1 min-w-[120px]">
-            <label className="block text-xs text-slate-400 mb-1">Sign fraction</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Sign fraction</label>
             <input type="number" step="0.05"
-              className="w-full rounded bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              className="w-full rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
               value={signFrac} onChange={(e) => setSignFrac(e.target.value)} />
           </div>
         </div>
@@ -1836,7 +1836,7 @@ function ValidationTab() {
               validation {run?.validation_status}
               {run?.validation_progress != null && ` · ${Math.round(run.validation_progress)}%`}
               <button onClick={cancelValidation}
-                className="rounded bg-slate-700 hover:bg-slate-600 px-2 py-0.5 text-slate-200">
+                className="rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-2 py-0.5 text-slate-800 dark:text-slate-200">
                 cancel
               </button>
             </span>
@@ -1847,7 +1847,7 @@ function ValidationTab() {
             </span>
           )}
           {run?.validation_status === 'cancelled' && (
-            <span className="text-[11px] text-slate-400">validation cancelled</span>
+            <span className="text-[11px] text-slate-600 dark:text-slate-400">validation cancelled</span>
           )}
         </div>
 
@@ -1856,7 +1856,7 @@ function ValidationTab() {
 
       {run && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-slate-300">Per-edge results</h3>
+          <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Per-edge results</h3>
           <ValidationResults run={run} onOpenManifest={setManifestId} />
         </div>
       )}
@@ -1889,21 +1889,21 @@ export function CircuitsPanel({ onNavigateToSteering }: { onNavigateToSteering?:
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-slate-100 flex items-center gap-2">
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <GitBranch className="w-5 h-5 text-violet-400" />
           Circuits
         </h1>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-700/60">
+      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700/60">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
               tab === t.id
-                ? 'border-violet-400 text-slate-100'
-                : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                ? 'border-violet-400 text-slate-900 dark:text-slate-100'
+                : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
           >
             {t.label}
           </button>

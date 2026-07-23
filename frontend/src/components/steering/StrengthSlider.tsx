@@ -114,7 +114,7 @@ export function StrengthSlider({
                 ? 'bg-red-500/10 border-red-500/50 text-red-400'
                 : warningLevel === 'caution'
                 ? 'bg-amber-500/10 border-amber-500/50 text-amber-400'
-                : 'bg-slate-900 border-slate-700 text-slate-100'
+                : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100'
             } focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50`}
           />
           <span className="text-xs text-slate-500">strength</span>
@@ -128,7 +128,7 @@ export function StrengthSlider({
                 ? 'text-red-400'
                 : warningLevel === 'caution'
                 ? 'text-amber-400'
-                : 'text-slate-400'
+                : 'text-slate-600 dark:text-slate-400'
             }`}
             title="Raw steering coefficient (Neuronpedia-compatible)"
           >
@@ -172,7 +172,7 @@ export function StrengthSlider({
           />
           {/* Normal zone (slate) */}
           <div
-            className="absolute h-full bg-slate-700"
+            className="absolute h-full bg-slate-100 dark:bg-slate-700"
             style={{ left: `${zonePositions.cautionLow}%`, width: `${zonePositions.cautionHigh - zonePositions.cautionLow}%` }}
           />
           {/* Caution high zone (amber) */}

@@ -249,7 +249,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
 
     return (
       <th
-        className={`px-4 py-3 text-left text-xs font-medium ${COMPONENTS.text.secondary} uppercase cursor-pointer hover:bg-slate-800/30 transition-colors ${className}`}
+        className={`px-4 py-3 text-left text-xs font-medium ${COMPONENTS.text.secondary} uppercase cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors ${className}`}
         onClick={() => handleSort(column)}
       >
         <div className="flex items-center gap-2">
@@ -523,7 +523,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
         );
       case 'pending':
         return (
-          <span className={`${baseClasses} bg-slate-800/50 text-slate-400 flex items-center gap-1`} title="NLP analysis pending">
+          <span className={`${baseClasses} bg-slate-100 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 flex items-center gap-1`} title="NLP analysis pending">
             <Brain className="w-3 h-3" />
             Pending
           </span>
@@ -905,7 +905,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     disabled={isNlpCancelling}
                     className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       isNlpCancelling
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
                         : 'bg-yellow-600/20 border border-yellow-600 text-yellow-400 hover:bg-yellow-600/30'
                     }`}
                     title="Pause NLP analysis (progress will be preserved)"
@@ -928,7 +928,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     disabled={isNlpProcessing}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       isNlpProcessing
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
                         : 'bg-emerald-600 hover:bg-emerald-500 text-white'
                     }`}
                     title="Resume NLP analysis from where it left off"
@@ -955,8 +955,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     disabled={isNlpResetting}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       isNlpResetting
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                        : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200'
                     }`}
                     title="Restart NLP analysis from scratch (clears existing progress)"
                   >
@@ -987,8 +987,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                   disabled={isNlpResetting}
                   className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                     isNlpResetting
-                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                      : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
+                      : 'bg-slate-100 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                   title="Reprocess NLP analysis from scratch"
                 >
@@ -1121,13 +1121,13 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
 
           {/* Live Metrics Section */}
           {showMetrics && (
-            <div className="border-t border-slate-700 pt-3 mt-3">
+            <div className="border-t border-slate-300 dark:border-slate-700 pt-3 mt-3">
               {/* Metrics Summary Grid */}
               <div className="grid grid-cols-4 gap-2 mb-3">
                 {/* Batch Progress */}
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-xs text-slate-400 mb-1">Batch</div>
-                  <div className="text-lg font-semibold text-slate-200">
+                <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                  <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Batch</div>
+                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-200">
                     {extraction.current_batch !== undefined
                       ? `${extraction.current_batch}/${extraction.total_batches || '?'}`
                       : '—'}
@@ -1135,8 +1135,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 </div>
 
                 {/* Samples Processed */}
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-xs text-slate-400 mb-1">Samples</div>
+                <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                  <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Samples</div>
                   <div className="text-lg font-semibold text-emerald-400">
                     {extraction.samples_processed !== undefined
                       ? extraction.samples_processed.toLocaleString()
@@ -1150,8 +1150,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 </div>
 
                 {/* Speed */}
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-xs text-slate-400 mb-1">Speed</div>
+                <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                  <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Speed</div>
                   <div className="text-lg font-semibold text-blue-400">
                     {extraction.samples_per_second !== undefined
                       ? `${extraction.samples_per_second.toFixed(1)}/s`
@@ -1160,8 +1160,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 </div>
 
                 {/* ETA */}
-                <div className="bg-slate-800/50 rounded-lg p-2">
-                  <div className="text-xs text-slate-400 mb-1">ETA</div>
+                <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
+                  <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">ETA</div>
                   <div className="text-lg font-semibold text-purple-400">
                     {extraction.eta_seconds !== undefined
                       ? formatEta(extraction.eta_seconds)
@@ -1173,15 +1173,15 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               {/* Two Column Layout: Logs left, Metrics right */}
               <div className="flex gap-3">
                 {/* Extraction Logs - Left Column (60%) */}
-                <div className="w-3/5 bg-slate-950 rounded-lg p-3 font-mono text-xs">
+                <div className="w-3/5 bg-slate-50 dark:bg-slate-950 rounded-lg p-3 font-mono text-xs">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-slate-400">Extraction Logs</span>
+                    <span className="text-slate-600 dark:text-slate-400">Extraction Logs</span>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={handleCopyLogs}
                         disabled={metricsHistory.length === 0}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title={logsCopied ? 'Copied!' : 'Copy logs to clipboard'}
                       >
                         {logsCopied ? (
@@ -1198,7 +1198,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                       [...metricsHistory].reverse().map((entry, i) => {
                         const time = new Date(entry.timestamp).toLocaleTimeString();
                         return (
-                          <div key={`${entry.batch}-${i}`} className="text-slate-300">
+                          <div key={`${entry.batch}-${i}`} className="text-slate-700 dark:text-slate-300">
                             <span className="text-slate-500">[{time}]</span>{' '}
                             batch={entry.batch ?? 0}/{entry.totalBatches ?? '?'},
                             samples={(entry.samplesProcessed ?? 0).toLocaleString()},
@@ -1219,9 +1219,9 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 {/* Metrics Charts - Right Column (40%) */}
                 <div className="w-2/5 flex flex-col gap-2">
                   {/* Speed Chart */}
-                  <div className="bg-slate-800/30 rounded-lg p-2">
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-400">Speed (samples/s)</span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Speed (samples/s)</span>
                       <span className="text-xs text-blue-400 font-mono">
                         {metricsHistory.length > 0
                           ? `${metricsHistory[metricsHistory.length - 1].samplesPerSecond.toFixed(1)}/s`
@@ -1266,9 +1266,9 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                   </div>
 
                   {/* Examples Collected Chart */}
-                  <div className="bg-slate-800/30 rounded-lg p-2">
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-400">Examples Collected</span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Examples Collected</span>
                       <span className="text-xs text-emerald-400 font-mono">
                         {metricsHistory.length > 0
                           ? metricsHistory[metricsHistory.length - 1].heapExamplesCount.toLocaleString()
@@ -1313,9 +1313,9 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                   </div>
 
                   {/* Collection Rate Chart (examples/sec) */}
-                  <div className="bg-slate-800/30 rounded-lg p-2">
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-slate-400">Collection Rate</span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Collection Rate</span>
                       <span className="text-xs text-purple-400 font-mono">
                         {(() => {
                           if (metricsHistory.length < 2) return '—';
@@ -1474,7 +1474,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               disabled={isNlpProcessing}
               className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2 rounded-lg transition-colors ${
                 isNlpProcessing
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white'
               }`}
             >
@@ -1500,8 +1500,8 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               disabled={isNlpResetting}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                 isNlpResetting
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200'
               }`}
             >
               {isNlpResetting ? (
@@ -1573,10 +1573,10 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
           </div>
 
           {/* Range Filters */}
-          <div className="flex flex-wrap items-center gap-4 mb-3 p-2 bg-slate-800/50 rounded border border-slate-700/50">
+          <div className="flex flex-wrap items-center gap-4 mb-3 p-2 bg-slate-100 dark:bg-slate-800/50 rounded border border-slate-300 dark:border-slate-700/50">
             {/* Activation Frequency Range */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400 whitespace-nowrap">Act. Freq:</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">Act. Freq:</span>
               <input
                 type="number"
                 min={0}
@@ -1585,7 +1585,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 placeholder="Min"
                 value={rangeFilterInputs.min_activation_freq}
                 onChange={(e) => handleRangeFilterChange('min_activation_freq', e.target.value)}
-                className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
+                className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
               />
               <span className="text-slate-500">-</span>
               <input
@@ -1596,13 +1596,13 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 placeholder="Max"
                 value={rangeFilterInputs.max_activation_freq}
                 onChange={(e) => handleRangeFilterChange('max_activation_freq', e.target.value)}
-                className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
+                className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
               />
             </div>
 
             {/* Max Activation Range */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400 whitespace-nowrap">Max Act:</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">Max Act:</span>
               <input
                 type="number"
                 min={0}
@@ -1610,7 +1610,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 placeholder="Min"
                 value={rangeFilterInputs.min_max_activation}
                 onChange={(e) => handleRangeFilterChange('min_max_activation', e.target.value)}
-                className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
+                className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
               />
               <span className="text-slate-500">-</span>
               <input
@@ -1620,7 +1620,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                 placeholder="Max"
                 value={rangeFilterInputs.max_max_activation}
                 onChange={(e) => handleRangeFilterChange('max_max_activation', e.target.value)}
-                className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
+                className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
               />
             </div>
 
@@ -1629,7 +1629,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               <button
                 type="button"
                 onClick={handleClearRangeFilters}
-                className="px-2 py-1 text-xs text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-colors"
+                className="px-2 py-1 text-xs text-slate-600 dark:text-slate-400 hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                 title="Clear range filters"
               >
                 Clear
@@ -1660,12 +1660,12 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     }}
                     onKeyPress={handleGoToFeatureKeyPress}
                     placeholder="#"
-                    className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="w-20 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     onClick={handleGoToFeature}
                     disabled={!goToFeatureInput.trim()}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
                   >
                     Go
                   </button>
@@ -1687,12 +1687,12 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     }}
                     onKeyPress={handleGoToPageKeyPress}
                     placeholder={`of ${Math.ceil(metadata.total / filters.limit!)}`}
-                    className="w-24 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="w-24 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     onClick={handleGoToPage}
                     disabled={!goToPageInput.trim()}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
                   >
                     Go
                   </button>
@@ -1707,7 +1707,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                   Refresh
                 </button>
                 {/* Previous/Next buttons */}
-                <div className="flex gap-2 border-l border-slate-700 pl-3">
+                <div className="flex gap-2 border-l border-slate-300 dark:border-slate-700 pl-3">
                   <button
                     onClick={handlePreviousPage}
                     disabled={filters.offset === 0}
@@ -1773,7 +1773,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                         </td>
                         <td className="px-4 py-3">
                           {feature.category ? (
-                            <span className="text-xs text-slate-300 bg-slate-700/50 px-2 py-1 rounded">
+                            <span className="text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50 px-2 py-1 rounded">
                               {feature.category}
                             </span>
                           ) : (
@@ -1782,7 +1782,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                         </td>
                         <td className="px-4 py-3">
                           {feature.description ? (
-                            <span className="text-xs text-slate-400 line-clamp-2">
+                            <span className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
                               {feature.description}
                             </span>
                           ) : (
@@ -1874,12 +1874,12 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     }}
                     onKeyPress={handleGoToFeatureKeyPress}
                     placeholder="#"
-                    className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="w-20 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     onClick={handleGoToFeature}
                     disabled={!goToFeatureInput.trim()}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
                   >
                     Go
                   </button>
@@ -1901,12 +1901,12 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                     }}
                     onKeyPress={handleGoToPageKeyPress}
                     placeholder={`of ${Math.ceil(metadata.total / filters.limit!)}`}
-                    className="w-24 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="w-24 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     onClick={handleGoToPage}
                     disabled={!goToPageInput.trim()}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-600 text-sm text-white rounded transition-colors"
                   >
                     Go
                   </button>
@@ -1921,7 +1921,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
                   Refresh
                 </button>
                 {/* Previous/Next buttons */}
-                <div className="flex gap-2 border-l border-slate-700 pl-3">
+                <div className="flex gap-2 border-l border-slate-300 dark:border-slate-700 pl-3">
                   <button
                     onClick={handlePreviousPage}
                     disabled={filters.offset === 0}

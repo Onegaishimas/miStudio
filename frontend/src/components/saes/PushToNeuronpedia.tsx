@@ -250,21 +250,21 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
       <div className="absolute inset-0 bg-black/60" onClick={handleClose} />
 
       {/* Modal */}
-      <div className="relative w-full max-w-2xl mx-4 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="relative w-full max-w-2xl mx-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3">
             <Send className="w-6 h-6 text-emerald-400" />
             <div>
-              <h2 className="text-lg font-semibold text-slate-100">Push to Neuronpedia</h2>
-              <p className="text-sm text-slate-400">{sae.name}</p>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Push to Neuronpedia</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{sae.name}</p>
             </div>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 rounded-lg hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
-            <X className="w-5 h-5 text-slate-400" />
+            <X className="w-5 h-5 text-slate-600 dark:text-slate-400" />
           </button>
         </div>
 
@@ -281,16 +281,16 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
           {view === 'config' && (
             <div className="space-y-6">
               {/* Connection Status */}
-              <div className="p-4 bg-slate-800/50 rounded-lg">
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                  <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
                     <Database className="w-4 h-4" />
                     Local Neuronpedia Status
                   </h3>
                   <button
                     onClick={checkStatus}
                     disabled={isCheckingStatus}
-                    className="text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1"
+                    className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1"
                   >
                     {isCheckingStatus ? (
                       <Loader className="w-3 h-3 animate-spin" />
@@ -301,7 +301,7 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
                 </div>
 
                 {isCheckingStatus ? (
-                  <div className="flex items-center gap-2 text-slate-400">
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                     <Loader className="w-4 h-4 animate-spin" />
                     Checking connection...
                   </div>
@@ -328,7 +328,7 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
                       </span>
                     </div>
                     {status.publicUrl && (
-                      <div className="flex items-center gap-2 text-slate-400">
+                      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                         <Globe className="w-4 h-4" />
                         <a
                           href={status.publicUrl}
@@ -350,55 +350,55 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
               </div>
 
               {/* SAE Info */}
-              <div className="p-4 bg-slate-800/50 rounded-lg">
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="text-slate-500">Features:</span>
-                    <span className="ml-2 text-slate-200">{sae.n_features?.toLocaleString() ?? 'N/A'}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{sae.n_features?.toLocaleString() ?? 'N/A'}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Layer:</span>
-                    <span className="ml-2 text-slate-200">{sae.layer ?? 'N/A'}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{sae.layer ?? 'N/A'}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Model:</span>
-                    <span className="ml-2 text-slate-200">{sae.model_name ?? 'N/A'}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{sae.model_name ?? 'N/A'}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Source:</span>
-                    <span className="ml-2 text-slate-200">{sae.source}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{sae.source}</span>
                   </div>
                 </div>
               </div>
 
               {/* Push Options */}
               <div className="space-y-3">
-                <h3 className="text-sm font-medium text-slate-300">Push Options</h3>
+                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Push Options</h3>
 
-                <label className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg cursor-pointer hover:bg-slate-800 transition-colors">
+                <label className="flex items-center gap-3 p-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
                   <input
                     type="checkbox"
                     checked={config.includeActivations}
                     onChange={(e) => setConfig({ ...config, includeActivations: e.target.checked })}
-                    className="w-4 h-4 text-emerald-500 bg-slate-700 border-slate-600 rounded focus:ring-emerald-500"
+                    className="w-4 h-4 text-emerald-500 bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-emerald-500"
                   />
                   <Activity className="w-4 h-4 text-blue-400" />
                   <div className="flex-1">
-                    <span className="text-slate-200">Include Activations</span>
+                    <span className="text-slate-800 dark:text-slate-200">Include Activations</span>
                     <p className="text-xs text-slate-500">Push activation examples for each feature</p>
                   </div>
                 </label>
 
-                <label className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg cursor-pointer hover:bg-slate-800 transition-colors">
+                <label className="flex items-center gap-3 p-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
                   <input
                     type="checkbox"
                     checked={config.includeExplanations}
                     onChange={(e) => setConfig({ ...config, includeExplanations: e.target.checked })}
-                    className="w-4 h-4 text-emerald-500 bg-slate-700 border-slate-600 rounded focus:ring-emerald-500"
+                    className="w-4 h-4 text-emerald-500 bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-emerald-500"
                   />
                   <MessageSquare className="w-4 h-4 text-purple-400" />
                   <div className="flex-1">
-                    <span className="text-slate-200">Include Explanations</span>
+                    <span className="text-slate-800 dark:text-slate-200">Include Explanations</span>
                     <p className="text-xs text-slate-500">Push feature labels and descriptions</p>
                   </div>
                 </label>
@@ -408,7 +408,7 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
               <div>
                 <button
                   onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors"
+                  className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                 >
                   {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   <Settings className="w-4 h-4" />
@@ -416,9 +416,9 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
                 </button>
 
                 {showAdvanced && (
-                  <div className="mt-3 p-4 bg-slate-800/50 rounded-lg space-y-4">
+                  <div className="mt-3 p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg space-y-4">
                     <div>
-                      <label className="block text-sm text-slate-400 mb-1">
+                      <label className="block text-sm text-slate-600 dark:text-slate-400 mb-1">
                         Max Activations per Feature
                       </label>
                       <input
@@ -427,7 +427,7 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
                         max={100}
                         value={config.maxActivationsPerFeature}
                         onChange={(e) => setConfig({ ...config, maxActivationsPerFeature: parseInt(e.target.value) || 20 })}
-                        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100"
+                        className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100"
                       />
                       <p className="text-xs text-slate-500 mt-1">
                         Limit the number of activation examples per feature (1-100)
@@ -444,10 +444,10 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
                     <AlertCircle className="w-4 h-4" />
                     Configuration Required
                   </h4>
-                  <p className="text-sm text-slate-300">
+                  <p className="text-sm text-slate-700 dark:text-slate-300">
                     Local Neuronpedia is not configured or not connected. Please ensure:
                   </p>
-                  <ul className="text-sm text-slate-400 mt-2 list-disc list-inside space-y-1">
+                  <ul className="text-sm text-slate-600 dark:text-slate-400 mt-2 list-disc list-inside space-y-1">
                     <li>NEURONPEDIA_LOCAL_DB_URL is set in the backend configuration</li>
                     <li>The Neuronpedia PostgreSQL database is accessible</li>
                     <li>The Neuronpedia webapp is running</li>
@@ -463,8 +463,8 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
               {/* Progress Header */}
               <div className="text-center py-4">
                 <Loader className="w-12 h-12 text-emerald-400 animate-spin mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-100">Pushing to Neuronpedia</h3>
-                <p className="text-slate-400 mt-1">
+                <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100">Pushing to Neuronpedia</h3>
+                <p className="text-slate-600 dark:text-slate-400 mt-1">
                   {currentProgress?.message || 'Initializing push...'}
                 </p>
               </div>
@@ -472,10 +472,10 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
               {/* Progress Bar */}
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Progress</span>
+                  <span className="text-slate-600 dark:text-slate-400">Progress</span>
                   <span className="text-emerald-400 font-medium">{Math.round(progressPercent)}%</span>
                 </div>
-                <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-300 ease-out"
                     style={{ width: `${Math.min(progressPercent, 100)}%` }}
@@ -486,58 +486,58 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
               {/* Statistics Grid */}
               <div className="grid grid-cols-2 gap-4">
                 {/* Features */}
-                <div className="p-4 bg-slate-800/50 rounded-lg">
-                  <div className="flex items-center gap-2 text-slate-400 text-sm mb-1">
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-1">
                     <Zap className="w-4 h-4" />
                     Features
                   </div>
-                  <div className="text-xl font-semibold text-slate-100">
+                  <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                     {featuresPushed.toLocaleString()} / {featuresTotal.toLocaleString()}
                   </div>
                 </div>
 
                 {/* Activations */}
                 {config.includeActivations && (
-                  <div className="p-4 bg-slate-800/50 rounded-lg">
-                    <div className="flex items-center gap-2 text-slate-400 text-sm mb-1">
+                  <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-1">
                       <Activity className="w-4 h-4" />
                       Activations
                     </div>
-                    <div className="text-xl font-semibold text-slate-100">
+                    <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                       {(currentProgress?.activations_pushed ?? 0).toLocaleString()}
                     </div>
                   </div>
                 )}
 
                 {/* Elapsed Time - uses local timer for real-time updates */}
-                <div className="p-4 bg-slate-800/50 rounded-lg">
-                  <div className="flex items-center gap-2 text-slate-400 text-sm mb-1">
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-1">
                     <Clock className="w-4 h-4" />
                     Elapsed
                   </div>
-                  <div className="text-xl font-semibold text-slate-100">
+                  <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                     {localElapsedSeconds > 0 ? formatDuration(localElapsedSeconds) : '-'}
                   </div>
                 </div>
 
                 {/* ETA */}
-                <div className="p-4 bg-slate-800/50 rounded-lg">
-                  <div className="flex items-center gap-2 text-slate-400 text-sm mb-1">
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-1">
                     <Clock className="w-4 h-4" />
                     Remaining
                   </div>
-                  <div className="text-xl font-semibold text-slate-100">
+                  <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                     {currentProgress?.eta_seconds ? formatDuration(currentProgress.eta_seconds) : '-'}
                   </div>
                 </div>
               </div>
 
               {/* Stage Indicator */}
-              <div className="p-4 bg-slate-800/50 rounded-lg">
-                <div className="flex items-center gap-2 text-slate-400 text-sm mb-2">
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
+                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-2">
                   Current Stage
                 </div>
-                <div className="text-sm text-slate-200 capitalize">
+                <div className="text-sm text-slate-800 dark:text-slate-200 capitalize">
                   {(currentProgress?.stage || 'initializing').replace(/_/g, ' ')}
                 </div>
               </div>
@@ -549,29 +549,29 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
             <div className="space-y-6">
               <div className="text-center py-4">
                 <CheckCircle className="w-12 h-12 text-emerald-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-100">Push Complete!</h3>
-                <p className="text-slate-400">Your features are now available in Neuronpedia</p>
+                <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100">Push Complete!</h3>
+                <p className="text-slate-600 dark:text-slate-400">Your features are now available in Neuronpedia</p>
               </div>
 
               {/* Push Summary */}
-              <div className="p-4 bg-slate-800/50 rounded-lg">
-                <h4 className="text-sm font-medium text-slate-300 mb-3">Push Summary</h4>
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Push Summary</h4>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-slate-500">Features Pushed:</span>
-                    <span className="ml-2 text-slate-200">{(currentProgress.features_pushed ?? 0).toLocaleString()}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{(currentProgress.features_pushed ?? 0).toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Activations Created:</span>
-                    <span className="ml-2 text-slate-200">{(currentProgress.activations_pushed ?? 0).toLocaleString()}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{(currentProgress.activations_pushed ?? 0).toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Explanations Created:</span>
-                    <span className="ml-2 text-slate-200">{(currentProgress.explanations_pushed ?? 0).toLocaleString()}</span>
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">{(currentProgress.explanations_pushed ?? 0).toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Total Time:</span>
-                    <span className="ml-2 text-slate-200">
+                    <span className="ml-2 text-slate-800 dark:text-slate-200">
                       {currentProgress.elapsed_seconds ? formatDuration(currentProgress.elapsed_seconds) : '-'}
                     </span>
                   </div>
@@ -582,7 +582,7 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
               {status?.publicUrl && (
                 <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
                   <h4 className="text-sm font-medium text-emerald-300 mb-2">View in Neuronpedia</h4>
-                  <p className="text-sm text-slate-300 mb-3">
+                  <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
                     Your features are now available for browsing in the local Neuronpedia instance.
                   </p>
                   <a
@@ -601,7 +601,7 @@ export function PushToNeuronpedia({ sae, isOpen, onClose }: PushToNeuronpediaPro
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
           {view === 'config' && (
             <>
               <button onClick={handleClose} className={COMPONENTS.button.ghost}>

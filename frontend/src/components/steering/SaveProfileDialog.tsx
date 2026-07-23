@@ -108,12 +108,12 @@ export function SaveProfileDialog() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={() => setSaveDialogOpen(false)} />
-      <div className="relative bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-md shadow-xl">
+      <div className="relative bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-6 w-full max-w-md shadow-xl">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium text-slate-100">Save Cluster Profile</h3>
+          <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100">Save Cluster Profile</h3>
           <button
             onClick={() => setSaveDialogOpen(false)}
-            className="text-slate-400 hover:text-slate-200"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -122,7 +122,7 @@ export function SaveProfileDialog() {
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               Name *
             </label>
             <input
@@ -131,12 +131,12 @@ export function SaveProfileDialog() {
               maxLength={PROFILE_NAME_MAX}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Fear response cluster"
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               Narrative <span className="text-slate-500">(markdown, optional)</span>
             </label>
             <textarea
@@ -145,7 +145,7 @@ export function SaveProfileDialog() {
               onChange={(e) => setNarrative(e.target.value)}
               rows={5}
               placeholder="What this cluster steers toward, evidence, tuning notes…"
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-y"
+              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-y"
             />
           </div>
 
@@ -163,14 +163,14 @@ export function SaveProfileDialog() {
           <div className="flex justify-end gap-2">
             <button
               onClick={() => setSaveDialogOpen(false)}
-              className="px-3 py-1.5 text-sm text-slate-300 hover:text-slate-100"
+              className="px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={!canSave}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 text-white"
             >
               <Save className="w-3.5 h-3.5" />
               {saving ? 'Saving…' : 'Save profile'}

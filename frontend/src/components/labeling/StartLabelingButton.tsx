@@ -324,8 +324,8 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
 
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-5xl border border-slate-700 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-semibold text-white mb-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg p-6 w-full max-w-5xl border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
               Start Semantic Labeling
             </h2>
 
@@ -342,13 +342,13 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                 <div className="space-y-4">
                   {/* Prompt Template */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       Prompt Template
                     </label>
                     <select
                       value={selectedTemplateId || ''}
                       onChange={(e) => setSelectedTemplateId(e.target.value || null)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value="">Use Default Template</option>
                       {templates.map((template) => (
@@ -358,20 +358,20 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                         </option>
                       ))}
                     </select>
-                    <p className="mt-1 text-xs text-slate-400">
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                       Select a prompt template for labeling features
                     </p>
                   </div>
 
                   {/* Labeling Method */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       Labeling Method
                     </label>
                     <select
                       value={labelingMethod}
                       onChange={(e) => setLabelingMethod(e.target.value as LabelingMethod)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value={LabelingMethod.OPENAI}>OpenAI (requires api-key)</option>
                       <option value={LabelingMethod.OPENAI_COMPATIBLE}>OpenAI-Compatible (miLLM, Ollama, vLLM, etc.)</option>
@@ -382,7 +382,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                   {/* OpenAI Model (when OpenAI selected) */}
                   {labelingMethod === LabelingMethod.OPENAI && (
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         OpenAI Model
                       </label>
                       <div className="flex gap-2">
@@ -390,7 +390,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           <select
                             value={openaiModel}
                             onChange={(e) => setOpenaiModel(e.target.value)}
-                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           >
                             {openaiModels.map((model) => (
                               <option key={model} value={model}>
@@ -402,7 +402,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           <select
                             value={openaiModel}
                             onChange={(e) => setOpenaiModel(e.target.value)}
-                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           >
                             <option value="gpt-4o-mini">gpt-4o-mini (recommended)</option>
                             <option value="gpt-4o">gpt-4o</option>
@@ -422,7 +422,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                         <p className="mt-1 text-xs text-red-400">{openaiModelsError}</p>
                       )}
                       {!openaiModelsError && openaiModels.length > 0 && (
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                           {openaiModels.length} model(s) available from OpenAI
                         </p>
                       )}
@@ -433,7 +433,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                   {labelingMethod === LabelingMethod.OPENAI_COMPATIBLE && (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                           Endpoint URL
                         </label>
                         <div className="flex gap-2">
@@ -448,19 +448,19 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                                   setCompatibleModelsError(null);
                                 }}
                                 placeholder="/ollama/v1"
-                                className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-l-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-l-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                               />
                               <button
                                 type="button"
                                 onClick={() => setShowSavedEndpoints(!showSavedEndpoints)}
-                                className="px-2 py-2 bg-slate-900 border border-l-0 border-slate-700 rounded-r-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                className="px-2 py-2 bg-white dark:bg-slate-900 border border-l-0 border-slate-300 dark:border-slate-700 rounded-r-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                                 title="Saved endpoints"
                               >
                                 <ChevronDown className="w-4 h-4" />
                               </button>
                             </div>
                             {showSavedEndpoints && (
-                              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                                 {savedEndpoints.length === 0 ? (
                                   <div className="px-3 py-2 text-xs text-slate-500">No saved endpoints</div>
                                 ) : (
@@ -469,11 +469,11 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                                     .map((ep) => (
                                       <div
                                         key={ep.url}
-                                        className="flex items-center gap-1 px-3 py-1.5 hover:bg-slate-700 group"
+                                        className="flex items-center gap-1 px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 group"
                                       >
                                         <button
                                           type="button"
-                                          className="flex-1 text-left text-sm text-slate-200 truncate"
+                                          className="flex-1 text-left text-sm text-slate-800 dark:text-slate-200 truncate"
                                           onClick={() => {
                                             setOpenaiCompatibleEndpoint(ep.url);
                                             setCompatibleModels([]);
@@ -485,7 +485,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                                         >
                                           {ep.label ? (
                                             <>
-                                              <span className="text-slate-300">{ep.label}</span>
+                                              <span className="text-slate-700 dark:text-slate-300">{ep.label}</span>
                                               <span className="text-slate-500 ml-1 text-xs">({ep.url})</span>
                                             </>
                                           ) : (
@@ -517,7 +517,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                               }
                             }}
                             disabled={!openaiCompatibleEndpoint.trim()}
-                            className="px-2 py-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 hover:text-white disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors"
+                            className="px-2 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 hover:text-slate-900 dark:hover:text-white disabled:bg-slate-50 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 disabled:cursor-not-allowed transition-colors"
                             title="Save endpoint URL"
                           >
                             <Save className="w-4 h-4" />
@@ -531,20 +531,20 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                             {loadingCompatibleModels ? 'Loading...' : 'Fetch Models'}
                           </button>
                         </div>
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                           OpenAI-compatible API endpoint (miLLM, Ollama, vLLM, etc.)
                         </p>
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                           Model Name
                         </label>
                         {compatibleModels.length > 0 ? (
                           <select
                             value={openaiCompatibleModel}
                             onChange={(e) => setOpenaiCompatibleModel(e.target.value)}
-                            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           >
                             {compatibleModels.map((model) => (
                               <option key={model} value={model}>
@@ -558,14 +558,14 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                             value={openaiCompatibleModel}
                             onChange={(e) => setOpenaiCompatibleModel(e.target.value)}
                             placeholder="llama3.2"
-                            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                           />
                         )}
                         {compatibleModelsError && (
                           <p className="mt-1 text-xs text-red-400">{compatibleModelsError}</p>
                         )}
                         {!compatibleModelsError && (
-                          <p className="mt-1 text-xs text-slate-400">
+                          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                             {compatibleModels.length > 0
                               ? `${compatibleModels.length} model(s) available`
                               : 'Click "Fetch Models" or enter model name manually'}
@@ -578,18 +578,18 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                   {/* Local Model (when Local selected) */}
                   {labelingMethod === LabelingMethod.LOCAL && (
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         Local Model
                       </label>
                       {loadingModels ? (
-                        <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-400">
+                        <div className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-400">
                           Loading models...
                         </div>
                       ) : availableModels.length > 0 ? (
                         <select
                           value={localModel}
                           onChange={(e) => setLocalModel(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                           {availableModels.map((model) => (
                             <option key={model} value={model}>
@@ -598,11 +598,11 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           ))}
                         </select>
                       ) : (
-                        <div className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-400">
+                        <div className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-400">
                           No local models found
                         </div>
                       )}
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Locally cached HuggingFace models
                       </p>
                     </div>
@@ -611,74 +611,74 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
 
                 {/* Token Filtering - pushed to bottom */}
                 <div className="mt-auto pt-4">
-                  <div className="bg-slate-900 rounded-lg border border-slate-700 p-4">
+                  <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
                     <button
                       type="button"
                       onClick={() => setShowFilters(!showFilters)}
                       className="flex items-center justify-between w-full text-left"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-300">Token Filtering</span>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Token Filtering</span>
                         <span className="text-xs text-slate-500">
                           ({[filterSpecial, filterSingleChar, filterPunctuation, filterNumbers, filterFragments, filterStopWords].filter(Boolean).length}/6 enabled)
                         </span>
                       </div>
-                      <span className="text-slate-400">{showFilters ? '▼' : '▶'}</span>
+                      <span className="text-slate-600 dark:text-slate-400">{showFilters ? '▼' : '▶'}</span>
                     </button>
 
                     {showFilters && (
                       <div className="mt-4 grid grid-cols-2 gap-3">
-                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={filterSpecial}
                             onChange={(e) => setFilterSpecial(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                           />
                           <span>Special tokens</span>
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={filterSingleChar}
                             onChange={(e) => setFilterSingleChar(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                           />
                           <span>Single characters</span>
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={filterPunctuation}
                             onChange={(e) => setFilterPunctuation(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                           />
                           <span>Punctuation</span>
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={filterNumbers}
                             onChange={(e) => setFilterNumbers(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                           />
                           <span>Numbers</span>
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={filterFragments}
                             onChange={(e) => setFilterFragments(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                           />
                           <span>Word fragments</span>
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={filterStopWords}
                             onChange={(e) => setFilterStopWords(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                           />
                           <span>Stop words</span>
                         </label>
@@ -693,7 +693,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                 <div className="space-y-4">
                   {/* Batch Size */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       Batch Size
                     </label>
                     <input
@@ -702,16 +702,16 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                       max={100}
                       value={batchSize}
                       onChange={(e) => setBatchSize(Math.max(1, Math.min(100, parseInt(e.target.value) || 10)))}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
-                    <p className="mt-1 text-xs text-slate-400">
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                       Features to label per batch (1-100, default from Settings)
                     </p>
                   </div>
 
                   {/* Examples Per Feature */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       Examples Per Feature
                     </label>
                     <input
@@ -720,16 +720,16 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                       max={50}
                       value={maxExamples}
                       onChange={(e) => setMaxExamples(parseInt(e.target.value) || 25)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
-                    <p className="mt-1 text-xs text-slate-400">
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                       Number of high-activation examples to show the LLM (10-50, default: 25)
                     </p>
                   </div>
 
                   {/* Max Tokens */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       Max Response Tokens
                     </label>
                     <input
@@ -738,9 +738,9 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                       max={8000}
                       value={maxTokens}
                       onChange={(e) => setMaxTokens(parseInt(e.target.value) || 300)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
-                    <p className="mt-1 text-xs text-slate-400">
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                       Maximum tokens in the LLM response (50-8000, default: 300). Increase for longer descriptions.
                     </p>
                   </div>
@@ -748,7 +748,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                   {/* OpenAI API Key (when OpenAI selected) */}
                   {labelingMethod === LabelingMethod.OPENAI && (
                     <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         OpenAI API Key (optional)
                       </label>
                       <input
@@ -756,9 +756,9 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                         value={openaiApiKey}
                         onChange={(e) => setOpenaiApiKey(e.target.value)}
                         placeholder="Uses server default if not provided"
-                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Leave blank to use the server's configured API key
                       </p>
                     </div>
@@ -766,7 +766,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
 
                   {/* API Timeout */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       API Timeout (seconds)
                     </label>
                     <input
@@ -775,9 +775,9 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                       max={600}
                       value={apiTimeout}
                       onChange={(e) => setApiTimeout(parseInt(e.target.value) || 120)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
-                    <p className="mt-1 text-xs text-slate-400">
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                       Maximum wait time for API responses (30-600 seconds, default: 120). Increase for larger models.
                     </p>
                   </div>
@@ -785,36 +785,36 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
 
                 {/* Save API Requests - pushed to bottom */}
                 <div className="mt-auto pt-4">
-                  <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 space-y-3">
-                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4 space-y-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={saveRequestsForTesting}
                         onChange={(e) => setSaveRequestsForTesting(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                        className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                       />
                       <div className="flex flex-col">
                         <span className="font-medium">Save API requests for testing</span>
-                        <span className="text-xs text-slate-400">Save requests to /tmp/ for debugging with Postman/cURL</span>
+                        <span className="text-xs text-slate-600 dark:text-slate-400">Save requests to /tmp/ for debugging with Postman/cURL</span>
                       </div>
                     </label>
 
                     {/* Export Format - only shown when Save API requests is enabled */}
                     {saveRequestsForTesting && (
-                      <div className="ml-6 pt-2 border-t border-slate-700">
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <div className="ml-6 pt-2 border-t border-slate-200 dark:border-slate-700">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                           Export Format
                         </label>
                         <select
                           value={exportFormat}
                           onChange={(e) => setExportFormat(e.target.value as 'postman' | 'curl' | 'both')}
-                          className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                           <option value="both">Both (Postman + cURL)</option>
                           <option value="postman">Postman Collection Only</option>
                           <option value="curl">cURL Command Only</option>
                         </select>
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                           Choose which format(s) to save for debugging
                         </p>
                       </div>
@@ -822,8 +822,8 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
 
                     {/* Sample Rate Slider - only shown when Save API requests is enabled */}
                     {saveRequestsForTesting && (
-                      <div className="ml-6 pt-2 border-t border-slate-700">
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <div className="ml-6 pt-2 border-t border-slate-200 dark:border-slate-700">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                           Sample Rate: {saveRequestsSampleRate}%
                         </label>
                         <input
@@ -833,32 +833,32 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           step={5}
                           value={saveRequestsSampleRate}
                           onChange={(e) => setSaveRequestsSampleRate(parseInt(e.target.value))}
-                          className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                          className="w-full h-2 bg-slate-100 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
                         />
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                           Percentage of all requests to save (0% = none, 100% = all). Lower values reduce disk usage.
                         </p>
                       </div>
                     )}
 
                     {/* Poor Quality Detection - in same debugging card */}
-                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer pt-3 border-t border-slate-700">
+                    <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer pt-3 border-t border-slate-200 dark:border-slate-700">
                       <input
                         type="checkbox"
                         checked={savePoorQualityLabels}
                         onChange={(e) => setSavePoorQualityLabels(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                        className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900"
                       />
                       <div className="flex flex-col">
                         <span className="font-medium">Save poor quality labels for debugging</span>
-                        <span className="text-xs text-slate-400">Detect and save ineffective labels like "uncategorized" or generic responses</span>
+                        <span className="text-xs text-slate-600 dark:text-slate-400">Detect and save ineffective labels like "uncategorized" or generic responses</span>
                       </div>
                     </label>
 
                     {/* Sample Rate Slider - only shown when Save poor quality labels is enabled */}
                     {savePoorQualityLabels && (
-                      <div className="ml-6 pt-2 border-t border-slate-700">
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <div className="ml-6 pt-2 border-t border-slate-200 dark:border-slate-700">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                           Sample Rate: {poorQualitySampleRate}%
                         </label>
                         <input
@@ -868,9 +868,9 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                           step={5}
                           value={poorQualitySampleRate}
                           onChange={(e) => setPoorQualitySampleRate(parseInt(e.target.value))}
-                          className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                          className="w-full h-2 bg-slate-100 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
                         />
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                           Percentage of poor quality labels to save (0% = none, 100% = all). Lower values reduce disk usage.
                         </p>
                       </div>
@@ -894,7 +894,7 @@ export const StartLabelingButton: React.FC<StartLabelingButtonProps> = ({
                   clearError();
                 }}
                 disabled={isLoading}
-                className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
               >
                 Cancel
               </button>

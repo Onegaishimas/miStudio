@@ -62,10 +62,10 @@ export function ActiveOperationsSection() {
 
   if (activeTasks.length === 0 && !activeLoading) {
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
           <Clock className="w-5 h-5 text-emerald-400" />
-          <h2 className="text-lg font-semibold text-slate-100">Active Operations</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Active Operations</h2>
         </div>
         <p className="text-slate-500 text-center py-8">No active operations</p>
       </div>
@@ -73,11 +73,11 @@ export function ActiveOperationsSection() {
   }
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <Clock className="w-5 h-5 text-emerald-400" />
-          <h2 className="text-lg font-semibold text-slate-100">Active Operations</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Active Operations</h2>
           <span className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-300">
             {activeTasks.length}
           </span>
@@ -85,7 +85,7 @@ export function ActiveOperationsSection() {
         <button
           onClick={() => fetchActiveTasks()}
           disabled={activeLoading}
-          className="text-slate-400 hover:text-slate-300 transition-colors disabled:opacity-50"
+          className="text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors disabled:opacity-50"
           title="Refresh"
         >
           <RefreshCw className={`w-4 h-4 ${activeLoading ? 'animate-spin' : ''}`} />
@@ -102,7 +102,7 @@ export function ActiveOperationsSection() {
         {activeTasks.map((task) => (
           <div
             key={task.id}
-            className="bg-slate-800/50 border border-slate-700 rounded-lg p-4"
+            className="bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4"
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
@@ -111,11 +111,11 @@ export function ActiveOperationsSection() {
                   <span className="px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/30 rounded text-xs font-medium text-emerald-300">
                     {getTaskTypeLabel(task.task_type)}
                   </span>
-                  <span className="px-2 py-0.5 bg-slate-700 rounded text-xs text-slate-300">
+                  <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-xs text-slate-700 dark:text-slate-300">
                     {getEntityTypeLabel(task.entity_type)}
                   </span>
                 </div>
-                <div className="text-sm font-medium text-slate-100 truncate">
+                <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                   {task.entity_info?.name || task.entity_id}
                 </div>
                 {task.entity_info?.repo_id && (
@@ -154,7 +154,7 @@ export function ActiveOperationsSection() {
             {/* Progress bar */}
             {task.progress !== null && task.progress !== undefined && (
               <div className="mt-3">
-                <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-emerald-500 h-full transition-all duration-300 ease-out"
                     style={{ width: `${Math.min(100, Math.max(0, task.progress))}%` }}

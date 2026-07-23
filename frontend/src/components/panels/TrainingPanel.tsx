@@ -711,8 +711,8 @@ export const TrainingPanel: React.FC = () => {
           </div>
         </div>
         {/* Configuration Section */}
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-slate-100 mb-4">
+        <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
             Training Configuration
           </h3>
 
@@ -721,7 +721,7 @@ export const TrainingPanel: React.FC = () => {
             {/* Dataset Selection - Multi-select for combining datasets */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-slate-300">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                   Datasets ({config.dataset_ids?.length || 0} selected)
                 </label>
                 {readyDatasets.length > 0 && (
@@ -766,7 +766,7 @@ export const TrainingPanel: React.FC = () => {
                         className={`px-3 py-2 text-sm text-left rounded transition-colors truncate ${
                           isSelected
                             ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                         }`}
                         title={dataset.name}
                       >
@@ -782,13 +782,13 @@ export const TrainingPanel: React.FC = () => {
 
             {/* Model Selection - Second in flow */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Model
               </label>
               <select
                 value={config.model_id}
                 onChange={(e) => updateConfig({ model_id: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
               >
                 <option value="">Select model...</option>
                 {readyModels.map((model) => (
@@ -801,7 +801,7 @@ export const TrainingPanel: React.FC = () => {
 
             {/* Training Framework Selection - Third in flow */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Training Framework
               </label>
               <select
@@ -809,7 +809,7 @@ export const TrainingPanel: React.FC = () => {
                 onChange={(e) =>
                   updateConfig({ architecture_type: e.target.value as SAEArchitectureType })
                 }
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
               >
                 {getFrameworkOptions().map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -833,7 +833,7 @@ export const TrainingPanel: React.FC = () => {
                   <h4 className="text-sm font-semibold text-amber-500 mb-2">
                     Tokenizer/Model Vocabulary Mismatch
                   </h4>
-                  <div className="text-sm text-slate-300 space-y-1">
+                  <div className="text-sm text-slate-700 dark:text-slate-300 space-y-1">
                     <p>
                       The selected dataset was tokenized with <span className="font-mono text-amber-400">{vocabMismatch.datasetTokenizer}</span> (vocab: {vocabMismatch.datasetVocabSize.toLocaleString()}),
                       but the selected model uses a vocabulary of {vocabMismatch.modelVocabSize.toLocaleString()} tokens.
@@ -867,10 +867,10 @@ export const TrainingPanel: React.FC = () => {
                       updateConfig({ extraction_ids: undefined });
                     }
                   }}
-                  className="mt-1 w-4 h-4 bg-slate-800 border border-slate-700 rounded focus:ring-2 focus:ring-emerald-500"
+                  className="mt-1 w-4 h-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded focus:ring-2 focus:ring-emerald-500"
                 />
                 <div className="flex-1">
-                  <label htmlFor="use-cached-activations" className="block text-sm font-medium text-slate-300 mb-1 cursor-pointer">
+                  <label htmlFor="use-cached-activations" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 cursor-pointer">
                     Use Cached Activations (10-20x faster training)
                   </label>
                   <p className="text-xs text-slate-500 mb-2">
@@ -885,12 +885,12 @@ export const TrainingPanel: React.FC = () => {
                         </div>
                       )}
                       {isLoadingExtractions ? (
-                        <div className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 text-sm flex items-center gap-2">
+                        <div className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 text-sm flex items-center gap-2">
                           <Loader size={14} className="animate-spin" />
                           <span>Loading available extractions...</span>
                         </div>
                       ) : !config.model_id || !config.dataset_ids || config.dataset_ids.length === 0 ? (
-                        <div className="text-sm text-slate-400 italic">
+                        <div className="text-sm text-slate-600 dark:text-slate-400 italic">
                           Select a model and datasets first.
                         </div>
                       ) : (
@@ -914,7 +914,7 @@ export const TrainingPanel: React.FC = () => {
                                     <XCircle className="w-4 h-4 text-slate-600" />
                                   )}
                                 </div>
-                                <span className="text-xs text-slate-400 w-36 truncate flex-shrink-0" title={dsName}>{dsName}</span>
+                                <span className="text-xs text-slate-600 dark:text-slate-400 w-36 truncate flex-shrink-0" title={dsName}>{dsName}</span>
                                 {dsExtractions.length > 0 ? (
                                   <select
                                     value={selectedExtId || ''}
@@ -926,8 +926,8 @@ export const TrainingPanel: React.FC = () => {
                                       if (newExtId) currentIds.push(newExtId);
                                       updateConfig({ extraction_ids: currentIds });
                                     }}
-                                    className={`flex-1 px-2 py-1 bg-slate-800 border rounded text-slate-100 text-xs focus:outline-none focus:border-emerald-500 ${
-                                      !selectedExtId ? 'border-amber-600/50' : 'border-slate-700'
+                                    className={`flex-1 px-2 py-1 bg-white dark:bg-slate-800 border rounded text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-emerald-500 ${
+                                      !selectedExtId ? 'border-amber-600/50' : 'border-slate-300 dark:border-slate-700'
                                     }`}
                                   >
                                     <option value="">Select...</option>
@@ -979,7 +979,7 @@ export const TrainingPanel: React.FC = () => {
           {/* Training Layers Selection */}
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-slate-300">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                 Select Layers ({config.training_layers?.length || 0} selected)
               </label>
               {numLayers > 0 && (
@@ -1027,7 +1027,7 @@ export const TrainingPanel: React.FC = () => {
                       className={`px-3 py-2 text-sm font-medium rounded transition-colors ${
                         isSelected
                           ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                       }`}
                     >
                       L{layerIdx}
@@ -1036,7 +1036,7 @@ export const TrainingPanel: React.FC = () => {
                 })}
               </div>
             ) : (
-              <div className="px-4 py-8 text-center text-slate-500 bg-slate-800/50 rounded-lg border border-slate-700">
+              <div className="px-4 py-8 text-center text-slate-500 bg-slate-100 dark:bg-slate-800/50 rounded-lg border border-slate-300 dark:border-slate-700">
                 {config.model_id
                   ? 'Loading model architecture...'
                   : 'Select a model to choose training layers'}
@@ -1047,7 +1047,7 @@ export const TrainingPanel: React.FC = () => {
           {/* Hook Types Selection */}
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-slate-300">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                 Hook Types ({config.hook_types?.length || 0} selected)
               </label>
               <div className="text-xs text-slate-500">
@@ -1084,7 +1084,7 @@ export const TrainingPanel: React.FC = () => {
                     className={`px-3 py-2 text-sm font-medium rounded transition-colors ${
                       isSelected
                         ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                     }`}
                   >
                     {displayNames[hookType]}
@@ -1100,15 +1100,15 @@ export const TrainingPanel: React.FC = () => {
           </div>
 
           {/* Memory Estimation Display */}
-          <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+          <div className="mt-4 p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
             <div className="flex items-start justify-between">
               <div>
-                <h4 className="text-sm font-medium text-slate-300 mb-2">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Estimated GPU Memory
                 </h4>
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Total:</span>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">Total:</span>
                     <span className={`text-sm font-mono font-semibold ${
                       memoryEstimate.fits_in_6gb ? 'text-emerald-400' : 'text-orange-400'
                     }`}>
@@ -1117,7 +1117,7 @@ export const TrainingPanel: React.FC = () => {
                     {numSAEs > 1 && (
                       <>
                         <span className="text-xs text-slate-500">×</span>
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-slate-600 dark:text-slate-400">
                           {formatMemorySize(memoryEstimate.per_layer_gb)} per SAE
                         </span>
                       </>
@@ -1164,7 +1164,7 @@ export const TrainingPanel: React.FC = () => {
 
           {/* Advanced Hyperparameters */}
           {showAdvanced && (
-            <div className="mt-4 pt-4 border-t border-slate-700">
+            <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
               <div className="grid grid-cols-2 gap-4">
                 {/* Hidden Dimension */}
                 <div>
@@ -1181,7 +1181,7 @@ export const TrainingPanel: React.FC = () => {
                     onChange={(e) => updateConfig({ hidden_dim: parseInt(e.target.value) })}
                     min={64}
                     max={8192}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                   {config.extraction_ids && config.extraction_ids.length > 0 && (
                     <p className="mt-1 text-xs text-emerald-400 flex items-center gap-1">
@@ -1208,9 +1208,9 @@ export const TrainingPanel: React.FC = () => {
                       min={1}
                       max={32}
                       step={1}
-                      className="w-24 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      className="w-24 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                     />
-                    <span className="text-slate-400 text-sm font-mono">
+                    <span className="text-slate-600 dark:text-slate-400 text-sm font-mono">
                       × {config.hidden_dim} = <span className="text-emerald-400">{config.latent_dim}</span>
                     </span>
                   </div>
@@ -1236,7 +1236,7 @@ export const TrainingPanel: React.FC = () => {
                         min={0.00001}
                         max={100.0}
                         step={config.architecture_type === SAEArchitectureType.STANDARD_ANTHROPIC ? 0.1 : 0.00001}
-                        className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                       {config.architecture_type !== SAEArchitectureType.STANDARD_ANTHROPIC && (
                         <button
@@ -1291,7 +1291,7 @@ export const TrainingPanel: React.FC = () => {
                       min={0.001}
                       max={1.0}
                       step={0.001}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                 )}
@@ -1300,7 +1300,7 @@ export const TrainingPanel: React.FC = () => {
                 {isFieldVisible(config.architecture_type, 'top_k') && (
                   <>
                     <div className="col-span-2 mt-4 mb-2">
-                      <div className="flex items-center gap-2 pb-2 border-b border-slate-700">
+                      <div className="flex items-center gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
                         <span className="text-sm font-semibold text-emerald-400">TopK Parameters</span>
                         <span className="text-xs text-slate-500">(Gao et al. 2024)</span>
                       </div>
@@ -1323,10 +1323,10 @@ export const TrainingPanel: React.FC = () => {
                           min={1}
                           max={config.latent_dim}
                           step={1}
-                          className="w-32 px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                          className="w-32 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                         />
                         {config.top_k && config.latent_dim > 0 && (
-                          <span className="text-slate-400 text-sm font-mono">
+                          <span className="text-slate-600 dark:text-slate-400 text-sm font-mono">
                             of {config.latent_dim.toLocaleString()} features{' '}
                             <span className="text-emerald-400">({((config.top_k / config.latent_dim) * 100).toFixed(2)}%)</span>
                           </span>
@@ -1357,9 +1357,9 @@ export const TrainingPanel: React.FC = () => {
                         max={config.latent_dim}
                         step={1}
                         placeholder={`Default: ${config.top_k ?? 64}`}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-500"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-500"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Number of dead features for auxiliary loss. Defaults to K.
                       </p>
                     </div>
@@ -1380,9 +1380,9 @@ export const TrainingPanel: React.FC = () => {
                         min={0}
                         max={1.0}
                         step={0.001}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Coefficient for auxiliary dead feature loss. Default: 1/32 ≈ 0.03125.
                       </p>
                     </div>
@@ -1400,9 +1400,9 @@ export const TrainingPanel: React.FC = () => {
                         type="text"
                         value={config.adam_epsilon ?? 6.25e-10}
                         onChange={(e) => updateConfig({ adam_epsilon: parseFloat(e.target.value) || 6.25e-10 })}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         TopK uses very small epsilon (6.25e-10) per Gao et al. Default Adam: 1e-8.
                       </p>
                     </div>
@@ -1413,7 +1413,7 @@ export const TrainingPanel: React.FC = () => {
                 {isFieldVisible(config.architecture_type, 'sparsity_coeff') && (
                   <>
                     <div className="col-span-2 mt-4 mb-2">
-                      <div className="flex items-center gap-2 pb-2 border-b border-slate-700">
+                      <div className="flex items-center gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
                         <span className="text-sm font-semibold text-emerald-400">JumpReLU Parameters</span>
                         <span className="text-xs text-slate-500">(Rajamanoharan et al. 2024)</span>
                       </div>
@@ -1435,9 +1435,9 @@ export const TrainingPanel: React.FC = () => {
                         min={0.000001}
                         max={10.0}
                         step={0.00001}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         L0 penalty coefficient (λ) applied to raw feature count. Default: 1e-3 (Gemma Scope: 6e-4).
                       </p>
                     </div>
@@ -1458,9 +1458,9 @@ export const TrainingPanel: React.FC = () => {
                         min={0.001}
                         max={5.0}
                         step={0.1}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Starting threshold for JumpReLU activation. Should match pre-activation magnitude (~0.5).
                       </p>
                     </div>
@@ -1481,9 +1481,9 @@ export const TrainingPanel: React.FC = () => {
                         min={0.001}
                         max={0.5}
                         step={0.001}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Smoothness of STE gradient estimation. Wider = more features get gradient. Default: 0.01.
                       </p>
                     </div>
@@ -1499,15 +1499,15 @@ export const TrainingPanel: React.FC = () => {
                           type="checkbox"
                           checked={config.normalize_decoder ?? true}
                           onChange={(e) => updateConfig({ normalize_decoder: e.target.checked })}
-                          className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                          className="w-4 h-4 rounded bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
                         />
-                        <span className="text-sm font-medium text-slate-300">
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                           Normalize Decoder Columns
                         </span>
                       </label>
                       <HyperparameterTooltip paramName="normalize_decoder" />
                     </div>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
                       Normalizes decoder columns to unit norm after each step.
                     </p>
                   </div>
@@ -1525,7 +1525,7 @@ export const TrainingPanel: React.FC = () => {
                     id="normalize-activations"
                     value={config.normalize_activations ?? 'constant_norm_rescale'}
                     onChange={(e) => updateConfig({ normalize_activations: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   >
                     <option value="constant_norm_rescale">Constant Norm Rescale (SAELens)</option>
                     <option value="anthropic_rescale">Anthropic Rescale (E[||x||²]=d_model)</option>
@@ -1549,7 +1549,7 @@ export const TrainingPanel: React.FC = () => {
                     min={0.00001}
                     max={0.01}
                     step={0.00001}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1569,7 +1569,7 @@ export const TrainingPanel: React.FC = () => {
                     min={1}
                     max={512}
                     step={32}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1589,7 +1589,7 @@ export const TrainingPanel: React.FC = () => {
                     min={1000}
                     max={1000000}
                     step={1000}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1609,7 +1609,7 @@ export const TrainingPanel: React.FC = () => {
                     min={0}
                     max={100000}
                     step={100}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1630,7 +1630,7 @@ export const TrainingPanel: React.FC = () => {
                       min={0}
                       max={100000}
                       step={1000}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                     />
                     <p className="text-xs text-slate-500 mt-1">Ramps sparsity penalty from 0 to full. Prevents dead neurons.</p>
                   </div>
@@ -1652,7 +1652,7 @@ export const TrainingPanel: React.FC = () => {
                     min={0}
                     max={0.1}
                     step={0.001}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1672,7 +1672,7 @@ export const TrainingPanel: React.FC = () => {
                     min={0}
                     max={10}
                     step={0.1}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1694,7 +1694,7 @@ export const TrainingPanel: React.FC = () => {
                     min={100}
                     max={10000}
                     step={100}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1714,7 +1714,7 @@ export const TrainingPanel: React.FC = () => {
                     min={10}
                     max={1000}
                     step={10}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -1737,7 +1737,7 @@ export const TrainingPanel: React.FC = () => {
                       min={1000}
                       max={100000}
                       step={1000}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                 )}
@@ -1761,7 +1761,7 @@ export const TrainingPanel: React.FC = () => {
                       min={1000}
                       max={50000}
                       step={1000}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                 )}
@@ -1777,9 +1777,9 @@ export const TrainingPanel: React.FC = () => {
                           onChange={(e) =>
                             updateConfig({ resample_dead_neurons: e.target.checked })
                           }
-                          className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                          className="w-4 h-4 rounded bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
                         />
-                        <span className="text-sm font-medium text-slate-300">
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
                           Resample dead neurons during training
                         </span>
                       </label>
@@ -1792,7 +1792,7 @@ export const TrainingPanel: React.FC = () => {
           )}
 
           {/* Action Buttons */}
-          <div className="mt-6 pt-4 border-t border-slate-700 flex gap-3">
+          <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700 flex gap-3">
             <button
               onClick={() => {
                 // Pre-populate template name and description from current config
@@ -1802,7 +1802,7 @@ export const TrainingPanel: React.FC = () => {
                 setShowSaveTemplateModal(true);
               }}
               disabled={!config.model_id || !config.dataset_ids || config.dataset_ids.length === 0}
-              className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-100 disabled:text-slate-500 rounded-md transition-colors"
+              className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-900 dark:text-slate-100 disabled:text-slate-500 rounded-md transition-colors"
               title="Save current configuration as a template"
             >
               <Save size={20} />
@@ -1829,17 +1829,17 @@ export const TrainingPanel: React.FC = () => {
         </div>
 
         {/* Training Jobs Section */}
-        <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
+        <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <h3 className="text-lg font-semibold text-slate-100">Training Jobs</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Training Jobs</h3>
               {trainings.length > 0 && (
-                <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer hover:text-slate-300">
+                <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 cursor-pointer hover:text-slate-700 dark:hover:text-slate-300">
                   <input
                     type="checkbox"
                     checked={selectedTrainingIds.size === trainings.length && trainings.length > 0}
                     onChange={handleSelectAll}
-                    className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                    className="w-4 h-4 rounded bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
                   />
                   Select All
                 </label>
@@ -1871,7 +1871,7 @@ export const TrainingPanel: React.FC = () => {
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 statusFilter === 'all'
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               All ({statusCounts.all})
@@ -1881,7 +1881,7 @@ export const TrainingPanel: React.FC = () => {
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 statusFilter === TrainingStatus.RUNNING
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               <Activity size={16} className="animate-pulse" />
@@ -1892,7 +1892,7 @@ export const TrainingPanel: React.FC = () => {
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 statusFilter === TrainingStatus.COMPLETED
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               <CheckCircle size={16} />
@@ -1903,7 +1903,7 @@ export const TrainingPanel: React.FC = () => {
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 statusFilter === TrainingStatus.FAILED
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               <XCircle size={16} />
@@ -1919,7 +1919,7 @@ export const TrainingPanel: React.FC = () => {
           ) : trainings.length === 0 ? (
             <div className="text-center py-12">
               <Activity size={48} className="mx-auto text-slate-600 mb-4" />
-              <p className="text-slate-400 mb-2">No training jobs yet</p>
+              <p className="text-slate-600 dark:text-slate-400 mb-2">No training jobs yet</p>
               <p className="text-sm text-slate-500">
                 Configure a training job above to get started
               </p>
@@ -1976,11 +1976,11 @@ export const TrainingPanel: React.FC = () => {
           }}
         >
           <div
-            className="bg-slate-900 rounded-lg max-w-lg w-full p-6 shadow-xl"
+            className="bg-white dark:bg-slate-900 rounded-lg max-w-lg w-full p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-slate-100">Save as Template</h2>
+              <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Save as Template</h2>
               <button
                 onClick={() => {
                   setShowSaveTemplateModal(false);
@@ -1988,14 +1988,14 @@ export const TrainingPanel: React.FC = () => {
                   setTemplateName('');
                   setTemplateDescription('');
                 }}
-                className="p-1 hover:bg-slate-800 rounded transition-colors"
+                className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
                 title="Close modal"
               >
-                <X className="w-5 h-5 text-slate-400" />
+                <X className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               </button>
             </div>
 
-            <p className="text-sm text-slate-400 mb-4">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
               Save your current training configuration as a reusable template.
             </p>
 
@@ -2010,7 +2010,7 @@ export const TrainingPanel: React.FC = () => {
             <div className="space-y-4">
               {/* Template Name */}
               <div>
-                <label htmlFor="template-name" className="block text-sm font-medium text-slate-300 mb-1">
+                <label htmlFor="template-name" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Template Name <span className="text-red-400">*</span>
                 </label>
                 <input
@@ -2019,14 +2019,14 @@ export const TrainingPanel: React.FC = () => {
                   value={templateName}
                   onChange={(e) => setTemplateName(e.target.value)}
                   placeholder="e.g., TinyLlama_OpenWebText_Standard_L1-0.0001"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
                   disabled={isSavingTemplate}
                 />
               </div>
 
               {/* Template Description */}
               <div>
-                <label htmlFor="template-description" className="block text-sm font-medium text-slate-300 mb-1">
+                <label htmlFor="template-description" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Description (Optional)
                 </label>
                 <textarea
@@ -2035,7 +2035,7 @@ export const TrainingPanel: React.FC = () => {
                   onChange={(e) => setTemplateDescription(e.target.value)}
                   placeholder="e.g., L1: 0.0001 | LR: 0.00027 | Dict: 2048→8192 (4x) | Steps: 50k"
                   rows={3}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors resize-none"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:border-emerald-500 transition-colors resize-none"
                   disabled={isSavingTemplate}
                 />
               </div>
@@ -2050,7 +2050,7 @@ export const TrainingPanel: React.FC = () => {
                     setTemplateDescription('');
                   }}
                   disabled={isSavingTemplate}
-                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-300 disabled:text-slate-600 rounded-md transition-colors"
+                  className="flex-1 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 disabled:text-slate-600 rounded-md transition-colors"
                 >
                   Cancel
                 </button>

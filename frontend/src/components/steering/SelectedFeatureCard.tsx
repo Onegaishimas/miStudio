@@ -35,7 +35,7 @@ interface SelectedFeatureCardProps {
  */
 function getStrengthInputClasses(strength: number | null): string {
   if (strength === null) {
-    return 'border-slate-700 text-slate-500 placeholder-slate-600';
+    return 'border-slate-300 dark:border-slate-700 text-slate-500 placeholder-slate-600';
   }
   const level = getStrengthWarningLevel(strength);
   switch (level) {
@@ -220,7 +220,7 @@ export function SelectedFeatureCard({
         )}
         {strengthSource === 'default' && (
           <span
-            className="text-[10px] font-medium text-slate-500 bg-slate-700/40 rounded px-1 py-0.5 shrink-0"
+            className="text-[10px] font-medium text-slate-500 bg-slate-100 dark:bg-slate-700/40 rounded px-1 py-0.5 shrink-0"
             title="No activation frequency available — using the default strength"
           >
             default
@@ -236,7 +236,7 @@ export function SelectedFeatureCard({
         {/* Remove button */}
         <button
           onClick={onRemove}
-          className="p-0.5 rounded hover:bg-white/10 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
+          className="p-0.5 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors shrink-0"
           title="Remove feature"
         >
           <X className="w-3.5 h-3.5" />
@@ -257,7 +257,7 @@ export function SelectedFeatureCard({
           )}
           {feature.label && (
             <p
-              className="text-xs text-slate-400 truncate min-w-0"
+              className="text-xs text-slate-600 dark:text-slate-400 truncate min-w-0"
               title={
                 typeof feature.meta?.['description'] === 'string'
                   ? (feature.meta['description'] as string)
@@ -285,7 +285,7 @@ export function SelectedFeatureCard({
       <div className="mt-1.5">
         <button
           onClick={() => setShowAdditional((v) => !v)}
-          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
           title="Test multiple strengths for this feature"
         >
           {showAdditional ? (
@@ -295,7 +295,7 @@ export function SelectedFeatureCard({
           )}
           Additional strengths
           {additionalStrengths.length > 0 && (
-            <span className="text-slate-400">({additionalStrengths.length})</span>
+            <span className="text-slate-600 dark:text-slate-400">({additionalStrengths.length})</span>
           )}
         </button>
 
@@ -312,7 +312,7 @@ export function SelectedFeatureCard({
                       onBlur={() => handleStrengthInputBlur(index)}
                       onKeyDown={(e) => handleStrengthInputKeyDown(e, index)}
                       autoFocus
-                      className={`w-14 px-1.5 py-0.5 text-xs font-mono text-center rounded border transition-colors bg-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 ${getStrengthInputClasses(parseFloat(editValue) || null)}`}
+                      className={`w-14 px-1.5 py-0.5 text-xs font-mono text-center rounded border transition-colors bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 ${getStrengthInputClasses(parseFloat(editValue) || null)}`}
                       placeholder="—"
                     />
                   ) : (

@@ -223,23 +223,23 @@ export function FeatureSelector() {
   const canAddMore = selectedFeatures.length < MAX_SELECTED_FEATURES;
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 border-r border-slate-800">
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800">
       {/* Header */}
-      <div className="p-4 border-b border-slate-800">
-        <h2 className="text-lg font-semibold text-slate-100 mb-1">Feature Steering</h2>
-        <p className="text-sm text-slate-400">Select up to {MAX_SELECTED_FEATURES} features to steer</p>
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">Feature Steering</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400">Select up to {MAX_SELECTED_FEATURES} features to steer</p>
       </div>
 
       {/* SAE Selector */}
-      <div className="p-4 border-b border-slate-800">
-        <label className="block text-sm font-medium text-slate-300 mb-2">
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
           <Brain className="w-4 h-4 inline mr-1.5" />
           Select SAE
         </label>
         <select
           value={selectedSAE?.id || ''}
           onChange={handleSAEChange}
-          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 transition-colors"
+          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 transition-colors"
         >
           <option value="">Choose an SAE...</option>
           {readySAEs.map((sae) => (
@@ -305,7 +305,7 @@ export function FeatureSelector() {
 
             {/* Feature count header */}
             <div className="p-4 pb-2 flex items-center justify-between">
-              <h3 className="text-sm font-medium text-slate-300">
+              <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Selected Features ({selectedFeatures.length}/{MAX_SELECTED_FEATURES})
               </h3>
               <div className="flex items-center gap-3">
@@ -322,7 +322,7 @@ export function FeatureSelector() {
                 {selectedFeatures.length > 0 && (
                   <button
                     onClick={clearFeatures}
-                    className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"
+                    className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1"
                   >
                     <Trash2 className="w-3 h-3" />
                     Clear all
@@ -340,7 +340,7 @@ export function FeatureSelector() {
                     <button
                       key={preset.label}
                       onClick={() => applyStrengthPreset(preset.value)}
-                      className="bg-slate-800 hover:bg-slate-700 rounded px-3 py-1 text-xs text-slate-300 transition-colors"
+                      className="bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded px-3 py-1 text-xs text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       {preset.label}
                     </button>
@@ -436,13 +436,13 @@ export function FeatureSelector() {
       {contextMenu.visible && (
         <div
           ref={contextMenuRef}
-          className="fixed z-50 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[180px]"
+          className="fixed z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 min-w-[180px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
             onClick={handleViewFeatureDetails}
             disabled={!selectedSAE?.training_id}
-            className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-4 py-2 text-left text-sm text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Eye className="w-4 h-4" />
             View Feature Details
@@ -450,24 +450,24 @@ export function FeatureSelector() {
           <button
             onClick={handleDuplicateFeature}
             disabled={!canDuplicate}
-            className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-4 py-2 text-left text-sm text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             title={canDuplicate ? 'Create a copy with negated strength' : `Maximum ${MAX_SELECTED_FEATURES} features reached`}
           >
             <Copy className="w-4 h-4" />
             Duplicate (Negated)
           </button>
           {contextMenu.featureIdx !== null && (
-            <div className="px-4 py-1 text-xs text-slate-500 border-t border-slate-700 mt-1">
+            <div className="px-4 py-1 text-xs text-slate-500 border-t border-slate-300 dark:border-slate-700 mt-1">
               Feature #{contextMenu.featureIdx} • L{contextMenu.layer}
             </div>
           )}
           {!canDuplicate && (
-            <div className="px-4 py-1 text-xs text-amber-500 border-t border-slate-700 mt-1">
+            <div className="px-4 py-1 text-xs text-amber-500 border-t border-slate-300 dark:border-slate-700 mt-1">
               Max {MAX_SELECTED_FEATURES} features - remove one to duplicate
             </div>
           )}
           {!selectedSAE?.training_id && (
-            <div className="px-4 py-1 text-xs text-amber-500 border-t border-slate-700 mt-1">
+            <div className="px-4 py-1 text-xs text-amber-500 border-t border-slate-300 dark:border-slate-700 mt-1">
               Feature details not available for downloaded SAEs
             </div>
           )}

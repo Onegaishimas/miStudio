@@ -88,7 +88,7 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
   return (
     <div
       onClick={onClickMonitor}
-      className="flex items-center gap-4 px-4 py-1.5 rounded-lg bg-slate-900/50 border border-slate-700/50 text-xs cursor-pointer hover:bg-slate-800/50 hover:border-slate-600/50 transition-colors"
+      className="flex items-center gap-4 px-4 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/50 text-xs cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-600/50 transition-colors"
       title="Click to open System Monitor"
     >
       {/* CPU Utilization */}
@@ -96,7 +96,7 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
         <div className="flex items-center gap-1.5">
           <Cpu className="w-3.5 h-3.5 text-purple-400" />
           <span className="text-slate-400">CPU:</span>
-          <span className="text-slate-100 font-medium">
+          <span className="text-slate-900 dark:text-slate-100 font-medium">
             <MetricValue value={systemMetrics.cpu?.percent} format="percent" decimals={0} />
           </span>
         </div>
@@ -107,7 +107,7 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
         <div className="flex items-center gap-1.5">
           <MemoryStick className="w-3.5 h-3.5 text-orange-400" />
           <span className="text-slate-400">RAM:</span>
-          <span className="text-slate-100 font-medium">
+          <span className="text-slate-900 dark:text-slate-100 font-medium">
             <MetricValue value={systemMetrics.ram?.used_gb} format="memory" decimals={1} />
             <span className="text-slate-400">/</span>
             <MetricValue value={systemMetrics.ram?.total_gb} format="memory" decimals={1} />
@@ -120,7 +120,7 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
         <div className="flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5 text-emerald-400" />
           <span className="text-slate-400">GPU:</span>
-          <span className="text-slate-100 font-medium flex items-center gap-1">
+          <span className="text-slate-900 dark:text-slate-100 font-medium flex items-center gap-1">
             {gpuList?.gpus.map((gpu, idx) => {
               const metrics = allGpuMetrics[gpu.gpu_id];
               const util = metrics?.utilization?.gpu || 0;
@@ -139,7 +139,7 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
         <div className="flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5 text-emerald-400" />
           <span className="text-slate-400">GPU:</span>
-          <span className="text-slate-100 font-medium">
+          <span className="text-slate-900 dark:text-slate-100 font-medium">
             <MetricValue value={gpuMetrics.utilization?.gpu} format="percent" decimals={0} />
           </span>
         </div>
@@ -150,7 +150,7 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
         <div className="flex items-center gap-1.5">
           <HardDrive className="w-3.5 h-3.5 text-blue-400" />
           <span className="text-slate-400">VRAM:</span>
-          <span className="text-slate-100 font-medium">
+          <span className="text-slate-900 dark:text-slate-100 font-medium">
             <MetricValue value={totalVramUsed} format="memory" decimals={1} />
             <span className="text-slate-400">/</span>
             <MetricValue value={totalVramTotal} format="memory" decimals={1} />

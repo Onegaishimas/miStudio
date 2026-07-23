@@ -164,7 +164,7 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
       case LabelingStatus.CANCELLED:
         return {
           icon: <Ban className="w-5 h-5" />,
-          color: 'text-slate-400',
+          color: 'text-slate-600 dark:text-slate-400',
           bg: 'bg-slate-500/10',
           border: 'border-slate-500/30',
           label: 'Cancelled',
@@ -172,7 +172,7 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
       default:
         return {
           icon: <Tag className="w-5 h-5" />,
-          color: 'text-slate-400',
+          color: 'text-slate-600 dark:text-slate-400',
           bg: 'bg-slate-500/10',
           border: 'border-slate-500/30',
           label: 'Unknown',
@@ -196,7 +196,7 @@ export const LabelingJobCard: React.FC<LabelingJobCardProps> = ({
               {job.model_name || 'Unknown Model'}
             </span>
             {job.layer_index != null && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
                 L{job.layer_index}
               </span>
             )}

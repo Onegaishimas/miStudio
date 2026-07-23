@@ -80,12 +80,12 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-lg max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
+        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h2 className="text-2xl font-semibold text-emerald-400">{model.name} Architecture</h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               {formatParams(model.params_count)} parameters • {model.quantization} quantization
               {model.architecture && ` • ${model.architecture}`}
             </p>
@@ -93,7 +93,7 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-300 transition-colors"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
             aria-label="Close"
           >
             <X className="w-6 h-6" />
@@ -104,26 +104,26 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
         <div className="flex-1 overflow-y-auto p-6">
           {/* Model Overview Stats */}
           <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-slate-800/50 p-4 rounded-lg">
-              <div className="text-sm text-slate-400 mb-1">Total Layers</div>
+            <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-lg">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Total Layers</div>
               <div className="text-2xl font-semibold text-emerald-400">
                 {architectureData.layers.length}
               </div>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-lg">
-              <div className="text-sm text-slate-400 mb-1">Hidden Dimension</div>
+            <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-lg">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Hidden Dimension</div>
               <div className="text-2xl font-semibold text-purple-400">
                 {architectureData.hiddenDim}
               </div>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-lg">
-              <div className="text-sm text-slate-400 mb-1">Attention Heads</div>
+            <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-lg">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Attention Heads</div>
               <div className="text-2xl font-semibold text-blue-400">
                 {architectureData.numHeads}
               </div>
             </div>
-            <div className="bg-slate-800/50 p-4 rounded-lg">
-              <div className="text-sm text-slate-400 mb-1">Parameters</div>
+            <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-lg">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mb-1">Parameters</div>
               <div className="text-2xl font-semibold text-yellow-400">
                 {formatParams(model.params_count)}
               </div>
@@ -132,24 +132,24 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
 
           {/* Layer List */}
           <div className="space-y-2">
-            <h3 className="text-lg font-semibold mb-3 text-slate-100">Model Layers</h3>
+            <h3 className="text-lg font-semibold mb-3 text-slate-900 dark:text-slate-100">Model Layers</h3>
             {architectureData.layers.map((layer, idx) => (
               <div
                 key={idx}
-                className="bg-slate-800/30 border border-slate-700 rounded-lg p-4 hover:border-slate-600 transition-colors"
+                className="bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-4 hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <span className="text-slate-500 font-mono text-sm w-8">{idx}</span>
                     <div>
-                      <div className="font-medium text-slate-200">{layer.type}</div>
+                      <div className="font-medium text-slate-800 dark:text-slate-200">{layer.type}</div>
                       {layer.attention && layer.mlp && (
-                        <div className="text-sm text-slate-400 mt-1">
+                        <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                           Attention: {layer.attention} | MLP: {layer.mlp}
                         </div>
                       )}
                       {layer.size && (
-                        <div className="text-sm text-slate-400 mt-1">
+                        <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                           Shape: {layer.size}
                         </div>
                       )}
@@ -161,43 +161,43 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
           </div>
 
           {/* Model Configuration */}
-          <div className="mt-6 bg-slate-800/30 border border-slate-700 rounded-lg p-4">
-            <h3 className="text-lg font-semibold mb-3 text-slate-100">Model Configuration</h3>
+          <div className="mt-6 bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
+            <h3 className="text-lg font-semibold mb-3 text-slate-900 dark:text-slate-100">Model Configuration</h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-slate-400">Vocabulary Size:</span>
-                <span className="font-mono ml-2 text-slate-200">{architectureData.vocabSize}</span>
+                <span className="text-slate-600 dark:text-slate-400">Vocabulary Size:</span>
+                <span className="font-mono ml-2 text-slate-800 dark:text-slate-200">{architectureData.vocabSize}</span>
               </div>
               <div>
-                <span className="text-slate-400">Max Position:</span>
-                <span className="font-mono ml-2 text-slate-200">
+                <span className="text-slate-600 dark:text-slate-400">Max Position:</span>
+                <span className="font-mono ml-2 text-slate-800 dark:text-slate-200">
                   {model.architecture_config?.max_position_embeddings || 1024}
                 </span>
               </div>
               <div>
-                <span className="text-slate-400">MLP Ratio:</span>
-                <span className="font-mono ml-2 text-slate-200">
+                <span className="text-slate-600 dark:text-slate-400">MLP Ratio:</span>
+                <span className="font-mono ml-2 text-slate-800 dark:text-slate-200">
                   {Math.round(architectureData.mlpDim / architectureData.hiddenDim)}x
                 </span>
               </div>
               <div>
-                <span className="text-slate-400">Architecture:</span>
-                <span className="font-mono ml-2 text-slate-200">
+                <span className="text-slate-600 dark:text-slate-400">Architecture:</span>
+                <span className="font-mono ml-2 text-slate-800 dark:text-slate-200">
                   {model.architecture || 'Decoder-only'}
                 </span>
               </div>
               {model.architecture_config?.num_key_value_heads && (
                 <div>
-                  <span className="text-slate-400">KV Heads:</span>
-                  <span className="font-mono ml-2 text-slate-200">
+                  <span className="text-slate-600 dark:text-slate-400">KV Heads:</span>
+                  <span className="font-mono ml-2 text-slate-800 dark:text-slate-200">
                     {model.architecture_config.num_key_value_heads}
                   </span>
                 </div>
               )}
               {model.architecture_config?.rope_theta && (
                 <div>
-                  <span className="text-slate-400">RoPE Theta:</span>
-                  <span className="font-mono ml-2 text-slate-200">
+                  <span className="text-slate-600 dark:text-slate-400">RoPE Theta:</span>
+                  <span className="font-mono ml-2 text-slate-800 dark:text-slate-200">
                     {model.architecture_config.rope_theta}
                   </span>
                 </div>

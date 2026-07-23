@@ -85,7 +85,7 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className="inline-flex items-center justify-center w-5 h-5 text-slate-400 hover:text-emerald-400 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 rounded-full"
+        className="inline-flex items-center justify-center w-5 h-5 text-slate-600 dark:text-slate-400 hover:text-emerald-400 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 rounded-full"
         aria-label={`Show documentation for ${doc.name}`}
       >
         <Info size={18} />
@@ -95,14 +95,14 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
       {isOpen && (
         <div
           ref={popoverRef}
-          className={`absolute z-50 w-[480px] max-h-[600px] overflow-y-auto bg-slate-800 border border-slate-700 rounded-lg shadow-2xl ${
+          className={`absolute z-50 w-[480px] max-h-[600px] overflow-y-auto bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg shadow-2xl ${
             position === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'
           } left-0`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="sticky top-0 bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
-            <h3 className="text-base font-semibold text-slate-100">{doc.name}</h3>
+          <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-300 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{doc.name}</h3>
             <button
               type="button"
               onClick={(e) => {
@@ -110,10 +110,10 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
                 e.stopPropagation();
                 setIsOpen(false);
               }}
-              className="p-1 hover:bg-slate-700 rounded transition-colors"
+              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
               aria-label="Close documentation"
             >
-              <X size={16} className="text-slate-400" />
+              <X size={16} className="text-slate-600 dark:text-slate-400" />
             </button>
           </div>
 
@@ -125,12 +125,12 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
                 <Lightbulb size={16} className="text-emerald-400" />
                 <h4 className="text-sm font-semibold text-emerald-400">Purpose</h4>
               </div>
-              <p className="text-sm text-slate-300 leading-relaxed">{doc.purpose}</p>
+              <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{doc.purpose}</p>
             </div>
 
             {/* Description */}
             <div>
-              <p className="text-sm text-slate-400 leading-relaxed">{doc.description}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{doc.description}</p>
             </div>
 
             {/* Examples */}
@@ -144,14 +144,14 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
                   {doc.examples.map((example, idx) => (
                     <div
                       key={idx}
-                      className="bg-slate-900/50 border border-slate-700 rounded-md p-3"
+                      className="bg-slate-100 dark:bg-slate-900/50 border border-slate-300 dark:border-slate-700 rounded-md p-3"
                     >
                       <div className="flex items-baseline gap-2 mb-1">
                         <code className="text-sm font-mono font-semibold text-emerald-400">
                           {example.value}
                         </code>
                         <span className="text-xs text-slate-500">→</span>
-                        <span className="text-sm text-slate-300">{example.effect}</span>
+                        <span className="text-sm text-slate-700 dark:text-slate-300">{example.effect}</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-1">{example.useCase}</p>
                     </div>
@@ -163,12 +163,12 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
             {/* Recommendations */}
             {doc.recommendations && doc.recommendations.length > 0 && (
               <div>
-                <h4 className="text-sm font-semibold text-slate-300 mb-2">
+                <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
                   💡 Recommendations
                 </h4>
                 <ul className="space-y-1.5">
                   {doc.recommendations.map((rec, idx) => (
-                    <li key={idx} className="text-sm text-slate-400 flex items-start gap-2">
+                    <li key={idx} className="text-sm text-slate-600 dark:text-slate-400 flex items-start gap-2">
                       <span className="text-emerald-400 mt-1">•</span>
                       <span className="flex-1">{rec}</span>
                     </li>
@@ -197,13 +197,13 @@ export const HyperparameterTooltip: React.FC<HyperparameterTooltipProps> = ({
 
             {/* Related Parameters */}
             {doc.relatedParams && doc.relatedParams.length > 0 && (
-              <div className="pt-2 border-t border-slate-700">
+              <div className="pt-2 border-t border-slate-300 dark:border-slate-700">
                 <p className="text-xs text-slate-500">
                   Related:{' '}
                   {doc.relatedParams.map((param, idx) => (
                     <React.Fragment key={param}>
                       {idx > 0 && ', '}
-                      <code className="text-slate-400">{param}</code>
+                      <code className="text-slate-600 dark:text-slate-400">{param}</code>
                     </React.Fragment>
                   ))}
                 </p>
@@ -238,7 +238,7 @@ export const HyperparameterLabel: React.FC<HyperparameterLabelProps> = ({
 }) => {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-300">
+      <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700 dark:text-slate-300">
         {label}
         {required && <span className="text-red-400 ml-1">*</span>}
       </label>

@@ -56,7 +56,7 @@ export const MaxActivatingExamples: React.FC<MaxActivatingExamplesProps> = ({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <div className="text-slate-400">Loading examples...</div>
+        <div className="text-slate-600 dark:text-slate-400">Loading examples...</div>
       </div>
     );
   }
@@ -72,7 +72,7 @@ export const MaxActivatingExamples: React.FC<MaxActivatingExamplesProps> = ({
   if (examples.length === 0) {
     return (
       <div className="flex items-center justify-center py-8">
-        <div className="text-slate-400">No examples found</div>
+        <div className="text-slate-600 dark:text-slate-400">No examples found</div>
       </div>
     );
   }
@@ -80,7 +80,7 @@ export const MaxActivatingExamples: React.FC<MaxActivatingExamplesProps> = ({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="text-sm text-slate-400">
+      <div className="text-sm text-slate-600 dark:text-slate-400">
         Showing {examples.length} example{examples.length !== 1 ? 's' : ''}
       </div>
 
@@ -89,15 +89,15 @@ export const MaxActivatingExamples: React.FC<MaxActivatingExamplesProps> = ({
         {examples.map((example, index) => (
           <div
             key={index}
-            className="bg-slate-800/30 rounded-lg p-4 space-y-2"
+            className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4 space-y-2"
           >
             {/* Example Header */}
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-slate-300">
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Example {index + 1}
               </div>
               <div className="text-sm">
-                <span className="text-slate-400">Max Activation: </span>
+                <span className="text-slate-600 dark:text-slate-400">Max Activation: </span>
                 <span className="text-emerald-400 font-mono">
                   {example.max_activation.toFixed(3)}
                 </span>
@@ -156,11 +156,11 @@ export const MaxActivatingExamplesCompact: React.FC<MaxActivatingExamplesProps> 
   }, [featureId, limit]);
 
   if (loading) {
-    return <div className="text-xs text-slate-400">Loading...</div>;
+    return <div className="text-xs text-slate-600 dark:text-slate-400">Loading...</div>;
   }
 
   if (examples.length === 0) {
-    return <div className="text-xs text-slate-400">No examples</div>;
+    return <div className="text-xs text-slate-600 dark:text-slate-400">No examples</div>;
   }
 
   return (
@@ -168,7 +168,7 @@ export const MaxActivatingExamplesCompact: React.FC<MaxActivatingExamplesProps> 
       {examples.map((example, index) => (
         <div key={index} className="space-y-1">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-400">#{index + 1}</span>
+            <span className="text-slate-600 dark:text-slate-400">#{index + 1}</span>
             <span className="text-emerald-400 font-mono">
               {example.max_activation.toFixed(2)}
             </span>

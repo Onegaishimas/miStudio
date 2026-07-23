@@ -84,14 +84,14 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
       saving: 'text-purple-400',
       complete: 'text-green-400',
     };
-    return colorMap[stage] || 'text-slate-400';
+    return colorMap[stage] || 'text-slate-600 dark:text-slate-400';
   };
 
   return (
     <div className="space-y-2">
       {/* Stage and Progress Bar */}
       <div>
-        <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+        <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
           <span className={getStageColor(progress.stage)}>
             {getStageDisplay(progress.stage)}
           </span>
@@ -99,7 +99,7 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
             {progress.progress.toFixed(1)}%
           </span>
         </div>
-        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+        <div className="w-full h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
           <div
             className="h-full bg-emerald-500 transition-all duration-300"
             style={{ width: `${progress.progress}%` }}
@@ -110,7 +110,7 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
       {/* Samples Progress */}
       <div className="flex items-center justify-between text-xs">
         <span className="text-slate-500">Samples:</span>
-        <span className="text-slate-300 font-medium">
+        <span className="text-slate-700 dark:text-slate-300 font-medium">
           {progress.samples_processed.toLocaleString()} / {progress.total_samples.toLocaleString()}
         </span>
       </div>
@@ -122,7 +122,7 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
             <div className="flex items-center gap-1.5">
               <Clock className="w-3 h-3 text-slate-500" />
               <span className="text-slate-500">Elapsed:</span>
-              <span className="text-slate-300 font-medium">
+              <span className="text-slate-700 dark:text-slate-300 font-medium">
                 {formatTime(displayElapsed)}
               </span>
             </div>
@@ -131,7 +131,7 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
             <div className="flex items-center gap-1.5">
               <Clock className="w-3 h-3 text-slate-500" />
               <span className="text-slate-500">Remaining:</span>
-              <span className="text-slate-300 font-medium">
+              <span className="text-slate-700 dark:text-slate-300 font-medium">
                 {formatTime(progress.estimated_seconds_remaining)}
               </span>
             </div>
@@ -144,7 +144,7 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
         <div className="flex items-center gap-1.5 text-xs">
           <Zap className="w-3 h-3 text-yellow-400" />
           <span className="text-slate-500">Rate:</span>
-          <span className="text-slate-300 font-medium">
+          <span className="text-slate-700 dark:text-slate-300 font-medium">
             {progress.samples_per_second.toFixed(1)} samples/sec
           </span>
         </div>
@@ -152,27 +152,27 @@ export function TokenizationProgressDisplay({ progress }: TokenizationProgressDi
 
       {/* Filter Statistics */}
       {progress.filter_stats && (
-        <div className="pt-2 border-t border-slate-700/50">
+        <div className="pt-2 border-t border-slate-300 dark:border-slate-700/50">
           <div className="flex items-center gap-1.5 mb-1.5">
             <Filter className="w-3 h-3 text-blue-400" />
-            <span className="text-xs font-medium text-slate-300">Filter Statistics</span>
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Filter Statistics</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5 text-xs">
             <div className="flex justify-between">
               <span className="text-slate-500">Filtered:</span>
-              <span className="text-slate-300">
+              <span className="text-slate-700 dark:text-slate-300">
                 {progress.filter_stats.samples_filtered.toLocaleString()}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Rate:</span>
-              <span className="text-slate-300">
+              <span className="text-slate-700 dark:text-slate-300">
                 {progress.filter_stats.filter_rate.toFixed(1)}%
               </span>
             </div>
             <div className="flex justify-between col-span-2">
               <span className="text-slate-500">Junk Tokens:</span>
-              <span className="text-slate-300">
+              <span className="text-slate-700 dark:text-slate-300">
                 {progress.filter_stats.junk_tokens.toLocaleString()} / {progress.filter_stats.total_tokens.toLocaleString()}
               </span>
             </div>

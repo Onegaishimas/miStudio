@@ -263,19 +263,19 @@ export function TrainingTemplateForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className={`bg-slate-900/50 border border-slate-800 rounded-lg p-6 ${className}`}
+      className={`bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-6 ${className}`}
     >
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-slate-100">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
           {isEditMode ? 'Edit Template' : 'Create Training Template'}
         </h2>
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="p-1 hover:bg-slate-800 rounded transition-colors"
+            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
           >
-            <X className="w-5 h-5 text-slate-400" />
+            <X className="w-5 h-5 text-slate-600 dark:text-slate-400" />
           </button>
         )}
       </div>
@@ -283,13 +283,13 @@ export function TrainingTemplateForm({
       <div className="space-y-6">
         {/* Basic Information */}
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
             Basic Information
           </h3>
 
           {/* Name */}
           <div>
-            <label htmlFor="name" className="block text-sm font-medium text-slate-300 mb-2">
+            <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Template Name <span className="text-red-400">*</span>
             </label>
             <input
@@ -298,7 +298,7 @@ export function TrainingTemplateForm({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="My Training Template"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               disabled={isSubmitting}
               required
             />
@@ -306,7 +306,7 @@ export function TrainingTemplateForm({
 
           {/* Description */}
           <div>
-            <label htmlFor="description" className="block text-sm font-medium text-slate-300 mb-2">
+            <label htmlFor="description" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Description
             </label>
             <textarea
@@ -315,7 +315,7 @@ export function TrainingTemplateForm({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Brief description of this template's purpose..."
               rows={2}
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+              className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
               disabled={isSubmitting}
             />
           </div>
@@ -323,7 +323,7 @@ export function TrainingTemplateForm({
           {/* Model ID and Dataset ID */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="model-id" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="model-id" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Model ID (Optional)
               </label>
               <input
@@ -332,12 +332,12 @@ export function TrainingTemplateForm({
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
                 placeholder="m_..."
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
               />
             </div>
             <div>
-              <label htmlFor="dataset-id" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="dataset-id" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Dataset ID (Optional)
               </label>
               <input
@@ -346,7 +346,7 @@ export function TrainingTemplateForm({
                 value={datasetId}
                 onChange={(e) => setDatasetId(e.target.value)}
                 placeholder="..."
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
               />
             </div>
@@ -355,23 +355,23 @@ export function TrainingTemplateForm({
 
         {/* SAE Architecture */}
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
             SAE Architecture
           </h3>
 
           {/* Training Framework */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Training Framework <span className="text-red-400">*</span>
             </label>
             <div className="flex flex-wrap gap-3">
               {getFrameworkOptions().map((opt) => (
                 <label
                   key={opt.value}
-                  className={`flex-1 min-w-[140px] px-4 py-3 bg-slate-800 border rounded cursor-pointer transition-all ${
+                  className={`flex-1 min-w-[140px] px-4 py-3 bg-white dark:bg-slate-800 border rounded cursor-pointer transition-all ${
                     encoderType === opt.value
                       ? 'border-emerald-500 bg-emerald-500/10'
-                      : 'border-slate-700 hover:border-slate-600'
+                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                   }`}
                   title={opt.description}
                 >
@@ -386,7 +386,7 @@ export function TrainingTemplateForm({
                   />
                   <span
                     className={`text-sm font-medium ${
-                      encoderType === opt.value ? 'text-emerald-400' : 'text-slate-300'
+                      encoderType === opt.value ? 'text-emerald-400' : 'text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     {opt.label}
@@ -399,7 +399,7 @@ export function TrainingTemplateForm({
           {/* Dimensions */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="hidden-dim" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="hidden-dim" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Hidden Dimension <span className="text-red-400">*</span>
               </label>
               <input
@@ -409,7 +409,7 @@ export function TrainingTemplateForm({
                 onChange={(e) => setHiddenDim(parseInt(e.target.value, 10))}
                 min="1"
                 max="100000"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
                 required
               />
@@ -417,7 +417,7 @@ export function TrainingTemplateForm({
             </div>
 
             <div>
-              <label htmlFor="latent-dim" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="latent-dim" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Latent Dimension <span className="text-red-400">*</span>
               </label>
               <input
@@ -427,7 +427,7 @@ export function TrainingTemplateForm({
                 onChange={(e) => setLatentDim(parseInt(e.target.value, 10))}
                 min="1"
                 max="1000000"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
                 required
               />
@@ -438,13 +438,13 @@ export function TrainingTemplateForm({
 
         {/* Sparsity & Training */}
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
             Sparsity & Training
           </h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="l1-alpha" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="l1-alpha" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 L1 Alpha
               </label>
               <input
@@ -454,14 +454,14 @@ export function TrainingTemplateForm({
                 onChange={(e) => setL1Alpha(parseFloat(e.target.value) || 0)}
                 step="any"
                 min="0"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
               />
               <p className="text-xs text-slate-500 mt-1">Sparsity penalty (0 for JumpReLU)</p>
             </div>
 
             <div>
-              <label htmlFor="target-l0" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="target-l0" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Target L0 (Optional)
               </label>
               <input
@@ -473,7 +473,7 @@ export function TrainingTemplateForm({
                 min="0"
                 max="1"
                 placeholder="0.05"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
               />
               <p className="text-xs text-slate-500 mt-1">Fraction of active features (0-1)</p>
@@ -482,7 +482,7 @@ export function TrainingTemplateForm({
 
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label htmlFor="learning-rate" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="learning-rate" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Learning Rate <span className="text-red-400">*</span>
               </label>
               <input
@@ -492,14 +492,14 @@ export function TrainingTemplateForm({
                 onChange={(e) => setLearningRate(parseFloat(e.target.value) || 0)}
                 step="any"
                 min="0"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
                 required
               />
             </div>
 
             <div>
-              <label htmlFor="batch-size" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="batch-size" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Batch Size <span className="text-red-400">*</span>
               </label>
               <input
@@ -510,14 +510,14 @@ export function TrainingTemplateForm({
                 min="1"
                 max="16384"
                 step="any"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
                 required
               />
             </div>
 
             <div>
-              <label htmlFor="total-steps" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="total-steps" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Total Steps <span className="text-red-400">*</span>
               </label>
               <input
@@ -526,7 +526,7 @@ export function TrainingTemplateForm({
                 value={totalSteps}
                 onChange={(e) => setTotalSteps(parseInt(e.target.value, 10))}
                 min="1"
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 disabled={isSubmitting}
                 required
               />
@@ -539,7 +539,7 @@ export function TrainingTemplateForm({
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-emerald-400 transition-colors"
+            className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:text-emerald-400 transition-colors"
           >
             {showAdvanced ? (
               <ChevronUp className="w-4 h-4" />
@@ -553,7 +553,7 @@ export function TrainingTemplateForm({
             <div className="mt-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="warmup-steps" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="warmup-steps" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Warmup Steps
                   </label>
                   <input
@@ -562,13 +562,13 @@ export function TrainingTemplateForm({
                     value={warmupSteps}
                     onChange={(e) => setWarmupSteps(parseInt(e.target.value, 10))}
                     min="0"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="weight-decay" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="weight-decay" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Weight Decay
                   </label>
                   <input
@@ -578,7 +578,7 @@ export function TrainingTemplateForm({
                     onChange={(e) => setWeightDecay(parseFloat(e.target.value))}
                     step="0.0001"
                     min="0"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                 </div>
@@ -586,7 +586,7 @@ export function TrainingTemplateForm({
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label htmlFor="grad-clip" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="grad-clip" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Gradient Clip Norm
                   </label>
                   <input
@@ -597,13 +597,13 @@ export function TrainingTemplateForm({
                     step="0.1"
                     min="0"
                     placeholder="1.0"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="checkpoint-interval" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="checkpoint-interval" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Checkpoint Interval
                   </label>
                   <input
@@ -612,13 +612,13 @@ export function TrainingTemplateForm({
                     value={checkpointInterval}
                     onChange={(e) => setCheckpointInterval(parseInt(e.target.value, 10))}
                     min="1"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="log-interval" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="log-interval" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Log Interval
                   </label>
                   <input
@@ -627,7 +627,7 @@ export function TrainingTemplateForm({
                     value={logInterval}
                     onChange={(e) => setLogInterval(parseInt(e.target.value, 10))}
                     min="1"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                 </div>
@@ -635,7 +635,7 @@ export function TrainingTemplateForm({
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label htmlFor="dead-neuron-threshold" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="dead-neuron-threshold" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Dead Neuron Threshold
                   </label>
                   <input
@@ -644,14 +644,14 @@ export function TrainingTemplateForm({
                     value={deadNeuronThreshold}
                     onChange={(e) => setDeadNeuronThreshold(parseInt(e.target.value, 10))}
                     min="1"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                   <p className="text-xs text-slate-500 mt-1">Steps before dead</p>
                 </div>
 
                 <div>
-                  <label htmlFor="resample-interval" className="block text-sm font-medium text-slate-300 mb-2">
+                  <label htmlFor="resample-interval" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     Resample Interval
                   </label>
                   <input
@@ -660,7 +660,7 @@ export function TrainingTemplateForm({
                     value={resampleInterval}
                     onChange={(e) => setResampleInterval(parseInt(e.target.value, 10))}
                     min="1"
-                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                     disabled={isSubmitting}
                   />
                   <p className="text-xs text-slate-500 mt-1">Resample every N steps</p>
@@ -673,20 +673,20 @@ export function TrainingTemplateForm({
                       checked={resampleDeadNeurons}
                       onChange={(e) => setResampleDeadNeurons(e.target.checked)}
                       disabled={isSubmitting}
-                      className="w-4 h-4 text-emerald-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
+                      className="w-4 h-4 text-emerald-600 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
                     />
-                    <span className="text-sm text-slate-300">Resample dead neurons</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">Resample dead neurons</span>
                   </label>
                 </div>
               </div>
 
               {/* JumpReLU-specific parameters - only show when JumpReLU is selected */}
               {encoderType === SAEArchitectureType.JUMPRELU && (
-                <div className="space-y-4 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+                <div className="space-y-4 p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg border border-slate-300 dark:border-slate-700">
                   <h4 className="text-sm font-medium text-emerald-400">JumpReLU Parameters</h4>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <label htmlFor="sparsity-coeff" className="block text-sm font-medium text-slate-300 mb-2">
+                      <label htmlFor="sparsity-coeff" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         Sparsity Coeff
                       </label>
                       <input
@@ -697,14 +697,14 @@ export function TrainingTemplateForm({
                         step="any"
                         min="0"
                         placeholder="0.0006"
-                        className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                        className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                         disabled={isSubmitting}
                       />
                       <p className="text-xs text-slate-500 mt-1">L0 sparsity coefficient</p>
                     </div>
 
                     <div>
-                      <label htmlFor="initial-threshold" className="block text-sm font-medium text-slate-300 mb-2">
+                      <label htmlFor="initial-threshold" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         Initial Threshold
                       </label>
                       <input
@@ -715,14 +715,14 @@ export function TrainingTemplateForm({
                         step="0.001"
                         min="0"
                         placeholder="0.001"
-                        className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                        className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                         disabled={isSubmitting}
                       />
                       <p className="text-xs text-slate-500 mt-1">JumpReLU threshold init</p>
                     </div>
 
                     <div>
-                      <label htmlFor="bandwidth" className="block text-sm font-medium text-slate-300 mb-2">
+                      <label htmlFor="bandwidth" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                         Bandwidth
                       </label>
                       <input
@@ -733,7 +733,7 @@ export function TrainingTemplateForm({
                         step="0.0001"
                         min="0"
                         placeholder="0.001"
-                        className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                        className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                         disabled={isSubmitting}
                       />
                       <p className="text-xs text-slate-500 mt-1">KDE bandwidth (epsilon)</p>
@@ -744,7 +744,7 @@ export function TrainingTemplateForm({
 
               {/* Extra Metadata */}
               <div>
-                <label htmlFor="metadata" className="block text-sm font-medium text-slate-300 mb-2">
+                <label htmlFor="metadata" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Extra Metadata (JSON)
                 </label>
                 <textarea
@@ -753,7 +753,7 @@ export function TrainingTemplateForm({
                   onChange={(e) => setMetadataJson(e.target.value)}
                   placeholder='{"author": "user", "version": "1.0"}'
                   rows={4}
-                  className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
                   disabled={isSubmitting}
                 />
                 <p className="text-xs text-slate-500 mt-1">Optional JSON metadata</p>
@@ -770,9 +770,9 @@ export function TrainingTemplateForm({
               checked={isFavorite}
               onChange={(e) => setIsFavorite(e.target.checked)}
               disabled={isSubmitting}
-              className="w-4 h-4 text-emerald-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
+              className="w-4 h-4 text-emerald-600 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
             />
-            <span className="text-sm text-slate-300">Mark as favorite</span>
+            <span className="text-sm text-slate-700 dark:text-slate-300">Mark as favorite</span>
           </label>
         </div>
 
@@ -788,7 +788,7 @@ export function TrainingTemplateForm({
           <button
             type="submit"
             disabled={isSubmitting || !name.trim()}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-medium rounded transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-medium rounded transition-colors"
           >
             <Save className="w-4 h-4" />
             {isSubmitting ? 'Saving...' : isEditMode ? 'Update Template' : 'Create Template'}
@@ -798,7 +798,7 @@ export function TrainingTemplateForm({
               type="button"
               onClick={onCancel}
               disabled={isSubmitting}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-300 font-medium rounded transition-colors"
+              className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:bg-white dark:disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 font-medium rounded transition-colors"
             >
               Cancel
             </button>

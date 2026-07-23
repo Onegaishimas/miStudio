@@ -205,8 +205,8 @@ export function ExtractionTemplatesPanel() {
     <>
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-100 mb-2">Extraction Templates</h1>
-        <p className="text-slate-400">
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 mb-2">Extraction Templates</h1>
+        <p className="text-slate-600 dark:text-slate-400">
           Manage activation extraction templates for feature analysis
         </p>
       </div>
@@ -257,7 +257,7 @@ export function ExtractionTemplatesPanel() {
               className={`px-4 py-2 rounded transition-colors ${
                 activeTab === 'all'
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               All Templates ({templates.length})
@@ -267,7 +267,7 @@ export function ExtractionTemplatesPanel() {
               className={`px-4 py-2 rounded transition-colors ${
                 activeTab === 'favorites'
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
             >
               Favorites ({favorites.length})
@@ -277,7 +277,7 @@ export function ExtractionTemplatesPanel() {
               className={`px-4 py-2 rounded transition-colors ${
                 activeTab === 'create'
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
               }`}
               title="Create new extraction template"
             >
@@ -291,7 +291,7 @@ export function ExtractionTemplatesPanel() {
               <button
                 onClick={handleExport}
                 disabled={templates.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-300 disabled:text-slate-600 rounded transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 disabled:text-slate-600 rounded transition-colors"
                 title="Export all templates"
               >
                 <Download className="w-4 h-4" />
@@ -299,7 +299,7 @@ export function ExtractionTemplatesPanel() {
               </button>
               <button
                 onClick={handleImportClick}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded transition-colors"
                 title="Import templates from JSON"
               >
                 <Upload className="w-4 h-4" />
@@ -340,7 +340,7 @@ export function ExtractionTemplatesPanel() {
       {/* Edit Modal */}
       {showEditModal && editingTemplate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <ExtractionTemplateForm
                 template={editingTemplate}

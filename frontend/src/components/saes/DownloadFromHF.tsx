@@ -218,13 +218,13 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
     <div className={`${COMPONENTS.card.base} p-6 space-y-4`}>
       <div className="flex items-center gap-2 mb-2">
         <Cloud className="w-5 h-5 text-cyan-400" />
-        <h3 className="text-lg font-semibold text-slate-100">Download from HuggingFace</h3>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Download from HuggingFace</h3>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         {/* HuggingFace Repository Input */}
         <div>
-          <label htmlFor="sae-repo" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="sae-repo" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             HuggingFace Repository
           </label>
           <input
@@ -239,13 +239,13 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
             }}
             onKeyPress={handleKeyPress}
             disabled={hfPreviewLoading || isDownloading}
-            className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           />
         </div>
 
         {/* Custom Name Input */}
         <div>
-          <label htmlFor="sae-name" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="sae-name" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             Custom Name <span className="text-slate-500">(optional)</span>
           </label>
           <input
@@ -256,14 +256,14 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
             value={customName}
             onChange={(e) => setCustomName(e.target.value)}
             disabled={hfPreviewLoading || isDownloading}
-            className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           />
         </div>
       </div>
 
       {/* Access Token Input */}
       <div>
-        <label htmlFor="sae-access-token" className="block text-sm font-medium text-slate-300 mb-2">
+        <label htmlFor="sae-access-token" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
           Access Token <span className="text-slate-500">(optional, for gated repos)</span>
         </label>
         <div className="relative">
@@ -280,7 +280,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
             onChange={(e) => setAccessToken(e.target.value)}
             onKeyPress={handleKeyPress}
             disabled={hfPreviewLoading || isDownloading}
-            className="w-full px-4 py-2 pr-10 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 font-mono text-sm text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full px-4 py-2 pr-10 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 font-mono text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             style={{ WebkitTextSecurity: showToken ? 'none' : 'disc' } as React.CSSProperties}
           />
           {accessToken && (
@@ -291,7 +291,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
               onMouseLeave={() => setShowToken(false)}
               onTouchStart={() => setShowToken(true)}
               onTouchEnd={() => setShowToken(false)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-300 transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
               title="Hold to reveal token"
               tabIndex={-1}
             >
@@ -303,7 +303,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
 
       {/* Model Selector - Required for steering */}
       <div>
-        <label htmlFor="sae-model" className="block text-sm font-medium text-slate-300 mb-2">
+        <label htmlFor="sae-model" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
           <span className="flex items-center gap-2">
             <Box className="w-4 h-4" />
             Link to Model <span className="text-red-400">*</span>
@@ -317,7 +317,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
           value={selectedModelId}
           onChange={(e) => setSelectedModelId(e.target.value)}
           disabled={hfPreviewLoading || isDownloading}
-          className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <option value="">Select a model...</option>
           {readyModels.map((model) => (
@@ -364,7 +364,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
       {hfPreview && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-slate-300">
+            <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300">
               Found {saeGroups.length} SAE{saeGroups.length !== 1 ? 's' : ''}
             </h4>
             {hfPreview.model_name && (
@@ -407,8 +407,8 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
                   return (
                     <div key={layerKey} className="relative">
                       {/* Sticky layer header with select all toggle */}
-                      <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 px-3 py-2 flex items-center justify-between">
-                        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      <div className="sticky top-0 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-700 px-3 py-2 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                           {layerKey === 'unknown' ? 'Unknown Layer' : `Layer ${layerKey}`}
                         </span>
                         <button
@@ -430,7 +430,7 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
                               className={`p-3 rounded-lg cursor-pointer transition-colors ${
                                 isSelected
                                   ? 'bg-emerald-500/20 border border-emerald-500/50'
-                                  : 'bg-slate-800 border border-slate-700 hover:border-slate-600'
+                                  : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                               }`}
                             >
                               <div className="flex items-center justify-between">
@@ -438,9 +438,9 @@ export function DownloadFromHF({ onDownloadComplete }: DownloadFromHFProps) {
                                   {isSelected ? (
                                     <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                                   ) : (
-                                    <FolderOpen className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <FolderOpen className="w-4 h-4 text-slate-600 dark:text-slate-400 flex-shrink-0" />
                                   )}
-                                  <span className="text-sm text-slate-200 truncate font-mono">
+                                  <span className="text-sm text-slate-800 dark:text-slate-200 truncate font-mono">
                                     {group.dirPath}
                                   </span>
                                 </div>
