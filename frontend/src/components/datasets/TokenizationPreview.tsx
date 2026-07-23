@@ -90,9 +90,9 @@ export function TokenizationPreview({
   const isOverLimit = charCount > 1000;
 
   return (
-    <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6">
+    <div className="bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
-        <h4 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+        <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
           <Zap className="w-4 h-4 text-emerald-400" />
           Tokenization Preview
         </h4>
@@ -102,7 +102,7 @@ export function TokenizationPreview({
       <div className="space-y-4">
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label htmlFor="preview-text" className="block text-sm font-medium text-slate-300">
+            <label htmlFor="preview-text" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
               Sample Text
             </label>
             <span
@@ -120,7 +120,7 @@ export function TokenizationPreview({
             placeholder="Enter sample text to see how it will be tokenized..."
             disabled={disabled || isLoading}
             rows={4}
-            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed resize-none"
           />
           <p className="text-xs text-slate-500 mt-1">
             Enter up to 1000 characters to preview tokenization with current settings
@@ -131,7 +131,7 @@ export function TokenizationPreview({
         <button
           onClick={handlePreview}
           disabled={disabled || isLoading || !text.trim() || isOverLimit}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-200 text-sm font-medium rounded transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-800 dark:text-slate-200 text-sm font-medium rounded transition-colors"
         >
           <Zap className="w-4 h-4" />
           {isLoading ? 'Tokenizing...' : 'Preview Tokenization'}
@@ -147,24 +147,24 @@ export function TokenizationPreview({
 
         {/* Preview Results */}
         {previewResult && (
-          <div className="space-y-4 pt-4 border-t border-slate-700">
+          <div className="space-y-4 pt-4 border-t border-slate-300 dark:border-slate-700">
             {/* Statistics */}
             <div className="grid grid-cols-3 gap-4">
-              <div className="bg-slate-800/50 rounded p-3">
-                <div className="text-xs text-slate-400">Total Tokens</div>
-                <div className="text-lg font-bold text-slate-200 font-mono">
+              <div className="bg-slate-100 dark:bg-slate-800/50 rounded p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400">Total Tokens</div>
+                <div className="text-lg font-bold text-slate-800 dark:text-slate-200 font-mono">
                   {previewResult.token_count}
                 </div>
               </div>
-              <div className="bg-slate-800/50 rounded p-3">
-                <div className="text-xs text-slate-400">Special Tokens</div>
+              <div className="bg-slate-100 dark:bg-slate-800/50 rounded p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400">Special Tokens</div>
                 <div className="text-lg font-bold text-emerald-400 font-mono">
                   {previewResult.special_token_count}
                 </div>
               </div>
-              <div className="bg-slate-800/50 rounded p-3">
-                <div className="text-xs text-slate-400">Sequence Length</div>
-                <div className="text-lg font-bold text-slate-200 font-mono">
+              <div className="bg-slate-100 dark:bg-slate-800/50 rounded p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400">Sequence Length</div>
+                <div className="text-lg font-bold text-slate-800 dark:text-slate-200 font-mono">
                   {previewResult.sequence_length}
                 </div>
               </div>
@@ -172,8 +172,8 @@ export function TokenizationPreview({
 
             {/* Token Display */}
             <div>
-              <div className="text-xs font-medium text-slate-400 mb-2">Tokens:</div>
-              <div className="bg-slate-900/50 border border-slate-700 rounded p-4 max-h-64 overflow-y-auto">
+              <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Tokens:</div>
+              <div className="bg-slate-100 dark:bg-slate-900/50 border border-slate-300 dark:border-slate-700 rounded p-4 max-h-64 overflow-y-auto">
                 <div className="flex flex-wrap gap-2">
                   {previewResult.tokens.map((token) => (
                     <div
@@ -181,7 +181,7 @@ export function TokenizationPreview({
                       className={`inline-flex items-center px-2 py-1 rounded text-xs font-mono ${
                         token.type === 'special'
                           ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-300'
-                          : 'bg-slate-700/50 border border-slate-600 text-slate-300'
+                          : 'bg-slate-100 dark:bg-slate-700/50 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
                       }`}
                       title={`Position: ${token.position}, ID: ${token.id}, Type: ${token.type}`}
                     >
@@ -193,7 +193,7 @@ export function TokenizationPreview({
               <p className="text-xs text-slate-500 mt-2">
                 <span className="inline-block w-3 h-3 bg-emerald-500/20 border border-emerald-500/30 rounded mr-1"></span>
                 Special tokens (BOS, EOS, PAD, etc.)
-                <span className="inline-block w-3 h-3 bg-slate-700/50 border border-slate-600 rounded mx-1 ml-3"></span>
+                <span className="inline-block w-3 h-3 bg-slate-100 dark:bg-slate-700/50 border border-slate-300 dark:border-slate-600 rounded mx-1 ml-3"></span>
                 Regular tokens
               </p>
             </div>
@@ -201,8 +201,8 @@ export function TokenizationPreview({
             {/* Attention Mask (if available) */}
             {previewResult.attention_mask && (
               <div>
-                <div className="text-xs font-medium text-slate-400 mb-2">Attention Mask:</div>
-                <div className="bg-slate-900/50 border border-slate-700 rounded p-3 max-h-32 overflow-y-auto">
+                <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Attention Mask:</div>
+                <div className="bg-slate-100 dark:bg-slate-900/50 border border-slate-300 dark:border-slate-700 rounded p-3 max-h-32 overflow-y-auto">
                   <div className="flex flex-wrap gap-1">
                     {previewResult.attention_mask.map((mask, idx) => (
                       <span
@@ -210,7 +210,7 @@ export function TokenizationPreview({
                         className={`inline-block w-6 h-6 text-center text-xs font-mono leading-6 rounded ${
                           mask === 1
                             ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-slate-700/50 text-slate-500'
+                            : 'bg-slate-100 dark:bg-slate-700/50 text-slate-500'
                         }`}
                         title={`Position ${idx}: ${mask === 1 ? 'Attend' : 'Ignore'}`}
                       >

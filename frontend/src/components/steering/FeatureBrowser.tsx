@@ -330,9 +330,9 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
     <div className={`${COMPONENTS.card.base} p-4 space-y-4`}>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-slate-100">Browse Features</h3>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Browse Features</h3>
         {selectedFeatures.length > 0 && (
-          <span className="text-sm text-slate-400">
+          <span className="text-sm text-slate-600 dark:text-slate-400">
             {selectedFeatures.length}/4 selected
           </span>
         )}
@@ -351,7 +351,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
                 setSearchQuery(e.target.value);
                 setCurrentPage(0);
               }}
-              className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 transition-colors"
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-colors"
             />
           </div>
         </div>
@@ -361,7 +361,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleToggleSortDirection}
-              className="p-1.5 rounded hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
             >
               {sortDirection === 'asc' ? (
@@ -373,7 +373,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
             <select
               value={sortBy}
               onChange={(e) => handleSortByChange(e.target.value as SortOption)}
-              className="px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 text-sm cursor-pointer"
+              className="px-2 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 text-sm cursor-pointer"
             >
               {SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -383,13 +383,13 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
             </select>
           </div>
           {/* Scope toggle */}
-          <div className="flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-700">
+          <div className="flex items-center gap-1 bg-white dark:bg-slate-900 rounded-lg p-0.5 border border-slate-300 dark:border-slate-700">
             <button
               onClick={() => handleScopeChange('page')}
               className={`px-2 py-1 text-xs rounded transition-colors ${
                 sortScope === 'page'
                   ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'text-slate-400 hover:text-slate-300'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
               title="Sort features on current page only"
             >
@@ -400,7 +400,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
               className={`px-2 py-1 text-xs rounded transition-colors ${
                 sortScope === 'all'
                   ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'text-slate-400 hover:text-slate-300'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
               title="Fetch and sort all features in SAE"
             >
@@ -411,15 +411,15 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
       </div>
 
       {/* Manual feature entry */}
-      <div className="p-3 bg-slate-900/50 rounded-lg space-y-2">
+      <div className="p-3 bg-slate-100 dark:bg-slate-900/50 rounded-lg space-y-2">
         {/* Row 1: Layer selector and Add button */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-400">Layer</label>
+            <label className="text-xs text-slate-600 dark:text-slate-400">Layer</label>
             <select
               value={manualLayer}
               onChange={(e) => setManualLayer(e.target.value)}
-              className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-emerald-500 text-slate-100 text-sm"
+              className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 text-sm"
             >
               {availableLayers.map((layer) => (
                 <option key={layer} value={layer}>
@@ -440,14 +440,14 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
         </div>
         {/* Row 2: Feature Index input */}
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Feature Index</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Feature Index</label>
           <input
             type="number"
             min="0"
             placeholder="e.g., 1234"
             value={manualFeatureIdx}
             onChange={(e) => setManualFeatureIdx(e.target.value)}
-            className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 text-sm"
+            className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-sm"
           />
         </div>
       </div>
@@ -455,8 +455,8 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
       {/* Loading state */}
       {featureBrowser.loading && (
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-slate-700 border-t-emerald-500"></div>
-          <p className="text-slate-400 mt-2 text-sm">Loading features...</p>
+          <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-slate-300 dark:border-slate-700 border-t-emerald-500"></div>
+          <p className="text-slate-600 dark:text-slate-400 mt-2 text-sm">Loading features...</p>
         </div>
       )}
 
@@ -471,7 +471,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
       {featureBrowser.data && !featureBrowser.loading && (
         <>
           {sortedFeatures.length === 0 ? (
-            <div className="text-center py-8 text-slate-400">
+            <div className="text-center py-8 text-slate-600 dark:text-slate-400">
               {searchQuery ? 'No features match your search' : 'No features found'}
             </div>
           ) : (
@@ -488,8 +488,8 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
                       isSelected
                         ? 'bg-emerald-500/10 border-emerald-500/50'
                         : isHighlighted
-                        ? 'bg-slate-700/50 border-slate-500 ring-1 ring-slate-500/50'
-                        : 'bg-slate-800 border-slate-700 hover:border-slate-600'
+                        ? 'bg-slate-100 dark:bg-slate-700/50 border-slate-500 ring-1 ring-slate-500/50'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                     }`}
                     onClick={() => handleTileClick(feature)}
                     onContextMenu={(e) => handleContextMenu(e, feature)}
@@ -498,12 +498,12 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
                       <div className="flex-1 min-w-0">
                         {/* Feature identifier */}
                         <div className="flex items-center gap-2 text-sm mb-1">
-                          <span className={`flex items-center gap-1 ${isSelected ? 'text-emerald-400' : 'text-slate-200'} font-medium`}>
+                          <span className={`flex items-center gap-1 ${isSelected ? 'text-emerald-400' : 'text-slate-800 dark:text-slate-200'} font-medium`}>
                             <Hash className="w-3.5 h-3.5" />
                             {feature.feature_idx}
                           </span>
                           <span className="text-slate-500">•</span>
-                          <span className="flex items-center gap-1 text-slate-400">
+                          <span className="flex items-center gap-1 text-slate-600 dark:text-slate-400">
                             <Layers className="w-3.5 h-3.5" />
                             L{feature.layer}
                           </span>
@@ -511,7 +511,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
 
                         {/* Label */}
                         {feature.label ? (
-                          <p className="text-sm text-slate-300 line-clamp-2">{feature.label}</p>
+                          <p className="text-sm text-slate-700 dark:text-slate-300 line-clamp-2">{feature.label}</p>
                         ) : (
                           <p className="text-sm text-slate-500 italic">No label</p>
                         )}
@@ -549,7 +549,7 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
                         </button>
                       )}
                       {!isSelected && !canAddMore && (
-                        <div className="p-1.5 rounded bg-slate-700/50 opacity-50" title="Maximum features selected">
+                        <div className="p-1.5 rounded bg-slate-100 dark:bg-slate-700/50 opacity-50" title="Maximum features selected">
                           <Plus className="w-4 h-4 text-slate-500" />
                         </div>
                       )}
@@ -565,23 +565,23 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
 
           {/* Pagination */}
           {featureBrowser.data.pagination.total > pageSize && (
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
                 disabled={currentPage === 0}
-                className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ChevronLeft className="w-4 h-4 text-slate-400" />
+                <ChevronLeft className="w-4 h-4 text-slate-600 dark:text-slate-400" />
               </button>
-              <span className="text-sm text-slate-400">
+              <span className="text-sm text-slate-600 dark:text-slate-400">
                 Page {currentPage + 1} of {Math.ceil(featureBrowser.data.pagination.total / pageSize)}
               </span>
               <button
                 onClick={() => setCurrentPage((p) => p + 1)}
                 disabled={!featureBrowser.data.pagination.has_more}
-                className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ChevronRight className="w-4 h-4 text-slate-400" />
+                <ChevronRight className="w-4 h-4 text-slate-600 dark:text-slate-400" />
               </button>
             </div>
           )}
@@ -592,19 +592,19 @@ export function FeatureBrowser({ saeId }: FeatureBrowserProps) {
       {contextMenu.visible && (
         <div
           ref={contextMenuRef}
-          className="fixed z-50 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[180px]"
+          className="fixed z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 min-w-[180px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
             onClick={handleViewFeatureDetails}
             disabled={!selectedSAE}
-            className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-4 py-2 text-left text-sm text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Eye className="w-4 h-4" />
             View Feature Details
           </button>
           {contextMenu.feature && (
-            <div className="px-4 py-1 text-xs text-slate-500 border-t border-slate-700 mt-1">
+            <div className="px-4 py-1 text-xs text-slate-500 border-t border-slate-300 dark:border-slate-700 mt-1">
               Feature #{contextMenu.feature.feature_idx} • L{contextMenu.feature.layer}
             </div>
           )}

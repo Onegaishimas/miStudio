@@ -83,11 +83,11 @@ export function ApprovalsBanner() {
           return (
             <div
               key={request.id}
-              className="flex items-center gap-3 bg-slate-900/60 rounded-md px-3 py-2"
+              className="flex items-center gap-3 bg-slate-100 dark:bg-slate-900/60 rounded-md px-3 py-2"
             >
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-mono text-amber-200">{request.tool_name}</span>
-                <span className="text-xs text-slate-400 ml-2">
+                <span className="text-xs text-slate-600 dark:text-slate-400 ml-2">
                   {featureCount} feature{featureCount === 1 ? '' : 's'} · "
                   {(payload.prompt ?? '').slice(0, 60)}"
                 </span>
@@ -102,7 +102,7 @@ export function ApprovalsBanner() {
               <button
                 disabled={busy === request.id}
                 onClick={() => void resolve(request.id, 'deny')}
-                className="flex items-center gap-1 px-2.5 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded disabled:opacity-50"
+                className="flex items-center gap-1 px-2.5 py-1 text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded disabled:opacity-50"
               >
                 <X className="w-3 h-3" /> Deny
               </button>

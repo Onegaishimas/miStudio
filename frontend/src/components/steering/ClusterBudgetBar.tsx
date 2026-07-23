@@ -46,12 +46,12 @@ function BudgetRow({
   const warnings = budget.flags.filter((f) => FLAG_COPY[f]);
 
   return (
-    <div className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-3 py-2">
+    <div className="rounded-lg border border-slate-300 dark:border-slate-700/60 bg-slate-100 dark:bg-slate-900/60 px-3 py-2">
       <div className="flex items-center justify-between text-[11px] mb-1">
-        <span className="flex items-center gap-1 text-slate-400">
+        <span className="flex items-center gap-1 text-slate-600 dark:text-slate-400">
           {layer != null ? (
             <span
-              className="inline-flex items-center gap-0.5 rounded bg-slate-800 px-1 py-px text-[10px] text-cyan-300"
+              className="inline-flex items-center gap-0.5 rounded bg-slate-100 dark:bg-slate-800 px-1 py-px text-[10px] text-cyan-300"
               title={`Budget for layer ${layer}`}
             >
               <Layers className="w-2.5 h-2.5" />
@@ -62,14 +62,14 @@ function BudgetRow({
           )}
           {layer != null ? 'budget' : 'Cluster budget'}
         </span>
-        <span className={`font-mono ${over ? 'text-amber-400' : 'text-slate-400'}`}>
+        <span className={`font-mono ${over ? 'text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
           {used.toFixed(1)} / {budget.B.toFixed(1)}
           <span className="text-slate-600 ml-2" title="Resultant-norm gain of the injected direction">
             G {budget.G.toFixed(2)}
           </span>
         </span>
       </div>
-      <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+      <div className="h-1.5 w-full rounded-full bg-white dark:bg-slate-800 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${over ? 'bg-amber-500' : 'bg-cyan-500'}`}
           style={{ width: `${pct}%` }}

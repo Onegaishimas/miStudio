@@ -82,18 +82,18 @@ export function ExtractionDetailModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
+        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
               <Activity className="w-6 h-6 text-emerald-400 flex-shrink-0" />
-              <h2 className="text-xl font-mono text-slate-100 truncate">
+              <h2 className="text-xl font-mono text-slate-900 dark:text-slate-100 truncate">
                 {extraction.extraction_id}
               </h2>
               {getStatusBadge(effectiveStatus)}
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
               {isInProgress ? 'Extraction in progress...' : 'Detailed extraction statistics and configuration'}
             </p>
           </div>
@@ -102,7 +102,7 @@ export function ExtractionDetailModal({
               <button
                 type="button"
                 onClick={onBack}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300"
+                className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300"
               >
                 ← Back to List
               </button>
@@ -110,7 +110,7 @@ export function ExtractionDetailModal({
             <button
               type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-300 transition-colors"
+              className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 transition-colors"
               aria-label="Close"
             >
               <span className="text-2xl">×</span>
@@ -134,13 +134,13 @@ export function ExtractionDetailModal({
                   {effectiveProgress.toFixed(1)}%
                 </span>
               </div>
-              <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
+              <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 overflow-hidden">
                 <div
                   className="bg-gradient-to-r from-blue-500 to-emerald-500 h-3 rounded-full transition-all duration-500 ease-out"
                   style={{ width: `${Math.min(effectiveProgress, 100)}%` }}
                 />
               </div>
-              <div className="flex items-center justify-between mt-2 text-xs text-slate-400">
+              <div className="flex items-center justify-between mt-2 text-xs text-slate-600 dark:text-slate-400">
                 <span>Started: {formatDate(extraction.created_at)}</span>
                 {extraction.max_samples && (
                   <span>Target: {extraction.max_samples.toLocaleString()} samples</span>
@@ -151,42 +151,42 @@ export function ExtractionDetailModal({
 
           {/* Overview Section */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-              <div className="flex items-center gap-2 text-slate-400 text-sm mb-2">
+            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-2">
                 <Calendar className="w-4 h-4" />
                 <span>Created</span>
               </div>
-              <div className="text-slate-100 font-medium">
+              <div className="text-slate-900 dark:text-slate-100 font-medium">
                 {formatDate(extraction.created_at)}
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-              <div className="flex items-center gap-2 text-slate-400 text-sm mb-2">
+            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-2">
                 <Layers className="w-4 h-4" />
                 <span>Layers</span>
               </div>
-              <div className="text-slate-100 font-medium text-2xl">
+              <div className="text-slate-900 dark:text-slate-100 font-medium text-2xl">
                 {extraction.layer_indices.length}
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-              <div className="flex items-center gap-2 text-slate-400 text-sm mb-2">
+            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-2">
                 <Database className="w-4 h-4" />
                 <span>Samples</span>
               </div>
-              <div className="text-slate-100 font-medium text-2xl">
+              <div className="text-slate-900 dark:text-slate-100 font-medium text-2xl">
                 {getSamplesProcessed().toLocaleString()}
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-              <div className="flex items-center gap-2 text-slate-400 text-sm mb-2">
+            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-2">
                 <HardDrive className="w-4 h-4" />
                 <span>Total Size</span>
               </div>
-              <div className="text-slate-100 font-medium text-2xl">
+              <div className="text-slate-900 dark:text-slate-100 font-medium text-2xl">
                 {extraction.statistics && Object.keys(extraction.statistics).length > 0
                   ? formatBytes(
                       Object.values(extraction.statistics).reduce((sum, stat) => sum + stat.size_mb, 0)
@@ -197,45 +197,45 @@ export function ExtractionDetailModal({
           </div>
 
           {/* Configuration Section */}
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-            <h3 className="text-lg font-semibold text-slate-100 mb-3 flex items-center gap-2">
+          <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-emerald-400" />
               Configuration
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
               {extraction.architecture && (
                 <div>
-                  <div className="text-slate-400">Architecture</div>
-                  <div className="text-slate-100 font-medium">{extraction.architecture}</div>
+                  <div className="text-slate-600 dark:text-slate-400">Architecture</div>
+                  <div className="text-slate-900 dark:text-slate-100 font-medium">{extraction.architecture}</div>
                 </div>
               )}
               {extraction.quantization && (
                 <div>
-                  <div className="text-slate-400">Quantization</div>
-                  <div className="text-slate-100 font-medium">{extraction.quantization}</div>
+                  <div className="text-slate-600 dark:text-slate-400">Quantization</div>
+                  <div className="text-slate-900 dark:text-slate-100 font-medium">{extraction.quantization}</div>
                 </div>
               )}
               <div>
-                <div className="text-slate-400">Batch Size</div>
-                <div className="text-slate-100 font-medium">{extraction.batch_size || 'N/A'}</div>
+                <div className="text-slate-600 dark:text-slate-400">Batch Size</div>
+                <div className="text-slate-900 dark:text-slate-100 font-medium">{extraction.batch_size || 'N/A'}</div>
               </div>
               <div>
-                <div className="text-slate-400">Max Samples</div>
-                <div className="text-slate-100 font-medium">{extraction.max_samples.toLocaleString()}</div>
+                <div className="text-slate-600 dark:text-slate-400">Max Samples</div>
+                <div className="text-slate-900 dark:text-slate-100 font-medium">{extraction.max_samples.toLocaleString()}</div>
               </div>
               <div>
-                <div className="text-slate-400">Hook Types</div>
-                <div className="text-slate-100 font-medium">{extraction.hook_types.join(', ')}</div>
+                <div className="text-slate-600 dark:text-slate-400">Hook Types</div>
+                <div className="text-slate-900 dark:text-slate-100 font-medium">{extraction.hook_types.join(', ')}</div>
               </div>
               <div>
-                <div className="text-slate-400">Layer Indices</div>
-                <div className="text-slate-100 font-medium">{extraction.layer_indices.join(', ')}</div>
+                <div className="text-slate-600 dark:text-slate-400">Layer Indices</div>
+                <div className="text-slate-900 dark:text-slate-100 font-medium">{extraction.layer_indices.join(', ')}</div>
               </div>
             </div>
             {extraction.dataset_path && (
-              <div className="mt-4 pt-4 border-t border-slate-700">
-                <div className="text-slate-400 text-sm mb-1">Dataset Path</div>
-                <div className="text-slate-100 font-mono text-xs bg-slate-900 p-2 rounded">
+              <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <div className="text-slate-600 dark:text-slate-400 text-sm mb-1">Dataset Path</div>
+                <div className="text-slate-900 dark:text-slate-100 font-mono text-xs bg-slate-50 dark:bg-slate-900 p-2 rounded">
                   {extraction.dataset_path}
                 </div>
               </div>
@@ -255,14 +255,14 @@ export function ExtractionDetailModal({
           {/* Layer Statistics */}
           {extraction.statistics && Object.keys(extraction.statistics).length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-emerald-400" />
                 Layer Statistics
               </h3>
               {Object.entries(extraction.statistics).map(([layerName, stats]) => (
                 <div
                   key={layerName}
-                  className="bg-slate-800/50 rounded-lg p-4 border border-slate-700"
+                  className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700"
                 >
                   <h4 className="text-md font-semibold text-emerald-400 mb-3">
                     {layerName}
@@ -270,8 +270,8 @@ export function ExtractionDetailModal({
 
                   {/* Shape Info */}
                   <div className="mb-4">
-                    <div className="text-slate-400 text-sm mb-1">Shape</div>
-                    <div className="text-slate-100 font-mono text-sm">
+                    <div className="text-slate-600 dark:text-slate-400 text-sm mb-1">Shape</div>
+                    <div className="text-slate-900 dark:text-slate-100 font-mono text-sm">
                       [{stats.shape.join(', ')}]
                     </div>
                   </div>
@@ -279,40 +279,40 @@ export function ExtractionDetailModal({
                   {/* Statistics Grid */}
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                     <div>
-                      <div className="text-slate-400 mb-1">Mean Magnitude</div>
-                      <div className="text-slate-100 font-medium">
+                      <div className="text-slate-600 dark:text-slate-400 mb-1">Mean Magnitude</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-medium">
                         {stats.mean_magnitude.toFixed(6)}
                       </div>
                     </div>
                     <div>
-                      <div className="text-slate-400 mb-1">Max Activation</div>
-                      <div className="text-slate-100 font-medium">
+                      <div className="text-slate-600 dark:text-slate-400 mb-1">Max Activation</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-medium">
                         {stats.max_activation.toFixed(6)}
                       </div>
                     </div>
                     <div>
-                      <div className="text-slate-400 mb-1">Min Activation</div>
-                      <div className="text-slate-100 font-medium">
+                      <div className="text-slate-600 dark:text-slate-400 mb-1">Min Activation</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-medium">
                         {stats.min_activation.toExponential(3)}
                       </div>
                     </div>
                     {stats.std_activation !== null && (
                       <div>
-                        <div className="text-slate-400 mb-1">Std Deviation</div>
-                        <div className="text-slate-100 font-medium">
+                        <div className="text-slate-600 dark:text-slate-400 mb-1">Std Deviation</div>
+                        <div className="text-slate-900 dark:text-slate-100 font-medium">
                           {stats.std_activation.toFixed(6)}
                         </div>
                       </div>
                     )}
                     <div>
-                      <div className="text-slate-400 mb-1">Sparsity</div>
-                      <div className="text-slate-100 font-medium">
+                      <div className="text-slate-600 dark:text-slate-400 mb-1">Sparsity</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-medium">
                         {stats.sparsity_percent.toFixed(2)}%
                       </div>
                     </div>
                     <div>
-                      <div className="text-slate-400 mb-1">File Size</div>
-                      <div className="text-slate-100 font-medium">
+                      <div className="text-slate-600 dark:text-slate-400 mb-1">File Size</div>
+                      <div className="text-slate-900 dark:text-slate-100 font-medium">
                         {formatBytes(stats.size_mb)}
                       </div>
                     </div>
@@ -320,8 +320,8 @@ export function ExtractionDetailModal({
 
                   {/* Activation Range Visualization */}
                   <div className="mt-4">
-                    <div className="text-slate-400 text-sm mb-2">Activation Range</div>
-                    <div className="relative h-8 bg-slate-900 rounded overflow-hidden">
+                    <div className="text-slate-600 dark:text-slate-400 text-sm mb-2">Activation Range</div>
+                    <div className="relative h-8 bg-slate-100 dark:bg-slate-900 rounded overflow-hidden">
                       <div
                         className="absolute inset-y-0 bg-gradient-to-r from-blue-500/30 to-emerald-500/30"
                         style={{
@@ -329,7 +329,7 @@ export function ExtractionDetailModal({
                           width: '100%'
                         }}
                       ></div>
-                      <div className="absolute inset-0 flex items-center justify-between px-2 text-xs text-slate-300">
+                      <div className="absolute inset-0 flex items-center justify-between px-2 text-xs text-slate-700 dark:text-slate-300">
                         <span>{stats.min_activation.toExponential(2)}</span>
                         <span>{stats.max_activation.toFixed(3)}</span>
                       </div>
@@ -339,10 +339,10 @@ export function ExtractionDetailModal({
                   {/* Sparsity Bar */}
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-sm mb-2">
-                      <span className="text-slate-400">Sparsity Level</span>
-                      <span className="text-slate-100">{stats.sparsity_percent.toFixed(2)}%</span>
+                      <span className="text-slate-600 dark:text-slate-400">Sparsity Level</span>
+                      <span className="text-slate-900 dark:text-slate-100">{stats.sparsity_percent.toFixed(2)}%</span>
                     </div>
-                    <div className="w-full bg-slate-900 rounded-full h-2">
+                    <div className="w-full bg-slate-100 dark:bg-slate-900 rounded-full h-2">
                       <div
                         className="bg-emerald-500 h-2 rounded-full"
                         style={{ width: `${Math.min(stats.sparsity_percent, 100)}%` }}
@@ -356,8 +356,8 @@ export function ExtractionDetailModal({
 
           {/* Saved Files */}
           {extraction.saved_files && extraction.saved_files.length > 0 && (
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-              <h3 className="text-lg font-semibold text-slate-100 mb-3 flex items-center gap-2">
+            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
                 <HardDrive className="w-5 h-5 text-emerald-400" />
                 Saved Files ({extraction.saved_files.length})
               </h3>
@@ -365,7 +365,7 @@ export function ExtractionDetailModal({
                 {extraction.saved_files.map((file, idx) => (
                   <div
                     key={idx}
-                    className="bg-slate-900 p-3 rounded font-mono text-sm text-slate-100"
+                    className="bg-slate-50 dark:bg-slate-900 p-3 rounded font-mono text-sm text-slate-900 dark:text-slate-100"
                   >
                     {file}
                   </div>
@@ -376,16 +376,16 @@ export function ExtractionDetailModal({
 
           {/* Timing Info */}
           {extraction.completed_at && (
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-              <h3 className="text-lg font-semibold text-slate-100 mb-3">Timing</h3>
+            <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-3">Timing</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <div className="text-slate-400 mb-1">Started</div>
-                  <div className="text-slate-100">{formatDate(extraction.created_at)}</div>
+                  <div className="text-slate-600 dark:text-slate-400 mb-1">Started</div>
+                  <div className="text-slate-900 dark:text-slate-100">{formatDate(extraction.created_at)}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 mb-1">Completed</div>
-                  <div className="text-slate-100">{formatDate(extraction.completed_at)}</div>
+                  <div className="text-slate-600 dark:text-slate-400 mb-1">Completed</div>
+                  <div className="text-slate-900 dark:text-slate-100">{formatDate(extraction.completed_at)}</div>
                 </div>
               </div>
             </div>
@@ -393,16 +393,16 @@ export function ExtractionDetailModal({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-800 p-4 bg-slate-900/50">
+        <div className="border-t border-slate-200 dark:border-slate-800 p-4 bg-slate-100 dark:bg-slate-900/50">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-slate-400">
-              Extraction ID: <span className="font-mono text-slate-300">{extraction.extraction_id}</span>
+            <div className="text-sm text-slate-600 dark:text-slate-400">
+              Extraction ID: <span className="font-mono text-slate-700 dark:text-slate-300">{extraction.extraction_id}</span>
             </div>
             <div className="flex gap-2">
               {onBack && (
                 <button
                   onClick={onBack}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300"
+                  className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300"
                 >
                   Back to List
                 </button>

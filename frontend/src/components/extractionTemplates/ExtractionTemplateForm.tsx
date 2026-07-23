@@ -213,19 +213,19 @@ export function ExtractionTemplateForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className={`bg-slate-900/50 border border-slate-800 rounded-lg p-6 ${className}`}
+      className={`bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-6 ${className}`}
     >
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-slate-100">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
           {isEditMode ? 'Edit Template' : 'Create Extraction Template'}
         </h2>
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="p-1 hover:bg-slate-800 rounded transition-colors"
+            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
           >
-            <X className="w-5 h-5 text-slate-400" />
+            <X className="w-5 h-5 text-slate-600 dark:text-slate-400" />
           </button>
         )}
       </div>
@@ -233,7 +233,7 @@ export function ExtractionTemplateForm({
       <div className="space-y-4">
         {/* Name */}
         <div>
-          <label htmlFor="name" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             Template Name <span className="text-red-400">*</span>
           </label>
           <input
@@ -242,7 +242,7 @@ export function ExtractionTemplateForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="My Extraction Template"
-            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             disabled={isSubmitting}
             required
           />
@@ -250,7 +250,7 @@ export function ExtractionTemplateForm({
 
         {/* Description */}
         <div>
-          <label htmlFor="description" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="description" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             Description
           </label>
           <textarea
@@ -259,14 +259,14 @@ export function ExtractionTemplateForm({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Brief description of this template's purpose..."
             rows={2}
-            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
             disabled={isSubmitting}
           />
         </div>
 
         {/* Layer Indices */}
         <div>
-          <label htmlFor="layer-indices" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="layer-indices" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             Layer Indices <span className="text-red-400">*</span>
           </label>
           <input
@@ -275,7 +275,7 @@ export function ExtractionTemplateForm({
             value={layerIndicesInput}
             onChange={(e) => setLayerIndicesInput(e.target.value)}
             placeholder="0, 5, 11, 23"
-            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             disabled={isSubmitting}
             required
           />
@@ -286,23 +286,23 @@ export function ExtractionTemplateForm({
 
         {/* Hook Types */}
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             Hook Types <span className="text-red-400">*</span>
           </label>
           <div className="flex flex-wrap gap-3">
             {Object.values(HookType).map((hookType) => (
               <label
                 key={hookType}
-                className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded cursor-pointer hover:border-slate-600 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
               >
                 <input
                   type="checkbox"
                   checked={hookTypes.includes(hookType)}
                   onChange={() => handleHookTypeToggle(hookType)}
                   disabled={isSubmitting}
-                  className="w-4 h-4 text-emerald-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
+                  className="w-4 h-4 text-emerald-600 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
                 />
-                <span className="text-sm text-slate-300 capitalize">{hookType}</span>
+                <span className="text-sm text-slate-700 dark:text-slate-300 capitalize">{hookType}</span>
               </label>
             ))}
           </div>
@@ -318,18 +318,18 @@ export function ExtractionTemplateForm({
               disabled={isSubmitting}
               className="w-4 h-4 text-emerald-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-emerald-500"
             />
-            <span className="text-sm text-slate-300">Mark as favorite</span>
+            <span className="text-sm text-slate-700 dark:text-slate-300">Mark as favorite</span>
           </label>
         </div>
 
         {/* Extraction Configuration Section */}
-        <div className="border-t border-slate-700 pt-4">
-          <h3 className="text-sm font-medium text-slate-200 mb-4">Extraction Configuration</h3>
+        <div className="border-t border-slate-300 dark:border-slate-700 pt-4">
+          <h3 className="text-sm font-medium text-slate-800 dark:text-slate-200 mb-4">Extraction Configuration</h3>
 
           {/* Evaluation Samples + Top-K Grid */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Evaluation Samples</label>
+              <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Evaluation Samples</label>
               <input
                 type="number"
                 value={maxSamples}
@@ -337,13 +337,13 @@ export function ExtractionTemplateForm({
                 min={100}
                 max={1000000}
                 step={100}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                 disabled={isSubmitting}
               />
               <p className="text-xs text-slate-500 mt-1">Max: 1,000,000</p>
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Top-K Examples per Feature</label>
+              <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Top-K Examples per Feature</label>
               <input
                 type="number"
                 value={topKExamples}
@@ -351,21 +351,21 @@ export function ExtractionTemplateForm({
                 min={10}
                 max={1000}
                 step={10}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                 disabled={isSubmitting}
               />
             </div>
           </div>
 
           {/* Dead Neuron Filtering */}
-          <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+          <div className="mt-4 p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-300">Dead Neuron Filtering</label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Dead Neuron Filtering</label>
               <span className="text-xs text-emerald-500">
                 {(minActivationFrequency * 100).toFixed(2)}% min frequency
               </span>
             </div>
-            <p className="text-xs text-slate-400 mb-3">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
               Neurons firing less than this threshold are considered &quot;dead&quot; and will be filtered out.
             </p>
             <div className="flex items-center gap-3">
@@ -376,7 +376,7 @@ export function ExtractionTemplateForm({
                 min={0}
                 max={10}
                 step={0.1}
-                className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                className="flex-1 h-2 bg-slate-100 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                 disabled={isSubmitting}
               />
               <input
@@ -386,56 +386,56 @@ export function ExtractionTemplateForm({
                 min={0}
                 max={10}
                 step={0.01}
-                className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-emerald-500"
+                className="w-20 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white text-sm focus:outline-none focus:border-emerald-500"
                 disabled={isSubmitting}
               />
-              <span className="text-xs text-slate-400">%</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">%</span>
             </div>
           </div>
 
           {/* Context Window Configuration (collapsible) */}
-          <div className="mt-4 bg-slate-900 rounded-lg border border-slate-700 p-4">
+          <div className="mt-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
             <button
               type="button"
               onClick={() => setShowContextWindow(!showContextWindow)}
               className="flex items-center justify-between w-full text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-300">Context Window</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Context Window</span>
                 <span className="text-xs text-emerald-500">
                   ({contextPrefixTokens} prefix + prime + {contextSuffixTokens} suffix)
                 </span>
               </div>
-              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showContextWindow ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-4 h-4 text-slate-600 dark:text-slate-400 transition-transform ${showContextWindow ? 'rotate-180' : ''}`} />
             </button>
 
             {showContextWindow && (
               <div className="mt-4 space-y-3">
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-600 dark:text-slate-400">
                   Capture tokens before and after the prime token (max activation) to provide context for interpretation.
                 </p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Prefix Tokens</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Prefix Tokens</label>
                     <input
                       type="number"
                       value={contextPrefixTokens}
                       onChange={(e) => setContextPrefixTokens(Number(e.target.value))}
                       min={0}
                       max={50}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                       disabled={isSubmitting}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Suffix Tokens</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Suffix Tokens</label>
                     <input
                       type="number"
                       value={contextSuffixTokens}
                       onChange={(e) => setContextSuffixTokens(Number(e.target.value))}
                       min={0}
                       max={50}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                       disabled={isSubmitting}
                     />
                   </div>
@@ -445,80 +445,80 @@ export function ExtractionTemplateForm({
           </div>
 
           {/* Token Filtering (collapsible, 6 individual checkboxes) */}
-          <div className="mt-4 bg-slate-900 rounded-lg border border-slate-700 p-4">
+          <div className="mt-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
             <button
               type="button"
               onClick={() => setShowFilters(!showFilters)}
               className="flex items-center justify-between w-full text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-300">Token Filtering</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Token Filtering</span>
                 <span className="text-xs text-slate-500">
                   ({[filterSpecial, filterSingleChar, filterPunctuation, filterNumbers, filterFragments, filterStopWords].filter(Boolean).length}/6 enabled)
                 </span>
               </div>
-              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-4 h-4 text-slate-600 dark:text-slate-400 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
             </button>
 
             {showFilters && (
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filterSpecial}
                     onChange={(e) => setFilterSpecial(e.target.checked)}
                     disabled={isSubmitting}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span>Special tokens</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filterSingleChar}
                     onChange={(e) => setFilterSingleChar(e.target.checked)}
                     disabled={isSubmitting}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span>Single characters</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filterPunctuation}
                     onChange={(e) => setFilterPunctuation(e.target.checked)}
                     disabled={isSubmitting}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span>Punctuation</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filterNumbers}
                     onChange={(e) => setFilterNumbers(e.target.checked)}
                     disabled={isSubmitting}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span>Numbers</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filterFragments}
                     onChange={(e) => setFilterFragments(e.target.checked)}
                     disabled={isSubmitting}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span>Word fragments</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={filterStopWords}
                     onChange={(e) => setFilterStopWords(e.target.checked)}
                     disabled={isSubmitting}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span>Stop words</span>
                 </label>
@@ -527,14 +527,14 @@ export function ExtractionTemplateForm({
           </div>
 
           {/* NLP Processing Configuration */}
-          <div className="mt-4 bg-slate-900 rounded-lg border border-slate-700 p-4">
-            <label className="flex items-center gap-3 text-sm text-slate-300 cursor-pointer">
+          <div className="mt-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
+            <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
               <input
                 type="checkbox"
                 checked={autoNlp}
                 onChange={(e) => setAutoNlp(e.target.checked)}
                 disabled={isSubmitting}
-                className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
               />
               <div>
                 <span className="font-medium">Auto-run NLP Analysis</span>
@@ -568,7 +568,7 @@ export function ExtractionTemplateForm({
               type="button"
               onClick={onCancel}
               disabled={isSubmitting}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-300 font-medium rounded transition-colors"
+              className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 font-medium rounded transition-colors"
             >
               Cancel
             </button>

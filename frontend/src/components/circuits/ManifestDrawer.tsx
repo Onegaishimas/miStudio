@@ -15,7 +15,7 @@ import type { ValidationManifest, ValidationEdge } from '../../types/circuits';
 
 function EdgeLabel({ up, down }: Pick<ValidationEdge, 'up' | 'down'>) {
   return (
-    <span className="font-mono text-slate-300 whitespace-nowrap">
+    <span className="font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
       L{up.layer}:f{up.feature_idx} → L{down.layer}:f{down.feature_idx}
     </span>
   );
@@ -30,7 +30,7 @@ function VerdictChip({ edge }: { edge: ValidationEdge }) {
     );
   }
   return (
-    <span className="rounded bg-slate-700/60 text-slate-400 px-1.5 py-0.5 text-[10px] whitespace-nowrap">
+    <span className="rounded bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 text-[10px] whitespace-nowrap">
       tested, did not validate
     </span>
   );
@@ -120,15 +120,15 @@ export function ManifestDrawer({
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
       />
-      <div className="relative h-full w-full max-w-xl overflow-y-auto bg-slate-900 border-l border-slate-700 shadow-xl">
-        <div className="sticky top-0 flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-900 px-5 py-3">
+      <div className="relative h-full w-full max-w-xl overflow-y-auto bg-white dark:bg-slate-900 border-l border-slate-300 dark:border-slate-700 shadow-xl">
+        <div className="sticky top-0 flex items-center justify-between gap-2 border-b border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-3">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-100">Validation manifest</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Validation manifest</h2>
             <p className="font-mono text-[11px] text-slate-500 truncate">{manifestId}</p>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-white/10 text-slate-400"
+            className="p-1 rounded hover:bg-white/10 text-slate-600 dark:text-slate-400"
             title="Close"
           >
             <XIcon className="w-4 h-4" />
@@ -150,36 +150,36 @@ export function ManifestDrawer({
             <>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                 <div className="text-slate-500">kind</div>
-                <div className="text-slate-300 font-mono">{manifest.kind}</div>
+                <div className="text-slate-700 dark:text-slate-300 font-mono">{manifest.kind}</div>
                 <div className="text-slate-500">intervention</div>
-                <div className="text-slate-300">
+                <div className="text-slate-700 dark:text-slate-300">
                   {payload?.intervention?.kind ?? '—'}
                 </div>
                 <div className="text-slate-500">baseline</div>
-                <div className="text-slate-300">
+                <div className="text-slate-700 dark:text-slate-300">
                   {payload?.intervention?.baseline ?? cfg('baseline')}
                 </div>
                 <div className="text-slate-500">ordering</div>
-                <div className="text-slate-300 font-mono">{payload?.ordering ?? '—'}</div>
+                <div className="text-slate-700 dark:text-slate-300 font-mono">{payload?.ordering ?? '—'}</div>
                 <div className="text-slate-500">k</div>
-                <div className="text-slate-300 font-mono">{payload?.k ?? '—'}</div>
+                <div className="text-slate-700 dark:text-slate-300 font-mono">{payload?.k ?? '—'}</div>
                 <div className="text-slate-500">seeds</div>
-                <div className="text-slate-300 font-mono">
+                <div className="text-slate-700 dark:text-slate-300 font-mono">
                   {payload?.seeds?.join(', ') ?? '—'}
                 </div>
                 <div className="text-slate-500">prompts/edge</div>
-                <div className="text-slate-300 font-mono">{cfg('prompts_per_edge')}</div>
+                <div className="text-slate-700 dark:text-slate-300 font-mono">{cfg('prompts_per_edge')}</div>
                 <div className="text-slate-500">sign_frac</div>
-                <div className="text-slate-300 font-mono">{cfg('sign_frac')}</div>
+                <div className="text-slate-700 dark:text-slate-300 font-mono">{cfg('sign_frac')}</div>
                 <div className="text-slate-500">survival</div>
-                <div className="text-slate-300 font-mono">
+                <div className="text-slate-700 dark:text-slate-300 font-mono">
                   {payload?.survival != null ? `${(payload.survival * 100).toFixed(0)}%` : '—'}
                 </div>
               </div>
 
               {payload?.null_summary && (
-                <div className="rounded border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-[11px] text-slate-400">
-                  <span className="font-medium text-slate-300">Null summary:</span>{' '}
+                <div className="rounded border border-slate-300 dark:border-slate-700/60 bg-slate-100 dark:bg-slate-800/40 px-3 py-2 text-[11px] text-slate-600 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">Null summary:</span>{' '}
                   {payload.null_summary.kind ?? 'shuffled null'}
                   {payload.null_summary.samples != null &&
                     ` · ${payload.null_summary.samples} samples`}
@@ -199,7 +199,7 @@ export function ManifestDrawer({
                       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                       : payload.verdict.within_tolerance === false
                         ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                        : 'border-slate-600 bg-slate-700/40 text-slate-300'
+                        : 'border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/40 text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   <span className="font-medium">Reproduction verdict:</span>{' '}
@@ -214,7 +214,7 @@ export function ManifestDrawer({
               )}
 
               <div>
-                <h3 className="text-xs font-medium text-slate-400 mb-1.5">
+                <h3 className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
                   Per-edge effect sizes
                 </h3>
                 {edges.length === 0 ? (
@@ -236,18 +236,18 @@ export function ManifestDrawer({
                       </thead>
                       <tbody>
                         {edges.map((e, i) => (
-                          <tr key={i} className="border-t border-slate-800 text-slate-300">
+                          <tr key={i} className="border-t border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300">
                             <td className="py-1 pr-3">
                               <EdgeLabel up={e.up} down={e.down} />
                             </td>
                             <td className="py-1 pr-3 font-mono">{e.effect_size.toFixed(3)}</td>
-                            <td className="py-1 pr-3 font-mono text-slate-400">
+                            <td className="py-1 pr-3 font-mono text-slate-600 dark:text-slate-400">
                               {e.null_percentile_value.toFixed(3)}
                             </td>
                             <td className="py-1 pr-3 font-mono">
                               {e.sign_consistency.toFixed(2)}
                             </td>
-                            <td className="py-1 pr-3 font-mono text-slate-400">{e.n_prompts}</td>
+                            <td className="py-1 pr-3 font-mono text-slate-600 dark:text-slate-400">{e.n_prompts}</td>
                             <td className="py-1">
                               <div className="flex flex-col gap-0.5">
                                 <VerdictChip edge={e} />
@@ -264,7 +264,7 @@ export function ManifestDrawer({
                 )}
               </div>
 
-              <div className="border-t border-slate-700/60 pt-3 space-y-2">
+              <div className="border-t border-slate-300 dark:border-slate-700/60 pt-3 space-y-2">
                 <button
                   onClick={reproduce}
                   disabled={reproBusy || manifest.kind !== 'edge_batch'}

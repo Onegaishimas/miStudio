@@ -66,7 +66,7 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
     return (
       <div className="flex flex-col items-center justify-center py-12 space-y-3">
         <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
-        <div className="text-slate-400 text-sm">Computing feature similarity...</div>
+        <div className="text-slate-600 dark:text-slate-400 text-sm">Computing feature similarity...</div>
       </div>
     );
   }
@@ -82,7 +82,7 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
   if (!data) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-slate-400">No data available</div>
+        <div className="text-slate-600 dark:text-slate-400">No data available</div>
       </div>
     );
   }
@@ -91,7 +91,7 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
     return (
       <div className="flex flex-col items-center justify-center py-12 space-y-2">
         <TrendingUp className="h-12 w-12 text-slate-600" />
-        <div className="text-slate-400">No similar features found</div>
+        <div className="text-slate-600 dark:text-slate-400">No similar features found</div>
         <div className="text-xs text-slate-500">
           Similarity threshold: 30%
         </div>
@@ -102,8 +102,8 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
   return (
     <div className="space-y-6">
       {/* Description */}
-      <div className="bg-slate-800/30 rounded-lg p-4">
-        <p className="text-sm text-slate-400">
+      <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+        <p className="text-sm text-slate-600 dark:text-slate-400">
           Features with similar characteristics based on token overlap,
           activation frequency, and activation magnitude. Higher similarity
           indicates features that likely detect related concepts.
@@ -111,22 +111,22 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
       </div>
 
       {/* Correlations Table */}
-      <div className="bg-slate-800/30 rounded-lg overflow-hidden">
+      <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg overflow-hidden">
         <table className="w-full">
-          <thead className="bg-slate-800/50">
+          <thead className="bg-slate-100 dark:bg-slate-800/50">
             <tr>
-              <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+              <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 dark:text-slate-400">
                 Feature ID
               </th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+              <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 dark:text-slate-400">
                 Label
               </th>
-              <th className="text-right px-4 py-3 text-xs font-medium text-slate-400">
+              <th className="text-right px-4 py-3 text-xs font-medium text-slate-600 dark:text-slate-400">
                 Similarity
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-700/50">
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-700/50">
             {data.correlated_features.map((feature) => {
               const similarityPercent = (feature.correlation * 100).toFixed(1);
               const barWidth = Math.max(5, feature.correlation * 100);
@@ -136,7 +136,7 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
               return (
                 <tr
                   key={feature.feature_id}
-                  className="hover:bg-slate-800/30 transition-colors"
+                  className="hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors"
                 >
                   <td className="px-4 py-3">
                     {onFeatureClick ? (
@@ -147,14 +147,14 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
                         {feature.feature_id}
                       </button>
                     ) : (
-                      <span className="font-mono text-sm text-slate-300">
+                      <span className="font-mono text-sm text-slate-700 dark:text-slate-300">
                         {feature.feature_id}
                       </span>
                     )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-300 truncate max-w-xs">
+                      <span className="text-sm text-slate-700 dark:text-slate-300 truncate max-w-xs">
                         {feature.feature_name}
                       </span>
                       {isHighSimilarity && (
@@ -167,7 +167,7 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end space-x-3">
                       {/* Bar visualization */}
-                      <div className="flex-1 max-w-[100px] bg-slate-700/50 rounded-full h-2">
+                      <div className="flex-1 max-w-[100px] bg-slate-100 dark:bg-slate-700/50 rounded-full h-2">
                         <div
                           className={`h-2 rounded-full transition-all duration-300 ${
                             isHighSimilarity

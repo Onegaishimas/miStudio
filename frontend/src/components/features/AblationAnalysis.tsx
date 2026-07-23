@@ -91,7 +91,7 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
     return (
       <div className="flex flex-col items-center justify-center py-12 space-y-3">
         <Loader2 className="h-8 w-8 text-purple-500 animate-spin" />
-        <div className="text-slate-400 text-sm">Computing ablation analysis...</div>
+        <div className="text-slate-600 dark:text-slate-400 text-sm">Computing ablation analysis...</div>
       </div>
     );
   }
@@ -107,7 +107,7 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
   if (!data) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-slate-400">No data available</div>
+        <div className="text-slate-600 dark:text-slate-400">No data available</div>
       </div>
     );
   }
@@ -118,13 +118,13 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
   return (
     <div className="space-y-6">
       {/* Impact Overview */}
-      <div className="bg-slate-800/30 rounded-lg p-6 space-y-4">
+      <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-6 space-y-4">
         {/* Impact Score with Icon */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <Zap className={`h-8 w-8 ${impact.color}`} />
             <div>
-              <div className="text-sm text-slate-400">Impact Score</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">Impact Score</div>
               <div className={`text-3xl font-bold ${impact.color}`}>
                 {impactPercent}%
               </div>
@@ -141,7 +141,7 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
         </div>
 
         {/* Progress Bar */}
-        <div className="w-full bg-slate-700/50 rounded-full h-3">
+        <div className="w-full bg-slate-100 dark:bg-slate-700/50 rounded-full h-3">
           <div
             className="bg-gradient-to-r from-purple-500 to-purple-400 h-3 rounded-full transition-all duration-500"
             style={{ width: `${Math.max(2, data.impact_score * 100)}%` }}
@@ -149,9 +149,9 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
         </div>
 
         {/* Description */}
-        <div className="flex items-start space-x-2 bg-slate-800/50 rounded p-3">
-          <AlertCircle className="h-5 w-5 text-slate-400 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-slate-400">{impact.description}</p>
+        <div className="flex items-start space-x-2 bg-slate-100 dark:bg-slate-800/50 rounded p-3">
+          <AlertCircle className="h-5 w-5 text-slate-600 dark:text-slate-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-slate-600 dark:text-slate-400">{impact.description}</p>
         </div>
 
         {/* 017: statistical-estimate caveat — this is not a model forward pass. */}
@@ -169,8 +169,8 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
       {/* Perplexity Metrics — PROJECTED (heuristic), not measured (R1 #11) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Baseline Perplexity */}
-        <div className="bg-slate-800/30 rounded-lg p-4">
-          <div className="text-xs text-slate-400 mb-1">Baseline Perplexity <span className="text-slate-500">(projected)</span></div>
+        <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+          <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Baseline Perplexity <span className="text-slate-500">(projected)</span></div>
           <div className="text-2xl font-bold text-emerald-400">
             {data.baseline_perplexity.toFixed(1)}
           </div>
@@ -178,8 +178,8 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
         </div>
 
         {/* Ablated Perplexity */}
-        <div className="bg-slate-800/30 rounded-lg p-4">
-          <div className="text-xs text-slate-400 mb-1">Ablated Perplexity <span className="text-slate-500">(projected)</span></div>
+        <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+          <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Ablated Perplexity <span className="text-slate-500">(projected)</span></div>
           <div className="text-2xl font-bold text-orange-400">
             {data.ablated_perplexity.toFixed(1)}
           </div>
@@ -187,8 +187,8 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
         </div>
 
         {/* Perplexity Delta */}
-        <div className="bg-slate-800/30 rounded-lg p-4">
-          <div className="text-xs text-slate-400 mb-1">Perplexity Delta</div>
+        <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+          <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Perplexity Delta</div>
           <div className="text-2xl font-bold text-purple-400">
             +{data.perplexity_delta.toFixed(1)}
           </div>
@@ -197,9 +197,9 @@ export const AblationAnalysis: React.FC<AblationAnalysisProps> = ({ featureId })
       </div>
 
       {/* Explanation */}
-      <div className="bg-slate-800/30 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-slate-300 mb-2">What This Means</h3>
-        <div className="text-sm text-slate-400 space-y-2">
+      <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">What This Means</h3>
+        <div className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
           <p>
             <strong>Baseline Perplexity:</strong> Model performance with this feature active.
             Lower is better.

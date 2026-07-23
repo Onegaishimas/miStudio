@@ -213,11 +213,11 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             <Cloud className="w-5 h-5 text-yellow-400" />
-            <h2 className="text-lg font-semibold text-slate-100">Upload to HuggingFace</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Upload to HuggingFace</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-300 transition-colors"
+            className="p-1 text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -230,25 +230,25 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
               <CheckCircle className="w-6 h-6 text-emerald-400 flex-shrink-0" />
               <div>
                 <p className="text-emerald-400 font-medium">Upload successful!</p>
-                <p className="text-sm text-slate-400 mt-1">
+                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                   Your SAE has been uploaded to HuggingFace.
                 </p>
               </div>
             </div>
 
-            <div className="p-4 bg-slate-800/50 rounded-lg space-y-2">
+            <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Repository</span>
-                <span className="text-sm text-slate-200 font-mono">{uploadResult.repo_id}</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400">Repository</span>
+                <span className="text-sm text-slate-800 dark:text-slate-200 font-mono">{uploadResult.repo_id}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Path</span>
-                <span className="text-sm text-slate-200 font-mono">{uploadResult.filepath}</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400">Path</span>
+                <span className="text-sm text-slate-800 dark:text-slate-200 font-mono">{uploadResult.filepath}</span>
               </div>
               {uploadResult.commit_hash && (
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Commit</span>
-                  <span className="text-sm text-slate-200 font-mono">
+                  <span className="text-sm text-slate-600 dark:text-slate-400">Commit</span>
+                  <span className="text-sm text-slate-800 dark:text-slate-200 font-mono">
                     {uploadResult.commit_hash.substring(0, 8)}
                   </span>
                 </div>
@@ -275,11 +275,11 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
         ) : (
           <div className="space-y-4">
             {/* SAE Info */}
-            <div className="p-4 bg-slate-800/50 rounded-lg">
+            <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
               <div className="flex items-start gap-3">
-                <FileCode className="w-5 h-5 text-slate-400 mt-0.5 flex-shrink-0" />
+                <FileCode className="w-5 h-5 text-slate-600 dark:text-slate-400 mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-200 truncate">{sae.name}</p>
+                  <p className="font-medium text-slate-800 dark:text-slate-200 truncate">{sae.name}</p>
                   <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
                     <span>{getSourceLabel(sae.source)}</span>
                     <span>•</span>
@@ -297,7 +297,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
 
             {/* Repository ID Input */}
             <div>
-              <label htmlFor="upload-repo" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="upload-repo" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Target Repository <span className="text-red-400">*</span>
               </label>
               <input
@@ -310,13 +310,13 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                   setValidationError(null);
                 }}
                 disabled={isUploading}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               />
             </div>
 
             {/* File Path Input */}
             <div>
-              <label htmlFor="upload-filepath" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="upload-filepath" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 File Path in Repository <span className="text-red-400">*</span>
               </label>
               <input
@@ -329,7 +329,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                   setValidationError(null);
                 }}
                 disabled={isUploading}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-mono text-sm"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-mono text-sm"
               />
               <p className="text-xs text-slate-500 mt-1">
                 Directory path where SAE files will be stored
@@ -338,7 +338,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
 
             {/* Access Token Input */}
             <div>
-              <label htmlFor="upload-token" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="upload-token" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 HuggingFace Access Token <span className="text-red-400">*</span>
               </label>
               <div className="relative">
@@ -352,7 +352,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                     setValidationError(null);
                   }}
                   disabled={isUploading}
-                  className="w-full px-4 py-2 pr-10 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 font-mono text-sm text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="w-full px-4 py-2 pr-10 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 font-mono text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 />
                 {accessToken && (
                   <button
@@ -362,7 +362,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                     onMouseLeave={() => setShowToken(false)}
                     onTouchStart={() => setShowToken(true)}
                     onTouchEnd={() => setShowToken(false)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-300 transition-colors"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                     title="Hold to reveal token"
                     tabIndex={-1}
                   >
@@ -391,10 +391,10 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                   checked={createRepo}
                   onChange={(e) => setCreateRepo(e.target.checked)}
                   disabled={isUploading}
-                  className="rounded border-slate-600 bg-slate-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 disabled:opacity-50"
+                  className="rounded border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 disabled:opacity-50"
                 />
                 <div>
-                  <span className="text-sm text-slate-300 group-hover:text-white">
+                  <span className="text-sm text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">
                     Create repository if it doesn't exist
                   </span>
                 </div>
@@ -406,10 +406,10 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                   checked={isPrivate}
                   onChange={(e) => setIsPrivate(e.target.checked)}
                   disabled={isUploading || !createRepo}
-                  className="rounded border-slate-600 bg-slate-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 disabled:opacity-50"
+                  className="rounded border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 disabled:opacity-50"
                 />
                 <div>
-                  <span className={`text-sm ${createRepo ? 'text-slate-300 group-hover:text-white' : 'text-slate-500'}`}>
+                  <span className={`text-sm ${createRepo ? 'text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white' : 'text-slate-500'}`}>
                     Make repository private
                   </span>
                   {!createRepo && (
@@ -423,7 +423,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
 
             {/* Commit Message Input */}
             <div>
-              <label htmlFor="upload-commit" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="upload-commit" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Commit Message <span className="text-slate-500">(optional)</span>
               </label>
               <input
@@ -433,7 +433,7 @@ export function UploadToHF({ sae, isOpen, onClose, onUploadComplete }: UploadToH
                 value={commitMessage}
                 onChange={(e) => setCommitMessage(e.target.value)}
                 disabled={isUploading}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               />
             </div>
 

@@ -378,13 +378,13 @@ export function LabelingPromptTemplatesPanel() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-900">
+    <div className="h-full flex flex-col bg-white dark:bg-slate-900">
       {/* Header */}
-      <div className="border-b border-slate-700 p-4">
+      <div className="border-b border-slate-300 dark:border-slate-700 p-4">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-slate-100">Labeling Prompt Templates</h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Labeling Prompt Templates</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Manage prompt templates for semantic feature labeling
             </p>
           </div>
@@ -392,7 +392,7 @@ export function LabelingPromptTemplatesPanel() {
             <button
               onClick={handleExport}
               disabled={isExporting || templates.filter(t => !t.is_system).length === 0}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors text-sm"
+              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors text-sm"
               title="Export custom templates"
             >
               <Download className="w-4 h-4" />
@@ -401,7 +401,7 @@ export function LabelingPromptTemplatesPanel() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isImporting}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors text-sm"
+              className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors text-sm"
               title="Import templates"
             >
               <Upload className="w-4 h-4" />
@@ -442,7 +442,7 @@ export function LabelingPromptTemplatesPanel() {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-slate-700 px-4">
+      <div className="border-b border-slate-300 dark:border-slate-700 px-4">
         <div className="flex space-x-4">
           <button
             onClick={() => {
@@ -453,7 +453,7 @@ export function LabelingPromptTemplatesPanel() {
             className={`py-2 px-4 font-medium transition-colors ${
               activeTab === 'all'
                 ? 'text-emerald-400 border-b-2 border-emerald-400'
-                : 'text-slate-400 hover:text-slate-300'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
             All Templates ({templates.length})
@@ -467,7 +467,7 @@ export function LabelingPromptTemplatesPanel() {
             className={`py-2 px-4 font-medium transition-colors ${
               activeTab === 'create'
                 ? 'text-emerald-400 border-b-2 border-emerald-400'
-                : 'text-slate-400 hover:text-slate-300'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
             <Plus className="w-4 h-4 inline mr-1" />
@@ -481,21 +481,21 @@ export function LabelingPromptTemplatesPanel() {
         {activeTab === 'all' && (
           <div className="space-y-3">
             {loading ? (
-              <div className="text-center py-8 text-slate-400">Loading templates...</div>
+              <div className="text-center py-8 text-slate-600 dark:text-slate-400">Loading templates...</div>
             ) : templates.length === 0 ? (
-              <div className="text-center py-8 text-slate-400">
+              <div className="text-center py-8 text-slate-600 dark:text-slate-400">
                 No templates found. Create your first template to get started.
               </div>
             ) : (
               templates.map((template) => (
                 <div
                   key={template.id}
-                  className="bg-slate-800 rounded-lg border border-slate-700 p-4 hover:border-slate-600 transition-colors"
+                  className="bg-white dark:bg-slate-800 rounded-lg border border-slate-300 dark:border-slate-700 p-4 hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-medium text-slate-100">{template.name}</h3>
+                        <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100">{template.name}</h3>
                         {template.is_default && (
                           <span className="px-2 py-1 text-xs bg-emerald-900/30 text-emerald-300 rounded border border-emerald-700 flex items-center gap-1">
                             <Check className="w-3 h-3" />
@@ -514,7 +514,7 @@ export function LabelingPromptTemplatesPanel() {
                         )}
                       </div>
                       {template.description && (
-                        <p className="text-sm text-slate-400 mt-1">{template.description}</p>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{template.description}</p>
                       )}
                       <div className="flex gap-4 mt-2 text-xs text-slate-500">
                         <span>Temp: {template.temperature}</span>
@@ -525,7 +525,7 @@ export function LabelingPromptTemplatesPanel() {
                     <div className="flex gap-2 ml-4">
                       <button
                         onClick={() => setPreviewTemplate(template)}
-                        className="p-2 text-slate-400 hover:text-purple-400 hover:bg-slate-700 rounded transition-colors"
+                        className="p-2 text-slate-600 dark:text-slate-400 hover:text-purple-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                         title="Preview"
                       >
                         <Eye className="w-4 h-4" />
@@ -533,7 +533,7 @@ export function LabelingPromptTemplatesPanel() {
                       {!template.is_default && (
                         <button
                           onClick={() => handleSetDefault(template.id)}
-                          className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700 rounded transition-colors"
+                          className="p-2 text-slate-600 dark:text-slate-400 hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                           title="Set as default"
                         >
                           <Star className="w-4 h-4" />
@@ -541,7 +541,7 @@ export function LabelingPromptTemplatesPanel() {
                       )}
                       <button
                         onClick={() => handleClone(template)}
-                        className="p-2 text-slate-400 hover:text-purple-400 hover:bg-slate-700 rounded transition-colors"
+                        className="p-2 text-slate-600 dark:text-slate-400 hover:text-purple-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                         title="Clone template"
                       >
                         <Copy className="w-4 h-4" />
@@ -550,14 +550,14 @@ export function LabelingPromptTemplatesPanel() {
                         <>
                           <button
                             onClick={() => handleEdit(template)}
-                            className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors"
+                            className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                             title="Edit"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => setShowDeleteConfirm(template.id)}
-                            className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-colors"
+                            className="p-2 text-slate-600 dark:text-slate-400 hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                             title="Delete"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -591,7 +591,7 @@ export function LabelingPromptTemplatesPanel() {
                         </button>
                         <button
                           onClick={() => setShowDeleteConfirm(null)}
-                          className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm transition-colors"
+                          className="px-3 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded text-sm transition-colors"
                         >
                           Cancel
                         </button>
@@ -607,33 +607,33 @@ export function LabelingPromptTemplatesPanel() {
         {activeTab === 'create' && (
           <form onSubmit={handleCreate} className="max-w-3xl space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Template Name *
               </label>
               <input
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
                 required
                 maxLength={LabelingPromptTemplateConstraints.name.maxLength}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Description
               </label>
               <input
                 type="text"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 System Message *
               </label>
               <textarea
@@ -644,13 +644,13 @@ export function LabelingPromptTemplatesPanel() {
                 onSelect={handleTextareaSelect}
                 onClick={handleTextareaSelect}
                 rows={3}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 font-mono text-sm"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 User Prompt Template * (must include <code className="text-emerald-400">{'{tokens_table}'}</code>)
               </label>
               <textarea
@@ -661,7 +661,7 @@ export function LabelingPromptTemplatesPanel() {
                 onSelect={handleTextareaSelect}
                 onClick={handleTextareaSelect}
                 rows={8}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 font-mono text-sm"
                 required
               />
               {/* Template Variable Insertion */}
@@ -669,7 +669,7 @@ export function LabelingPromptTemplatesPanel() {
                 <select
                   value={selectedVariable}
                   onChange={(e) => setSelectedVariable(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
+                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                 >
                   <option value="">Select variable to insert...</option>
                   {TEMPLATE_VARIABLES.map((v) => (
@@ -682,7 +682,7 @@ export function LabelingPromptTemplatesPanel() {
                   type="button"
                   onClick={insertVariable}
                   disabled={!selectedVariable || !activeTextField}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm rounded transition-colors"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm rounded transition-colors"
                 >
                   Insert
                 </button>
@@ -694,7 +694,7 @@ export function LabelingPromptTemplatesPanel() {
 
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Temperature (0-2)
                 </label>
                 <input
@@ -704,11 +704,11 @@ export function LabelingPromptTemplatesPanel() {
                   max={LabelingPromptTemplateConstraints.temperature.max}
                   value={formData.temperature}
                   onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Max Tokens (10-1000)
                 </label>
                 <input
@@ -718,11 +718,11 @@ export function LabelingPromptTemplatesPanel() {
                   max={LabelingPromptTemplateConstraints.max_tokens.max}
                   value={formData.max_tokens}
                   onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Top-p (0-1)
                 </label>
                 <input
@@ -732,7 +732,7 @@ export function LabelingPromptTemplatesPanel() {
                   max={LabelingPromptTemplateConstraints.top_p.max}
                   value={formData.top_p}
                   onChange={(e) => setFormData({ ...formData, top_p: parseFloat(e.target.value) })}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
@@ -744,9 +744,9 @@ export function LabelingPromptTemplatesPanel() {
                   id="include_nlp_analysis"
                   checked={formData.include_nlp_analysis ?? false}
                   onChange={(e) => setFormData({ ...formData, include_nlp_analysis: e.target.checked })}
-                  className="rounded bg-slate-800 border-slate-700"
+                  className="rounded bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
                 />
-                <label htmlFor="include_nlp_analysis" className="text-sm text-slate-300">
+                <label htmlFor="include_nlp_analysis" className="text-sm text-slate-700 dark:text-slate-300">
                   Include NLP statistical analysis in prompt
                 </label>
                 <span className="text-xs text-slate-500">(POS tagging, NER, n-grams from all examples)</span>
@@ -757,9 +757,9 @@ export function LabelingPromptTemplatesPanel() {
                   id="is_default"
                   checked={formData.is_default}
                   onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
-                  className="rounded bg-slate-800 border-slate-700"
+                  className="rounded bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
                 />
-                <label htmlFor="is_default" className="text-sm text-slate-300">
+                <label htmlFor="is_default" className="text-sm text-slate-700 dark:text-slate-300">
                   Set as default template
                 </label>
               </div>
@@ -779,7 +779,7 @@ export function LabelingPromptTemplatesPanel() {
                   setActiveTab('all');
                   resetForm();
                 }}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded font-medium transition-colors"
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded font-medium transition-colors"
               >
                 Cancel
               </button>
@@ -791,40 +791,40 @@ export function LabelingPromptTemplatesPanel() {
       {/* Edit Modal */}
       {showEditModal && editingTemplate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto">
-            <div className="p-4 border-b border-slate-700 flex justify-between items-center sticky top-0 bg-slate-800">
-              <h3 className="text-lg font-semibold text-slate-100">Edit Template</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto">
+            <div className="p-4 border-b border-slate-300 dark:border-slate-700 flex justify-between items-center sticky top-0 bg-white dark:bg-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Edit Template</h3>
               <button
                 onClick={() => {
                   setShowEditModal(false);
                   resetForm();
                 }}
-                className="text-slate-400 hover:text-slate-200"
+                className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
               >
                 ×
               </button>
             </div>
             <form onSubmit={handleUpdate} className="p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Name</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Name</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Description</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Description</label>
                 <input
                   type="text"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">System Message</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">System Message</label>
                 <textarea
                   ref={editSystemMessageRef}
                   value={formData.system_message}
@@ -833,11 +833,11 @@ export function LabelingPromptTemplatesPanel() {
                   onSelect={handleTextareaSelect}
                   onClick={handleTextareaSelect}
                   rows={3}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100 font-mono text-sm"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 font-mono text-sm"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">User Prompt Template</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">User Prompt Template</label>
                 <textarea
                   ref={editUserPromptRef}
                   value={formData.user_prompt_template}
@@ -846,14 +846,14 @@ export function LabelingPromptTemplatesPanel() {
                   onSelect={handleTextareaSelect}
                   onClick={handleTextareaSelect}
                   rows={8}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100 font-mono text-sm"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 font-mono text-sm"
                 />
                 {/* Template Variable Insertion */}
                 <div className="flex items-center gap-3 mt-2">
                   <select
                     value={selectedVariable}
                     onChange={(e) => setSelectedVariable(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
+                    className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                   >
                     <option value="">Select variable to insert...</option>
                     {TEMPLATE_VARIABLES.map((v) => (
@@ -866,7 +866,7 @@ export function LabelingPromptTemplatesPanel() {
                     type="button"
                     onClick={insertVariable}
                     disabled={!selectedVariable || !activeTextField}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm rounded transition-colors"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm rounded transition-colors"
                   >
                     Insert
                   </button>
@@ -877,7 +877,7 @@ export function LabelingPromptTemplatesPanel() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Temperature</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Temperature</label>
                   <input
                     type="number"
                     step="0.1"
@@ -885,11 +885,11 @@ export function LabelingPromptTemplatesPanel() {
                     max="2"
                     value={formData.temperature}
                     onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Max Tokens</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Max Tokens</label>
                   <input
                     type="number"
                     step="1"
@@ -897,11 +897,11 @@ export function LabelingPromptTemplatesPanel() {
                     max="9999"
                     value={formData.max_tokens}
                     onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Top-p</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Top-p</label>
                   <input
                     type="number"
                     step="0.1"
@@ -909,7 +909,7 @@ export function LabelingPromptTemplatesPanel() {
                     max="1"
                     value={formData.top_p}
                     onChange={(e) => setFormData({ ...formData, top_p: parseFloat(e.target.value) })}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100"
                   />
                 </div>
               </div>
@@ -927,7 +927,7 @@ export function LabelingPromptTemplatesPanel() {
                     setShowEditModal(false);
                     resetForm();
                   }}
-                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded font-medium transition-colors"
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded font-medium transition-colors"
                 >
                   Cancel
                 </button>
@@ -940,15 +940,15 @@ export function LabelingPromptTemplatesPanel() {
       {/* Preview Modal */}
       {previewTemplate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-auto">
-            <div className="p-4 border-b border-slate-700 flex justify-between items-center sticky top-0 bg-slate-800">
+          <div className="bg-white dark:bg-slate-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-auto">
+            <div className="p-4 border-b border-slate-300 dark:border-slate-700 flex justify-between items-center sticky top-0 bg-white dark:bg-slate-800">
               <div>
-                <h3 className="text-lg font-semibold text-slate-100">Template Preview</h3>
-                <p className="text-sm text-slate-400 mt-1">{previewTemplate.name}</p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Template Preview</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{previewTemplate.name}</p>
               </div>
               <button
                 onClick={() => setPreviewTemplate(null)}
-                className="text-slate-400 hover:text-slate-200"
+                className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
               >
                 ×
               </button>
@@ -958,42 +958,42 @@ export function LabelingPromptTemplatesPanel() {
               {/* Description */}
               {previewTemplate.description && (
                 <div>
-                  <p className="text-sm text-slate-300">{previewTemplate.description}</p>
+                  <p className="text-sm text-slate-700 dark:text-slate-300">{previewTemplate.description}</p>
                 </div>
               )}
 
               {/* Parameters */}
               <div className="grid grid-cols-3 gap-4 text-sm">
-                <div className="bg-slate-900/50 p-3 rounded">
-                  <span className="text-slate-400">Temperature:</span>
-                  <span className="ml-2 text-slate-200 font-medium">{previewTemplate.temperature}</span>
+                <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                  <span className="text-slate-600 dark:text-slate-400">Temperature:</span>
+                  <span className="ml-2 text-slate-800 dark:text-slate-200 font-medium">{previewTemplate.temperature}</span>
                 </div>
-                <div className="bg-slate-900/50 p-3 rounded">
-                  <span className="text-slate-400">Max Tokens:</span>
-                  <span className="ml-2 text-slate-200 font-medium">{previewTemplate.max_tokens}</span>
+                <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                  <span className="text-slate-600 dark:text-slate-400">Max Tokens:</span>
+                  <span className="ml-2 text-slate-800 dark:text-slate-200 font-medium">{previewTemplate.max_tokens}</span>
                 </div>
-                <div className="bg-slate-900/50 p-3 rounded">
-                  <span className="text-slate-400">Top-p:</span>
-                  <span className="ml-2 text-slate-200 font-medium">{previewTemplate.top_p}</span>
+                <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                  <span className="text-slate-600 dark:text-slate-400">Top-p:</span>
+                  <span className="ml-2 text-slate-800 dark:text-slate-200 font-medium">{previewTemplate.top_p}</span>
                 </div>
               </div>
 
               {/* System Message */}
               <div>
-                <h4 className="text-sm font-medium text-slate-300 mb-2">System Message</h4>
-                <div className="bg-slate-900/50 p-3 rounded border border-slate-700">
-                  <pre className="text-xs text-slate-300 font-mono whitespace-pre-wrap">{previewTemplate.system_message}</pre>
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">System Message</h4>
+                <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded border border-slate-300 dark:border-slate-700">
+                  <pre className="text-xs text-slate-700 dark:text-slate-300 font-mono whitespace-pre-wrap">{previewTemplate.system_message}</pre>
                 </div>
               </div>
 
               {/* User Prompt with Sample Data */}
               <div>
-                <h4 className="text-sm font-medium text-slate-300 mb-2">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   User Prompt Template
                   <span className="ml-2 text-xs text-slate-500">(with sample token data)</span>
                 </h4>
-                <div className="bg-slate-900/50 p-3 rounded border border-slate-700">
-                  <pre className="text-xs text-slate-300 font-mono whitespace-pre-wrap">
+                <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded border border-slate-300 dark:border-slate-700">
+                  <pre className="text-xs text-slate-700 dark:text-slate-300 font-mono whitespace-pre-wrap">
                     {(() => {
                       // Debug logging
                       console.log('[LabelingPromptTemplatesPanel] Preview Template:', {
@@ -1012,7 +1012,7 @@ export function LabelingPromptTemplatesPanel() {
 
               {/* Example Output */}
               <div>
-                <h4 className="text-sm font-medium text-slate-300 mb-2">
+                <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Example Expected Output
                   <span className="ml-2 text-xs text-slate-500">(illustrative)</span>
                 </h4>
@@ -1029,7 +1029,7 @@ export function LabelingPromptTemplatesPanel() {
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={() => setPreviewTemplate(null)}
-                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded font-medium transition-colors"
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded font-medium transition-colors"
                 >
                   Close
                 </button>
@@ -1042,9 +1042,9 @@ export function LabelingPromptTemplatesPanel() {
       {/* Import Modal */}
       {showImportModal && importFile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-800 rounded-lg max-w-2xl w-full">
-            <div className="p-4 border-b border-slate-700 flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-slate-100">Import Templates</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-lg max-w-2xl w-full">
+            <div className="p-4 border-b border-slate-300 dark:border-slate-700 flex justify-between items-center">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Import Templates</h3>
               <button
                 onClick={() => {
                   setShowImportModal(false);
@@ -1052,7 +1052,7 @@ export function LabelingPromptTemplatesPanel() {
                   setImportResults(null);
                   setOverwriteDuplicates(false);
                 }}
-                className="text-slate-400 hover:text-slate-200"
+                className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
               >
                 ×
               </button>
@@ -1060,10 +1060,10 @@ export function LabelingPromptTemplatesPanel() {
 
             <div className="p-4 space-y-4">
               <div>
-                <p className="text-sm text-slate-300 mb-2">
+                <p className="text-sm text-slate-700 dark:text-slate-300 mb-2">
                   File: <span className="font-mono text-emerald-400">{importFile.name}</span>
                 </p>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-600 dark:text-slate-400">
                   Size: {(importFile.size / 1024).toFixed(2)} KB
                 </p>
               </div>
@@ -1076,11 +1076,11 @@ export function LabelingPromptTemplatesPanel() {
                       id="overwrite"
                       checked={overwriteDuplicates}
                       onChange={(e) => setOverwriteDuplicates(e.target.checked)}
-                      className="mt-1 rounded bg-slate-700 border-slate-600"
+                      className="mt-1 rounded bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600"
                     />
-                    <label htmlFor="overwrite" className="text-sm text-slate-300">
+                    <label htmlFor="overwrite" className="text-sm text-slate-700 dark:text-slate-300">
                       <span className="font-medium">Overwrite duplicate templates</span>
-                      <p className="text-xs text-slate-400 mt-1">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                         If enabled, templates with the same name will be updated. Otherwise, duplicates will be skipped.
                       </p>
                     </label>
@@ -1090,7 +1090,7 @@ export function LabelingPromptTemplatesPanel() {
                     <button
                       onClick={handleImport}
                       disabled={isImporting}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded font-medium transition-colors"
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded font-medium transition-colors"
                     >
                       {isImporting ? 'Importing...' : 'Import Templates'}
                     </button>
@@ -1101,7 +1101,7 @@ export function LabelingPromptTemplatesPanel() {
                         setOverwriteDuplicates(false);
                       }}
                       disabled={isImporting}
-                      className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded font-medium transition-colors"
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded font-medium transition-colors"
                     >
                       Cancel
                     </button>
@@ -1122,30 +1122,30 @@ export function LabelingPromptTemplatesPanel() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="bg-slate-900/50 p-3 rounded">
-                      <span className="text-slate-400">Imported:</span>
+                    <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                      <span className="text-slate-600 dark:text-slate-400">Imported:</span>
                       <span className="ml-2 text-emerald-400 font-medium">{importResults.imported_count}</span>
                     </div>
-                    <div className="bg-slate-900/50 p-3 rounded">
-                      <span className="text-slate-400">Overwritten:</span>
+                    <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                      <span className="text-slate-600 dark:text-slate-400">Overwritten:</span>
                       <span className="ml-2 text-blue-400 font-medium">{importResults.overwritten_count}</span>
                     </div>
-                    <div className="bg-slate-900/50 p-3 rounded">
-                      <span className="text-slate-400">Skipped:</span>
+                    <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                      <span className="text-slate-600 dark:text-slate-400">Skipped:</span>
                       <span className="ml-2 text-cyan-400 font-medium">{importResults.skipped_count}</span>
                     </div>
-                    <div className="bg-slate-900/50 p-3 rounded">
-                      <span className="text-slate-400">Failed:</span>
+                    <div className="bg-slate-100 dark:bg-slate-900/50 p-3 rounded">
+                      <span className="text-slate-600 dark:text-slate-400">Failed:</span>
                       <span className="ml-2 text-red-400 font-medium">{importResults.failed_count}</span>
                     </div>
                   </div>
 
                   {importResults.details.length > 0 && (
                     <div className="max-h-48 overflow-auto">
-                      <p className="text-xs font-medium text-slate-400 mb-2">Details:</p>
+                      <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Details:</p>
                       <div className="space-y-1">
                         {importResults.details.map((detail, index) => (
-                          <p key={index} className="text-xs text-slate-300 font-mono bg-slate-900/50 p-2 rounded">
+                          <p key={index} className="text-xs text-slate-700 dark:text-slate-300 font-mono bg-slate-100 dark:bg-slate-900/50 p-2 rounded">
                             {detail}
                           </p>
                         ))}

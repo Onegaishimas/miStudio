@@ -67,9 +67,9 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   return (
     <div className={className}>
       <div className="flex items-center gap-3">
-        <BookTemplate className="w-5 h-5 text-slate-400 flex-shrink-0" />
+        <BookTemplate className="w-5 h-5 text-slate-600 dark:text-slate-400 flex-shrink-0" />
         <div className="flex-1">
-          <label htmlFor="template-selector" className="block text-sm font-medium text-slate-300 mb-1">
+          <label htmlFor="template-selector" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
             Load Template
           </label>
           <div className="relative">
@@ -81,10 +81,10 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
                   handleTemplateSelect(e.target.value);
                 }
               }}
-              className={`w-full px-3 py-2 bg-slate-800 border rounded-md text-sm focus:outline-none focus:border-emerald-500 transition-colors ${
+              className={`w-full px-3 py-2 bg-white dark:bg-slate-800 border rounded-md text-sm focus:outline-none focus:border-emerald-500 transition-colors ${
                 selectedTemplateId
                   ? 'border-emerald-500/50 text-emerald-300 pr-8'
-                  : 'border-slate-700 text-slate-100'
+                  : 'border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100'
               }`}
             >
               <option value="" disabled>
@@ -100,7 +100,7 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
               <button
                 type="button"
                 onClick={handleClearSelection}
-                className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-200 transition-colors"
+                className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
                 title="Clear selection"
               >
                 <X className="w-4 h-4" />

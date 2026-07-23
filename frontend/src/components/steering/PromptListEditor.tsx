@@ -134,7 +134,7 @@ export function PromptListEditor({
     <div className="space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-slate-300">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
           Prompts
           {prompts.length > 1 && (
             <span className="ml-2 text-slate-500 font-normal">
@@ -148,7 +148,7 @@ export function PromptListEditor({
             <button
               onClick={handleOpenLoadModal}
               disabled={disabled}
-              className="text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Load prompts from template"
             >
               <FolderOpen className="w-3 h-3" />
@@ -160,7 +160,7 @@ export function PromptListEditor({
             <button
               onClick={handleOpenSaveModal}
               disabled={disabled}
-              className="text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Save prompts as template"
             >
               <Save className="w-3 h-3" />
@@ -171,7 +171,7 @@ export function PromptListEditor({
             <button
               onClick={onClearPrompts}
               disabled={disabled}
-              className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Clear all prompts"
             >
               <Trash2 className="w-3 h-3" />
@@ -197,7 +197,7 @@ export function PromptListEditor({
             <div className="flex items-start gap-2">
               {/* Prompt number indicator */}
               {prompts.length > 1 && (
-                <div className="flex-shrink-0 w-6 h-6 mt-3 flex items-center justify-center rounded bg-slate-800 text-slate-500 text-xs font-mono">
+                <div className="flex-shrink-0 w-6 h-6 mt-3 flex items-center justify-center rounded bg-white dark:bg-slate-800 text-slate-500 text-xs font-mono">
                   {index + 1}
                 </div>
               )}
@@ -213,10 +213,10 @@ export function PromptListEditor({
                 }
                 rows={prompts.length === 1 ? 4 : 2}
                 disabled={disabled}
-                className={`flex-1 px-4 py-3 bg-slate-900 border rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 resize-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`flex-1 px-4 py-3 bg-white dark:bg-slate-900 border rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 resize-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   prompt.trim().length === 0 && prompts.length > 1
                     ? 'border-amber-500/30'
-                    : 'border-slate-700'
+                    : 'border-slate-300 dark:border-slate-700'
                 }`}
               />
 
@@ -264,12 +264,12 @@ export function PromptListEditor({
             className="absolute inset-0 bg-black/60"
             onClick={() => setShowSaveModal(false)}
           />
-          <div className="relative bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-lg font-medium text-slate-100 mb-4">Save as Steering Prompt Template</h3>
+          <div className="relative bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-6 w-full max-w-md shadow-xl">
+            <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-4">Save as Steering Prompt Template</h3>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Template Name *
                 </label>
                 <input
@@ -277,13 +277,13 @@ export function PromptListEditor({
                   value={templateName}
                   onChange={(e) => setTemplateName(e.target.value)}
                   placeholder="Enter template name..."
-                  className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Description (optional)
                 </label>
                 <textarea
@@ -291,7 +291,7 @@ export function PromptListEditor({
                   onChange={(e) => setTemplateDescription(e.target.value)}
                   placeholder="Brief description of this prompt set..."
                   rows={2}
-                  className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
                 />
               </div>
 
@@ -307,7 +307,7 @@ export function PromptListEditor({
             <div className="flex justify-end gap-3 mt-6">
               <button
                 onClick={() => setShowSaveModal(false)}
-                className="px-4 py-2 text-slate-300 hover:text-slate-100 transition-colors"
+                className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
               >
                 Cancel
               </button>
@@ -330,11 +330,11 @@ export function PromptListEditor({
             className="absolute inset-0 bg-black/60"
             onClick={() => setShowLoadModal(false)}
           />
-          <div className="relative bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[70vh] overflow-hidden flex flex-col">
-            <h3 className="text-lg font-medium text-slate-100 mb-4">Load Steering Prompt Template</h3>
+          <div className="relative bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[70vh] overflow-hidden flex flex-col">
+            <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-4">Load Steering Prompt Template</h3>
 
             {availableTemplates.length === 0 ? (
-              <p className="text-slate-400 text-center py-8">
+              <p className="text-slate-600 dark:text-slate-400 text-center py-8">
                 No steering prompt templates available. Create templates from the Templates page.
               </p>
             ) : (
@@ -343,11 +343,11 @@ export function PromptListEditor({
                   <button
                     key={template.id}
                     onClick={() => handleLoadTemplate(template)}
-                    className="w-full text-left p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+                    className="w-full text-left p-4 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 rounded-lg transition-colors"
                   >
-                    <div className="font-medium text-slate-100">{template.name}</div>
+                    <div className="font-medium text-slate-900 dark:text-slate-100">{template.name}</div>
                     {template.description && (
-                      <p className="text-sm text-slate-400 mt-1 line-clamp-2">
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
                         {template.description}
                       </p>
                     )}
@@ -359,10 +359,10 @@ export function PromptListEditor({
               </div>
             )}
 
-            <div className="flex justify-end mt-4 pt-4 border-t border-slate-700">
+            <div className="flex justify-end mt-4 pt-4 border-t border-slate-300 dark:border-slate-700">
               <button
                 onClick={() => setShowLoadModal(false)}
-                className="px-4 py-2 text-slate-300 hover:text-slate-100 transition-colors"
+                className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
               >
                 Cancel
               </button>

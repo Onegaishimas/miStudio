@@ -182,7 +182,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                 placeholder="Search SAEs by name, model, or repository..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 transition-colors"
+                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-colors"
               />
             </div>
 
@@ -192,7 +192,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
               className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
                 showFilters || filters.source || filters.status
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                  : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
               }`}
             >
               <Filter className="w-4 h-4" />
@@ -208,14 +208,14 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
             <div className={`${COMPONENTS.card.base} p-4 space-y-4`}>
               {/* Source Filter */}
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Source</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Source</label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => handleSourceFilter(null)}
                     className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${
                       !filters.source
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     All Sources
@@ -225,7 +225,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${
                       filters.source === SAESource.HUGGINGFACE
                         ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     <Cloud className="w-3.5 h-3.5" />
@@ -236,7 +236,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${
                       filters.source === SAESource.TRAINED
                         ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     <Layers className="w-3.5 h-3.5" />
@@ -247,7 +247,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition-colors ${
                       filters.source === SAESource.LOCAL
                         ? 'bg-slate-500/20 text-slate-300 border border-slate-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     <HardDrive className="w-3.5 h-3.5" />
@@ -258,14 +258,14 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
 
               {/* Status Filter */}
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Status</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Status</label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => handleStatusFilter(null)}
                     className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
                       !filters.status
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     All Statuses
@@ -275,7 +275,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
                       filters.status === SAEStatus.READY
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     Ready
@@ -285,7 +285,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
                       filters.status === SAEStatus.DOWNLOADING
                         ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     Downloading
@@ -295,7 +295,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
                       filters.status === SAEStatus.ERROR
                         ? 'bg-red-500/20 text-red-400 border border-red-500/50'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                   >
                     Error
@@ -310,7 +310,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                     handleSourceFilter(null);
                     handleStatusFilter(null);
                   }}
-                  className="text-sm text-slate-400 hover:text-slate-300"
+                  className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
                 >
                   Clear all filters
                 </button>
@@ -322,8 +322,8 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
         {/* Loading state */}
         {loading && saes.length === 0 && (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-700 border-t-emerald-500"></div>
-            <p className="text-slate-400 mt-4">Loading SAEs...</p>
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-300 dark:border-slate-700 border-t-emerald-500"></div>
+            <p className="text-slate-600 dark:text-slate-400 mt-4">Loading SAEs...</p>
           </div>
         )}
 
@@ -331,7 +331,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
         {!loading && saes.length === 0 && (
           <div className="text-center py-12">
             <Brain className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <p className="text-slate-400 text-lg">No SAEs yet</p>
+            <p className="text-slate-600 dark:text-slate-400 text-lg">No SAEs yet</p>
             <p className="text-slate-500 mt-2">
               Download an SAE from HuggingFace or import from a completed training job
             </p>
@@ -342,11 +342,11 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
         {saes.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold text-slate-100">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                 Your SAEs ({pagination.total})
               </h2>
               {pagination.total > pagination.limit && (
-                <div className="flex items-center gap-2 text-sm text-slate-400">
+                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                   <span>
                     Showing {pagination.skip + 1}-{Math.min(pagination.skip + pagination.limit, pagination.total)}
                   </span>
@@ -378,7 +378,7 @@ export function SAEsPanel({ onNavigateToSteering }: SAEsPanelProps = {}) {
                 >
                   Previous
                 </button>
-                <span className="text-sm text-slate-400">
+                <span className="text-sm text-slate-600 dark:text-slate-400">
                   Page {Math.floor(pagination.skip / pagination.limit) + 1} of{' '}
                   {Math.ceil(pagination.total / pagination.limit)}
                 </span>

@@ -102,7 +102,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
       onSubmit={handleSubmit}
       className={`${COMPONENTS.card.base} p-6 ${className}`}
     >
-      <h2 className="text-lg font-semibold text-slate-100 mb-4">
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
         Download from HuggingFace
       </h2>
 
@@ -110,7 +110,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
         <div>
           <label
             htmlFor="hf-repo"
-            className="block text-sm font-medium text-slate-300 mb-2"
+            className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
           >
             Repository ID
           </label>
@@ -121,7 +121,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
             value={hfRepo}
             onChange={(e) => setHfRepo(e.target.value)}
             placeholder="publisher/dataset-name"
-            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             disabled={isSubmitting}
             required
           />
@@ -130,7 +130,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
         <div>
           <label
             htmlFor="access-token"
-            className="block text-sm font-medium text-slate-300 mb-2"
+            className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
           >
             Access Token (optional)
           </label>
@@ -146,7 +146,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
               value={accessToken}
               onChange={(e) => setAccessToken(e.target.value)}
               placeholder="hf_..."
-              className="w-full px-4 py-2 pr-10 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              className="w-full px-4 py-2 pr-10 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               disabled={isSubmitting}
               style={{ WebkitTextSecurity: showToken ? 'none' : 'disc' } as React.CSSProperties}
             />
@@ -158,7 +158,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
                 onMouseLeave={() => setShowToken(false)}
                 onTouchStart={() => setShowToken(true)}
                 onTouchEnd={() => setShowToken(false)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-300 transition-colors"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                 title="Hold to reveal token"
                 tabIndex={-1}
               >
@@ -175,7 +175,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
           <div>
             <label
               htmlFor="split"
-              className="block text-sm font-medium text-slate-300 mb-2"
+              className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
             >
               Split (optional)
             </label>
@@ -186,7 +186,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
               value={split}
               onChange={(e) => setSplit(e.target.value)}
               placeholder="train, validation, test"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               disabled={isSubmitting}
             />
             <p className="text-xs text-slate-500 mt-1">
@@ -197,7 +197,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
           <div>
             <label
               htmlFor="config"
-              className="block text-sm font-medium text-slate-300 mb-2"
+              className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
             >
               Config (optional)
             </label>
@@ -208,7 +208,7 @@ export function DownloadForm({ onDownload, className = '' }: DownloadFormProps) 
               value={config}
               onChange={(e) => setConfig(e.target.value)}
               placeholder="en, zh, etc."
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
               disabled={isSubmitting}
             />
             <p className="text-xs text-slate-500 mt-1">

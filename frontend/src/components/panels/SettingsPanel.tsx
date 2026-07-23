@@ -35,7 +35,7 @@ export function SettingsPanel() {
     <div className="px-6 py-8">
       {/* Tabs */}
       <div className="mb-6">
-        <div className="border-b border-slate-800">
+        <div className="border-b border-slate-200 dark:border-slate-800">
           <nav className="flex gap-1">
             {TABS.map((tab) => (
               <button
@@ -44,7 +44,7 @@ export function SettingsPanel() {
                 className={`px-6 py-3 font-medium transition-colors relative ${
                   activeTab === tab.id
                     ? 'text-emerald-400'
-                    : 'text-slate-400 hover:text-slate-300'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
                 {tab.label}
@@ -152,10 +152,10 @@ function PinGate({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 gap-8">
       <div className="text-center">
-        <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
+        <div className="w-14 h-14 rounded-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 flex items-center justify-center mx-auto mb-4">
           <Lock className="w-6 h-6 text-slate-500" />
         </div>
-        <h3 className="text-slate-200 font-medium mb-1">Settings are PIN-protected</h3>
+        <h3 className="text-slate-800 dark:text-slate-200 font-medium mb-1">Settings are PIN-protected</h3>
         <p className="text-slate-500 text-sm">Enter your PIN to access settings.</p>
       </div>
 
@@ -166,7 +166,7 @@ function PinGate({ children }: { children: React.ReactNode }) {
           value={pin}
           onChange={(e) => { setPin(e.target.value); setError(null); }}
           placeholder="Enter PIN"
-          className="w-full bg-slate-800 border border-slate-700 rounded px-4 py-2.5 text-center text-slate-200 text-lg tracking-widest focus:border-emerald-500 focus:outline-none placeholder:tracking-normal placeholder:text-sm placeholder:text-slate-600"
+          className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-4 py-2.5 text-center text-slate-800 dark:text-slate-200 text-lg tracking-widest focus:border-emerald-500 focus:outline-none placeholder:tracking-normal placeholder:text-sm placeholder:text-slate-400 dark:placeholder:text-slate-600"
         />
         {error && <p className="text-red-400 text-xs">{error}</p>}
         <button
@@ -179,13 +179,13 @@ function PinGate({ children }: { children: React.ReactNode }) {
       </form>
 
       {/* Recovery instructions */}
-      <div className="max-w-xs text-center border-t border-slate-800 pt-6">
+      <div className="max-w-xs text-center border-t border-slate-200 dark:border-slate-800 pt-6">
         <p className="text-xs text-slate-500 font-medium mb-2">Forgot your PIN?</p>
         <p className="text-xs text-slate-600 leading-relaxed">
           Set{' '}
-          <code className="text-slate-500 bg-slate-800 px-1 rounded">MISTUDIO_BYPASS_PIN=true</code>{' '}
+          <code className="text-slate-500 bg-white dark:bg-slate-800 px-1 rounded">MISTUDIO_BYPASS_PIN=true</code>{' '}
           in your server's{' '}
-          <code className="text-slate-500 bg-slate-800 px-1 rounded">.env</code>{' '}
+          <code className="text-slate-500 bg-white dark:bg-slate-800 px-1 rounded">.env</code>{' '}
           file and restart the backend. The Settings panel will be accessible without a PIN.
           Reset your PIN in the API Keys tab, then remove the bypass flag and restart again.
         </p>
@@ -261,7 +261,7 @@ function PinManagementSection() {
 
   return (
     <div className="mt-8">
-      <h3 className="text-base font-semibold text-slate-200 mb-1">Settings Access PIN</h3>
+      <h3 className="text-base font-semibold text-slate-800 dark:text-slate-200 mb-1">Settings Access PIN</h3>
       <p className="text-xs text-slate-500 mb-4">
         {pinStatus.configured
           ? 'A PIN is required to open the Settings panel.'
@@ -274,7 +274,7 @@ function PinManagementSection() {
         </div>
       )}
 
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
         {pinStatus.configured && !showForm ? (
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
@@ -283,13 +283,13 @@ function PinManagementSection() {
             <div className="flex gap-1">
               <button
                 onClick={() => setShowForm(true)}
-                className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 Change
               </button>
               <button
                 onClick={handleRemovePin}
-                className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                className="text-xs text-slate-600 dark:text-slate-400 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 Remove
               </button>
@@ -299,34 +299,34 @@ function PinManagementSection() {
           <div className="space-y-3">
             {pinStatus.configured && !pinStatus.bypass_active && (
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Current PIN</label>
+                <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Current PIN</label>
                 <input
                   type="password"
                   value={currentPin}
                   onChange={(e) => setCurrentPin(e.target.value)}
                   placeholder="Enter current PIN"
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
                 />
               </div>
             )}
             <div>
-              <label className="block text-xs text-slate-400 mb-1">New PIN</label>
+              <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">New PIN</label>
               <input
                 type="password"
                 value={newPin}
                 onChange={(e) => { setNewPin(e.target.value); setError(null); }}
                 placeholder="Min 4 characters"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Confirm PIN</label>
+              <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Confirm PIN</label>
               <input
                 type="password"
                 value={confirmPin}
                 onChange={(e) => { setConfirmPin(e.target.value); setError(null); }}
                 placeholder="Repeat new PIN"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
               />
             </div>
             {error && <p className="text-xs text-red-400">{error}</p>}
@@ -339,7 +339,7 @@ function PinManagementSection() {
                 {saving ? 'Saving…' : pinStatus.configured ? 'Change PIN' : 'Set PIN'}
               </button>
               {showForm && (
-                <button onClick={resetForm} className="px-3 py-1.5 text-slate-400 hover:text-slate-200 text-sm">
+                <button onClick={resetForm} className="px-3 py-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 text-sm">
                   Cancel
                 </button>
               )}
@@ -449,7 +449,7 @@ function EndpointsTab() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-200 mb-1">API Endpoints</h2>
+      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-1">API Endpoints</h2>
       <p className="text-xs text-slate-500 mb-4">Saved OpenAI-compatible endpoint URLs for labeling jobs.</p>
 
       {/* Toast */}
@@ -460,26 +460,26 @@ function EndpointsTab() {
       )}
 
       {/* OpenAI-Compatible Endpoint + Model */}
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-6">
-        <label className="block text-sm font-medium text-slate-200 mb-1">OpenAI-Compatible Endpoint</label>
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4 mb-6">
+        <label className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">OpenAI-Compatible Endpoint</label>
         <p className="text-xs text-slate-500 mb-3">
           Used by enhanced per-feature labeling and batch labeling jobs.
         </p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Endpoint URL</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Endpoint URL</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={compatEndpoint}
                 onChange={(e) => { setCompatEndpoint(e.target.value); setAvailableModels([]); setFetchModelsError(null); }}
                 placeholder="http://millm-backend.millm.svc.cluster.local:8000/v1"
-                className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+                className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
               />
               <button
                 onClick={handleFetchModels}
                 disabled={fetchingModels || !compatEndpoint.trim()}
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm rounded transition-colors whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 text-slate-800 dark:text-slate-200 text-sm rounded transition-colors whitespace-nowrap"
               >
                 <RefreshCw className={`w-4 h-4 ${fetchingModels ? 'animate-spin' : ''}`} />
                 {fetchingModels ? 'Fetching…' : 'Fetch Models'}
@@ -488,12 +488,12 @@ function EndpointsTab() {
           </div>
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Model</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Model</label>
             {availableModels.length > 0 ? (
               <select
                 value={compatModel}
                 onChange={(e) => setCompatModel(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
               >
                 {availableModels.map((m) => (
                   <option key={m} value={m}>{m}</option>
@@ -505,7 +505,7 @@ function EndpointsTab() {
                 value={compatModel}
                 onChange={(e) => setCompatModel(e.target.value)}
                 placeholder="e.g. gemma-3-27b-it"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
               />
             )}
             {fetchModelsError && (
@@ -530,8 +530,8 @@ function EndpointsTab() {
       </div>
 
       {/* Ollama / LLM Service URL */}
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-6">
-        <label className="block text-sm font-medium text-slate-200 mb-1">Ollama / LLM Service URL</label>
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4 mb-6">
+        <label className="block text-sm font-medium text-slate-800 dark:text-slate-200 mb-1">Ollama / LLM Service URL</label>
         <p className="text-xs text-slate-500 mb-3">
           Base URL for the local LLM service used for labeling. Overrides the server environment variable.
         </p>
@@ -541,7 +541,7 @@ function EndpointsTab() {
             value={ollamaUrl}
             onChange={(e) => setOllamaUrl(e.target.value)}
             placeholder="http://k8s-millm.hitsai.local"
-            className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+            className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
           />
           <button
             onClick={handleSaveOllamaUrl}
@@ -568,26 +568,26 @@ function EndpointsTab() {
       </div>
 
       {/* Add form */}
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4 mb-4">
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">URL</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">URL</label>
             <input
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="http://192.168.244.61:8001/v1"
-              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Label (optional)</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Label (optional)</label>
             <input
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="miLLM GPU Server"
-              className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
             />
           </div>
           <button
@@ -601,7 +601,7 @@ function EndpointsTab() {
       </div>
 
       {/* Saved endpoints list */}
-      <h3 className="text-sm font-medium text-slate-300 mb-2">Saved Endpoints</h3>
+      <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Saved Endpoints</h3>
       {endpoints.length === 0 ? (
         <p className="text-xs text-slate-500">No saved endpoints yet.</p>
       ) : (
@@ -611,13 +611,13 @@ function EndpointsTab() {
             return (
               <div
                 key={s.id}
-                className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 group"
+                className="flex items-center justify-between bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-3 group"
               >
                 <div>
                   {ep.label && (
-                    <div className="text-sm font-medium text-slate-200">{ep.label}</div>
+                    <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{ep.label}</div>
                   )}
-                  <div className="text-xs font-mono text-slate-400">{ep.url}</div>
+                  <div className="text-xs font-mono text-slate-600 dark:text-slate-400">{ep.url}</div>
                   {ep.lastUsed && (
                     <div className="text-xs text-slate-600 mt-0.5">
                       Last used: {new Date(ep.lastUsed).toLocaleDateString()}
@@ -681,7 +681,7 @@ function ApiKeysTab() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-200 mb-1">API Keys</h2>
+      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-1">API Keys</h2>
       <p className="text-xs text-slate-500 mb-4">
         Keys are encrypted at rest (AES-256-GCM) and never displayed in full after saving.
       </p>
@@ -700,10 +700,10 @@ function ApiKeysTab() {
           return (
             <div
               key={preset.key}
-              className="bg-slate-900 border border-slate-700 rounded-lg p-4"
+              className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4"
             >
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-slate-200">{preset.label}</label>
+                <label className="text-sm font-medium text-slate-800 dark:text-slate-200">{preset.label}</label>
                 <div className="flex items-center gap-1">
                   {existing && !isEditing && (
                     <>
@@ -713,13 +713,13 @@ function ApiKeysTab() {
                           setNewValue('');
                           setShowValue(false);
                         }}
-                        className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                        className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(preset.key)}
-                        className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                        className="text-xs text-slate-600 dark:text-slate-400 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                       >
                         Delete
                       </button>
@@ -736,12 +736,12 @@ function ApiKeysTab() {
                       value={newValue}
                       onChange={(e) => setNewValue(e.target.value)}
                       placeholder={preset.placeholder}
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none pr-9"
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none pr-9"
                       autoFocus
                     />
                     <button
                       onClick={() => setShowValue(!showValue)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                     >
                       {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -755,14 +755,14 @@ function ApiKeysTab() {
                   </button>
                   <button
                     onClick={() => { setEditingKey(null); setNewValue(''); setShowValue(false); }}
-                    className="px-3 py-2 text-slate-400 hover:text-slate-200 text-sm"
+                    className="px-3 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 text-sm"
                   >
                     Cancel
                   </button>
                 </div>
               ) : existing ? (
                 <div className="flex items-center gap-2">
-                  <code className="text-sm font-mono text-slate-400 bg-slate-800 px-3 py-2 rounded flex-1">
+                  <code className="text-sm font-mono text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded flex-1">
                     {existing.value}
                   </code>
                 </div>
@@ -776,7 +776,7 @@ function ApiKeysTab() {
                         onChange={(e) => { setEditingKey(null); setNewValue(e.target.value); }}
                         onFocus={() => setEditingKey(preset.key)}
                         placeholder={`Enter ${preset.label}...`}
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
                       />
                     </div>
                   </div>
@@ -866,7 +866,7 @@ function LabelingTab() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-200 mb-1">Labeling Defaults</h2>
+      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-1">Labeling Defaults</h2>
       <p className="text-xs text-slate-500 mb-4">
         These values pre-fill when starting a new labeling job.
       </p>
@@ -877,27 +877,27 @@ function LabelingTab() {
         </div>
       )}
 
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4 space-y-4">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Default Batch Size</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Default Batch Size</label>
           <input
             type="number"
             value={batchSize}
             onChange={(e) => setBatchSize(e.target.value)}
             min={1}
             max={100}
-            className="w-32 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+            className="w-32 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
           />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Default Max Examples per Feature</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Default Max Examples per Feature</label>
           <input
             type="number"
             value={maxExamples}
             onChange={(e) => setMaxExamples(e.target.value)}
             min={5}
             max={100}
-            className="w-32 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+            className="w-32 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
           />
         </div>
         <button
@@ -912,17 +912,17 @@ function LabelingTab() {
       </div>
 
       {/* Enhanced labeling settings */}
-      <h2 className="text-lg font-semibold text-slate-200 mt-8 mb-1">Enhanced Labeling</h2>
+      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mt-8 mb-1">Enhanced Labeling</h2>
       <p className="text-xs text-slate-500 mb-4">
         Settings for the two-pass per-feature labeling triggered from the Feature Detail modal.
       </p>
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4 space-y-4">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Labeling Method</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Labeling Method</label>
           <select
             value={enhancedMethod}
             onChange={(e) => setEnhancedMethod(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
           >
             <option value="openai">OpenAI (requires api-key)</option>
             <option value="openai_compatible">OpenAI-Compatible (miLLM, Ollama, vLLM, etc.)</option>
@@ -931,13 +931,13 @@ function LabelingTab() {
 
         {enhancedMethod === 'openai' && (
           <div>
-            <label className="block text-xs text-slate-400 mb-1">OpenAI Model</label>
+            <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">OpenAI Model</label>
             <div className="flex gap-2">
               {openaiModels.length > 0 ? (
                 <select
                   value={enhancedOpenaiModel}
                   onChange={(e) => setEnhancedOpenaiModel(e.target.value)}
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                  className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
                 >
                   {openaiModels.map((m) => (
                     <option key={m} value={m}>{m}{m === 'gpt-4o-mini' ? ' (recommended)' : ''}</option>
@@ -949,14 +949,14 @@ function LabelingTab() {
                   value={enhancedOpenaiModel}
                   onChange={(e) => setEnhancedOpenaiModel(e.target.value)}
                   placeholder="e.g. gpt-4o-mini"
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+                  className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
               )}
               <button
                 onClick={handleFetchOpenaiModels}
                 disabled={fetchingOpenaiModels || !hasOpenaiApiKey}
                 title={!hasOpenaiApiKey ? 'Set the OpenAI API key first' : 'Fetch available models from OpenAI'}
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-sm rounded transition-colors whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 dark:text-slate-200 text-sm rounded transition-colors whitespace-nowrap"
               >
                 <RefreshCw className={`w-4 h-4 ${fetchingOpenaiModels ? 'animate-spin' : ''}`} />
                 {fetchingOpenaiModels ? 'Fetching…' : 'Fetch Models'}
@@ -989,14 +989,14 @@ function LabelingTab() {
         )}
 
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Max Parallel Workers (Pass 1)</label>
+          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Max Parallel Workers (Pass 1)</label>
           <input
             type="number"
             value={enhancedWorkers}
             onChange={(e) => setEnhancedWorkers(e.target.value)}
             min={1}
             max={20}
-            className="w-32 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+            className="w-32 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:border-emerald-500 focus:outline-none"
           />
           <p className="text-xs text-slate-500 mt-1">
             Concurrent LLM calls during per-example summarization. Reduce if the
@@ -1025,15 +1025,15 @@ function LabelingTab() {
 function DisplayTab() {
   return (
     <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-200 mb-1">Display Preferences</h2>
+      <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-1">Display Preferences</h2>
       <p className="text-xs text-slate-500 mb-4">
         Saved locally in your browser. These settings don't sync across devices.
       </p>
 
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
         <div className="flex items-center gap-3">
           <AlertCircle className="w-4 h-4 text-slate-500" />
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
             Display preferences are managed via the sidebar collapse toggle and theme button in the header.
             Additional display settings will be added here in a future update.
           </p>

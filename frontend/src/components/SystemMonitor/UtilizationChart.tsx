@@ -22,8 +22,8 @@ export function UtilizationChart({ data }: UtilizationChartProps) {
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-lg">
-          <p className="text-slate-400 text-xs mb-2">
+        <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-3 shadow-lg">
+          <p className="text-slate-600 dark:text-slate-400 text-xs mb-2">
             {formatTime(payload[0].payload.timestamp)}
           </p>
           {payload.map((entry: any, index: number) => (
@@ -38,8 +38,8 @@ export function UtilizationChart({ data }: UtilizationChartProps) {
   };
 
   return (
-    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6">
-      <h3 className="text-lg font-semibold text-slate-100 mb-4">
+    <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-6">
+      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
         Utilization & Temperature
       </h3>
       {data.length === 0 ? (

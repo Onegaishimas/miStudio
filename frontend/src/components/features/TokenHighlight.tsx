@@ -41,7 +41,7 @@ const getBackgroundColor = (intensity: number): string => {
  * Get text color based on activation intensity.
  */
 const getTextColor = (intensity: number): string => {
-  return intensity > 0.6 ? 'text-white' : 'text-slate-300';
+  return intensity > 0.6 ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300';
 };
 
 /**
@@ -85,7 +85,7 @@ export const TokenHighlight: React.FC<TokenHighlightProps> = ({
           >
             {cleanedToken}
             {/* Tooltip */}
-            <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+            <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
               Activation: {activation.toFixed(3)}
             </span>
           </span>
@@ -129,7 +129,7 @@ export const TokenHighlightCompact: React.FC<TokenHighlightProps & { maxTokens?:
           >
             {cleanedToken}
             {/* Tooltip */}
-            <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+            <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
               Activation: {activation.toFixed(3)}
             </span>
           </span>
@@ -219,7 +219,7 @@ export const TokenHighlightContext: React.FC<TokenHighlightContextProps> = ({
 
             // Enhanced styling for prime token
             const roleClass = isPrime
-              ? 'ring-2 ring-emerald-400 ring-offset-1 ring-offset-slate-900 font-bold scale-105'
+              ? 'ring-2 ring-emerald-400 ring-offset-1 ring-offset-white dark:ring-offset-slate-900 font-bold scale-105'
               : 'opacity-90';
 
             // Display token or placeholder for empty tokens
@@ -240,10 +240,10 @@ export const TokenHighlightContext: React.FC<TokenHighlightContextProps> = ({
                 )}
                 <span className="inline-block min-w-[1ch]">{displayToken}</span>
                 {/* Enhanced tooltip */}
-                <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 border border-slate-700">
+                <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 border border-slate-300 dark:border-slate-700">
                   {isPrime && <div className="font-bold text-emerald-400 mb-1">★ PRIME TOKEN</div>}
                   <div>Activation: {activation.toFixed(3)}</div>
-                  <div className="text-slate-400 text-[10px]">
+                  <div className="text-slate-600 dark:text-slate-400 text-[10px]">
                     {isPrefix ? 'Context (prefix)' : isPrime ? 'Maximum activation' : 'Context (suffix)'}
                   </div>
                 </span>

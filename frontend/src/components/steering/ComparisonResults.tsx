@@ -349,13 +349,13 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
             {colorClasses && (
               <div className={`w-3 h-3 rounded-full ${colorClasses.bg}`} />
             )}
-            <h4 className={`font-medium ${colorClasses ? colorClasses.text : 'text-slate-300'}`}>
+            <h4 className={`font-medium ${colorClasses ? colorClasses.text : 'text-slate-700 dark:text-slate-300'}`}>
               {title}
             </h4>
           </div>
           <button
             onClick={() => handleCopy(output.text, id)}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+            className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
             title="Copy output"
           >
             {copiedId === id ? (
@@ -369,19 +369,19 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
         {/* Feature config for steered outputs */}
         {featureConfig && (
           <div className="flex items-center gap-3 mb-3 text-sm">
-            <span className={`flex items-center gap-1 ${colorClasses?.text || 'text-slate-400'}`}>
+            <span className={`flex items-center gap-1 ${colorClasses?.text || 'text-slate-600 dark:text-slate-400'}`}>
               <Hash className="w-3.5 h-3.5" />
               {featureConfig.feature_idx}
             </span>
             <span className="text-slate-500">•</span>
-            <span className="flex items-center gap-1 text-slate-400">
+            <span className="flex items-center gap-1 text-slate-600 dark:text-slate-400">
               <Layers className="w-3.5 h-3.5" />
               L{featureConfig.layer}
             </span>
             <span className="text-slate-500">•</span>
             <span className={`flex items-center gap-1 ${
               featureConfig.strength > 150 ? 'text-amber-400' :
-              featureConfig.strength > 250 ? 'text-red-400' : 'text-slate-400'
+              featureConfig.strength > 250 ? 'text-red-400' : 'text-slate-600 dark:text-slate-400'
             }`}>
               <Zap className="w-3.5 h-3.5" />
               {featureConfig.strength > 0 ? '+' : ''}{featureConfig.strength}
@@ -390,8 +390,8 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
         )}
 
         {/* Output text */}
-        <div className="bg-slate-900/50 rounded-lg p-3">
-          <p className="text-slate-200 whitespace-pre-wrap font-mono text-sm leading-relaxed">
+        <div className="bg-slate-100 dark:bg-slate-900/50 rounded-lg p-3">
+          <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap font-mono text-sm leading-relaxed">
             {output.text}
           </p>
         </div>
@@ -428,7 +428,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${colorClasses.bg}`} />
             <h4 className={`font-medium ${colorClasses.text}`}>{displayTitle}</h4>
-            <div className="flex items-center gap-2 text-sm text-slate-400">
+            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
               <span className="flex items-center gap-1">
                 <Hash className="w-3.5 h-3.5" />
                 {featureConfig.feature_idx}
@@ -457,19 +457,19 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
                 className={`rounded-lg p-3 w-full ${
                   isPrimary
                     ? `bg-${featureConfig.color}-500/10 border border-${featureConfig.color}-500/30`
-                    : 'bg-slate-900/50'
+                    : 'bg-slate-100 dark:bg-slate-900/50'
                 }`}
               >
                 {/* Strength Header */}
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
-                    <span className={`text-xs ${isPrimary ? colorClasses.text : 'text-slate-400'}`}>
+                    <span className={`text-xs ${isPrimary ? colorClasses.text : 'text-slate-600 dark:text-slate-400'}`}>
                       {isPrimary ? 'Primary' : `Strength`}
                     </span>
                     <span className={`font-mono text-sm font-medium ${
                       warningLevel === 'extreme' ? 'text-red-400' :
                       warningLevel === 'caution' ? 'text-amber-400' :
-                      'text-slate-300'
+                      'text-slate-700 dark:text-slate-300'
                     }`}>
                       {result.strength > 0 ? '+' : ''}{result.strength}
                     </span>
@@ -478,14 +478,14 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
                     {/* Metrics inline in header */}
                     {result.metrics && (
                       <div className="flex items-center gap-4 text-xs text-slate-500">
-                        <span>PPL: <span className="text-slate-300">{result.metrics.perplexity?.toFixed(1) ?? '—'}</span></span>
-                        <span>Coh: <span className="text-slate-300">{result.metrics.coherence?.toFixed(2) ?? '—'}</span></span>
-                        <span>Tok: <span className="text-slate-300">{result.metrics.token_count ?? '—'}</span></span>
+                        <span>PPL: <span className="text-slate-700 dark:text-slate-300">{result.metrics.perplexity?.toFixed(1) ?? '—'}</span></span>
+                        <span>Coh: <span className="text-slate-700 dark:text-slate-300">{result.metrics.coherence?.toFixed(2) ?? '—'}</span></span>
+                        <span>Tok: <span className="text-slate-700 dark:text-slate-300">{result.metrics.token_count ?? '—'}</span></span>
                       </div>
                     )}
                     <button
                       onClick={() => handleCopy(result.text, `multi-${featureIndex}-${idx}`)}
-                      className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-300 transition-colors"
+                      className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                       title="Copy output"
                     >
                       {copiedId === `multi-${featureIndex}-${idx}` ? (
@@ -498,7 +498,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
                 </div>
 
                 {/* Output Text - fixed height with scroll */}
-                <div className="text-sm text-slate-200 h-40 overflow-y-auto font-mono whitespace-pre-wrap bg-slate-950/50 rounded p-2">
+                <div className="text-sm text-slate-800 dark:text-slate-200 h-40 overflow-y-auto font-mono whitespace-pre-wrap bg-slate-100 dark:bg-slate-950/50 rounded p-2">
                   {result.text}
                 </div>
               </div>
@@ -532,8 +532,8 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
             <AlertCircle className="w-5 h-5 text-red-400" />
             <h4 className="font-medium text-red-400">Prompt {index + 1} - Failed</h4>
           </div>
-          <div className="bg-slate-900/50 rounded-lg p-3 mb-2">
-            <p className="text-slate-300 text-sm">{result.prompt}</p>
+          <div className="bg-slate-100 dark:bg-slate-900/50 rounded-lg p-3 mb-2">
+            <p className="text-slate-700 dark:text-slate-300 text-sm">{result.prompt}</p>
           </div>
           <p className="text-red-400 text-sm">{result.error || 'Unknown error'}</p>
         </div>
@@ -548,8 +548,8 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
             <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
             <h4 className="font-medium text-emerald-400">Prompt {index + 1} - Processing...</h4>
           </div>
-          <div className="bg-slate-900/50 rounded-lg p-3">
-            <p className="text-slate-300 text-sm">{result.prompt}</p>
+          <div className="bg-slate-100 dark:bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-700 dark:text-slate-300 text-sm">{result.prompt}</p>
           </div>
         </div>
       );
@@ -576,7 +576,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
             </div>
             <button
               onClick={() => handleCopy(comp.prompt, `batch-prompt-${index}`)}
-              className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
               title="Copy prompt"
             >
               {copiedId === `batch-prompt-${index}` ? (
@@ -586,7 +586,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
               )}
             </button>
           </div>
-          <p className="text-slate-200 mt-2">{comp.prompt}</p>
+          <p className="text-slate-800 dark:text-slate-200 mt-2">{comp.prompt}</p>
           {/* Feature 012: server-truth applied-features summary for blended results */}
           {comp.applied_features && <AppliedFeaturesSummary applied={comp.applied_features} />}
         </div>
@@ -630,10 +630,10 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
       {/* Header with summary */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-slate-100">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
             {isBatchMode ? (isRunning ? 'Batch Results (Processing...)' : 'Batch Results') : 'Comparison Results'}
           </h3>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
             {isBatchMode && batchStats ? (
               <>
                 {batchStats.completed} of {batchStats.total} prompts completed
@@ -708,7 +708,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
               <span className="text-xs text-slate-500 uppercase tracking-wide">Prompt</span>
               <button
                 onClick={() => handleCopy(comparison.prompt, 'prompt')}
-                className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
                 title="Copy prompt"
               >
                 {copiedId === 'prompt' ? (
@@ -718,7 +718,7 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
                 )}
               </button>
             </div>
-            <p className="text-slate-200 mt-1">{comparison.prompt}</p>
+            <p className="text-slate-800 dark:text-slate-200 mt-1">{comparison.prompt}</p>
           </div>
 
           {/* Results grid */}
@@ -756,8 +756,8 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
           {/* Metrics summary */}
           {comparison.metrics_summary && Object.keys(comparison.metrics_summary).length > 0 && (
             <div className={`${COMPONENTS.card.base} p-4`}>
-              <h4 className="text-sm font-medium text-slate-300 mb-2">Metrics Summary</h4>
-              <pre className="text-xs text-slate-400 bg-slate-900/50 p-3 rounded overflow-x-auto">
+              <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Metrics Summary</h4>
+              <pre className="text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/50 p-3 rounded overflow-x-auto">
                 {JSON.stringify(comparison.metrics_summary, null, 2)}
               </pre>
             </div>

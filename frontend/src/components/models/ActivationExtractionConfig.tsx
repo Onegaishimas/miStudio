@@ -345,12 +345,12 @@ export function ActivationExtractionConfig({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
+        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h2 className="text-2xl font-semibold text-emerald-400">Extract Activations</h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Extract activations from {model.name}
             </p>
           </div>
@@ -358,7 +358,7 @@ export function ActivationExtractionConfig({
             type="button"
             onClick={onClose}
             disabled={extracting}
-            className="text-slate-400 hover:text-slate-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Close"
           >
             <X className="w-6 h-6" />
@@ -370,7 +370,7 @@ export function ActivationExtractionConfig({
           {/* Template Selection */}
           {templates.length > 0 && (
             <div>
-              <label htmlFor="extraction-template" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="extraction-template" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Load Template (Optional)
               </label>
               <select
@@ -378,7 +378,7 @@ export function ActivationExtractionConfig({
                 value={selectedTemplate}
                 onChange={(e) => handleTemplateSelect(e.target.value)}
                 disabled={extracting}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <option value="">None (Manual Configuration)</option>
                 {favorites.length > 0 && (
@@ -410,7 +410,7 @@ export function ActivationExtractionConfig({
 
           {/* Dataset Selection */}
           <div>
-            <label htmlFor="extraction-dataset" className="block text-sm font-medium text-slate-300 mb-2">
+            <label htmlFor="extraction-dataset" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Select Dataset
             </label>
             {readyDatasets.length === 0 ? (
@@ -424,8 +424,8 @@ export function ActivationExtractionConfig({
                   value={selectedDataset}
                   onChange={(e) => setSelectedDataset(e.target.value)}
                   disabled={extracting}
-                  className={`w-full px-4 py-2 bg-slate-900 border rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
-                    selectedDataset && !hasTokenization ? 'border-cyan-500/50' : 'border-slate-700'
+                  className={`w-full px-4 py-2 bg-white dark:bg-slate-900 border rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                    selectedDataset && !hasTokenization ? 'border-cyan-500/50' : 'border-slate-300 dark:border-slate-700'
                   }`}
                 >
                   {readyDatasets.map((ds) => (
@@ -457,7 +457,7 @@ export function ActivationExtractionConfig({
           {/* Layer Selection */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-300">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Select Layers ({selectedLayers.length} selected)
               </label>
               <div className="flex gap-2">
@@ -465,7 +465,7 @@ export function ActivationExtractionConfig({
                   type="button"
                   onClick={selectAllLayers}
                   disabled={extracting}
-                  className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs px-2 py-1 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Select All
                 </button>
@@ -473,7 +473,7 @@ export function ActivationExtractionConfig({
                   type="button"
                   onClick={deselectAllLayers}
                   disabled={extracting}
-                  className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs px-2 py-1 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Deselect All
                 </button>
@@ -489,7 +489,7 @@ export function ActivationExtractionConfig({
                   className={`px-3 py-2 rounded font-mono text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     selectedLayers.includes(layer)
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   L{layer}
@@ -500,7 +500,7 @@ export function ActivationExtractionConfig({
 
           {/* Hook Type Selection */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
               Hook Types
             </label>
             <div className="flex gap-3">
@@ -513,7 +513,7 @@ export function ActivationExtractionConfig({
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed capitalize ${
                     hookTypes.includes(type)
                       ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   {type}
@@ -525,7 +525,7 @@ export function ActivationExtractionConfig({
           {/* Extraction Settings */}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label htmlFor="extraction-batch-size" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="extraction-batch-size" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Batch Size
               </label>
               <input
@@ -536,11 +536,11 @@ export function ActivationExtractionConfig({
                 value={batchSize}
                 onChange={(e) => setBatchSize(parseInt(e.target.value) || 1)}
                 disabled={extracting}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               />
             </div>
             <div>
-              <label htmlFor="extraction-micro-batch-size" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="extraction-micro-batch-size" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Micro-Batch Size
                 <span className="text-xs text-slate-500 ml-2">(GPU memory)</span>
               </label>
@@ -553,11 +553,11 @@ export function ActivationExtractionConfig({
                 onChange={(e) => setMicroBatchSize(parseInt(e.target.value) || 1)}
                 disabled={extracting}
                 placeholder="Auto (same as batch)"
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               />
             </div>
             <div>
-              <label htmlFor="extraction-max-samples" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="extraction-max-samples" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Max Samples
               </label>
               <input
@@ -568,12 +568,12 @@ export function ActivationExtractionConfig({
                 value={maxSamples}
                 onChange={(e) => setMaxSamples(parseInt(e.target.value) || 1)}
                 disabled={extracting}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               />
               <p className="text-xs text-slate-500 mt-1">Max: 1,000,000</p>
             </div>
             <div>
-              <label htmlFor="extraction-top-k" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="extraction-top-k" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 Top K Examples
               </label>
               <input
@@ -584,11 +584,11 @@ export function ActivationExtractionConfig({
                 value={topKExamples}
                 onChange={(e) => setTopKExamples(parseInt(e.target.value) || 1)}
                 disabled={extracting}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               />
             </div>
             <div>
-              <label htmlFor="extraction-gpu" className="block text-sm font-medium text-slate-300 mb-2">
+              <label htmlFor="extraction-gpu" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                 <Cpu className="w-4 h-4 inline mr-1" />
                 GPU Device
               </label>
@@ -597,7 +597,7 @@ export function ActivationExtractionConfig({
                 value={gpuId}
                 onChange={(e) => setGpuId(parseInt(e.target.value))}
                 disabled={extracting}
-                className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {gpuList?.gpus && gpuList.gpus.length > 0 ? (
                   gpuList.gpus.map((gpu) => (
@@ -619,9 +619,9 @@ export function ActivationExtractionConfig({
           {!extracting && selectedLayers.length > 0 && hookTypes.length > 0 && selectedDataset && (
             <div className="space-y-4">
               {/* Extraction Summary */}
-              <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-300">
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-700 dark:text-slate-300">
                 <div className="font-medium mb-2">Extraction Summary:</div>
-                <ul className="space-y-1 text-slate-400">
+                <ul className="space-y-1 text-slate-600 dark:text-slate-400">
                   <li>• Will extract from {selectedLayers.length} layer(s)</li>
                   <li>• Using {hookTypes.length} hook type(s): {hookTypes.join(', ')}</li>
                   <li>• Processing up to {maxSamples.toLocaleString()} samples</li>
@@ -631,20 +631,20 @@ export function ActivationExtractionConfig({
 
               {/* Resource Requirements */}
               {loadingEstimates ? (
-                <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
-                  <div className="flex items-center gap-2 text-slate-400">
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-400 border-t-transparent"></div>
                     <span className="text-sm">Calculating resource requirements...</span>
                   </div>
                 </div>
               ) : resourceEstimates ? (
-                <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg text-sm">
-                  <div className="flex items-center gap-2 font-medium mb-3 text-slate-300">
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg text-sm">
+                  <div className="flex items-center gap-2 font-medium mb-3 text-slate-700 dark:text-slate-300">
                     <Info className="w-4 h-4 text-blue-400" />
                     <span>Resource Requirements:</span>
                   </div>
 
-                  <div className="space-y-3 text-slate-400">
+                  <div className="space-y-3 text-slate-600 dark:text-slate-400">
                     {/* GPU Memory */}
                     <div className="flex justify-between items-center">
                       <span>GPU Memory:</span>
@@ -682,7 +682,7 @@ export function ActivationExtractionConfig({
 
                     {/* Warnings */}
                     {resourceEstimates.warnings && resourceEstimates.warnings.length > 0 && (
-                      <div className="pt-2 mt-2 border-t border-slate-700">
+                      <div className="pt-2 mt-2 border-t border-slate-200 dark:border-slate-700">
                         <div className="flex items-start gap-2">
                           <AlertCircle className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
                           <div className="space-y-1">
@@ -715,7 +715,7 @@ export function ActivationExtractionConfig({
               type="button"
               onClick={handleOpenSaveTemplate}
               disabled={extracting || selectedLayers.length === 0 || hookTypes.length === 0}
-              className="px-6 py-3 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed rounded-lg flex items-center justify-center gap-2 transition-colors font-medium text-white"
+              className="px-6 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:bg-slate-50 dark:disabled:bg-slate-800 disabled:cursor-not-allowed rounded-lg flex items-center justify-center gap-2 transition-colors font-medium text-slate-900 dark:text-white"
             >
               <Save className="w-5 h-5" />
               Save as Template
@@ -726,7 +726,7 @@ export function ActivationExtractionConfig({
               type="button"
               onClick={handleExtract}
               disabled={extracting || readyDatasets.length === 0 || selectedLayers.length === 0 || hookTypes.length === 0 || !hasTokenization}
-              className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg flex items-center justify-center gap-2 transition-colors font-medium text-white"
+              className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg flex items-center justify-center gap-2 transition-colors font-medium text-white"
             >
               {extracting ? (
                 <>
@@ -747,18 +747,18 @@ export function ActivationExtractionConfig({
       {/* Save Template Dialog */}
       {showSaveTemplate && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-lg max-w-md w-full">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg max-w-md w-full">
             {/* Dialog Header */}
-            <div className="flex items-center justify-between p-6 border-b border-slate-800">
+            <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800">
               <div>
                 <h3 className="text-xl font-semibold text-emerald-400">Save as Template</h3>
-                <p className="text-sm text-slate-400 mt-1">Save current configuration for reuse</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Save current configuration for reuse</p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowSaveTemplate(false)}
                 disabled={savingTemplate}
-                className="text-slate-400 hover:text-slate-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Close"
               >
                 <X className="w-5 h-5" />
@@ -769,7 +769,7 @@ export function ActivationExtractionConfig({
             <div className="p-6 space-y-4">
               {/* Template Name */}
               <div>
-                <label htmlFor="template-name" className="block text-sm font-medium text-slate-300 mb-2">
+                <label htmlFor="template-name" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Template Name *
                 </label>
                 <input
@@ -780,13 +780,13 @@ export function ActivationExtractionConfig({
                   onChange={(e) => setTemplateName(e.target.value)}
                   disabled={savingTemplate}
                   placeholder="e.g., GPT-2 Small - L0,5,11 - residual,mlp"
-                  className="w-full px-4 py-2 bg-slate-950 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 />
               </div>
 
               {/* Template Description */}
               <div>
-                <label htmlFor="template-description" className="block text-sm font-medium text-slate-300 mb-2">
+                <label htmlFor="template-description" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Description (Optional)
                 </label>
                 <textarea
@@ -796,14 +796,14 @@ export function ActivationExtractionConfig({
                   disabled={savingTemplate}
                   rows={3}
                   placeholder="Describe what this template is for..."
-                  className="w-full px-4 py-2 bg-slate-950 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors resize-none"
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors resize-none"
                 />
               </div>
 
               {/* Configuration Summary */}
-              <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-300">
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-700 dark:text-slate-300">
                 <div className="font-medium mb-2">Template Configuration:</div>
-                <ul className="space-y-1 text-slate-400">
+                <ul className="space-y-1 text-slate-600 dark:text-slate-400">
                   <li>• Layer(s): {selectedLayers.join(', ')}</li>
                   <li>• Hook Types: {hookTypes.join(', ')}</li>
                   <li>• Batch Size: {batchSize} (micro-batch: {microBatchSize || 'auto'})</li>
@@ -818,7 +818,7 @@ export function ActivationExtractionConfig({
                   type="button"
                   onClick={() => setShowSaveTemplate(false)}
                   disabled={savingTemplate}
-                  className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-slate-100 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors text-slate-900 dark:text-slate-100 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
@@ -826,7 +826,7 @@ export function ActivationExtractionConfig({
                   type="button"
                   onClick={handleSaveTemplate}
                   disabled={savingTemplate || !templateName.trim()}
-                  className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg transition-colors text-white font-medium flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg transition-colors text-white font-medium flex items-center justify-center gap-2"
                 >
                   {savingTemplate ? (
                     <>

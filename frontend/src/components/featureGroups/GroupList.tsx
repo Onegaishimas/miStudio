@@ -33,7 +33,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
             value={filters.search}
             onChange={(e) => setFilters({ search: e.target.value })}
             placeholder="Search token…"
-            className="bg-slate-900 border border-slate-700 rounded-md pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:border-emerald-500 focus:outline-none w-48"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md pl-8 pr-3 py-1.5 text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:border-emerald-500 focus:outline-none w-48"
           />
         </div>
         <label className="text-xs text-slate-500 flex items-center gap-1.5">
@@ -41,7 +41,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
           <select
             value={filters.minGroupSize}
             onChange={(e) => setFilters({ minGroupSize: Number(e.target.value) })}
-            className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-200"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-2 py-1 text-sm text-slate-800 dark:text-slate-200"
           >
             {[2, 3, 5, 10].map((n) => (
               <option key={n} value={n}>{n}</option>
@@ -53,7 +53,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
           <select
             value={filters.sortBy}
             onChange={(e) => setFilters({ sortBy: e.target.value as 'size' | 'cohesion' | 'token' })}
-            className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-200"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-2 py-1 text-sm text-slate-800 dark:text-slate-200"
           >
             <option value="size">Size</option>
             <option value="cohesion">Cohesion</option>
@@ -80,10 +80,10 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
         {groups.map((group) => {
           const expanded = expandedGroupId === group.group_id;
           return (
-            <div key={group.group_id} className="bg-slate-900 border border-slate-800 rounded-lg">
+            <div key={group.group_id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg">
               <button
                 onClick={() => void expandGroup(group.group_id)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-800/50 rounded-lg"
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 rounded-lg"
               >
                 {expanded ? (
                   <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />
@@ -113,7 +113,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
           <button
             disabled={groupsOffset === 0}
             onClick={() => void fetchGroups(Math.max(0, groupsOffset - 50))}
-            className="px-3 py-1 text-xs bg-slate-800 text-slate-300 rounded disabled:opacity-40"
+            className="px-3 py-1 text-xs bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded disabled:opacity-40"
           >
             Previous
           </button>
@@ -123,7 +123,7 @@ export function GroupList({ onOpenFeature }: GroupListProps) {
           <button
             disabled={groupsOffset + 50 >= groupsTotal}
             onClick={() => void fetchGroups(groupsOffset + 50)}
-            className="px-3 py-1 text-xs bg-slate-800 text-slate-300 rounded disabled:opacity-40"
+            className="px-3 py-1 text-xs bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded disabled:opacity-40"
           >
             Next
           </button>

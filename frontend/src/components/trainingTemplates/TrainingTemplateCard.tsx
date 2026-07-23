@@ -50,21 +50,21 @@ export function TrainingTemplateCard({
 
   return (
     <div
-      className={`bg-slate-900/50 border border-slate-800 rounded-lg p-6 transition-all ${
-        onClick ? 'cursor-pointer hover:bg-slate-900/70 hover:border-slate-700' : 'cursor-default'
+      className={`bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-6 transition-all ${
+        onClick ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900/70 hover:border-slate-300 dark:hover:border-slate-700' : 'cursor-default'
       }`}
       onClick={onClick}
     >
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0">
-          <Settings className="w-8 h-8 text-slate-400" />
+          <Settings className="w-8 h-8 text-slate-600 dark:text-slate-400" />
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold text-slate-100 truncate">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
                   {template.name}
                 </h3>
                 {template.is_favorite && (
@@ -72,7 +72,7 @@ export function TrainingTemplateCard({
                 )}
               </div>
               {template.description && (
-                <p className="text-sm text-slate-400 mt-1 line-clamp-2">{template.description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">{template.description}</p>
               )}
             </div>
 
@@ -82,7 +82,7 @@ export function TrainingTemplateCard({
                 className={`p-1.5 rounded transition-colors ${
                   template.is_favorite
                     ? 'text-yellow-400 hover:bg-yellow-500/10'
-                    : 'text-slate-500 hover:bg-slate-700'
+                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
                 }`}
                 title={template.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
               >
@@ -92,20 +92,20 @@ export function TrainingTemplateCard({
               {onDuplicate && (
                 <button
                   onClick={handleDuplicate}
-                  className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                   title="Duplicate template"
                 >
-                  <Copy className="w-4 h-4 text-slate-400" />
+                  <Copy className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
               )}
 
               {onEdit && (
                 <button
                   onClick={handleEdit}
-                  className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                   title="Edit template"
                 >
-                  <Edit2 className="w-4 h-4 text-slate-400" />
+                  <Edit2 className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
               )}
 
@@ -125,13 +125,13 @@ export function TrainingTemplateCard({
             {/* Architecture Info */}
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Architecture:</span>
-              <span className="text-slate-300 font-mono">{getFrameworkDisplayName(template.encoder_type)}</span>
+              <span className="text-slate-700 dark:text-slate-300 font-mono">{getFrameworkDisplayName(template.encoder_type)}</span>
             </div>
 
             {/* Dimensions */}
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Dimensions:</span>
-              <span className="text-slate-300 font-mono">
+              <span className="text-slate-700 dark:text-slate-300 font-mono">
                 {template.hyperparameters.hidden_dim.toLocaleString()} → {template.hyperparameters.latent_dim.toLocaleString()}
               </span>
             </div>
@@ -139,38 +139,38 @@ export function TrainingTemplateCard({
             {/* Sparsity */}
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">L1 Alpha:</span>
-              <span className="text-slate-300 font-mono">{template.hyperparameters.l1_alpha}</span>
+              <span className="text-slate-700 dark:text-slate-300 font-mono">{template.hyperparameters.l1_alpha}</span>
             </div>
 
             {/* Learning Rate */}
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Learning Rate:</span>
-              <span className="text-slate-300 font-mono">{template.hyperparameters.learning_rate}</span>
+              <span className="text-slate-700 dark:text-slate-300 font-mono">{template.hyperparameters.learning_rate}</span>
             </div>
 
             {/* Training Config */}
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Batch Size:</span>
-              <span className="text-slate-300 font-mono">{template.hyperparameters.batch_size.toLocaleString()}</span>
+              <span className="text-slate-700 dark:text-slate-300 font-mono">{template.hyperparameters.batch_size.toLocaleString()}</span>
             </div>
 
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Total Steps:</span>
-              <span className="text-slate-300 font-mono">{template.hyperparameters.total_steps.toLocaleString()}</span>
+              <span className="text-slate-700 dark:text-slate-300 font-mono">{template.hyperparameters.total_steps.toLocaleString()}</span>
             </div>
           </div>
 
           {/* Model/Dataset References */}
           {(template.model_id || template.dataset_id) && (
-            <div className="mt-3 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded text-xs">
+            <div className="mt-3 px-3 py-2 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded text-xs">
               {template.model_id && (
-                <div className="text-slate-400">
+                <div className="text-slate-600 dark:text-slate-400">
                   <span className="font-medium">Model:</span>{' '}
                   <span className="font-mono">{template.model_id}</span>
                 </div>
               )}
               {template.dataset_id && (
-                <div className="text-slate-400 mt-1">
+                <div className="text-slate-600 dark:text-slate-400 mt-1">
                   <span className="font-medium">Dataset:</span>{' '}
                   <span className="font-mono">{template.dataset_id}</span>
                 </div>
@@ -180,7 +180,7 @@ export function TrainingTemplateCard({
 
           {/* Extra Metadata */}
           {template.extra_metadata && Object.keys(template.extra_metadata).length > 0 && (
-            <div className="mt-2 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded text-xs text-slate-400">
+            <div className="mt-2 px-3 py-2 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded text-xs text-slate-600 dark:text-slate-400">
               <span className="font-medium">Metadata:</span>{' '}
               {Object.keys(template.extra_metadata).length} field
               {Object.keys(template.extra_metadata).length !== 1 ? 's' : ''}

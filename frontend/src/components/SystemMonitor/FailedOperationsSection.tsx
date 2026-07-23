@@ -86,10 +86,10 @@ export function FailedOperationsSection() {
 
   if (failedTasks.length === 0 && !failedLoading) {
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
           <AlertTriangle className="w-5 h-5 text-emerald-400" />
-          <h2 className="text-lg font-semibold text-slate-100">Failed Operations</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Failed Operations</h2>
         </div>
         <p className="text-slate-500 text-center py-8">No failed operations</p>
       </div>
@@ -98,11 +98,11 @@ export function FailedOperationsSection() {
 
   return (
     <>
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400" />
-            <h2 className="text-lg font-semibold text-slate-100">Failed Operations</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Failed Operations</h2>
             <span className="px-2 py-1 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-300">
               {failedTasks.length}
             </span>
@@ -110,7 +110,7 @@ export function FailedOperationsSection() {
           <button
             onClick={() => fetchFailedTasks()}
             disabled={failedLoading}
-            className="text-slate-400 hover:text-slate-300 transition-colors disabled:opacity-50"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors disabled:opacity-50"
             title="Refresh"
           >
             <RefreshCw className={`w-4 h-4 ${failedLoading ? 'animate-spin' : ''}`} />
@@ -130,7 +130,7 @@ export function FailedOperationsSection() {
             return (
               <div
                 key={task.id}
-                className="bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden"
+                className="bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden"
               >
                 {/* Task Header */}
                 <div className="p-4">
@@ -140,11 +140,11 @@ export function FailedOperationsSection() {
                         <span className="px-2 py-0.5 bg-red-500/20 border border-red-500/30 rounded text-xs font-medium text-red-300">
                           {getTaskTypeLabel(task.task_type)}
                         </span>
-                        <span className="px-2 py-0.5 bg-slate-700 rounded text-xs text-slate-300">
+                        <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-xs text-slate-700 dark:text-slate-300">
                           {getEntityTypeLabel(task.entity_type)}
                         </span>
                       </div>
-                      <div className="text-sm font-medium text-slate-100 truncate">
+                      <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                         {task.entity_info?.name || task.entity_id}
                       </div>
                       {task.entity_info?.repo_id && (
@@ -185,7 +185,7 @@ export function FailedOperationsSection() {
                             className={`px-2 py-1.5 rounded text-xs transition-colors ${
                               confirmingDeleteId === task.id
                                 ? 'bg-red-600 hover:bg-red-700 text-white font-medium'
-                                : 'text-slate-400 hover:text-red-400 hover:bg-red-500/10'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-red-400 hover:bg-red-500/10'
                             }`}
                             title={
                               confirmingDeleteId === task.id
@@ -210,7 +210,7 @@ export function FailedOperationsSection() {
                       )}
                       <button
                         onClick={() => toggleExpanded(task.id)}
-                        className="p-1.5 text-slate-400 hover:text-slate-300 transition-colors"
+                        className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
                         title={isExpanded ? 'Collapse' : 'Expand'}
                       >
                         {isExpanded ? (
@@ -225,8 +225,8 @@ export function FailedOperationsSection() {
 
                 {/* Expanded Details */}
                 {isExpanded && (
-                  <div className="px-4 pb-4 pt-2 border-t border-slate-700">
-                    <div className="text-xs text-slate-400 font-semibold mb-2">Error Details:</div>
+                  <div className="px-4 pb-4 pt-2 border-t border-slate-300 dark:border-slate-700">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 font-semibold mb-2">Error Details:</div>
                     <div className="text-sm text-red-300 bg-red-950/30 border border-red-900/50 rounded p-3 font-mono whitespace-pre-wrap break-words">
                       {task.error_message || 'No error message available'}
                     </div>

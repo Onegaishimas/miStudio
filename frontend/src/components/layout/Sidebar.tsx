@@ -134,7 +134,7 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
                   title="User Manual"
                   className="flex-shrink-0 p-2 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
-                  <BookOpen className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
+                  <BookOpen className="w-4 h-4 text-slate-600 dark:text-slate-400 hover:text-emerald-400" />
                 </a>
               )}
             </div>
@@ -145,7 +145,7 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
                 href="https://github.com/hitsainet/miStudio/releases"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors font-mono"
+                className="text-[10px] text-slate-600 dark:text-slate-400 hover:text-emerald-400 transition-colors font-mono"
               >
                 v{APP_VERSION}
               </a>

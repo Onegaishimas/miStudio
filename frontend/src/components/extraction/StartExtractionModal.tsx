@@ -381,18 +381,18 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
 
       {/* Modal Dialog */}
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
-        <div className="bg-slate-900 rounded-lg border border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           {/* Modal Header */}
-          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+          <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-300 dark:border-slate-700 px-6 py-4 flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-white">Start Feature Extraction</h2>
-              <p className="text-sm text-slate-400 mt-1">
+              <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Start Feature Extraction</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                 Extract interpretable features from an SAE
               </p>
             </div>
             <button
               onClick={handleClose}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-slate-600 dark:text-slate-400 hover:text-white transition-colors"
               aria-label="Close modal"
             >
               <X className="w-6 h-6" />
@@ -409,24 +409,24 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                     <p className="text-emerald-400 font-medium mb-2">
                       Batch extraction started successfully!
                     </p>
-                    <div className="text-sm text-slate-300 space-y-2">
+                    <div className="text-sm text-slate-700 dark:text-slate-300 space-y-2">
                       <p>
                         <span className="text-emerald-400">{batchResult.total_created}</span> extraction jobs created
                         {batchResult.total_skipped > 0 && (
                           <span>, <span className="text-amber-400">{batchResult.total_skipped}</span> SAEs skipped</span>
                         )}
                       </p>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
                         Batch ID: {batchResult.batch_id}
                       </p>
                       {batchResult.created_jobs.length > 0 && (
                         <div className="mt-3">
-                          <p className="text-xs text-slate-400 mb-1">Created jobs:</p>
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Created jobs:</p>
                           <div className="max-h-32 overflow-y-auto space-y-1">
                             {batchResult.created_jobs.map((job) => (
                               <div key={job.job_id} className="text-xs flex items-center gap-2">
                                 <span className="text-emerald-500">#{job.position}</span>
-                                <span className="text-slate-300">{job.sae_name || job.sae_id.slice(0, 12)}</span>
+                                <span className="text-slate-700 dark:text-slate-300">{job.sae_name || job.sae_id.slice(0, 12)}</span>
                               </div>
                             ))}
                           </div>
@@ -451,7 +451,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                     <p className="text-emerald-400 font-medium mb-2">
                       Extraction started successfully!
                     </p>
-                    <p className="text-sm text-slate-300">
+                    <p className="text-sm text-slate-700 dark:text-slate-300">
                       The extraction job is now queued. You can monitor progress on this page.
                     </p>
                   </>
@@ -467,7 +467,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                     {/* SAE Selection - Multi-select for batch extraction */}
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <label className="block text-xs text-slate-400">
+                        <label className="block text-xs text-slate-600 dark:text-slate-400">
                           Select SAE{readySAEs.length > 1 ? 's' : ''} ({selectedSAEIds.length} selected)
                         </label>
                         {readySAEs.length > 1 && (
@@ -483,7 +483,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                             <button
                               type="button"
                               onClick={deselectAllSAEs}
-                              className="text-xs text-slate-400 hover:text-slate-300"
+                              className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-300"
                             >
                               Clear
                             </button>
@@ -492,7 +492,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                       </div>
 
                       {/* SAE List with checkboxes */}
-                      <div className="max-h-48 overflow-y-auto bg-slate-800 border border-slate-700 rounded">
+                      <div className="max-h-48 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded">
                         {readySAEs.length === 0 ? (
                           <div className="p-3 text-center text-sm text-slate-500">
                             No ready SAEs available
@@ -511,24 +511,24 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                               <div
                                 key={sae.id}
                                 onClick={() => toggleSAESelection(sae.id)}
-                                className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-slate-700 last:border-b-0 transition-colors ${
+                                className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-slate-300 dark:border-slate-700 last:border-b-0 transition-colors ${
                                   isSelected
                                     ? 'bg-emerald-900/30'
-                                    : 'hover:bg-slate-700/50'
+                                    : 'hover:bg-slate-100 dark:hover:bg-slate-700/50'
                                 }`}
                               >
                                 <div className={`w-5 h-5 rounded flex items-center justify-center border ${
                                   isSelected
                                     ? 'bg-emerald-600 border-emerald-500'
-                                    : 'border-slate-600'
+                                    : 'border-slate-300 dark:border-slate-600'
                                 }`}>
                                   {isSelected && <Check className="w-3 h-3 text-white" />}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-sm text-white truncate">
+                                  <div className="text-sm text-slate-900 dark:text-white truncate">
                                     {sae.name || `${modelName} - ${layer}`}
                                   </div>
-                                  <div className="text-xs text-slate-400 truncate">
+                                  <div className="text-xs text-slate-600 dark:text-slate-400 truncate">
                                     {modelName} | {layer} | {arch} | {features} features
                                   </div>
                                 </div>
@@ -559,11 +559,11 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
 
                     {/* Dataset Selection (required for SAE) */}
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">Select Dataset</label>
+                      <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Select Dataset</label>
                       <select
                         value={selectedDatasetId}
                         onChange={(e) => setSelectedDatasetId(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                       >
                         <option value="">-- Select a dataset --</option>
                         {readyDatasets.map((dataset) => (
@@ -581,20 +581,20 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
 
                     {/* Selected SAE(s) Info */}
                     {selectedSAEs.length === 1 && (
-                      <div className="p-3 bg-slate-800/30 border border-slate-700 rounded text-sm">
-                        <div className="grid grid-cols-2 gap-2 text-slate-400">
+                      <div className="p-3 bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded text-sm">
+                        <div className="grid grid-cols-2 gap-2 text-slate-600 dark:text-slate-400">
                           <span>Model:</span>
-                          <span className="text-slate-200">{selectedSAEs[0].model_name || (selectedSAEs[0].model_id ? getModelName(selectedSAEs[0].model_id) : 'Unknown')}</span>
+                          <span className="text-slate-800 dark:text-slate-200">{selectedSAEs[0].model_name || (selectedSAEs[0].model_id ? getModelName(selectedSAEs[0].model_id) : 'Unknown')}</span>
                           <span>Layer:</span>
-                          <span className="text-slate-200">{selectedSAEs[0].layer ?? 'Unknown'}</span>
+                          <span className="text-slate-800 dark:text-slate-200">{selectedSAEs[0].layer ?? 'Unknown'}</span>
                           <span>Features:</span>
-                          <span className="text-slate-200">{selectedSAEs[0].n_features?.toLocaleString() ?? 'Unknown'}</span>
+                          <span className="text-slate-800 dark:text-slate-200">{selectedSAEs[0].n_features?.toLocaleString() ?? 'Unknown'}</span>
                         </div>
                       </div>
                     )}
                     {selectedSAEs.length > 1 && (
-                      <div className="p-3 bg-slate-800/30 border border-slate-700 rounded text-sm">
-                        <div className="text-slate-400 mb-2">
+                      <div className="p-3 bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded text-sm">
+                        <div className="text-slate-600 dark:text-slate-400 mb-2">
                           <span className="text-emerald-400 font-medium">{selectedSAEs.length}</span> SAEs selected for batch extraction
                         </div>
                         <div className="text-xs text-slate-500">
@@ -606,8 +606,8 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
 
                 {/* Extraction Template Selector */}
                 {extractionTemplates.length > 0 && (
-                  <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
-                    <label className="block text-xs text-slate-400 mb-2">Load Settings from Template</label>
+                  <div className="p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-2">Load Settings from Template</label>
                     <select
                       onChange={(e) => {
                         const template = extractionTemplates.find(t => t.id === e.target.value);
@@ -615,7 +615,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                           applyTemplate(template);
                         }
                       }}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                       defaultValue=""
                     >
                       <option value="">-- Select a template to apply --</option>
@@ -634,7 +634,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                 {/* Basic Configuration */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Evaluation Samples</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Evaluation Samples</label>
                     <input
                       type="number"
                       value={evaluationSamples}
@@ -642,12 +642,12 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                       min={100}
                       max={1000000}
                       step={100}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                     />
                     <p className="text-xs text-slate-500 mt-1">Max: 1,000,000</p>
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Top-K Examples per Feature</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Top-K Examples per Feature</label>
                     <input
                       type="number"
                       value={topKExamples}
@@ -655,20 +655,20 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                       min={10}
                       max={1000}
                       step={10}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
 
                 {/* Dead Neuron Filtering */}
-                <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium text-slate-300">Dead Neuron Filtering</label>
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Dead Neuron Filtering</label>
                     <span className="text-xs text-emerald-500">
                       {(minActivationFrequency * 100).toFixed(2)}% min frequency
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mb-3">
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
                     Neurons firing less than this threshold are considered "dead" and will be filtered out.
                   </p>
                   <div className="flex items-center gap-3">
@@ -679,7 +679,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                       min={0}
                       max={10}
                       step={0.1}
-                      className="flex-1 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      className="flex-1 h-2 bg-slate-100 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
                     <input
                       type="number"
@@ -688,54 +688,54 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                       min={0}
                       max={10}
                       step={0.01}
-                      className="w-20 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-emerald-500"
+                      className="w-20 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white text-sm focus:outline-none focus:border-emerald-500"
                     />
-                    <span className="text-xs text-slate-400">%</span>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">%</span>
                   </div>
                 </div>
 
                 {/* Context Window Configuration */}
-                <div className="bg-slate-900 rounded-lg border border-slate-700 p-4">
+                <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
                   <button
                     type="button"
                     onClick={() => setShowContextWindow(!showContextWindow)}
                     className="flex items-center justify-between w-full text-left"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-slate-300">Context Window</span>
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Context Window</span>
                       <span className="text-xs text-emerald-500">
                         ({contextPrefixTokens} prefix + prime + {contextSuffixTokens} suffix)
                       </span>
                     </div>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showContextWindow ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`w-4 h-4 text-slate-600 dark:text-slate-400 transition-transform ${showContextWindow ? 'rotate-180' : ''}`} />
                   </button>
 
                   {showContextWindow && (
                     <div className="mt-4 space-y-3">
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
                         Capture tokens before and after the prime token (max activation) to provide context for interpretation.
                       </p>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">Prefix Tokens</label>
+                          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Prefix Tokens</label>
                           <input
                             type="number"
                             value={contextPrefixTokens}
                             onChange={(e) => setContextPrefixTokens(Number(e.target.value))}
                             min={0}
                             max={50}
-                            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">Suffix Tokens</label>
+                          <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Suffix Tokens</label>
                           <input
                             type="number"
                             value={contextSuffixTokens}
                             onChange={(e) => setContextSuffixTokens(Number(e.target.value))}
                             min={0}
                             max={50}
-                            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                           />
                         </div>
                       </div>
@@ -744,74 +744,74 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                 </div>
 
                 {/* Token Filtering Configuration */}
-                <div className="bg-slate-900 rounded-lg border border-slate-700 p-4">
+                <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
                   <button
                     type="button"
                     onClick={() => setShowFilters(!showFilters)}
                     className="flex items-center justify-between w-full text-left"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-slate-300">Token Filtering</span>
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Token Filtering</span>
                       <span className="text-xs text-slate-500">
                         ({[filterSpecial, filterSingleChar, filterPunctuation, filterNumbers, filterFragments, filterStopWords].filter(Boolean).length}/6 enabled)
                       </span>
                     </div>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`w-4 h-4 text-slate-600 dark:text-slate-400 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
                   </button>
 
                   {showFilters && (
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={filterSpecial}
                           onChange={(e) => setFilterSpecial(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>Special tokens</span>
                       </label>
-                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={filterSingleChar}
                           onChange={(e) => setFilterSingleChar(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>Single characters</span>
                       </label>
-                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={filterPunctuation}
                           onChange={(e) => setFilterPunctuation(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>Punctuation</span>
                       </label>
-                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={filterNumbers}
                           onChange={(e) => setFilterNumbers(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>Numbers</span>
                       </label>
-                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={filterFragments}
                           onChange={(e) => setFilterFragments(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>Word fragments</span>
                       </label>
-                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={filterStopWords}
                           onChange={(e) => setFilterStopWords(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                         />
                         <span>Stop words</span>
                       </label>
@@ -820,13 +820,13 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                 </div>
 
                 {/* NLP Processing Configuration */}
-                <div className="bg-slate-900 rounded-lg border border-slate-700 p-4">
-                  <label className="flex items-center gap-3 text-sm text-slate-300 cursor-pointer">
+                <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-700 p-4">
+                  <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={autoNlp}
                       onChange={(e) => setAutoNlp(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500"
+                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div>
                       <span className="font-medium">Auto-run NLP Analysis</span>
@@ -859,7 +859,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
           </div>
 
           {/* Modal Footer */}
-          <div className="sticky bottom-0 bg-slate-900 border-t border-slate-700 px-6 py-4 flex items-center justify-end gap-3">
+          <div className="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-slate-300 dark:border-slate-700 px-6 py-4 flex items-center justify-end gap-3">
             {showSuccessMessage ? (
               <button
                 onClick={handleClose}
@@ -872,7 +872,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                 <button
                   onClick={handleSaveAsTemplate}
                   disabled={isSavingTemplate}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-300 rounded transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-700 dark:text-slate-300 rounded transition-colors"
                   title="Save current settings as a reusable template"
                 >
                   <Save className="w-4 h-4" />
@@ -881,7 +881,7 @@ export const StartExtractionModal: React.FC<StartExtractionModalProps> = ({
                 <div className="flex-1" /> {/* Spacer */}
                 <button
                   onClick={handleClose}
-                  className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
+                  className="px-6 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-600 text-slate-900 dark:text-white rounded transition-colors"
                 >
                   Cancel
                 </button>

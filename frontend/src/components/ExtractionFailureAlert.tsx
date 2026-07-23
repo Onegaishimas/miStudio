@@ -101,7 +101,7 @@ export function ExtractionFailureAlert({ model, onRetry, onCancel, onDismiss }: 
 
             <button
               onClick={() => onCancel(model.id, extraction_id)}
-              className="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium rounded transition-colors"
+              className="px-2.5 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-600 text-slate-800 dark:text-slate-200 text-xs font-medium rounded transition-colors"
             >
               Cancel
             </button>

@@ -15,13 +15,13 @@ export function ComputeIndexBanner() {
     const progress = computeProgress?.progress ?? 0;
     const stage = computeProgress?.stage ?? 'starting';
     return (
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-4 mb-4">
         <div className="flex items-center gap-3 mb-2">
           <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
-          <span className="text-sm text-slate-200">Building cluster index…</span>
+          <span className="text-sm text-slate-800 dark:text-slate-200">Building cluster index…</span>
           <span className="text-xs text-slate-500">{stage}</span>
         </div>
-        <div className="w-full bg-slate-800 rounded-full h-2">
+        <div className="w-full bg-white dark:bg-slate-800 rounded-full h-2">
           <div
             className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
             style={{ width: `${Math.max(progress, 2)}%` }}
@@ -51,9 +51,9 @@ export function ComputeIndexBanner() {
 
   if (!status || status.status === 'none') {
     return (
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 mb-4 text-center">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-6 mb-4 text-center">
         <Sparkles className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
-        <p className="text-sm text-slate-200 mb-1">No cluster index yet</p>
+        <p className="text-sm text-slate-800 dark:text-slate-200 mb-1">No cluster index yet</p>
         <p className="text-xs text-slate-500 mb-4 max-w-md mx-auto">
           Build a token→feature index to browse features that fire on the same top activating
           token with similar context. CPU-only background job; a few minutes for large extractions.
@@ -77,7 +77,7 @@ export function ComputeIndexBanner() {
       </span>
       <button
         onClick={() => void computeIndex({}, true)}
-        className="flex items-center gap-1 text-slate-400 hover:text-emerald-400"
+        className="flex items-center gap-1 text-slate-600 dark:text-slate-400 hover:text-emerald-400"
         title="Recompute the index"
       >
         <RefreshCw className="w-3 h-3" /> Recompute

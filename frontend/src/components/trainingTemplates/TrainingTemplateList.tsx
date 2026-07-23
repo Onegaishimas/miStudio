@@ -56,8 +56,8 @@ export function TrainingTemplateList({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader className="w-8 h-8 text-slate-400 animate-spin" />
-        <span className="ml-3 text-slate-400">Loading templates...</span>
+        <Loader className="w-8 h-8 text-slate-600 dark:text-slate-400 animate-spin" />
+        <span className="ml-3 text-slate-600 dark:text-slate-400">Loading templates...</span>
       </div>
     );
   }
@@ -65,10 +65,10 @@ export function TrainingTemplateList({
   if (templates.length === 0) {
     return (
       <div className="text-center py-12">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800 mb-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white dark:bg-slate-800 mb-4">
           <Search className="w-8 h-8 text-slate-500" />
         </div>
-        <h3 className="text-lg font-semibold text-slate-300 mb-2">No templates found</h3>
+        <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">No templates found</h3>
         <p className="text-sm text-slate-500">
           Create your first training template to get started.
         </p>
@@ -87,15 +87,15 @@ export function TrainingTemplateList({
               value={localSearchQuery}
               onChange={(e) => setLocalSearchQuery(e.target.value)}
               placeholder="Search templates..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
           </div>
         </div>
         <div className="text-center py-12">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800 mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white dark:bg-slate-800 mb-4">
             <Search className="w-8 h-8 text-slate-500" />
           </div>
-          <h3 className="text-lg font-semibold text-slate-300 mb-2">
+          <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">
             No templates match your search
           </h3>
           <p className="text-sm text-slate-500">
@@ -103,7 +103,7 @@ export function TrainingTemplateList({
           </p>
           <button
             onClick={() => setLocalSearchQuery('')}
-            className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300"
+            className="mt-4 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300"
           >
             Clear Search
           </button>
@@ -123,7 +123,7 @@ export function TrainingTemplateList({
             value={localSearchQuery}
             onChange={(e) => setLocalSearchQuery(e.target.value)}
             placeholder="Search templates by name, description, or architecture..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
           />
         </div>
         <button
@@ -131,7 +131,7 @@ export function TrainingTemplateList({
           className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
             showFilters
               ? 'bg-emerald-600 text-white'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
           }`}
         >
           <SlidersHorizontal className="w-4 h-4" />
@@ -141,15 +141,15 @@ export function TrainingTemplateList({
 
       {/* Filters Panel (placeholder for future enhancement) */}
       {showFilters && (
-        <div className="mb-6 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
-          <p className="text-sm text-slate-400">
+        <div className="mb-6 p-4 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
             Additional filters coming soon (architecture type, date range, etc.)
           </p>
         </div>
       )}
 
       {/* Results Count */}
-      <div className="mb-4 text-sm text-slate-400">
+      <div className="mb-4 text-sm text-slate-600 dark:text-slate-400">
         Showing {filteredTemplates.length} of {templates.length} template
         {templates.length !== 1 ? 's' : ''}
         {localSearchQuery && ' (filtered)'}
@@ -172,15 +172,15 @@ export function TrainingTemplateList({
 
       {/* Pagination */}
       {totalPages > 1 && onPageChange && (
-        <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-800">
-          <div className="text-sm text-slate-400">
+        <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-200 dark:border-slate-800">
+          <div className="text-sm text-slate-600 dark:text-slate-400">
             Page {currentPage} of {totalPages}
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => onPageChange(currentPage - 1)}
               disabled={!hasPrev}
-              className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-300 disabled:text-slate-600 rounded transition-colors"
+              className="flex items-center gap-1 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 disabled:text-slate-600 rounded transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
               Previous
@@ -188,7 +188,7 @@ export function TrainingTemplateList({
             <button
               onClick={() => onPageChange(currentPage + 1)}
               disabled={!hasNext}
-              className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-300 disabled:text-slate-600 rounded transition-colors"
+              className="flex items-center gap-1 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 disabled:text-slate-600 rounded transition-colors"
             >
               Next
               <ChevronRight className="w-4 h-4" />

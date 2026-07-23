@@ -218,12 +218,12 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
 
   if (error) {
     return (
-      <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+      <div className="bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
         <div className="flex items-start space-x-2 text-red-400">
           <XCircle size={20} className="mt-0.5 flex-shrink-0" />
           <div>
             <p className="font-medium">Failed to load resource configuration</p>
-            <p className="text-sm text-slate-400 mt-1">{error}</p>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{error}</p>
           </div>
         </div>
       </div>
@@ -232,8 +232,8 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
 
   if (!estimate) {
     return (
-      <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
-        <div className="flex items-center space-x-2 text-slate-400">
+      <div className="bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
+        <div className="flex items-center space-x-2 text-slate-600 dark:text-slate-400">
           <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-400 border-t-transparent" />
           <span>Loading resource configuration...</span>
         </div>
@@ -246,12 +246,12 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
   const hasWarnings = resource_estimates.warnings.length > 0;
 
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 space-y-4">
+    <div className="bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <Settings size={18} className="text-slate-400" />
-          <h3 className="font-medium text-slate-200">Resource Configuration</h3>
+          <Settings size={18} className="text-slate-600 dark:text-slate-400" />
+          <h3 className="font-medium text-slate-800 dark:text-slate-200">Resource Configuration</h3>
         </div>
         <div className="flex items-center space-x-2">
           <button
@@ -264,7 +264,7 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
           </button>
           <button
             onClick={handleReset}
-            className="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+            className="px-3 py-1 text-sm bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded transition-colors"
             disabled={isLoading}
           >
             Reset
@@ -274,20 +274,20 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
 
       {/* System Resources Summary */}
       <div className="grid grid-cols-3 gap-3 text-sm">
-        <div className="bg-slate-900/50 rounded p-2">
-          <p className="text-slate-400 text-xs">CPU Cores</p>
-          <p className="text-slate-100 font-medium">{system_resources.cpu_cores}</p>
+        <div className="bg-slate-100 dark:bg-slate-900/50 rounded p-2">
+          <p className="text-slate-600 dark:text-slate-400 text-xs">CPU Cores</p>
+          <p className="text-slate-900 dark:text-slate-100 font-medium">{system_resources.cpu_cores}</p>
         </div>
-        <div className="bg-slate-900/50 rounded p-2">
-          <p className="text-slate-400 text-xs">Available RAM</p>
-          <p className="text-slate-100 font-medium">
+        <div className="bg-slate-100 dark:bg-slate-900/50 rounded p-2">
+          <p className="text-slate-600 dark:text-slate-400 text-xs">Available RAM</p>
+          <p className="text-slate-900 dark:text-slate-100 font-medium">
             {system_resources.available_ram_gb.toFixed(1)} GB
           </p>
         </div>
         {system_resources.gpu_available && (
-          <div className="bg-slate-900/50 rounded p-2">
-            <p className="text-slate-400 text-xs">Available GPU</p>
-            <p className="text-slate-100 font-medium">
+          <div className="bg-slate-100 dark:bg-slate-900/50 rounded p-2">
+            <p className="text-slate-600 dark:text-slate-400 text-xs">Available GPU</p>
+            <p className="text-slate-900 dark:text-slate-100 font-medium">
               {system_resources.gpu_memory_available_gb?.toFixed(1)} GB
             </p>
           </div>
@@ -299,8 +299,8 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
         {/* Batch Size */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-sm text-slate-300">Batch Size</label>
-            <span className="text-sm text-slate-400">
+            <label className="text-sm text-slate-700 dark:text-slate-300">Batch Size</label>
+            <span className="text-sm text-slate-600 dark:text-slate-400">
               {batchSize} {batchSize !== recommended_settings.batch_size && (
                 <span className="text-xs text-slate-500">
                   (recommended: {recommended_settings.batch_size})
@@ -315,7 +315,7 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
             step="8"
             value={batchSize ?? recommended_settings.batch_size}
             onChange={(e) => handleBatchSizeChange(parseInt(e.target.value))}
-            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+            className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
             disabled={isLoading}
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1">
@@ -327,8 +327,8 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
         {/* CPU Workers */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-sm text-slate-300">CPU Workers</label>
-            <span className="text-sm text-slate-400">
+            <label className="text-sm text-slate-700 dark:text-slate-300">CPU Workers</label>
+            <span className="text-sm text-slate-600 dark:text-slate-400">
               {numWorkers} {numWorkers !== recommended_settings.num_workers && (
                 <span className="text-xs text-slate-500">
                   (recommended: {recommended_settings.num_workers})
@@ -343,7 +343,7 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
             step="1"
             value={numWorkers ?? recommended_settings.num_workers}
             onChange={(e) => handleNumWorkersChange(parseInt(e.target.value))}
-            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+            className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
             disabled={isLoading}
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1">
@@ -355,8 +355,8 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
         {/* DB Commit Batch */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-sm text-slate-300">DB Commit Batch</label>
-            <span className="text-sm text-slate-400">
+            <label className="text-sm text-slate-700 dark:text-slate-300">DB Commit Batch</label>
+            <span className="text-sm text-slate-600 dark:text-slate-400">
               {dbCommitBatch} {dbCommitBatch !== recommended_settings.db_commit_batch && (
                 <span className="text-xs text-slate-500">
                   (recommended: {recommended_settings.db_commit_batch})
@@ -371,7 +371,7 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
             step="500"
             value={dbCommitBatch ?? recommended_settings.db_commit_batch}
             onChange={(e) => handleDbCommitBatchChange(parseInt(e.target.value))}
-            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+            className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
             disabled={isLoading}
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1">
@@ -383,18 +383,18 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
 
       {/* Estimated Resource Usage */}
       <div className="space-y-2">
-        <h4 className="text-sm font-medium text-slate-300">Estimated Resource Usage</h4>
+        <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300">Estimated Resource Usage</h4>
 
         {/* RAM Usage */}
         <div>
           <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-slate-400">RAM</span>
-            <span className="text-slate-300">
+            <span className="text-slate-600 dark:text-slate-400">RAM</span>
+            <span className="text-slate-700 dark:text-slate-300">
               {resource_estimates.estimated_ram_gb.toFixed(1)} GB /{' '}
               {system_resources.available_ram_gb.toFixed(1)} GB available
             </span>
           </div>
-          <div className="w-full bg-slate-700 rounded-full h-2">
+          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
             <div
               className={`${getUsageColor(
                 resource_estimates.estimated_ram_gb,
@@ -414,13 +414,13 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
         {system_resources.gpu_available && resource_estimates.estimated_gpu_gb !== null && (
           <div>
             <div className="flex items-center justify-between text-xs mb-1">
-              <span className="text-slate-400">GPU Memory</span>
-              <span className="text-slate-300">
+              <span className="text-slate-600 dark:text-slate-400">GPU Memory</span>
+              <span className="text-slate-700 dark:text-slate-300">
                 {resource_estimates.estimated_gpu_gb.toFixed(1)} GB /{' '}
                 {system_resources.gpu_memory_available_gb?.toFixed(1)} GB available
               </span>
             </div>
-            <div className="w-full bg-slate-700 rounded-full h-2">
+            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
               <div
                 className={`${getUsageColor(
                   resource_estimates.estimated_gpu_gb,
@@ -441,8 +441,8 @@ export const ResourceConfigPanel: React.FC<ResourceConfigPanelProps> = ({
 
         {/* Duration */}
         <div className="flex items-center justify-between text-sm pt-1">
-          <span className="text-slate-400">Estimated Time</span>
-          <span className="text-slate-200 font-medium">
+          <span className="text-slate-600 dark:text-slate-400">Estimated Time</span>
+          <span className="text-slate-900 dark:text-slate-200 font-medium">
             {formatDuration(resource_estimates.estimated_duration_minutes)}
           </span>
         </div>

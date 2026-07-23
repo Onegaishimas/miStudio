@@ -126,7 +126,7 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
       <div className="grid grid-cols-2 gap-4">
         {/* HuggingFace Repository Input */}
         <div>
-          <label htmlFor="model-repo" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="model-repo" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             HuggingFace Model Repository
           </label>
           <input
@@ -141,13 +141,13 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
             }}
             onKeyPress={handleKeyPress}
             disabled={isSubmitting}
-            className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           />
         </div>
 
         {/* Quantization Format Selector */}
         <div>
-          <label htmlFor="model-quantization" className="block text-sm font-medium text-slate-300 mb-2">
+          <label htmlFor="model-quantization" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
             Quantization Format
           </label>
           <select
@@ -155,7 +155,7 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
             value={quantization}
             onChange={(e) => setQuantization(e.target.value)}
             disabled={isSubmitting}
-            className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <option value={QuantizationFormat.FP32}>FP32 (Full Precision)</option>
             <option value={QuantizationFormat.FP16}>FP16 (Half Precision)</option>
@@ -168,7 +168,7 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
 
       {/* Access Token Input */}
       <div>
-        <label htmlFor="access-token" className="block text-sm font-medium text-slate-300 mb-2">
+        <label htmlFor="access-token" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
           Access Token <span className="text-slate-500">(optional, for gated models)</span>
         </label>
         <div className="relative">
@@ -185,7 +185,7 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
             onChange={(e) => setAccessToken(e.target.value)}
             onKeyPress={handleKeyPress}
             disabled={isSubmitting}
-            className="w-full px-4 py-2 pr-10 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 font-mono text-sm text-slate-100 placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full px-4 py-2 pr-10 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-500 font-mono text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             style={{ WebkitTextSecurity: showToken ? 'none' : 'disc' } as React.CSSProperties}
           />
           {accessToken && (
@@ -196,7 +196,7 @@ export function ModelDownloadForm({ onDownload }: ModelDownloadFormProps) {
               onMouseLeave={() => setShowToken(false)}
               onTouchStart={() => setShowToken(true)}
               onTouchEnd={() => setShowToken(false)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-300 transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
               title="Hold to reveal token"
               tabIndex={-1}
             >

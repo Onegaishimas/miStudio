@@ -15,7 +15,7 @@ export function TimeRangeSelector({ selected, onChange }: TimeRangeSelectorProps
   const ranges: TimeRange[] = ['1h', '6h', '24h'];
 
   return (
-    <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-1">
+    <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-1">
       {ranges.map((range) => (
         <button
           key={range}
@@ -23,7 +23,7 @@ export function TimeRangeSelector({ selected, onChange }: TimeRangeSelectorProps
           className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
             selected === range
               ? 'bg-emerald-600 text-white'
-              : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
           {range}

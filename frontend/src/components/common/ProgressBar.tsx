@@ -19,14 +19,14 @@ export function ProgressBar({
 
   return (
     <div className={`space-y-1 ${className}`}>
-      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+      <div className="w-full h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
         <div
           className="h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out"
           style={{ width: `${clampedProgress}%` }}
         />
       </div>
       {showPercentage && (
-        <div className="text-right text-xs text-slate-400">
+        <div className="text-right text-xs text-slate-600 dark:text-slate-400">
           {clampedProgress.toFixed(1)}%
         </div>
       )}

@@ -160,22 +160,22 @@ export function DeleteExtractionsModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
+        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800">
           <div>
             <div className="flex items-center gap-3 mb-2">
               <Trash2 className="w-6 h-6 text-red-400" />
-              <h2 className="text-2xl font-semibold text-slate-100">Delete Extractions</h2>
+              <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Delete Extractions</h2>
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
               {model.name} - Select extractions to delete
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-300 transition-colors"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 transition-colors"
             aria-label="Close"
             disabled={deleting}
           >
@@ -187,8 +187,8 @@ export function DeleteExtractionsModal({
         <div className="flex-1 overflow-y-auto p-6">
           {loading && (
             <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-700 border-t-emerald-500"></div>
-              <p className="text-slate-400 mt-4">Loading extractions...</p>
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 dark:border-slate-700 border-t-emerald-500"></div>
+              <p className="text-slate-600 dark:text-slate-400 mt-4">Loading extractions...</p>
             </div>
           )}
 
@@ -199,7 +199,7 @@ export function DeleteExtractionsModal({
               <p className="text-slate-500">{error}</p>
               <button
                 onClick={fetchExtractions}
-                className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300"
+                className="mt-4 px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300"
               >
                 Retry
               </button>
@@ -209,26 +209,26 @@ export function DeleteExtractionsModal({
           {!loading && !error && extractions.length === 0 && (
             <div className="text-center py-12">
               <Database className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-              <p className="text-slate-400 text-lg">No extractions to delete</p>
+              <p className="text-slate-600 dark:text-slate-400 text-lg">No extractions to delete</p>
             </div>
           )}
 
           {!loading && !error && extractions.length > 0 && (
             <div className="space-y-4">
               {/* Select All */}
-              <div className="flex items-center justify-between bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+              <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={selectedIds.size === extractions.filter(e => e.can_delete !== false).length && selectedIds.size > 0}
                     onChange={toggleSelectAll}
-                    className="w-5 h-5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900 cursor-pointer"
+                    className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 cursor-pointer"
                   />
-                  <span className="text-slate-100 font-medium">
+                  <span className="text-slate-900 dark:text-slate-100 font-medium">
                     Select All Deletable ({extractions.filter(e => e.can_delete !== false).length} of {extractions.length} extractions)
                   </span>
                 </label>
-                <div className="text-slate-400 text-sm">
+                <div className="text-slate-600 dark:text-slate-400 text-sm">
                   {selectedIds.size} selected
                 </div>
               </div>
@@ -242,12 +242,12 @@ export function DeleteExtractionsModal({
                   return (
                     <div
                       key={extraction.extraction_id}
-                      className={`flex items-start gap-4 bg-slate-800/50 border rounded-lg p-4 transition-colors ${
+                      className={`flex items-start gap-4 bg-slate-100 dark:bg-slate-800/50 border rounded-lg p-4 transition-colors ${
                         !isDeletable
-                          ? 'border-slate-700/50 opacity-75'
+                          ? 'border-slate-300 dark:border-slate-700/50 opacity-75'
                           : isSelected
                           ? 'border-red-500/50 bg-red-900/10 cursor-pointer'
-                          : 'border-slate-700 hover:border-slate-600 cursor-pointer'
+                          : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600 cursor-pointer'
                       }`}
                       onClick={() => isDeletable && toggleSelection(extraction)}
                     >
@@ -256,7 +256,7 @@ export function DeleteExtractionsModal({
                         checked={isSelected}
                         onChange={() => {}}
                         disabled={!isDeletable}
-                        className={`w-5 h-5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900 mt-0.5 flex-shrink-0 ${
+                        className={`w-5 h-5 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 mt-0.5 flex-shrink-0 ${
                           isDeletable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
                         }`}
                       />
@@ -265,14 +265,14 @@ export function DeleteExtractionsModal({
                           {!isDeletable && (
                             <Lock className="w-4 h-4 text-cyan-400 flex-shrink-0" />
                           )}
-                          <h3 className="text-sm font-mono text-slate-100 truncate">
+                          <h3 className="text-sm font-mono text-slate-900 dark:text-slate-100 truncate">
                             {extraction.extraction_id}
                           </h3>
                           <span className={`text-xs px-2 py-1 rounded ${getStatusColor(extraction.status)}`}>
                             {extraction.status}
                           </span>
                         </div>
-                        <div className="flex items-center gap-4 text-xs text-slate-400 flex-wrap">
+                        <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 flex-wrap">
                           <div className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
                             <span>{formatDate(extraction.created_at)}</span>
@@ -313,9 +313,9 @@ export function DeleteExtractionsModal({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-800 p-4 bg-slate-900/50">
+        <div className="border-t border-slate-200 dark:border-slate-800 p-4 bg-slate-100 dark:bg-slate-900/50">
           <div className="flex items-center justify-between">
-            <div className="text-sm text-slate-400">
+            <div className="text-sm text-slate-600 dark:text-slate-400">
               {selectedIds.size > 0 ? (
                 <>
                   Will delete {selectedIds.size} extraction{selectedIds.size !== 1 ? 's' : ''} ({calculateTotalSize()})
@@ -328,7 +328,7 @@ export function DeleteExtractionsModal({
               <button
                 onClick={onClose}
                 disabled={deleting}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded transition-colors text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors text-slate-700 dark:text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>

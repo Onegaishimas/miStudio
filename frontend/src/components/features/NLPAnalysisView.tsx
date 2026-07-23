@@ -41,7 +41,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
 
   if (!nlpAnalysis) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+      <div className="flex flex-col items-center justify-center py-12 text-slate-600 dark:text-slate-400">
         <Brain className="w-12 h-12 mb-4 text-slate-600" />
         <p className="text-lg font-medium mb-2">No NLP Analysis Available</p>
         <p className="text-sm text-slate-500 text-center max-w-md">
@@ -65,19 +65,19 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
     return (
       <button
         onClick={() => toggleSection(id)}
-        className="w-full flex items-center justify-between p-3 bg-slate-800/50 hover:bg-slate-800/70 rounded-lg transition-colors"
+        className="w-full flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-800/70 rounded-lg transition-colors"
       >
         <div className="flex items-center gap-3">
           <div className="text-cyan-400">{icon}</div>
           <div className="text-left">
-            <div className="font-medium text-slate-200">{title}</div>
-            {subtitle && <div className="text-xs text-slate-400">{subtitle}</div>}
+            <div className="font-medium text-slate-800 dark:text-slate-200">{title}</div>
+            {subtitle && <div className="text-xs text-slate-600 dark:text-slate-400">{subtitle}</div>}
           </div>
         </div>
         {isExpanded ? (
-          <ChevronUp className="w-5 h-5 text-slate-400" />
+          <ChevronUp className="w-5 h-5 text-slate-600 dark:text-slate-400" />
         ) : (
-          <ChevronDown className="w-5 h-5 text-slate-400" />
+          <ChevronDown className="w-5 h-5 text-slate-600 dark:text-slate-400" />
         )}
       </button>
     );
@@ -105,7 +105,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
         {sorted.map(([item, count]) => (
           <span
             key={item}
-            className="px-2 py-1 bg-slate-700/50 text-slate-300 text-xs rounded flex items-center gap-1"
+            className="px-2 py-1 bg-slate-200 dark:bg-slate-700/50 text-slate-700 dark:text-slate-300 text-xs rounded flex items-center gap-1"
           >
             <span className="font-mono">{item}</span>
             <span className="text-slate-500">({count})</span>
@@ -118,7 +118,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Metadata Header */}
-      <div className="flex items-center justify-between text-sm text-slate-400 mb-4">
+      <div className="flex items-center justify-between text-sm text-slate-600 dark:text-slate-400 mb-4">
         <div className="flex items-center gap-2">
           <Brain className="w-4 h-4 text-cyan-400" />
           <span>Analyzed {num_examples_analyzed} examples</span>
@@ -139,8 +139,8 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
           subtitle="AI-generated feature description"
         />
         {expandedSections.has('summary') && (
-          <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50">
-            <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">
+          <div className="p-4 bg-slate-100 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/50">
+            <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
               {summary_for_prompt || 'No summary available.'}
             </p>
           </div>
@@ -156,15 +156,15 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
           subtitle={`${prime_token_analysis.unique_count} unique tokens, ${formatPct(prime_token_analysis.concentration_ratio)} concentration`}
         />
         {expandedSections.has('prime') && (
-          <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50 space-y-4">
+          <div className="p-4 bg-slate-100 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/50 space-y-4">
             {/* Most Common Token */}
             <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Most Common Token</div>
+              <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Most Common Token</div>
               <div className="flex items-center gap-2">
                 <span className="px-3 py-1.5 bg-cyan-900/30 text-cyan-400 rounded font-mono text-lg">
                   "{prime_token_analysis.most_common_token[0]}"
                 </span>
-                <span className="text-slate-400">
+                <span className="text-slate-600 dark:text-slate-400">
                   ({prime_token_analysis.most_common_token[1]} occurrences)
                 </span>
               </div>
@@ -172,20 +172,20 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
 
             {/* POS Distribution */}
             <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Part-of-Speech Distribution</div>
+              <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Part-of-Speech Distribution</div>
               <TopItems items={prime_token_analysis.pos_distribution} label="POS tags" />
             </div>
 
             {/* Token Types */}
             <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Token Types</div>
+              <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Token Types</div>
               <TopItems items={prime_token_analysis.token_types} label="token types" />
             </div>
 
             {/* Named Entities */}
             {prime_token_analysis.ner_entities.length > 0 && (
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Named Entities</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Named Entities</div>
                 <div className="flex flex-wrap gap-2">
                   {prime_token_analysis.ner_entities.slice(0, 10).map((entity, idx) => (
                     <span
@@ -201,7 +201,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
 
             {/* Token Frequency */}
             <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Top Prime Tokens (Case-Sensitive)</div>
+              <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Top Prime Tokens (Case-Sensitive)</div>
               <TopItems items={prime_token_analysis.frequency_distribution} limit={15} label="tokens" />
             </div>
           </div>
@@ -217,15 +217,15 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
           subtitle="N-grams and syntactic patterns from surrounding context"
         />
         {expandedSections.has('context') && (
-          <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50 space-y-4">
+          <div className="p-4 bg-slate-100 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/50 space-y-4">
             {/* Immediately Before/After */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Immediately Before</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Immediately Before</div>
                 <TopItems items={context_patterns.immediately_before} limit={8} label="tokens" />
               </div>
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Immediately After</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Immediately After</div>
                 <TopItems items={context_patterns.immediately_after} limit={8} label="tokens" />
               </div>
             </div>
@@ -233,7 +233,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
             {/* Prefix/Suffix Bigrams */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Prefix Bigrams</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Prefix Bigrams</div>
                 {context_patterns.prefix_bigrams.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {context_patterns.prefix_bigrams.slice(0, 6).map((ngram, idx) => (
@@ -250,7 +250,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
                 )}
               </div>
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Suffix Bigrams</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Suffix Bigrams</div>
                 {context_patterns.suffix_bigrams.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {context_patterns.suffix_bigrams.slice(0, 6).map((ngram, idx) => (
@@ -271,7 +271,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
             {/* Syntactic Patterns */}
             {context_patterns.syntactic_patterns.length > 0 && (
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Syntactic Patterns</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Syntactic Patterns</div>
                 <div className="flex flex-wrap gap-2">
                   {context_patterns.syntactic_patterns.slice(0, 8).map((pattern, idx) => (
                     <span
@@ -297,31 +297,31 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
           subtitle={`Distribution: ${activation_stats.distribution_type}, CV: ${activation_stats.coefficient_of_variation.toFixed(2)}`}
         />
         {expandedSections.has('activation') && (
-          <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50 space-y-4">
+          <div className="p-4 bg-slate-100 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/50 space-y-4">
             {/* Stats Grid */}
             <div className="grid grid-cols-3 gap-4">
-              <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-1">Mean</div>
+              <div className="bg-slate-100 dark:bg-slate-700/30 rounded-lg p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Mean</div>
                 <div className="text-lg font-semibold text-emerald-400">{activation_stats.mean.toFixed(3)}</div>
               </div>
-              <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-1">Std Dev</div>
+              <div className="bg-slate-100 dark:bg-slate-700/30 rounded-lg p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Std Dev</div>
                 <div className="text-lg font-semibold text-blue-400">{activation_stats.std.toFixed(3)}</div>
               </div>
-              <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-1">Median</div>
+              <div className="bg-slate-100 dark:bg-slate-700/30 rounded-lg p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Median</div>
                 <div className="text-lg font-semibold text-purple-400">{activation_stats.median.toFixed(3)}</div>
               </div>
-              <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-1">Min</div>
-                <div className="text-lg font-semibold text-slate-300">{activation_stats.min.toFixed(3)}</div>
+              <div className="bg-slate-100 dark:bg-slate-700/30 rounded-lg p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Min</div>
+                <div className="text-lg font-semibold text-slate-700 dark:text-slate-300">{activation_stats.min.toFixed(3)}</div>
               </div>
-              <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-1">Max</div>
-                <div className="text-lg font-semibold text-slate-300">{activation_stats.max.toFixed(3)}</div>
+              <div className="bg-slate-100 dark:bg-slate-700/30 rounded-lg p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Max</div>
+                <div className="text-lg font-semibold text-slate-700 dark:text-slate-300">{activation_stats.max.toFixed(3)}</div>
               </div>
-              <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="text-xs text-slate-400 mb-1">Skewness</div>
+              <div className="bg-slate-100 dark:bg-slate-700/30 rounded-lg p-3">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Skewness</div>
                 <div className="text-lg font-semibold text-amber-400">{activation_stats.skewness.toFixed(3)}</div>
               </div>
             </div>
@@ -329,7 +329,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
             {/* High Activation Tokens */}
             {activation_stats.high_activation_tokens.length > 0 && (
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">High Activation Tokens</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">High Activation Tokens</div>
                 <div className="flex flex-wrap gap-2">
                   {activation_stats.high_activation_tokens.slice(0, 10).map((item, idx) => (
                     <span
@@ -346,7 +346,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
             {/* Activation Range Buckets */}
             {Object.keys(activation_stats.activation_range_buckets).length > 0 && (
               <div>
-                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Activation Distribution</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Activation Distribution</div>
                 <div className="space-y-1">
                   {Object.entries(activation_stats.activation_range_buckets)
                     .sort(([a], [b]) => a.localeCompare(b))
@@ -355,14 +355,14 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
                       const pct = (count / total) * 100;
                       return (
                         <div key={range} className="flex items-center gap-2">
-                          <span className="text-xs text-slate-400 w-24 font-mono">{range}</span>
-                          <div className="flex-1 h-4 bg-slate-700/30 rounded overflow-hidden">
+                          <span className="text-xs text-slate-600 dark:text-slate-400 w-24 font-mono">{range}</span>
+                          <div className="flex-1 h-4 bg-slate-200 dark:bg-slate-700/30 rounded overflow-hidden">
                             <div
                               className="h-full bg-cyan-600/50"
                               style={{ width: `${pct}%` }}
                             />
                           </div>
-                          <span className="text-xs text-slate-400 w-16 text-right">
+                          <span className="text-xs text-slate-600 dark:text-slate-400 w-16 text-right">
                             {count} ({pct.toFixed(0)}%)
                           </span>
                         </div>
@@ -385,15 +385,15 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
             subtitle={`${semantic_clusters.length} clusters identified`}
           />
           {expandedSections.has('clusters') && (
-            <div className="p-4 bg-slate-800/30 rounded-lg border border-slate-700/50 space-y-3">
+            <div className="p-4 bg-slate-100 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/50 space-y-3">
               {semantic_clusters.map((cluster: NLPSemanticCluster, idx: number) => (
                 <div
                   key={idx}
-                  className="p-3 bg-slate-700/30 rounded-lg"
+                  className="p-3 bg-slate-100 dark:bg-slate-700/30 rounded-lg"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-slate-200">{cluster.label}</span>
-                    <span className="text-xs text-slate-400">
+                    <span className="font-medium text-slate-800 dark:text-slate-200">{cluster.label}</span>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">
                       {cluster.size} examples, avg activation: {cluster.avg_activation.toFixed(2)}
                     </span>
                   </div>
@@ -401,7 +401,7 @@ export const NLPAnalysisView: React.FC<NLPAnalysisViewProps> = ({
                     {cluster.representative_tokens.map((token, tidx) => (
                       <span
                         key={tidx}
-                        className="px-2 py-0.5 bg-slate-600/50 text-slate-300 text-xs rounded font-mono"
+                        className="px-2 py-0.5 bg-slate-300 dark:bg-slate-600/50 text-slate-700 dark:text-slate-300 text-xs rounded font-mono"
                       >
                         {token}
                       </span>

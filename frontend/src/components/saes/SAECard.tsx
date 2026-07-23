@@ -195,11 +195,11 @@ export function SAECard({
       case SAEStatus.CONVERTING:
         return <Activity className="w-5 h-5 text-yellow-400 animate-pulse" />;
       case SAEStatus.PENDING:
-        return <Loader className="w-5 h-5 text-slate-400 animate-spin" />;
+        return <Loader className="w-5 h-5 text-slate-600 dark:text-slate-400 animate-spin" />;
       case SAEStatus.ERROR:
         return <AlertCircle className="w-5 h-5 text-red-400" />;
       default:
-        return <Brain className="w-5 h-5 text-slate-400" />;
+        return <Brain className="w-5 h-5 text-slate-600 dark:text-slate-400" />;
     }
   };
 
@@ -214,11 +214,11 @@ export function SAECard({
       case SAEStatus.CONVERTING:
         return <span className={`${baseClasses} bg-yellow-900/30 text-yellow-400`}>Converting</span>;
       case SAEStatus.PENDING:
-        return <span className={`${baseClasses} bg-slate-800 text-slate-300`}>Pending</span>;
+        return <span className={`${baseClasses} bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300`}>Pending</span>;
       case SAEStatus.ERROR:
         return <span className={`${baseClasses} bg-red-900/30 text-red-400`}>Error</span>;
       default:
-        return <span className={`${baseClasses} bg-slate-800 text-slate-300`}>Unknown</span>;
+        return <span className={`${baseClasses} bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300`}>Unknown</span>;
     }
   };
 
@@ -242,7 +242,7 @@ export function SAECard({
         );
       case SAESource.LOCAL:
         return (
-          <span className={`${baseClasses} bg-slate-700 text-slate-300`}>
+          <span className={`${baseClasses} bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300`}>
             <HardDrive className="w-3 h-3" />
             Local File
           </span>
@@ -289,7 +289,7 @@ export function SAECard({
   return (
     <div
       className={`${COMPONENTS.card.base} p-4 transition-colors ${
-        isSelected ? 'border-emerald-500 bg-emerald-500/5' : 'hover:border-slate-700'
+        isSelected ? 'border-emerald-500 bg-emerald-500/5' : 'hover:border-slate-300 dark:hover:border-slate-700'
       } ${onSelect ? 'cursor-pointer' : ''}`}
       onClick={onSelect}
     >
@@ -299,10 +299,10 @@ export function SAECard({
           <Brain className="w-6 h-6 text-purple-400 flex-shrink-0" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-base text-slate-100 truncate">{sae.name}</h3>
+              <h3 className="font-semibold text-base text-slate-900 dark:text-slate-100 truncate">{sae.name}</h3>
               {getSourceBadge()}
             </div>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
               {sae.n_features ? formatFeatureCount(sae.n_features) : '?'} features
               {sae.layer !== undefined && sae.layer !== null && ` • Layer ${sae.layer}`}
               {modelName && ` • ${modelName}`}
@@ -418,7 +418,7 @@ export function SAECard({
       {isActive && sae.progress !== undefined && (
         <div className="mt-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-400">
+            <span className="text-slate-600 dark:text-slate-400">
               {sae.status === SAEStatus.DOWNLOADING && 'Download Progress'}
               {sae.status === SAEStatus.CONVERTING && 'Converting SAE'}
               {sae.status === SAEStatus.PENDING && 'Pending'}
@@ -427,7 +427,7 @@ export function SAECard({
               {sae.progress > 0 ? `${sae.progress.toFixed(1)}%` : 'Starting...'}
             </span>
           </div>
-          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
             {sae.progress > 0 ? (
               <div
                 className="h-full bg-gradient-to-r from-purple-500 to-purple-400 transition-all duration-500"
@@ -506,7 +506,7 @@ export function SAECard({
           </div>
           {/* Progress bar for active push */}
           {!activePushJob.isComplete && activePushJob.progress && (
-            <div className="mt-2 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className="mt-2 h-1.5 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-300"
                 style={{ width: `${activePushJob.progress.progress || 0}%` }}

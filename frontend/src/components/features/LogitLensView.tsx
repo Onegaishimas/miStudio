@@ -56,7 +56,7 @@ export const LogitLensView: React.FC<LogitLensViewProps> = ({ featureId }) => {
     return (
       <div className="flex flex-col items-center justify-center py-12 space-y-3">
         <Loader2 className="h-8 w-8 text-emerald-500 animate-spin" />
-        <div className="text-slate-400 text-sm">Computing logit lens analysis...</div>
+        <div className="text-slate-600 dark:text-slate-400 text-sm">Computing logit lens analysis...</div>
       </div>
     );
   }
@@ -72,7 +72,7 @@ export const LogitLensView: React.FC<LogitLensViewProps> = ({ featureId }) => {
   if (!data) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-slate-400">No data available</div>
+        <div className="text-slate-600 dark:text-slate-400">No data available</div>
       </div>
     );
   }
@@ -80,14 +80,14 @@ export const LogitLensView: React.FC<LogitLensViewProps> = ({ featureId }) => {
   return (
     <div className="space-y-6">
       {/* Semantic Interpretation */}
-      <div className="bg-slate-800/30 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-slate-300 mb-2">Interpretation</h3>
-        <p className="text-sm text-slate-400">{data.interpretation}</p>
+      <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Interpretation</h3>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{data.interpretation}</p>
       </div>
 
       {/* Top Predicted Tokens */}
-      <div className="bg-slate-800/30 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-slate-300 mb-4">
+      <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-4">
           Top Predicted Tokens
         </h3>
         <div className="space-y-3">
@@ -99,11 +99,11 @@ export const LogitLensView: React.FC<LogitLensViewProps> = ({ featureId }) => {
             return (
               <div key={index} className="space-y-1">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-mono text-slate-300">{token}</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">{token}</span>
                   <span className="text-emerald-400">{percentage}%</span>
                 </div>
                 {/* Probability Bar */}
-                <div className="w-full bg-slate-700/50 rounded-full h-2">
+                <div className="w-full bg-slate-200 dark:bg-slate-700/50 rounded-full h-2">
                   <div
                     className="bg-gradient-to-r from-emerald-500 to-emerald-400 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${width}%` }}

@@ -95,7 +95,7 @@ export function ProfilesMenu() {
     <div className="px-4 pb-2">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+        className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
       >
         {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
         <BookMarked className="w-3 h-3 text-emerald-400" />
@@ -103,14 +103,14 @@ export function ProfilesMenu() {
       </button>
 
       {open && (
-        <div className="mt-2 rounded-lg border border-slate-700/60 bg-slate-900/60 p-2 space-y-1.5">
+        <div className="mt-2 rounded-lg border border-slate-300 dark:border-slate-700/60 bg-slate-100 dark:bg-slate-900/60 p-2 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-slate-500">
               {isLoading ? 'Loading…' : `${visibleProfiles.length} available`}
             </span>
             <button
               onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-emerald-400"
+              className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-400 hover:text-emerald-400"
               title="Import a .cluster.json definition or bundle"
             >
               <FileUp className="w-3 h-3" />
@@ -143,11 +143,11 @@ export function ProfilesMenu() {
           )}
 
           {visibleProfiles.map((p) => (
-            <div key={p.id} className="rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5">
+            <div key={p.id} className="rounded border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/60 px-2 py-1.5">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
-                  className="flex-1 text-left text-xs text-slate-200 truncate hover:text-white"
+                  className="flex-1 text-left text-xs text-slate-800 dark:text-slate-200 truncate hover:text-slate-900 dark:hover:text-white"
                   title={p.name}
                 >
                   {p.name}
@@ -156,21 +156,21 @@ export function ProfilesMenu() {
                   </span>
                 </button>
                 {!p.sae_id && (
-                  <span className="text-[9px] px-1 rounded bg-slate-700/60 text-slate-400">unbound</span>
+                  <span className="text-[9px] px-1 rounded bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400">unbound</span>
                 )}
                 {p.imported_from && (
                   <span className="text-[9px] px-1 rounded bg-indigo-500/15 text-indigo-300">imported</span>
                 )}
                 <button
                   onClick={() => handleLoad(p)}
-                  className="text-slate-400 hover:text-emerald-400"
+                  className="text-slate-600 dark:text-slate-400 hover:text-emerald-400"
                   title="Load into steering (explicit tuned strengths)"
                 >
                   <Play className="w-3 h-3" />
                 </button>
                 <button
                   onClick={() => exportProfile(p)}
-                  className="text-slate-400 hover:text-cyan-400"
+                  className="text-slate-600 dark:text-slate-400 hover:text-cyan-400"
                   title="Export portable definition (.cluster.json)"
                 >
                   <Download className="w-3 h-3" />
@@ -182,14 +182,14 @@ export function ProfilesMenu() {
                       void deleteProfile(p.id);
                     }
                   }}
-                  className="text-slate-400 hover:text-red-400"
+                  className="text-slate-600 dark:text-slate-400 hover:text-red-400"
                   title="Delete profile"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
               </div>
               {expandedId === p.id && p.narrative && (
-                <div className="mt-1.5 border-t border-slate-800 pt-1.5 text-[11px] text-slate-400 prose prose-invert prose-xs max-w-none max-h-40 overflow-y-auto">
+                <div className="mt-1.5 border-t border-slate-200 dark:border-slate-800 pt-1.5 text-[11px] text-slate-600 dark:text-slate-400 prose prose-invert prose-xs max-w-none max-h-40 overflow-y-auto">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.narrative}</ReactMarkdown>
                 </div>
               )}

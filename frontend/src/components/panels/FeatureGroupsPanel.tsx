@@ -140,7 +140,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Boxes className="w-5 h-5 text-emerald-400" />
-            <h1 className="text-lg font-semibold text-slate-100">Clusters</h1>
+            <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Clusters</h1>
           </div>
           {selection.size > 0 && (
             <div className="flex items-center gap-2">
@@ -153,7 +153,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
               </button>
               <button
                 onClick={() => void handleSteerSelected(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-600/40 rounded-md"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-emerald-300 border border-emerald-600/40 rounded-md"
                 title="Hand off to Steering and open the Save Cluster Profile dialog"
               >
                 <BookMarked className="w-4 h-4" />
@@ -174,7 +174,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
           <select
             value={extractionId ?? ''}
             onChange={(e) => setExtraction(e.target.value || null)}
-            className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 w-full max-w-xl"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-3 py-2 text-sm text-slate-800 dark:text-slate-200 w-full max-w-xl"
           >
             <option value="">Select a completed extraction…</option>
             {completedExtractions.map((extraction) => {
@@ -208,7 +208,7 @@ export function FeatureGroupsPanel({ onNavigateToSteering }: FeatureGroupsPanelP
         <GroupList onOpenFeature={setDetailFeatureId} />
       )}
       {!extractionId && completedExtractions.length === 0 && (
-        <div className="text-sm text-slate-500 bg-slate-900 border border-slate-800 rounded-lg p-6 text-center">
+        <div className="text-sm text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 text-center">
           No completed extractions yet. Run a feature extraction from the SAEs or Extractions
           panel first.
         </div>

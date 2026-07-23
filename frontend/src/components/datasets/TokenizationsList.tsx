@@ -51,11 +51,11 @@ function FallbackProgress({ progress, createdAt }: { progress: number; createdAt
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+      <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
         <span className="text-blue-400">Processing</span>
         <span className="font-medium text-emerald-400">{progress.toFixed(1)}%</span>
       </div>
-      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+      <div className="w-full h-2 bg-white dark:bg-slate-800 rounded-full overflow-hidden">
         <div
           className="h-full bg-emerald-500 transition-all duration-300"
           style={{ width: `${progress}%` }}
@@ -65,7 +65,7 @@ function FallbackProgress({ progress, createdAt }: { progress: number; createdAt
         <div className="flex items-center gap-1.5 text-xs">
           <Clock className="w-3 h-3 text-slate-500" />
           <span className="text-slate-500">Elapsed:</span>
-          <span className="text-slate-300 font-medium">{formatElapsedTime(elapsed)}</span>
+          <span className="text-slate-700 dark:text-slate-300 font-medium">{formatElapsedTime(elapsed)}</span>
         </div>
       )}
     </div>
@@ -195,7 +195,7 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-100">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           Tokenizations ({datasetTokenizations.length})
         </h3>
         {!showCreateForm && (
@@ -213,13 +213,13 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
       {/* Create Form */}
       {showCreateForm && (
         <div className={`${COMPONENTS.card.base} p-4 space-y-3`}>
-          <h4 className="text-sm font-medium text-slate-100">Create New Tokenization</h4>
+          <h4 className="text-sm font-medium text-slate-900 dark:text-slate-100">Create New Tokenization</h4>
           <div className="space-y-2">
-            <label className="text-xs text-slate-400">Select Model</label>
+            <label className="text-xs text-slate-600 dark:text-slate-400">Select Model</label>
             <select
               value={selectedModelId}
               onChange={(e) => setSelectedModelId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-sm"
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-sm"
             >
               <option value="">-- Select a model --</option>
               {availableModels.map((model) => (
@@ -231,14 +231,14 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-slate-400">Max Sequence Length</label>
+            <label className="text-xs text-slate-600 dark:text-slate-400">Max Sequence Length</label>
             <input
               type="number"
               value={maxLength}
               onChange={(e) => setMaxLength(Math.max(1, Math.min(8192, parseInt(e.target.value) || 512)))}
               min={1}
               max={8192}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-sm"
+              className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-sm"
             />
             <p className="text-xs text-slate-500">
               Maximum tokens per sample (1-8192). Common values: 128, 256, 512, 1024, 2048
@@ -246,16 +246,16 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
           </div>
 
           {/* Filtering Settings Section */}
-          <div className="border-t border-slate-700 pt-3 mt-3 space-y-3">
+          <div className="border-t border-slate-300 dark:border-slate-700 pt-3 mt-3 space-y-3">
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
                 id="filter-enabled"
                 checked={filterEnabled}
                 onChange={(e) => setFilterEnabled(e.target.checked)}
-                className="w-4 h-4 bg-slate-900 border-slate-700 rounded text-emerald-500 focus:ring-emerald-500"
+                className="w-4 h-4 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 rounded text-emerald-500 focus:ring-emerald-500"
               />
-              <label htmlFor="filter-enabled" className="text-sm font-medium text-slate-100">
+              <label htmlFor="filter-enabled" className="text-sm font-medium text-slate-900 dark:text-slate-100">
                 Enable Sample Filtering
               </label>
               <span className="text-xs text-slate-500 ml-auto">
@@ -264,10 +264,10 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
             </div>
 
             {filterEnabled && (
-              <div className="ml-6 space-y-3 bg-slate-900/50 p-3 rounded border border-slate-700/50">
+              <div className="ml-6 space-y-3 bg-slate-100 dark:bg-slate-900/50 p-3 rounded border border-slate-300 dark:border-slate-700/50">
                 {/* Filter Mode */}
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-300">Filter Mode</label>
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Filter Mode</label>
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
@@ -275,9 +275,9 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                         value="minimal"
                         checked={filterMode === 'minimal'}
                         onChange={(e) => setFilterMode(e.target.value as TokenFilterMode)}
-                        className="w-3.5 h-3.5 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                        className="w-3.5 h-3.5 text-emerald-500 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:ring-emerald-500"
                       />
-                      <span className="text-sm text-slate-200">Minimal</span>
+                      <span className="text-sm text-slate-800 dark:text-slate-200">Minimal</span>
                       <span className="text-xs text-slate-500">- Only control chars</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -286,9 +286,9 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                         value="conservative"
                         checked={filterMode === 'conservative'}
                         onChange={(e) => setFilterMode(e.target.value as TokenFilterMode)}
-                        className="w-3.5 h-3.5 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                        className="w-3.5 h-3.5 text-emerald-500 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:ring-emerald-500"
                       />
-                      <span className="text-sm text-slate-200">Conservative</span>
+                      <span className="text-sm text-slate-800 dark:text-slate-200">Conservative</span>
                       <span className="text-xs text-slate-500">- + Whitespace tokens</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -297,9 +297,9 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                         value="standard"
                         checked={filterMode === 'standard'}
                         onChange={(e) => setFilterMode(e.target.value as TokenFilterMode)}
-                        className="w-3.5 h-3.5 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                        className="w-3.5 h-3.5 text-emerald-500 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:ring-emerald-500"
                       />
-                      <span className="text-sm text-slate-200">Standard</span>
+                      <span className="text-sm text-slate-800 dark:text-slate-200">Standard</span>
                       <span className="text-xs text-slate-500">- + Pure punctuation</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -308,9 +308,9 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                         value="aggressive"
                         checked={filterMode === 'aggressive'}
                         onChange={(e) => setFilterMode(e.target.value as TokenFilterMode)}
-                        className="w-3.5 h-3.5 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                        className="w-3.5 h-3.5 text-emerald-500 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:ring-emerald-500"
                       />
-                      <span className="text-sm text-slate-200">Aggressive</span>
+                      <span className="text-sm text-slate-800 dark:text-slate-200">Aggressive</span>
                       <span className="text-xs text-slate-500">- + Short tokens</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -319,24 +319,24 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                         value="strict"
                         checked={filterMode === 'strict'}
                         onChange={(e) => setFilterMode(e.target.value as TokenFilterMode)}
-                        className="w-3.5 h-3.5 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                        className="w-3.5 h-3.5 text-emerald-500 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:ring-emerald-500"
                       />
-                      <span className="text-sm text-slate-200">Strict</span>
+                      <span className="text-sm text-slate-800 dark:text-slate-200">Strict</span>
                       <span className="text-xs text-slate-500">- + ALL punctuation</span>
                     </label>
                   </div>
                 </div>
 
                 {/* Remove All Punctuation */}
-                <div className="flex items-center gap-2 pt-2 border-t border-slate-700/50">
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-300 dark:border-slate-700/50">
                   <input
                     type="checkbox"
                     id="remove-all-punctuation"
                     checked={removeAllPunctuation}
                     onChange={(e) => setRemoveAllPunctuation(e.target.checked)}
-                    className="w-4 h-4 bg-slate-900 border-slate-700 rounded text-emerald-500 focus:ring-emerald-500"
+                    className="w-4 h-4 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 rounded text-emerald-500 focus:ring-emerald-500"
                   />
-                  <label htmlFor="remove-all-punctuation" className="text-sm text-slate-200">
+                  <label htmlFor="remove-all-punctuation" className="text-sm text-slate-800 dark:text-slate-200">
                     Remove ALL Punctuation
                   </label>
                 </div>
@@ -345,15 +345,15 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                 </p>
 
                 {/* Custom Filter Characters */}
-                <div className="space-y-2 pt-2 border-t border-slate-700/50">
-                  <label className="text-xs font-medium text-slate-300">Custom Characters to Filter</label>
+                <div className="space-y-2 pt-2 border-t border-slate-300 dark:border-slate-700/50">
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Custom Characters to Filter</label>
                   <input
                     type="text"
                     autoComplete="off"
                     value={customFilterChars}
                     onChange={(e) => setCustomFilterChars(e.target.value)}
                     placeholder="e.g., ~@#$%"
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-100 text-sm placeholder-slate-500"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-slate-100 text-sm placeholder-slate-400 dark:placeholder-slate-500"
                   />
                   <p className="text-xs text-slate-500">
                     Additional characters to remove from tokens (e.g., ~@#$%)
@@ -361,9 +361,9 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                 </div>
 
                 {/* Junk Ratio Threshold */}
-                <div className="space-y-2 pt-2 border-t border-slate-700/50">
+                <div className="space-y-2 pt-2 border-t border-slate-300 dark:border-slate-700/50">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-slate-300">Junk Ratio Threshold</label>
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Junk Ratio Threshold</label>
                     <span className="text-xs text-emerald-400 font-mono">{(junkRatioThreshold * 100).toFixed(0)}%</span>
                   </div>
                   <input
@@ -372,7 +372,7 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                     max="100"
                     value={junkRatioThreshold * 100}
                     onChange={(e) => setJunkRatioThreshold(parseInt(e.target.value) / 100)}
-                    className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    className="w-full h-2 bg-slate-100 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                   />
                   <p className="text-xs text-slate-500">
                     Skip samples if &gt;{(junkRatioThreshold * 100).toFixed(0)}% of tokens are junk
@@ -413,7 +413,7 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
 
       {/* Empty State */}
       {datasetTokenizations.length === 0 && !showCreateForm && (
-        <div className="text-center py-8 text-slate-400 text-sm">
+        <div className="text-center py-8 text-slate-600 dark:text-slate-400 text-sm">
           <Hash className="w-8 h-8 mx-auto mb-2 text-slate-600" />
           <p>No tokenizations yet</p>
           <p className="text-xs text-slate-500 mt-1">
@@ -434,10 +434,10 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     {getStatusIcon(tokenization.status)}
-                    <span className="text-sm font-medium text-slate-100 truncate">
+                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                       {tokenization.tokenizer_repo_id}
                     </span>
-                    <span className="text-xs text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
+                    <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                       {tokenization.max_length || 512} tokens
                     </span>
                   </div>
@@ -469,28 +469,28 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
 
               {/* Stats */}
               {tokenization.status === TokenizationStatus.READY && (
-                <div className="grid grid-cols-4 gap-3 pt-2 border-t border-slate-700/50">
+                <div className="grid grid-cols-4 gap-3 pt-2 border-t border-slate-300 dark:border-slate-700/50">
                   <div>
                     <p className="text-xs text-slate-500">Max Length</p>
-                    <p className="text-sm text-slate-300 font-medium">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
                       {tokenization.max_length?.toLocaleString() || '512'}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Vocab Size</p>
-                    <p className="text-sm text-slate-300 font-medium">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
                       {tokenization.vocab_size?.toLocaleString() || 'N/A'}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Total Tokens</p>
-                    <p className="text-sm text-slate-300 font-medium">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
                       {tokenization.num_tokens ? (tokenization.num_tokens / 1e9).toFixed(2) + 'B' : 'N/A'}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Avg Length</p>
-                    <p className="text-sm text-slate-300 font-medium">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
                       {tokenization.avg_seq_length?.toFixed(1) || 'N/A'}
                     </p>
                   </div>
@@ -499,7 +499,7 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
 
               {/* Progress */}
               {(tokenization.status === TokenizationStatus.PROCESSING || tokenization.status === TokenizationStatus.QUEUED) && (
-                <div className="pt-2 border-t border-slate-700/50">
+                <div className="pt-2 border-t border-slate-300 dark:border-slate-700/50">
                   {tokenizationProgress[tokenization.id] ? (
                     <TokenizationProgressDisplay progress={tokenizationProgress[tokenization.id]} />
                   ) : tokenization.progress !== undefined ? (

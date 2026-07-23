@@ -162,25 +162,25 @@ export const RADIUS = {
 export const COMPONENTS = {
   // Card variants
   card: {
-    base: 'bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg',
-    elevated: 'bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg shadow-lg',
-    interactive: 'bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg hover:border-slate-400 dark:hover:border-slate-600 transition-colors cursor-pointer',
+    base: 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg',
+    elevated: 'bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg',
+    interactive: 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:border-slate-400 dark:hover:border-slate-600 transition-colors cursor-pointer',
   },
 
   // Button variants
   button: {
-    primary: 'px-4 py-2 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 disabled:bg-slate-700 dark:disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded transition-colors',
-    secondary: 'px-4 py-2 bg-slate-800 hover:bg-slate-700 dark:bg-slate-100 dark:hover:bg-slate-200 disabled:bg-slate-900 dark:disabled:bg-slate-50 disabled:cursor-not-allowed text-slate-300 dark:text-slate-700 disabled:text-slate-600 dark:disabled:text-slate-400 font-medium rounded transition-colors',
-    ghost: 'px-4 py-2 hover:bg-slate-800 dark:hover:bg-slate-100 text-slate-400 dark:text-slate-600 hover:text-slate-300 dark:hover:text-slate-700 rounded transition-colors',
-    danger: 'px-4 py-2 bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 disabled:bg-slate-700 dark:disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded transition-colors',
-    icon: 'p-2 hover:bg-slate-800 dark:hover:bg-slate-100 text-slate-400 dark:text-slate-600 hover:text-slate-300 dark:hover:text-slate-700 rounded transition-colors',
+    primary: 'px-4 py-2 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 disabled:bg-emerald-200 dark:disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded transition-colors',
+    secondary: 'px-4 py-2 bg-white hover:bg-slate-100 dark:bg-slate-100 dark:hover:bg-slate-200 border border-slate-300 dark:border-transparent disabled:bg-slate-50 dark:disabled:bg-slate-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-700 disabled:text-slate-400 dark:disabled:text-slate-400 font-medium rounded transition-colors',
+    ghost: 'px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-100 text-slate-500 dark:text-slate-600 hover:text-slate-700 dark:hover:text-slate-700 rounded transition-colors',
+    danger: 'px-4 py-2 bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 disabled:bg-red-200 dark:disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded transition-colors',
+    icon: 'p-2 hover:bg-slate-100 dark:hover:bg-slate-100 text-slate-500 dark:text-slate-600 hover:text-slate-700 dark:hover:text-slate-700 rounded transition-colors',
   },
 
   // Input variants
   input: {
-    default: 'w-full px-4 py-2 bg-slate-800 dark:bg-white border border-slate-700 dark:border-slate-300 rounded text-slate-100 dark:text-slate-900 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent',
-    error: 'w-full px-4 py-2 bg-slate-800 dark:bg-white border border-red-500 rounded text-slate-100 dark:text-slate-900 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent',
-    textarea: 'w-full px-4 py-2 bg-slate-800 dark:bg-white border border-slate-700 dark:border-slate-300 rounded text-slate-100 dark:text-slate-900 placeholder-slate-500 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none',
+    default: 'w-full px-4 py-2 bg-white dark:bg-white border border-slate-300 dark:border-slate-300 rounded text-slate-900 dark:text-slate-900 placeholder-slate-400 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent',
+    error: 'w-full px-4 py-2 bg-white dark:bg-white border border-red-500 rounded text-slate-900 dark:text-slate-900 placeholder-slate-400 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent',
+    textarea: 'w-full px-4 py-2 bg-white dark:bg-white border border-slate-300 dark:border-slate-300 rounded text-slate-900 dark:text-slate-900 placeholder-slate-400 dark:placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none',
   },
 
   // Badge variants (for status indicators)
@@ -194,29 +194,29 @@ export const COMPONENTS = {
 
   // Progress bar
   progress: {
-    container: 'w-full h-2 bg-slate-800 dark:bg-slate-200 rounded-full overflow-hidden',
+    container: 'w-full h-2 bg-slate-200 dark:bg-slate-200 rounded-full overflow-hidden',
     bar: 'h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out',
-    percentage: 'text-right text-xs text-slate-400 dark:text-slate-600',
+    percentage: 'text-right text-xs text-slate-600 dark:text-slate-600',
   },
 
   // Modal/Dialog
   modal: {
-    overlay: 'fixed inset-0 bg-black/50 dark:bg-black/30 backdrop-blur-sm z-40',
+    overlay: 'fixed inset-0 bg-slate-900/40 dark:bg-black/30 backdrop-blur-sm z-40',
     container: 'fixed inset-0 z-50 flex items-center justify-center p-4',
-    content: 'bg-slate-900 dark:bg-white border border-slate-800 dark:border-slate-200 rounded-lg shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden',
-    header: 'flex items-center justify-between p-6 border-b border-slate-800 dark:border-slate-200',
+    content: 'bg-white dark:bg-white border border-slate-200 dark:border-slate-200 rounded-lg shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden',
+    header: 'flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-200',
     body: 'p-6 overflow-y-auto',
-    footer: 'flex items-center justify-end gap-3 p-6 border-t border-slate-800 dark:border-slate-200',
+    footer: 'flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-200',
   },
 
   // Loading spinner
-  spinner: 'inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-700 dark:border-slate-200 border-t-emerald-500',
+  spinner: 'inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 dark:border-slate-200 border-t-emerald-500',
 
   // Empty state
   emptyState: {
     container: 'text-center py-12',
-    icon: 'inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800 dark:bg-slate-100 mb-4',
-    title: 'text-slate-400 dark:text-slate-600 text-lg',
+    icon: 'inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-100 mb-4',
+    title: 'text-slate-600 dark:text-slate-600 text-lg',
     subtitle: 'text-slate-500 dark:text-slate-500 mt-2',
   },
 
@@ -231,8 +231,8 @@ export const COMPONENTS = {
   surface: {
     base: 'bg-slate-50 dark:bg-slate-900',
     elevated: 'bg-white dark:bg-slate-800',
-    card: 'bg-slate-200 dark:bg-slate-800',
-    hover: 'hover:bg-slate-300 dark:hover:bg-slate-700',
+    card: 'bg-white dark:bg-slate-800',
+    hover: 'hover:bg-slate-100 dark:hover:bg-slate-700',
   },
 
   border: {
@@ -242,7 +242,7 @@ export const COMPONENTS = {
   },
 
   stat: {
-    container: 'bg-slate-300 dark:bg-slate-700 rounded p-3',
+    container: 'bg-slate-100 dark:bg-slate-700 rounded p-3',
     label: 'text-xs text-slate-600 dark:text-slate-400 mb-1',
     value: 'text-lg font-bold',
   },

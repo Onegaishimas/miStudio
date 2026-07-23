@@ -16,14 +16,14 @@ interface ViewModeToggleProps {
 
 export function ViewModeToggle({ mode, onChange, disabled = false }: ViewModeToggleProps) {
   return (
-    <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-1">
+    <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-1">
       <button
         onClick={() => onChange('single')}
         disabled={disabled}
         className={`px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${
           mode === 'single'
             ? 'bg-emerald-600 text-white'
-            : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         <Monitor className="w-4 h-4" />
@@ -35,7 +35,7 @@ export function ViewModeToggle({ mode, onChange, disabled = false }: ViewModeTog
         className={`px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${
           mode === 'compare'
             ? 'bg-emerald-600 text-white'
-            : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         <Grid className="w-4 h-4" />

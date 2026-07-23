@@ -64,7 +64,7 @@ function AppContent() {
   }, [ws]);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <Sidebar activePanel={activePanel} onPanelChange={setActivePanel} />
 
       <Header

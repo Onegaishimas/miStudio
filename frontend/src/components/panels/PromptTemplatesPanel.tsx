@@ -254,11 +254,11 @@ export function PromptTemplatesPanel() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex-shrink-0 p-6 border-b border-slate-800">
+      <div className="flex-shrink-0 p-6 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-xl font-semibold text-slate-100">Steering Prompt Templates</h1>
-            <p className="text-sm text-slate-400 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Steering Prompt Templates</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Save and manage prompt series for steering experiments
             </p>
           </div>
@@ -306,8 +306,8 @@ export function PromptTemplatesPanel() {
               onClick={() => setActiveTab('all')}
               className={`px-4 py-2 text-sm rounded-lg transition-colors ${
                 activeTab === 'all'
-                  ? 'bg-slate-800 text-slate-100'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               All ({templates.length})
@@ -316,8 +316,8 @@ export function PromptTemplatesPanel() {
               onClick={() => setActiveTab('favorites')}
               className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 ${
                 activeTab === 'favorites'
-                  ? 'bg-slate-800 text-slate-100'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               <Star className="w-4 h-4" />
@@ -330,8 +330,8 @@ export function PromptTemplatesPanel() {
               }}
               className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 ${
                 activeTab === 'create'
-                  ? 'bg-slate-800 text-slate-100'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               <Plus className="w-4 h-4" />
@@ -346,7 +346,7 @@ export function PromptTemplatesPanel() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search templates..."
-                className="pl-10 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-64"
+                className="pl-10 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-64"
               />
             </div>
           )}
@@ -374,10 +374,10 @@ export function PromptTemplatesPanel() {
         {activeTab === 'create' ? (
           /* Create Form */
           <div className={`${COMPONENTS.card.base} p-6 max-w-2xl`}>
-            <h2 className="text-lg font-medium text-slate-100 mb-4">Create New Template</h2>
+            <h2 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-4">Create New Template</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Name <span className="text-red-400">*</span>
                 </label>
                 <input
@@ -385,11 +385,11 @@ export function PromptTemplatesPanel() {
                   value={formData.name}
                   onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="My prompt template"
-                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Description
                 </label>
                 <textarea
@@ -397,12 +397,12 @@ export function PromptTemplatesPanel() {
                   onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="Optional description..."
                   rows={2}
-                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
                 />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-300">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                     Prompts <span className="text-red-400">*</span>
                   </label>
                   <button
@@ -421,7 +421,7 @@ export function PromptTemplatesPanel() {
                         onChange={e => updatePrompt(index, e.target.value)}
                         placeholder={`Prompt ${index + 1}...`}
                         rows={2}
-                        className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+                        className="flex-1 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
                       />
                       {formData.prompts.length > 1 && (
                         <button
@@ -441,9 +441,9 @@ export function PromptTemplatesPanel() {
                   id="is_favorite"
                   checked={formData.is_favorite}
                   onChange={e => setFormData(prev => ({ ...prev, is_favorite: e.target.checked }))}
-                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                  className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-500 focus:ring-emerald-500"
                 />
-                <label htmlFor="is_favorite" className="text-sm text-slate-300">
+                <label htmlFor="is_favorite" className="text-sm text-slate-700 dark:text-slate-300">
                   Add to favorites
                 </label>
               </div>
@@ -470,7 +470,7 @@ export function PromptTemplatesPanel() {
             {filteredTemplates.length === 0 ? (
               <div className={`${COMPONENTS.card.base} p-8 text-center`}>
                 <FileText className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-300 mb-2">
+                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
                   {searchQuery ? 'No matching templates' : 'No templates yet'}
                 </h3>
                 <p className="text-slate-500">
@@ -488,13 +488,13 @@ export function PromptTemplatesPanel() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-medium text-slate-100 truncate">{template.name}</h3>
+                        <h3 className="font-medium text-slate-900 dark:text-slate-100 truncate">{template.name}</h3>
                         {template.is_favorite && (
                           <Star className="w-4 h-4 text-amber-400 fill-amber-400 flex-shrink-0" />
                         )}
                       </div>
                       {template.description && (
-                        <p className="text-sm text-slate-400 mb-2 line-clamp-2">
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-2 line-clamp-2">
                           {template.description}
                         </p>
                       )}
@@ -505,7 +505,7 @@ export function PromptTemplatesPanel() {
                             {template.tags.map(tag => (
                               <span
                                 key={tag}
-                                className="inline-block px-2 py-0.5 bg-slate-800 rounded text-slate-400 mr-1"
+                                className="inline-block px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-600 dark:text-slate-400 mr-1"
                               >
                                 {tag}
                               </span>
@@ -520,7 +520,7 @@ export function PromptTemplatesPanel() {
                         className={`p-2 rounded-lg transition-colors ${
                           template.is_favorite
                             ? 'text-amber-400 hover:bg-amber-500/10'
-                            : 'text-slate-500 hover:text-amber-400 hover:bg-slate-800'
+                            : 'text-slate-500 hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                         }`}
                         title={template.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
                       >
@@ -530,14 +530,14 @@ export function PromptTemplatesPanel() {
                       </button>
                       <button
                         onClick={() => handleDuplicate(template.id)}
-                        className="p-2 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-lg transition-colors"
+                        className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                         title="Duplicate"
                       >
                         <Copy className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleEdit(template)}
-                        className="p-2 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-lg transition-colors"
+                        className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                         title="Edit"
                       >
                         <Edit2 className="w-4 h-4" />
@@ -563,43 +563,43 @@ export function PromptTemplatesPanel() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className={`${COMPONENTS.card.base} w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 m-4`}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-medium text-slate-100">Edit Template</h2>
+              <h2 className="text-lg font-medium text-slate-900 dark:text-slate-100">Edit Template</h2>
               <button
                 onClick={() => {
                   setShowEditModal(false);
                   setEditingTemplate(null);
                 }}
-                className="text-slate-500 hover:text-slate-300"
+                className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Name <span className="text-red-400">*</span>
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Description
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={2}
-                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500 resize-none"
+                  className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 resize-none"
                 />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-300">Prompts</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Prompts</label>
                   <button
                     onClick={addPrompt}
                     className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
@@ -615,7 +615,7 @@ export function PromptTemplatesPanel() {
                         value={prompt}
                         onChange={e => updatePrompt(index, e.target.value)}
                         rows={2}
-                        className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500 resize-none"
+                        className="flex-1 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 resize-none"
                       />
                       {formData.prompts.length > 1 && (
                         <button
@@ -635,9 +635,9 @@ export function PromptTemplatesPanel() {
                   id="edit_is_favorite"
                   checked={formData.is_favorite}
                   onChange={e => setFormData(prev => ({ ...prev, is_favorite: e.target.checked }))}
-                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                  className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-500 focus:ring-emerald-500"
                 />
-                <label htmlFor="edit_is_favorite" className="text-sm text-slate-300">
+                <label htmlFor="edit_is_favorite" className="text-sm text-slate-700 dark:text-slate-300">
                   Favorite
                 </label>
               </div>
