@@ -91,17 +91,46 @@ def _federated_row(
     }
 
 
+async def _fetch_federated(db: AsyncSession, statement, params: dict) -> list:
+    """Execute a federated query inside a SAVEPOINT and return its rows.
+
+    PostgreSQL aborts the ENTIRE transaction on a failed statement. Each
+    federator swallows its own exception, which looks safe but is not: once one
+    federated query errors, every federator that runs after it fails with
+    ``InFailedSQLTransactionError`` and silently returns nothing, so the whole
+    "Active Operations" panel goes blank because of one bad query.
+
+    (That was not hypothetical — ``_federated_trainings`` selected a
+    non-existent ``trainings.name`` column, which zeroed out every federator
+    after it in both the test and production databases.)
+
+    Running each query in a SAVEPOINT keeps a failure local to the federator
+    that caused it; the outer transaction stays usable for the rest.
+    """
+    try:
+        async with db.begin_nested():
+            result = await db.execute(statement, params)
+            return list(result)
+    except Exception:
+        logger.exception("Federated task query failed", exc_info=True)
+        return []
+
+
 async def _federated_trainings(db: AsyncSession, statuses: tuple, limit: int = 25) -> list:
     """Fetch trainings in the given statuses as task-queue-shaped rows."""
     from sqlalchemy import text, bindparam
 
     rows = []
     try:
-        result = await db.execute(
+        # NB: the trainings table has no `name` column — join models for a label.
+        result = await _fetch_federated(
+            db,
             text("""
-                SELECT t.id, t.name, t.status, t.progress, t.current_step, t.total_steps,
-                       t.error_message, t.created_at, t.started_at, t.completed_at, t.updated_at
+                SELECT t.id, t.status, t.progress, t.current_step, t.total_steps,
+                       t.error_message, t.created_at, t.started_at, t.completed_at,
+                       t.updated_at, m.name AS model_name
                 FROM trainings t
+                LEFT JOIN models m ON m.id = t.model_id
                 WHERE t.status IN :statuses
                 ORDER BY t.created_at DESC
                 LIMIT :limit
@@ -118,7 +147,7 @@ async def _federated_trainings(db: AsyncSession, statuses: tuple, limit: int = 2
                     "failed" if row.status == "failed" else "queued"
                 ),
                 progress=row.progress,
-                name=row.name or row.id,
+                name=f"SAE training ({row.model_name})" if row.model_name else f"Training {row.id}",
                 details=f"Step {row.current_step:,}/{row.total_steps:,}" if row.total_steps else None,
                 error_message=row.error_message,
                 created_at=row.created_at,
@@ -137,7 +166,8 @@ async def _federated_extractions(db: AsyncSession, statuses: tuple, limit: int =
 
     rows = []
     try:
-        result = await db.execute(
+        result = await _fetch_federated(
+            db,
             text("""
                 SELECT e.id, e.status, e.progress, e.layer_index, e.hook_type,
                        e.features_extracted, e.total_features, e.error_message,
@@ -181,7 +211,8 @@ async def _federated_labeling(db: AsyncSession, statuses: tuple, limit: int = 25
 
     rows = []
     try:
-        result = await db.execute(
+        result = await _fetch_federated(
+            db,
             text("""
                 SELECT lj.id, lj.extraction_job_id, lj.labeling_method,
                        lj.openai_compatible_model, lj.openai_model, lj.local_model,
@@ -224,7 +255,8 @@ async def _federated_pushes(db: AsyncSession, statuses: tuple, limit: int = 25) 
 
     rows = []
     try:
-        result = await db.execute(
+        result = await _fetch_federated(
+            db,
             text("""
                 SELECT np.id, np.sae_id, np.status, np.progress,
                        np.features_pushed, np.total_features, np.error_message,
@@ -257,6 +289,132 @@ async def _federated_pushes(db: AsyncSession, statuses: tuple, limit: int = 25) 
             ))
     except Exception:
         logger.exception("Failed to query neuronpedia pushes for task federation")
+    return rows
+
+
+async def _federated_activation_extractions(
+    db: AsyncSession, statuses: tuple, limit: int = 25
+) -> list:
+    """Fetch model activation extractions as task-queue-shaped rows.
+
+    DISTINCT FROM ``_federated_extractions``: that one federates ``extraction_jobs``
+    (extracting *features from a trained SAE*). This one federates
+    ``activation_extractions`` — the "Extract Activations" flow that pulls
+    activations *out of a model* — which is a different table with its own status
+    enum and had no federator at all, so a running extraction never appeared in
+    /active.
+
+    NOTE ON CASING: ``activation_extractions.status`` is the Postgres enum
+    ``extractionstatus`` whose labels are the UPPERCASE Python enum NAMES
+    ('EXTRACTING', 'QUEUED', ...), unlike ``extraction_status_enum`` used by
+    ``extraction_jobs`` which is lowercase. Comparison is normalized with
+    ``upper(...::text)``; callers pass uppercase names.
+    """
+    from sqlalchemy import text, bindparam
+
+    rows = []
+    try:
+        result = await _fetch_federated(
+            db,
+            text("""
+                SELECT e.id, e.status, e.progress, e.samples_processed, e.max_samples,
+                       e.layer_indices, e.error_message, e.model_id,
+                       e.created_at, e.completed_at, e.updated_at,
+                       m.name AS model_name
+                FROM activation_extractions e
+                LEFT JOIN models m ON m.id = e.model_id
+                WHERE upper(e.status::text) IN :statuses
+                ORDER BY e.created_at DESC
+                LIMIT :limit
+            """).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": [s.upper() for s in statuses], "limit": limit},
+        )
+        for row in result:
+            status_label = str(row.status).upper()
+            details = None
+            if row.max_samples:
+                details = f"{row.samples_processed or 0}/{row.max_samples} samples"
+            layers = row.layer_indices or []
+            layer_part = f" (layer{'s' if len(layers) > 1 else ''} {','.join(str(x) for x in layers)})" if layers else ""
+            rows.append(_federated_row(
+                row_id=row.id,
+                task_type="extraction",
+                entity_id=row.id,
+                entity_type="extraction",
+                status="queued" if status_label == "QUEUED" else (
+                    "failed" if status_label == "FAILED" else "running"
+                ),
+                progress=float(row.progress) if row.progress else 0,
+                name=f"Extracting activations{layer_part}",
+                details=f"{row.model_name} — {details}" if row.model_name and details else (
+                    row.model_name or details
+                ),
+                error_message=row.error_message,
+                created_at=row.created_at,
+                completed_at=row.completed_at,
+                updated_at=row.updated_at,
+            ))
+    except Exception:
+        logger.exception("Failed to query activation extractions for task federation")
+    return rows
+
+
+async def _federated_tokenizations(db: AsyncSession, statuses: tuple, limit: int = 25) -> list:
+    """Fetch dataset tokenizations in the given statuses as task-queue-shaped rows.
+
+    A running tokenization has no ``task_queue`` row — the worker only inserts one
+    on failure — so without this federator an in-progress tokenization is invisible
+    to /active even though the Datasets page shows it running.
+
+    NOTE ON CASING: ``dataset_tokenizations.status`` is the Postgres enum
+    ``tokenization_status_enum``, whose labels are UPPERCASE ('QUEUED',
+    'PROCESSING', ...) because SQLAlchemy persists the Python enum *name*. This is
+    the opposite of ``extraction_status_enum`` ('queued', 'extracting', ...), so
+    comparing against lowercase strings here silently matches zero rows. The
+    comparison is normalized with ``upper(...::text)`` to be immune to either
+    convention; callers pass uppercase names.
+    """
+    from sqlalchemy import text, bindparam
+
+    rows = []
+    try:
+        result = await _fetch_federated(
+            db,
+            text("""
+                SELECT t.id, t.status, t.progress, t.max_length, t.error_message,
+                       t.dataset_id, t.created_at, t.completed_at, t.updated_at,
+                       d.name AS dataset_name
+                FROM dataset_tokenizations t
+                JOIN datasets d ON d.id = t.dataset_id
+                WHERE upper(t.status::text) IN :statuses
+                ORDER BY t.created_at DESC
+                LIMIT :limit
+            """).bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": [s.upper() for s in statuses], "limit": limit},
+        )
+        for row in result:
+            status_label = str(row.status).upper()
+            details = f"{row.max_length} tokens/seq" if row.max_length else None
+            rows.append(_federated_row(
+                row_id=row.id,
+                task_type="tokenization",
+                # Mirrors the failure-path task_queue row written by
+                # dataset_tasks.tokenize_dataset_task so the UI renders both alike.
+                entity_id=str(row.dataset_id),
+                entity_type="dataset",
+                status="running" if status_label == "PROCESSING" else (
+                    "failed" if status_label == "ERROR" else "queued"
+                ),
+                progress=float(row.progress) if row.progress else 0,
+                name=f"Tokenizing {row.dataset_name}" if row.dataset_name else "Tokenization",
+                details=details,
+                error_message=row.error_message,
+                created_at=row.created_at,
+                completed_at=row.completed_at,
+                updated_at=row.updated_at,
+            ))
+    except Exception:
+        logger.exception("Failed to query dataset tokenizations for task federation")
     return rows
 
 
@@ -330,8 +488,8 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
     List all active (queued or running) operations across all job types.
 
     Queries the task_queue table plus trainings, extraction jobs, labeling
-    jobs, and Neuronpedia push jobs to provide a unified view of all
-    background operations.
+    jobs, Neuronpedia push jobs, and dataset tokenizations to provide a
+    unified view of all background operations.
 
     Returns:
         List of active tasks with entity information
@@ -356,6 +514,21 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
     )
     enriched_tasks.extend(
         await _federated_pushes(db, ("queued", "pushing", "preparing"))
+    )
+    # Uppercase: tokenization_status_enum labels are the Python enum NAMES.
+    # Failed tokenizations are intentionally excluded here — the worker writes a
+    # real task_queue row on failure, which /failed already surfaces; federating
+    # ERROR too would double-count them.
+    enriched_tasks.extend(
+        await _federated_tokenizations(db, ("QUEUED", "PROCESSING"))
+    )
+    # Model activation extractions (distinct from extraction_jobs above). The
+    # in-flight set mirrors cleanup_stuck_activations.py, which is the authority
+    # on which statuses mean "still running".
+    enriched_tasks.extend(
+        await _federated_activation_extractions(
+            db, ("QUEUED", "LOADING", "EXTRACTING", "SAVING")
+        )
     )
 
     # Newest first across all sources

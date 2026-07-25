@@ -757,6 +757,13 @@ def extract_activations(
                     existing.samples_processed = 0
                     existing.retry_count = self.request.retries
                     existing.celery_task_id = self.request.id
+                    # Clear the previous attempt's failure. Without this the UI
+                    # keeps rendering its "Error Details" panel (it keys off a
+                    # non-empty error_message) for the whole successful retry and
+                    # after it completes — e.g. a transient CUDA OOM shown against
+                    # a healthy run sitting at 58%.
+                    existing.error_message = None
+                    existing.error_type = None
                     db.commit()
                 else:
                     # Create new record (first attempt)
