@@ -70,6 +70,15 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: api
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -117,6 +126,15 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: celery-worker
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
             # GPU/serialised work ONLY. low_priority is deliberately ABSENT —
             # see the celery-worker-cpu container below.
             - name: CELERY_QUEUES
@@ -184,6 +202,15 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: celery-worker
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
             - name: CELERY_QUEUES
               value: low_priority
             - name: CELERY_WORKER_NAME
@@ -232,6 +259,15 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: celery-beat
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

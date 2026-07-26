@@ -146,3 +146,33 @@ class TestDynamicQueueExemptionIsReal:
             "no on-demand steering worker spawner found — the DYNAMIC_QUEUES "
             "exemption is now hiding a queue with no consumer at all"
         )
+
+
+class TestProductionEnvironmentIsDeclared:
+    """SQLAlchemy echo must be off in the deployed containers.
+
+    `Settings.environment` defaults to "development", and nothing in the
+    manifest set it — so `echo=settings.is_development` was True in production.
+    The NLP pass commits per feature, which produced ~20,700 log lines in 13
+    minutes and rotated away the exact window a 2026-07-26 incident needed.
+
+    MUTATION CONTROL: remove ENVIRONMENT from any container -> this fails.
+    """
+
+    def test_every_container_declares_environment_production(self):
+        if not MANIFEST.exists():          # pragma: no cover
+            pytest.skip(f"manifest not found at {MANIFEST}")
+
+        missing = []
+        for doc in yaml.safe_load_all(MANIFEST.read_text()):
+            if not doc or doc.get("kind") != "Deployment":
+                continue
+            for c in doc["spec"]["template"]["spec"]["containers"]:
+                env = {e["name"]: e.get("value") for e in c.get("env", [])}
+                if env.get("ENVIRONMENT") != "production":
+                    missing.append(f"{c['name']}={env.get('ENVIRONMENT')!r}")
+
+        assert not missing, (
+            "containers do not declare ENVIRONMENT=production, so Settings "
+            f"falls back to 'development' and turns on SQL echo: {missing}"
+        )

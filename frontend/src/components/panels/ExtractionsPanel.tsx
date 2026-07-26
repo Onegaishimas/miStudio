@@ -17,6 +17,12 @@ import { useExtractionWebSocket } from '../../hooks/useExtractionWebSocket';
 import { useNlpWebSocket } from '../../hooks/useNlpWebSocket';
 import { COMPONENTS } from '../../config/brand';
 
+/**
+ * How often to reconcile extraction state over HTTP while work is in flight.
+ * Only a safety net for a dropped WebSocket event — not the primary channel.
+ */
+const EXTRACTION_RECONCILE_MS = 15_000;
+
 export const ExtractionsPanel: React.FC = () => {
   const {
     allExtractions,
@@ -63,6 +69,38 @@ export const ExtractionsPanel: React.FC = () => {
   useEffect(() => {
     fetchAllExtractions(statusFilter.length > 0 ? statusFilter : undefined);
   }, [statusFilter]);
+
+  // Reconciliation poll while anything is still in flight.
+  //
+  // WebSocket is the primary channel, but a single dropped `extraction:completed`
+  // used to leave the card stuck on "extracting" until the user reloaded the page
+  // by hand — reported 2026-07-26 ("one extraction job finished without updating
+  // the ui"). Every other live surface in this app already pairs WS with an HTTP
+  // fallback (see systemMonitorStore); this one did not, so a miss was permanent
+  // rather than self-healing.
+  //
+  // Deliberately slow: WS still delivers the sub-second updates, and this only
+  // has to catch a miss. It stops entirely once no extraction is active, so an
+  // idle panel issues no requests.
+  const hasActiveExtraction = useMemo(
+    () =>
+      allExtractions.some(
+        (e) =>
+          e.status === 'queued' ||
+          e.status === 'extracting' ||
+          e.nlp_status === 'pending' ||
+          e.nlp_status === 'processing',
+      ),
+    [allExtractions],
+  );
+
+  useEffect(() => {
+    if (!hasActiveExtraction) return;
+    const id = window.setInterval(() => {
+      fetchAllExtractions(statusFilter.length > 0 ? statusFilter : undefined);
+    }, EXTRACTION_RECONCILE_MS);
+    return () => window.clearInterval(id);
+  }, [hasActiveExtraction, statusFilter, fetchAllExtractions]);
 
   // Note: Extraction already includes model_name and dataset_name, so we don't need to look up training
 
