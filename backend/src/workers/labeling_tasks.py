@@ -89,6 +89,16 @@ def label_features_task(
 
             return statistics
 
+        except LabelingService._LabelingCancelled:
+            # A clean, user-initiated stop — not a failure. The job row is
+            # already CANCELLED (that is what the loop noticed), so return
+            # quietly and free the worker. Re-raising would mark the run failed
+            # and log a spurious traceback for something the user asked for.
+            logger.info(
+                f"Labeling job {labeling_job_id} stopped early: cancelled by user"
+            )
+            return {"cancelled": True, "labeling_job_id": labeling_job_id}
+
         except Exception as e:
             logger.error(
                 f"Labeling task failed for job {labeling_job_id}: {e}",
