@@ -48,6 +48,12 @@ from src.models.model import Model as ModelRecord, QuantizationFormat
 
 logger = logging.getLogger(__name__)
 
+# Fraction of the progress bar owned by the activation-sampling phase. The
+# remainder belongs to writing feature records to the database — a phase that
+# takes ~9 minutes for a 32,768-latent SAE and used to be invisible because
+# sampling had already reported 1.0.
+SAMPLING_PROGRESS_SHARE = 0.9
+
 
 def cleanup_gpu_memory(
     models_to_cleanup: Optional[List[Any]] = None,
@@ -855,6 +861,9 @@ class ExtractionService:
             progress: Progress percentage (0.0-1.0)
             statistics: Extraction statistics (on completion)
             error_message: Error message (if failed)
+            message: Human-readable phase description for the UI. The frontend
+                maps it to status_message, which is how a card can say which of
+                the two long phases it is in.
         """
         result = await self.db.execute(
             select(ExtractionJob).where(ExtractionJob.id == extraction_id)
@@ -893,7 +902,8 @@ class ExtractionService:
         progress: Optional[float] = None,
         features_extracted: Optional[int] = None,
         statistics: Optional[Dict[str, Any]] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        message: Optional[str] = None
     ) -> None:
         """
         Synchronous version of update_extraction_status for use in Celery tasks.
@@ -956,6 +966,8 @@ class ExtractionService:
                 "features_extracted": extraction_job.features_extracted,
                 "total_features": extraction_job.total_features,
             }
+            if message is not None:
+                event_data["message"] = message
 
             # Emit appropriate event based on status
             if status == ExtractionStatus.COMPLETED.value:
@@ -1551,8 +1563,17 @@ class ExtractionService:
                             if torch.cuda.is_available():
                                 torch.cuda.empty_cache()
 
-                        # Update progress
-                        progress = batch_end / len(dataset)
+                        # Update progress.
+                        #
+                        # Sampling is only the FIRST phase. Writing the feature
+                        # records to the database follows and takes minutes of
+                        # its own, so sampling is scaled into the leading
+                        # SAMPLING_PROGRESS_SHARE of the bar. Letting it reach
+                        # 1.0 here is what made a running job look finished:
+                        # reported 2026-07-26 ("why it's at 100% but doesn't
+                        # transition to complete") against a job that still had
+                        # ~9 minutes of committing to do.
+                        progress = SAMPLING_PROGRESS_SHARE * batch_end / len(dataset)
                         current_time = time.time()
                         # Emit progress every 2 seconds OR at 5% intervals (whichever comes first)
                         should_emit = (current_time - last_emit_time >= 2.0) or (int(progress * 20) > int((batch_start / len(dataset)) * 20))
@@ -1725,10 +1746,20 @@ class ExtractionService:
                 if features_processed % db_commit_batch == 0:
                     self.db.commit()
                     logger.info(f"Committed batch: {features_processed}/{latent_dim} features")
+                    # Carry the bar through the write phase. Without a progress
+                    # value here the field kept whatever sampling last wrote, so
+                    # the UI sat at 100% for the entire commit pass.
+                    write_fraction = features_processed / latent_dim if latent_dim else 1.0
                     self.update_extraction_status_sync(
                         extraction_job.id,
                         ExtractionStatus.EXTRACTING.value,
-                        features_extracted=features_processed
+                        progress=SAMPLING_PROGRESS_SHARE
+                        + (1.0 - SAMPLING_PROGRESS_SHARE) * write_fraction,
+                        features_extracted=features_processed,
+                        message=(
+                            f"Writing features to database: "
+                            f"{features_processed:,}/{latent_dim:,}"
+                        ),
                     )
 
             self.db.commit()
