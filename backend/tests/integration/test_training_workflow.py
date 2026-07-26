@@ -316,7 +316,11 @@ class TestTrainingWorkflow:
         assert our_checkpoint.is_best is True
 
         # Cleanup
-        await CheckpointService.delete_checkpoint(async_session, checkpoint.id)
+        # allow_best: this checkpoint was created with is_best=True and the
+        # guard now refuses best checkpoints unless deletion is explicit.
+        await CheckpointService.delete_checkpoint(
+            async_session, checkpoint.id, allow_best=True
+        )
         await TrainingService.delete_training(async_session, training.id)
         await ModelService.delete_model(async_session, model.id)
         await DatasetService.delete_dataset(async_session, dataset.id)

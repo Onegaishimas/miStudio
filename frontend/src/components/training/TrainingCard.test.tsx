@@ -41,6 +41,8 @@ describe('TrainingCard', () => {
   const mockFetchCheckpoints = vi.fn();
   const mockSaveCheckpoint = vi.fn();
   const mockDeleteCheckpoint = vi.fn();
+const mockStopAndFinalizeTraining = vi.fn();
+const mockFinalizeTraining = vi.fn();
 
   const mockModels: Model[] = [
     {
@@ -126,6 +128,8 @@ describe('TrainingCard', () => {
       fetchCheckpoints: mockFetchCheckpoints,
       saveCheckpoint: mockSaveCheckpoint,
       deleteCheckpoint: mockDeleteCheckpoint,
+      stopAndFinalizeTraining: mockStopAndFinalizeTraining,
+      finalizeTraining: mockFinalizeTraining,
     });
   });
 
@@ -491,7 +495,7 @@ describe('TrainingCard', () => {
           />
         );
 
-        expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^stop training$/i })).toBeInTheDocument();
 
         rerender(
           <TrainingCard
@@ -503,7 +507,7 @@ describe('TrainingCard', () => {
           />
         );
 
-        expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^stop training$/i })).toBeInTheDocument();
       });
 
       it('should call stopTraining when stop button is clicked', async () => {
@@ -517,7 +521,7 @@ describe('TrainingCard', () => {
           />
         );
 
-        const stopButton = screen.getByRole('button', { name: /stop/i });
+        const stopButton = screen.getByRole('button', { name: /^stop training$/i });
         fireEvent.click(stopButton);
 
         await waitFor(() => {
@@ -741,6 +745,177 @@ describe('TrainingCard', () => {
     });
   });
 
+  describe('Finalize (Feature 021)', () => {
+    it('should render Stop & Finalize alongside Stop while RUNNING', () => {
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.RUNNING }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      expect(
+        screen.getByRole('button', { name: /stop and finalize training/i })
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^stop training$/i })).toBeInTheDocument();
+    });
+
+    it('should dispatch stopAndFinalizeTraining when clicked', async () => {
+      mockStopAndFinalizeTraining.mockResolvedValueOnce({});
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.RUNNING }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /stop and finalize training/i }));
+      await waitFor(() => {
+        expect(mockStopAndFinalizeTraining).toHaveBeenCalledWith(baseMockTraining.id);
+      });
+    });
+
+    it('should offer Finalize on a cancelled run that HAS checkpoints', async () => {
+      // The rescue path: runs stopped before this feature existed have intact
+      // checkpoints but no community_format. Without overriding the default
+      // empty mock, checkpoints.length > 0 is false in every test and the whole
+      // button block can be deleted with the suite still green.
+      mockFetchCheckpoints.mockResolvedValueOnce([
+        { id: 'ckpt_1', step: 10000, loss: 0.29, is_best: false },
+      ]);
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.CANCELLED }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      const btn = await screen.findByRole('button', {
+        name: /finalize training from checkpoint/i,
+      });
+      fireEvent.click(btn);
+      await waitFor(() => {
+        expect(mockFinalizeTraining).toHaveBeenCalledWith(baseMockTraining.id);
+      });
+      expect(mockFinalizeTraining).toHaveBeenCalledTimes(1);
+    });
+
+    it('should offer Finalize on a FAILED run that has checkpoints', async () => {
+      // A crashed run previously offered only Retry (which restarts from step 0),
+      // stranding perfectly good checkpoints.
+      mockFetchCheckpoints.mockResolvedValueOnce([
+        { id: 'ckpt_1', step: 3000, loss: 0.4, is_best: false },
+      ]);
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.FAILED }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      expect(
+        await screen.findByRole('button', {
+          name: /finalize training from checkpoint/i,
+        })
+      ).toBeInTheDocument();
+    });
+
+    it('should escalate with allow_failed when the API 409s a FAILED run', async () => {
+      // The 409 body says "Re-send with allow_failed=true" — the UI must be able
+      // to actually do that, or the message is unfollowable.
+      mockFetchCheckpoints.mockResolvedValueOnce([
+        { id: 'ckpt_1', step: 3000, loss: 0.4, is_best: false },
+      ]);
+      mockFinalizeTraining
+        .mockRejectedValueOnce({
+          response: { status: 409, data: { detail: 'run FAILED' } },
+        })
+        .mockResolvedValueOnce(undefined);
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.FAILED }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: /finalize training from checkpoint/i,
+        })
+      );
+
+      await waitFor(() => {
+        expect(mockFinalizeTraining).toHaveBeenCalledTimes(2);
+      });
+      // Payload AND call count: "was called" would pass on the wrong flags.
+      expect(mockFinalizeTraining).toHaveBeenLastCalledWith(
+        baseMockTraining.id,
+        undefined,
+        { allowFailed: true, force: false }
+      );
+    });
+
+    it('should NOT offer Finalize on a cancelled run with no checkpoints', () => {
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.CANCELLED }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      expect(
+        screen.queryByRole('button', { name: /finalize training from checkpoint/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('should show the finalized-early badge instead of implying a full run', () => {
+      render(
+        <TrainingCard
+          training={{
+            ...baseMockTraining,
+            status: TrainingStatus.COMPLETED,
+            finalized_from_step: 10000,
+            total_steps: 50000,
+          }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      // status is 'completed' so the SAE imports, but the card must say the run
+      // stopped early rather than presenting it as a finished 50k-step run.
+      expect(screen.getByText(/finalized early/i)).toBeInTheDocument();
+    });
+
+    it('should not show the badge for a normally completed run', () => {
+      render(
+        <TrainingCard
+          training={{ ...baseMockTraining, status: TrainingStatus.COMPLETED }}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+      expect(screen.queryByText(/finalized early/i)).not.toBeInTheDocument();
+    });
+  });
+
   describe('Error Handling', () => {
     it('should handle pause error gracefully', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -804,7 +979,7 @@ describe('TrainingCard', () => {
         />
       );
 
-      const stopButton = screen.getByRole('button', { name: /stop/i });
+      const stopButton = screen.getByRole('button', { name: /^stop training$/i });
       fireEvent.click(stopButton);
 
       await waitFor(() => {
