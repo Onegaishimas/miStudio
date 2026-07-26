@@ -68,3 +68,14 @@ Emitted every **2 seconds** by a Celery Beat task; all use the event `system:met
 - **Subscription:** React hooks subscribe on mount, unsubscribe on unmount; handlers update Zustand stores.
 - **Polling fallback:** every store detects WebSocket disconnection and falls back to HTTP polling automatically, then stops polling when the socket reconnects. A refresh is never *required* for correctness — the stores re-fetch authoritative state from REST on load.
 - **Payload conventions:** progress events include `progress` (0–100) and job-specific fields; failure events include `error`.
+
+### Finalization events
+
+| Channel | Event | Payload |
+|---|---|---|
+| `trainings/{id}` | `training:completed` | `status`, `progress` (the run's **real** progress, not always 100), `current_step`, `finalized_from_step`, `completed_at` |
+| `trainings/{id}` | `training:finalize_failed` | `training_id`, `error` |
+
+`training:completed` is emitted both by a normal completion and by a finalize.
+Consumers must not assume `progress = 100`: a run finalized from an early
+checkpoint reports the progress it actually reached.

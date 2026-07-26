@@ -748,6 +748,78 @@ describe('trainingsStore', () => {
         '/api/v1/trainings/train_123/checkpoints/ckpt_123'
       );
     });
+
+    it('should send allow_best=true when escalating a best-checkpoint delete', async () => {
+      // The API 409s on the best checkpoint and tells the caller to re-send with
+      // allow_best. If the store drops the flag the UI can never comply.
+      mockedAxios.delete.mockResolvedValueOnce({ data: {} });
+
+      const { deleteCheckpoint } = useTrainingsStore.getState();
+      await deleteCheckpoint('train_123', 'ckpt_123', true);
+
+      expect(mockedAxios.delete).toHaveBeenCalledWith(
+        '/api/v1/trainings/train_123/checkpoints/ckpt_123?allow_best=true'
+      );
+    });
+  });
+
+  describe('Finalize Operations (Feature 021)', () => {
+    it('should POST finalize with no query params by default', async () => {
+      mockedAxios.post.mockResolvedValueOnce({ data: {} });
+
+      const { finalizeTraining } = useTrainingsStore.getState();
+      await finalizeTraining('train_123');
+
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        '/api/v1/trainings/train_123/finalize'
+      );
+    });
+
+    it('should send allow_failed=true so a FAILED run can be escalated', async () => {
+      // Without this the API's own 409 message ("Re-send with allow_failed=true")
+      // is unfollowable through the product.
+      mockedAxios.post.mockResolvedValueOnce({ data: {} });
+
+      const { finalizeTraining } = useTrainingsStore.getState();
+      await finalizeTraining('train_123', undefined, { allowFailed: true });
+
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        '/api/v1/trainings/train_123/finalize?allow_failed=true'
+      );
+    });
+
+    it('should send force=true when overwriting a completed run', async () => {
+      mockedAxios.post.mockResolvedValueOnce({ data: {} });
+
+      const { finalizeTraining } = useTrainingsStore.getState();
+      await finalizeTraining('train_123', undefined, { force: true });
+
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        '/api/v1/trainings/train_123/finalize?force=true'
+      );
+    });
+
+    it('should send an explicit checkpoint_step when given one', async () => {
+      mockedAxios.post.mockResolvedValueOnce({ data: {} });
+
+      const { finalizeTraining } = useTrainingsStore.getState();
+      await finalizeTraining('train_123', 10000);
+
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        '/api/v1/trainings/train_123/finalize?checkpoint_step=10000'
+      );
+    });
+
+    it('should POST the prune route when pruning a training', async () => {
+      mockedAxios.post.mockResolvedValueOnce({ data: {} });
+
+      const { pruneCheckpoints } = useTrainingsStore.getState();
+      await pruneCheckpoints('train_123');
+
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        '/api/v1/trainings/train_123/checkpoints/prune'
+      );
+    });
   });
 
   describe('Configuration Management', () => {

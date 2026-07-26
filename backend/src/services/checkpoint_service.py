@@ -35,6 +35,10 @@ from ..ml.community_format import (
 logger = logging.getLogger(__name__)
 
 
+class CheckpointFileDeleteError(Exception):
+    """The checkpoint row was left in place because its file could not be deleted."""
+
+
 class CheckpointService:
     """Service class for checkpoint operations."""
 
@@ -244,67 +248,117 @@ class CheckpointService:
         return target_checkpoint
 
     @staticmethod
+    def delete_checkpoint_files(storage_path: str) -> int:
+        """Delete a checkpoint file and any parent directories it leaves empty.
+
+        SYNC and session-free so both the async API path and the sync Celery
+        pruner share one implementation — the pruner cannot call the async
+        ``delete_checkpoint`` below, and duplicating unlink/rmdir logic is how
+        the two paths drift apart.
+
+        Layout::
+
+            checkpoints/
+            └── checkpoint_498000/              # step directory
+                └── layer_7_residual/           # layer directory
+                    └── checkpoint.safetensors  # the file
+
+        Returns:
+            Bytes freed. A file that is already absent returns 0 (nothing to do).
+
+        Raises:
+            OSError: if the file exists but could NOT be removed. The caller must
+                keep the database row in that case — committing the row deletion
+                over a failed unlink strands a multi-GB file that no future prune
+                can ever see again (no row -> never planned), while reporting
+                "0.00 GB freed" as though it were a no-op.
+        """
+        path = Path(storage_path)
+        if not path.exists():
+            return 0
+
+        try:
+            freed = path.stat().st_size
+        except OSError:
+            freed = 0
+
+        try:
+            path.unlink()
+            logger.info(f"Deleted checkpoint file: {path}")
+
+            # Remove the layer directory, then the step directory, but only
+            # while they are empty — a sibling layer still present means other
+            # checkpoints live here and the directory must survive.
+            layer_dir = path.parent
+            if layer_dir.exists() and not any(layer_dir.iterdir()):
+                layer_dir.rmdir()
+                logger.info(f"Deleted empty layer directory: {layer_dir}")
+
+                step_dir = layer_dir.parent
+                if step_dir.exists() and not any(step_dir.iterdir()):
+                    step_dir.rmdir()
+                    logger.info(f"Deleted empty checkpoint directory: {step_dir}")
+
+            return freed
+
+        except OSError as e:
+            # Directory cleanup is best-effort, but a failed FILE unlink is not:
+            # re-raise so the caller can leave the row in place for a retry.
+            if path.exists():
+                logger.error(f"Failed to delete checkpoint file {path}: {e}")
+                raise
+            logger.warning(f"Error cleaning checkpoint directories: {e}")
+            return freed
+
+    @staticmethod
     async def delete_checkpoint(
         db: AsyncSession,
         checkpoint_id: str,
-        delete_file: bool = True
+        delete_file: bool = True,
+        allow_best: bool = False,
     ) -> bool:
         """
         Delete a checkpoint record and optionally its file and parent directories.
-
-        For multi-layer checkpoints, this will:
-        1. Delete the checkpoint file (e.g., checkpoint.safetensors)
-        2. Delete the layer directory if empty (e.g., layer_7/)
-        3. Delete the checkpoint step directory if empty (e.g., checkpoint_498000/)
 
         Args:
             db: Database session
             checkpoint_id: Checkpoint ID
             delete_file: Whether to delete the checkpoint file and empty directories
+            allow_best: Permit deleting a checkpoint flagged ``is_best``. Defaults
+                to False — the best checkpoint is the lowest-loss weights for the
+                run and is usually the artifact worth keeping, so removing it has
+                to be asked for explicitly.
 
         Returns:
             True if deleted, False if not found
 
-        Example structure:
-            checkpoints/
-            └── checkpoint_498000/         # Checkpoint step directory
-                ├── layer_7/               # Layer directory
-                │   └── checkpoint.safetensors  # Checkpoint file
-                ├── layer_14/
-                │   └── checkpoint.safetensors
-                └── layer_18/
-                    └── checkpoint.safetensors
+        Raises:
+            ValueError: if the checkpoint is ``is_best`` and ``allow_best`` is False
         """
         db_checkpoint = await CheckpointService.get_checkpoint(db, checkpoint_id)
         if not db_checkpoint:
             return False
 
-        # Delete file and parent directories if requested
-        if delete_file and os.path.exists(db_checkpoint.storage_path):
-            storage_path = Path(db_checkpoint.storage_path)
+        if db_checkpoint.is_best and not allow_best:
+            raise ValueError(
+                f"Refusing to delete best checkpoint {checkpoint_id} "
+                f"(step {db_checkpoint.step}); pass allow_best=True to override"
+            )
 
+        # SAME ORDERING AS THE PRUNER (prune_checkpoints._execute_plan): unlink
+        # the file FIRST and keep the row if that fails. Committing the row
+        # removal over a failed unlink strands the file permanently — planning
+        # is row-driven, so with no row no future prune can ever see it again,
+        # while the caller is told the delete succeeded.
+        storage_path = db_checkpoint.storage_path
+        if delete_file:
             try:
-                # Step 1: Delete the checkpoint file
-                storage_path.unlink()
-                logger.info(f"Deleted checkpoint file: {storage_path}")
-
-                # Step 2: Delete layer directory if empty (e.g., layer_7/)
-                layer_dir = storage_path.parent
-                if layer_dir.exists() and not any(layer_dir.iterdir()):
-                    layer_dir.rmdir()
-                    logger.info(f"Deleted empty layer directory: {layer_dir}")
-
-                    # Step 3: Delete checkpoint step directory if empty (e.g., checkpoint_498000/)
-                    checkpoint_dir = layer_dir.parent
-                    if checkpoint_dir.exists() and not any(checkpoint_dir.iterdir()):
-                        checkpoint_dir.rmdir()
-                        logger.info(f"Deleted empty checkpoint directory: {checkpoint_dir}")
-
+                CheckpointService.delete_checkpoint_files(storage_path)
             except OSError as e:
-                logger.warning(f"Error deleting checkpoint files/directories: {e}")
-                # Continue with database deletion even if file deletion fails
+                raise CheckpointFileDeleteError(
+                    f"Could not delete checkpoint file {storage_path}: {e}"
+                ) from e
 
-        # Delete database record
         await db.delete(db_checkpoint)
         await db.commit()
 
