@@ -32,6 +32,12 @@ Google's [Gemma Scope](https://huggingface.co/google/gemma-scope) repositories f
 
 ## Importing SAEs
 
+:::tip Stopped runs can be imported too
+A run that was stopped early has no SAE to import until it is finalized. Click
+**Finalize** on the training, then import as usual — see
+[Training Lifecycle & Checkpoints](/core-workflow/training-lifecycle).
+:::
+
 Two import paths complement HF downloads:
 
 - **Import from training** — register the SAE(s) a completed miStudio training produced. Multi-layer/multi-hook trainings expose *all* of their SAEs for import; already-imported ones appear disabled in the picker so you can't double-import. The hook type is auto-detected from each SAE's `cfg.json`.

@@ -9,14 +9,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Eye, EyeOff, Save, AlertCircle, CheckCircle2, RefreshCw, Lock } from 'lucide-react';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useTrainingsStore } from '../../stores/trainingsStore';
+import type { CheckpointPrunePreview } from '../../types/training';
 import { fetchAPI } from '../../api/client';
 
-type SettingsTab = 'endpoints' | 'api_keys' | 'labeling' | 'display';
+type SettingsTab = 'endpoints' | 'api_keys' | 'labeling' | 'storage' | 'display';
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'endpoints', label: 'Endpoints' },
   { id: 'api_keys', label: 'API Keys' },
   { id: 'labeling', label: 'Labeling' },
+  { id: 'storage', label: 'Storage' },
   { id: 'display', label: 'Display' },
 ];
 
@@ -64,6 +67,7 @@ export function SettingsPanel() {
       {activeTab === 'endpoints' && <EndpointsTab />}
       {activeTab === 'api_keys' && <PinGate><ApiKeysTab /></PinGate>}
       {activeTab === 'labeling' && <LabelingTab />}
+      {activeTab === 'storage' && <StorageTab />}
       {activeTab === 'display' && <DisplayTab />}
     </div>
   );
@@ -1039,6 +1043,326 @@ function DisplayTab() {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Storage Tab ─────────────────────────────────────────────────────────────
+/**
+ * Checkpoint retention settings.
+ *
+ * Pruning permanently deletes checkpoint files, so the shipped defaults are
+ * deliberately inert: disabled, and dry-run when first enabled. An operator
+ * reviews the dry-run report before any deletion happens.
+ */
+function StorageTab() {
+  const { settings, upsert } = useSettingsStore();
+  const [toast, setToast] = useState<string | null>(null);
+
+  const getValue = (key: string, defaultVal: string) => {
+    const s = settings.find((s) => s.key === key);
+    return s?.value ?? defaultVal;
+  };
+
+  // Deliberately does NOT toast: the caller toasts once, after ALL writes
+  // succeed, so a partial failure can never render as "Saved".
+  const handleSave = async (key: string, value: string) => {
+    await upsert({ key, value, is_sensitive: false, category: 'general' });
+  };
+
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(getValue('checkpoint_prune_enabled', 'false'));
+  const [dryRun, setDryRun] = useState(getValue('checkpoint_prune_dry_run', 'true'));
+  const [keepLast, setKeepLast] = useState(getValue('checkpoint_prune_keep_last', '2'));
+  const [keepBest, setKeepBest] = useState(getValue('checkpoint_prune_keep_best', 'true'));
+  const [minAgeHours, setMinAgeHours] = useState(
+    getValue('checkpoint_prune_min_age_hours', '24')
+  );
+
+  // Re-sync once the settings request resolves.
+  useEffect(() => {
+    setEnabled(getValue('checkpoint_prune_enabled', 'false'));
+    setDryRun(getValue('checkpoint_prune_dry_run', 'true'));
+    setKeepLast(getValue('checkpoint_prune_keep_last', '2'));
+    setKeepBest(getValue('checkpoint_prune_keep_best', 'true'));
+    setMinAgeHours(getValue('checkpoint_prune_min_age_hours', '24'));
+  }, [settings]);
+
+  const isTruthy = (v: string) => ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-slate-900 dark:text-white font-medium mb-1">
+          Checkpoint Retention
+        </h3>
+        <p className="text-xs text-slate-500">
+          Training saves a checkpoint every N steps and never removes them. Pruning
+          reclaims that space. Deletions are permanent — the best checkpoint, the
+          most recent steps, and any active training are always protected.
+        </p>
+      </div>
+
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={isTruthy(enabled)}
+          onChange={(e) => setEnabled(e.target.checked ? 'true' : 'false')}
+          className="rounded"
+        />
+        <span className="text-sm text-slate-700 dark:text-slate-300">
+          Enable scheduled pruning (runs daily)
+        </span>
+      </label>
+
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={isTruthy(dryRun)}
+          onChange={(e) => setDryRun(e.target.checked ? 'true' : 'false')}
+          className="rounded"
+        />
+        <span className="text-sm text-slate-700 dark:text-slate-300">
+          Dry run — report what would be deleted, delete nothing
+        </span>
+      </label>
+      <p className="text-xs text-slate-500 -mt-4 ml-6">
+        Leave this on until you have reviewed a report. Turning it off makes the
+        next scheduled run delete files.
+      </p>
+
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={isTruthy(keepBest)}
+          onChange={(e) => setKeepBest(e.target.checked ? 'true' : 'false')}
+          className="rounded"
+        />
+        <span className="text-sm text-slate-700 dark:text-slate-300">
+          Always keep the best (lowest-loss) checkpoint
+        </span>
+      </label>
+
+      <div>
+        <label className="block text-sm text-slate-700 dark:text-slate-300 mb-1">
+          Keep most recent steps
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={50}
+          value={keepLast}
+          onChange={(e) => setKeepLast(e.target.value)}
+          className="w-32 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white"
+        />
+        <p className="text-xs text-slate-500 mt-1">
+          How many of the newest checkpoint steps to preserve per training. The
+          newest is always kept so a run stays resumable.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-sm text-slate-700 dark:text-slate-300 mb-1">
+          Minimum age (hours)
+        </label>
+        <input
+          type="number"
+          min={0}
+          max={8760}
+          value={minAgeHours}
+          onChange={(e) => setMinAgeHours(e.target.value)}
+          className="w-32 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white"
+        />
+        <p className="text-xs text-slate-500 mt-1">
+          Checkpoints younger than this are never pruned.
+        </p>
+      </div>
+
+      <CheckpointPrunePreviewPanel />
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={async () => {
+            // ORDER MATTERS: write every RESTRICTIVE setting before `enabled`.
+            // Saving `enabled` first means a mid-sequence failure leaves
+            // scheduled pruning switched ON with the previous (possibly
+            // dry_run=false) safety settings — deleting files against a config
+            // the operator never actually confirmed.
+            setSaveError(null);
+            try {
+              await handleSave('checkpoint_prune_dry_run', dryRun);
+              await handleSave('checkpoint_prune_keep_last', keepLast);
+              await handleSave('checkpoint_prune_keep_best', keepBest);
+              await handleSave('checkpoint_prune_min_age_hours', minAgeHours);
+              await handleSave('checkpoint_prune_enabled', enabled);
+              setToast('Saved');
+              setTimeout(() => setToast(null), 2000);
+            } catch (e: any) {
+              // Never claim success on a partial write.
+              setSaveError(
+                e?.response?.data?.detail ||
+                  'Failed to save settings — some values may not have been applied'
+              );
+            }
+          }}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors"
+        >
+          Save
+        </button>
+        {toast && <span className="text-sm text-emerald-500">{toast}</span>}
+        {saveError && (
+          <span role="alert" className="text-sm text-red-500">
+            {saveError}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Dry-run report for checkpoint pruning.
+ *
+ * The Storage tab tells operators to review a report before enabling deletion —
+ * this is that report. Without it the only way to see what pruning would remove
+ * is the Celery worker log, which makes the advice unfollowable.
+ */
+function CheckpointPrunePreviewPanel() {
+  const { trainings, fetchTrainings, previewCheckpointPrune, pruneCheckpoints } =
+    useTrainingsStore();
+  const [selected, setSelected] = useState<string>('');
+  const [preview, setPreview] = useState<CheckpointPrunePreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pruning, setPruning] = useState(false);
+  const [pruneMsg, setPruneMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (trainings.length === 0) {
+      fetchTrainings().catch(() => {
+        /* listing failures are surfaced by the trainings panel itself */
+      });
+    }
+  }, [trainings.length, fetchTrainings]);
+
+  const runPreview = async () => {
+    if (!selected) return;
+    setLoading(true);
+    setError(null);
+    setPreview(null);
+    try {
+      setPreview(await previewCheckpointPrune(selected));
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Failed to load prune preview');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const gb = (bytes: number) => (bytes / 1e9).toFixed(2);
+
+  return (
+    <div className="border-t border-slate-300 dark:border-slate-700 pt-4 space-y-3">
+      <h4 className="text-sm font-medium text-slate-900 dark:text-white">
+        Preview (read-only)
+      </h4>
+      <p className="text-xs text-slate-500">
+        Shows exactly which checkpoint steps the current policy would delete for
+        a training. Nothing is removed by running a preview.
+      </p>
+
+      <div className="flex items-center gap-2">
+        <select
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          aria-label="Training to preview"
+          className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-900 dark:text-white text-sm"
+        >
+          <option value="">Select a training…</option>
+          {trainings.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.id} ({t.status})
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={runPreview}
+          disabled={!selected || loading}
+          className="px-4 py-2 bg-slate-600 hover:bg-slate-700 disabled:opacity-50 text-white rounded text-sm transition-colors"
+        >
+          {loading ? 'Checking…' : 'Preview'}
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-red-500">{error}</p>}
+
+      {preview && !preview.skipped_reason && preview.checkpoint_count > 0 && (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={async () => {
+              const verb = preview.policy.dry_run ? 'report on' : 'PERMANENTLY DELETE';
+              if (
+                !confirm(
+                  `This will ${verb} ${preview.checkpoint_count} checkpoint file(s) ` +
+                    `for ${selected}. Continue?`
+                )
+              ) {
+                return;
+              }
+              setPruning(true);
+              setPruneMsg(null);
+              try {
+                await pruneCheckpoints(selected);
+                setPruneMsg(
+                  preview.policy.dry_run
+                    ? 'Dry-run prune queued — check the worker log for the report.'
+                    : 'Prune queued.'
+                );
+              } catch (e: any) {
+                setError(e?.response?.data?.detail || 'Failed to start prune');
+              } finally {
+                setPruning(false);
+              }
+            }}
+            disabled={pruning}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded text-sm transition-colors"
+          >
+            {pruning ? 'Starting…' : 'Prune now'}
+          </button>
+          {pruneMsg && <span className="text-xs text-emerald-500">{pruneMsg}</span>}
+        </div>
+      )}
+
+      {preview && (
+        <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1 bg-slate-100 dark:bg-slate-800/60 rounded p-3">
+          {preview.skipped_reason ? (
+            <p>
+              Skipped: <span className="font-medium">{preview.skipped_reason}</span>
+            </p>
+          ) : (
+            <>
+              <p>
+                Would delete{' '}
+                <span className="font-medium text-red-500">
+                  {preview.checkpoint_count} checkpoint file(s)
+                </span>{' '}
+                across steps [{preview.prunable_steps.join(', ') || '—'}], freeing
+                ~{gb(preview.estimated_bytes)} GB.
+              </p>
+              <p>Keeping steps: [{preview.kept_steps.join(', ') || '—'}]</p>
+              {preview.policy.dry_run && (
+                <p className="text-amber-600 dark:text-amber-400">
+                  Dry run is ON — a real prune would delete nothing until you turn
+                  it off.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

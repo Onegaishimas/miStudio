@@ -67,6 +67,8 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
     pauseTraining,
     resumeTraining,
     stopTraining,
+    stopAndFinalizeTraining,
+    finalizeTraining,
     retryTraining,
     fetchCheckpoints,
     saveCheckpoint,
@@ -80,6 +82,8 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
   const [autoSave, setAutoSave] = useState(false);
   const [autoSaveInterval, setAutoSaveInterval] = useState(1000);
   const [isControlling, setIsControlling] = useState(false);
+  // Surfaced to the user; these operations previously failed silently.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isSavingCheckpoint, setIsSavingCheckpoint] = useState(false);
   const [checkpoints, setCheckpoints] = useState<any[]>([]);
 
@@ -238,6 +242,67 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
       await stopTraining(training.id);
     } catch (error) {
       console.error('Failed to stop training:', error);
+    } finally {
+      setIsControlling(false);
+    }
+  };
+
+  const handleStopAndFinalize = async () => {
+    setIsControlling(true);
+    setActionError(null);
+    try {
+      await stopAndFinalizeTraining(training.id);
+    } catch (error: any) {
+      const detail =
+        error?.response?.data?.detail || 'Failed to stop and finalize training';
+      console.error('Failed to stop and finalize training:', error);
+      setActionError(detail);
+    } finally {
+      setIsControlling(false);
+    }
+  };
+
+  const handleFinalize = async () => {
+    setIsControlling(true);
+    setActionError(null);
+    try {
+      await finalizeTraining(training.id);
+      // Finalize is queued to a worker and returns 202 immediately, so there is
+      // nothing to refetch yet. The training:completed WebSocket event flips the
+      // status and fills in finalized_from_step when the worker finishes.
+      setActionError(null);
+    } catch (error: any) {
+      const detail =
+        error?.response?.data?.detail || 'Failed to finalize training';
+      // The API guards FAILED runs (allow_failed) and already-COMPLETED runs
+      // (force) behind 409s. Offer the escalation the message asks for.
+      if (error?.response?.status === 409) {
+        const isFailed = training.status === TrainingStatus.FAILED;
+        const prompt = isFailed
+          ? 'This run FAILED, so its checkpoints may predate the crash.\n\n' +
+            'Build the SAE from the last checkpoint anyway?'
+          : 'This run already completed and has an exported SAE.\n\n' +
+            'Overwrite it from an earlier checkpoint? The exported weights will ' +
+            'no longer match the finished run.';
+        if (confirm(prompt)) {
+          try {
+            await finalizeTraining(training.id, undefined, {
+              allowFailed: isFailed,
+              force: !isFailed,
+            });
+            setActionError(null);
+            return;
+          } catch (retryError: any) {
+            setActionError(
+              retryError?.response?.data?.detail || 'Failed to finalize training'
+            );
+            return;
+          }
+        }
+        return;
+      }
+      console.error('Failed to finalize training:', error);
+      setActionError(detail);
     } finally {
       setIsControlling(false);
     }
@@ -436,11 +501,38 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
       return;
     }
 
+    setActionError(null);
     try {
       await deleteCheckpoint(training.id, checkpointId);
       setCheckpoints((prev) => prev.filter((c) => c.id !== checkpointId));
-    } catch (error) {
+    } catch (error: any) {
+      const detail =
+        error?.response?.data?.detail || 'Failed to delete checkpoint';
+      // 409 = this is the best checkpoint. The API accepts allow_best, so offer
+      // the escalation rather than showing an error telling the user to do
+      // something the UI gives them no way to do.
+      if (error?.response?.status === 409) {
+        if (
+          confirm(
+            'This is the BEST (lowest-loss) checkpoint for this run.\n\n' +
+              'Delete it anyway? This cannot be undone.'
+          )
+        ) {
+          try {
+            await deleteCheckpoint(training.id, checkpointId, true);
+            setCheckpoints((prev) => prev.filter((c) => c.id !== checkpointId));
+            return;
+          } catch (retryError: any) {
+            setActionError(
+              retryError?.response?.data?.detail || 'Failed to delete checkpoint'
+            );
+            return;
+          }
+        }
+        return;
+      }
       console.error('Failed to delete checkpoint:', error);
+      setActionError(detail);
     }
   };
 
@@ -553,6 +645,17 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
           {training.completed_at && training.started_at && (
             <span className="text-xs text-slate-500">
               • {calculateDuration(training.started_at, training.completed_at)}
+            </span>
+          )}
+          {/* A finalized-early run has status 'completed' so its SAE can be
+              imported, but it did NOT run to total_steps. Say so plainly rather
+              than presenting a partial run as a finished one. */}
+          {training.finalized_from_step != null && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+              title={`Stopped early and finalized from checkpoint step ${training.finalized_from_step.toLocaleString()} of ${training.total_steps.toLocaleString()}`}
+            >
+              Finalized early @ {training.finalized_from_step.toLocaleString()}
             </span>
           )}
         </div>
@@ -1011,6 +1114,23 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
         </div>
       )}
 
+      {actionError && (
+        <div
+          role="alert"
+          className="mt-3 px-3 py-2 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs flex items-start justify-between gap-2"
+        >
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss error"
+            className="shrink-0 underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Control Buttons */}
       {training.status !== TrainingStatus.COMPLETED && (
         <div className="border-t border-slate-300 dark:border-slate-700 pt-3 flex gap-2">
@@ -1032,8 +1152,25 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               </button>
               <button
                 type="button"
+                onClick={handleStopAndFinalize}
+                disabled={isControlling}
+                aria-label="Stop and finalize training"
+                title="Stop and keep the SAE: writes community_format from the newest checkpoint so it stays importable"
+                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              >
+                {isControlling ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                Stop &amp; Finalize
+              </button>
+              <button
+                type="button"
                 onClick={handleStop}
                 disabled={isControlling}
+                aria-label="Stop training"
+                title="Stop without saving an importable SAE"
                 className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 {isControlling ? (
@@ -1064,8 +1201,25 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               </button>
               <button
                 type="button"
+                onClick={handleStopAndFinalize}
+                disabled={isControlling}
+                aria-label="Stop and finalize training"
+                title="Stop and keep the SAE: writes community_format from the newest checkpoint so it stays importable"
+                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              >
+                {isControlling ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                Stop &amp; Finalize
+              </button>
+              <button
+                type="button"
                 onClick={handleStop}
                 disabled={isControlling}
+                aria-label="Stop training"
+                title="Stop without saving an importable SAE"
                 className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 {isControlling ? (
@@ -1077,6 +1231,29 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
               </button>
             </>
           )}
+
+          {/* Cancelled with checkpoints: offer Finalize (rescues runs stopped
+              before Stop & Finalize existed — their checkpoints are intact but
+              no community_format was ever written, so no SAE is importable). */}
+          {(training.status === TrainingStatus.CANCELLED ||
+            training.status === TrainingStatus.FAILED) &&
+            checkpoints.length > 0 && (
+              <button
+                type="button"
+                onClick={handleFinalize}
+                disabled={isControlling}
+                aria-label="Finalize training from checkpoint"
+                title="Write community_format from the newest checkpoint so this run's SAE becomes importable"
+                className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 dark:disabled:bg-slate-700 disabled:text-slate-500 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              >
+                {isControlling ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                Finalize
+              </button>
+            )}
 
           {/* Failed/Cancelled Status: Show Retry */}
           {(training.status === TrainingStatus.FAILED ||

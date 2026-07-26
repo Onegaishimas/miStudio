@@ -28,6 +28,7 @@ import type {
   TrainingControlResponse,
   Checkpoint,
   CheckpointListResponse,
+  CheckpointPrunePreview,
 } from '../types/training';
 import { SAEArchitectureType } from '../types/training';
 import { getFrameworkConfig } from '../config/frameworkConfigs';
@@ -146,11 +147,27 @@ interface TrainingStoreActions {
   pauseTraining: (trainingId: string) => Promise<TrainingControlResponse>;
   resumeTraining: (trainingId: string) => Promise<TrainingControlResponse>;
   stopTraining: (trainingId: string) => Promise<TrainingControlResponse>;
+  /** Stop a run AND write community_format from its newest checkpoint. */
+  stopAndFinalizeTraining: (trainingId: string) => Promise<TrainingControlResponse>;
+  /** Finalize an already-stopped run so its SAE becomes importable. */
+  finalizeTraining: (
+    trainingId: string,
+    checkpointStep?: number,
+    opts?: { allowFailed?: boolean; force?: boolean }
+  ) => Promise<void>;
+  /** Report which checkpoints the retention policy would delete (read-only). */
+  previewCheckpointPrune: (trainingId: string) => Promise<CheckpointPrunePreview>;
+  /** Run the retention policy against one training now. */
+  pruneCheckpoints: (trainingId: string) => Promise<void>;
 
   // Checkpoint operations
   fetchCheckpoints: (trainingId: string) => Promise<Checkpoint[]>;
   saveCheckpoint: (trainingId: string) => Promise<Checkpoint>;
-  deleteCheckpoint: (trainingId: string, checkpointId: string) => Promise<void>;
+  deleteCheckpoint: (
+    trainingId: string,
+    checkpointId: string,
+    allowBest?: boolean
+  ) => Promise<void>;
 
   // Configuration management
   updateConfig: (updates: Partial<TrainingConfig>) => void;
@@ -550,6 +567,93 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
   },
 
   /**
+   * Stop a training and immediately finalize it from the newest checkpoint.
+   *
+   * Plain 'stop' leaves usable checkpoints that nothing downstream can read,
+   * because cancelling skips the training loop's community_format export.
+   */
+  stopAndFinalizeTraining: async (trainingId: string) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      const request: TrainingControlRequest = { action: 'stop_and_finalize' };
+      const response = await axios.post<TrainingControlResponse>(
+        `${API_BASE_URL}/${trainingId}/control`,
+        request
+      );
+
+      get().updateTrainingStatus(trainingId, { status: response.data.status });
+
+      set({ isLoading: false });
+      return response.data;
+    } catch (error: any) {
+      set({
+        error:
+          error.response?.data?.detail ||
+          error.response?.data?.message ||
+          'Failed to stop and finalize training',
+        isLoading: false,
+      });
+      throw error;
+    }
+  },
+
+  /**
+   * Preview what pruning would delete for a training. Never deletes anything.
+   */
+  previewCheckpointPrune: async (trainingId: string) => {
+    const response = await axios.get(
+      `${API_BASE_URL}/${trainingId}/checkpoints/prune-preview`
+    );
+    return response.data.data as CheckpointPrunePreview;
+  },
+
+  /**
+   * Prune this training's checkpoints now (honours dry-run and every guard).
+   */
+  pruneCheckpoints: async (trainingId: string) => {
+    await axios.post(`${API_BASE_URL}/${trainingId}/checkpoints/prune`);
+  },
+
+  /**
+   * Finalize an already-stopped training from a checkpoint.
+   *
+   * This is the rescue path for runs stopped before finalize existed: their
+   * checkpoints are intact but no community_format was ever written.
+   */
+  finalizeTraining: async (
+    trainingId: string,
+    checkpointStep?: number,
+    opts?: { allowFailed?: boolean; force?: boolean }
+  ) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      // The API refuses a FAILED run without allow_failed and an already
+      // COMPLETED run without force. Both must be sendable, or the 409 tells
+      // the user to do something the product gives them no way to do.
+      const params = new URLSearchParams();
+      if (checkpointStep !== undefined) {
+        params.set('checkpoint_step', String(checkpointStep));
+      }
+      if (opts?.allowFailed) params.set('allow_failed', 'true');
+      if (opts?.force) params.set('force', 'true');
+      const query = params.toString() ? `?${params.toString()}` : '';
+      await axios.post(`${API_BASE_URL}/${trainingId}/finalize${query}`);
+      set({ isLoading: false });
+    } catch (error: any) {
+      set({
+        error:
+          error.response?.data?.detail ||
+          error.response?.data?.message ||
+          'Failed to finalize training',
+        isLoading: false,
+      });
+      throw error;
+    }
+  },
+
+  /**
    * Fetch checkpoints for a training job.
    *
    * @param trainingId - Training job ID
@@ -607,9 +711,18 @@ export const useTrainingsStore = create<TrainingStore>((set, get) => ({
    * @param trainingId - Training job ID
    * @param checkpointId - Checkpoint ID
    */
-  deleteCheckpoint: async (trainingId: string, checkpointId: string) => {
+  deleteCheckpoint: async (
+    trainingId: string,
+    checkpointId: string,
+    allowBest?: boolean
+  ) => {
     try {
-      await axios.delete(`${API_BASE_URL}/${trainingId}/checkpoints/${checkpointId}`);
+      // The API 409s on the best checkpoint unless deletion is explicit; without
+      // sending this the UI can never honour its own error message.
+      const query = allowBest ? '?allow_best=true' : '';
+      await axios.delete(
+        `${API_BASE_URL}/${trainingId}/checkpoints/${checkpointId}${query}`
+      );
     } catch (error: any) {
       console.error('Failed to delete checkpoint:', error);
       throw error;

@@ -81,7 +81,16 @@ export const useTrainingWebSocket = (trainingIds: string[]) => {
     console.log('[Training WS] ✅ Training completed:', data);
     updateTrainingStatus(data.training_id, {
       status: TrainingStatus.COMPLETED,
-      progress: 100.0,
+      // A run finalized early from a checkpoint completes at its real progress,
+      // NOT 100%. Hard-coding 100 here would show a full progress bar for a run
+      // stopped at step 10k of 50k — the exact misrepresentation that
+      // finalized_from_step exists to prevent. Only assume 100 when the server
+      // does not say otherwise (normal completion omits progress).
+      progress: data.progress ?? 100.0,
+      ...(data.current_step != null ? { current_step: data.current_step } : {}),
+      ...(data.finalized_from_step != null
+        ? { finalized_from_step: data.finalized_from_step }
+        : {}),
       // Prefer the server timestamp; fall back to client clock for old backends
       completed_at: data.completed_at || new Date().toISOString(),
     });

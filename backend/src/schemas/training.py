@@ -294,6 +294,14 @@ class TrainingResponse(BaseModel):
     progress: float = Field(..., description="Training progress (0-100)")
     current_step: int = Field(..., description="Current training step")
     total_steps: int = Field(..., description="Total training steps")
+    finalized_from_step: Optional[int] = Field(
+        None,
+        description=(
+            "Checkpoint step this run was finalized from after being stopped "
+            "early; None if it ran to completion. status is 'completed' in both "
+            "cases, so this is what distinguishes a full run from a salvaged one."
+        ),
+    )
 
     hyperparameters: Dict[str, Any] = Field(..., description="Training hyperparameters")
 
@@ -430,7 +438,16 @@ class CheckpointListResponse(BaseModel):
 class TrainingControlRequest(BaseModel):
     """Schema for training control operations (pause/resume/stop)."""
 
-    action: Literal["pause", "resume", "stop"] = Field(..., description="Control action to perform")
+    # NOTE: this Literal is the request gate — a new action must be added here
+    # or the endpoint returns 422 before its handler ever runs.
+    action: Literal["pause", "resume", "stop", "stop_and_finalize"] = Field(
+        ...,
+        description=(
+            "Control action. 'stop' cancels the run; 'stop_and_finalize' also "
+            "writes community_format from the newest checkpoint so the SAE "
+            "stays importable."
+        ),
+    )
 
 
 class TrainingControlResponse(BaseModel):

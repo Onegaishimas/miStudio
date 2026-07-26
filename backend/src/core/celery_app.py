@@ -164,6 +164,19 @@ celery_app.conf.update(
             "queue": "low_priority",
         },
 
+        # Finalize a stopped training from a checkpoint (Feature 021): CPU-only.
+        # Deliberately NOT on the "training" queue — rebuilding SAE modules and
+        # writing community_format never touches the GPU, so a finalize must be
+        # able to run while another training owns the device.
+        "src.workers.training_finalize_tasks.*": {
+            "queue": "low_priority",
+        },
+
+        # Checkpoint retention pruning (Feature 021): CPU + filesystem only.
+        "src.workers.prune_checkpoints.*": {
+            "queue": "low_priority",
+        },
+
         # Maintenance operations: Background tasks
         "src.workers.maintenance_tasks.*": {
             "queue": "low_priority",
@@ -311,6 +324,16 @@ celery_app.conf.update(
                 "queue": "low_priority",
             },
         },
+        # Checkpoint retention pruning (Feature 021) - runs daily.
+        # No-ops unless checkpoint_prune_enabled=true, and reports without
+        # deleting while checkpoint_prune_dry_run=true (both defaults).
+        "prune-checkpoints": {
+            "task": "src.workers.prune_checkpoints.prune_checkpoints",
+            "schedule": 86400.0,  # Run daily
+            "options": {
+                "queue": "low_priority",
+            },
+        },
         # GPU Memory Watchdog - runs every minute to detect stuck processes
         # This is critical for preventing zombie processes from holding GPU memory
         "gpu-memory-watchdog": {
@@ -377,6 +400,8 @@ celery_app.autodiscover_tasks(
         "src.workers.circuit_validation_tasks",  # Circuit edge validation (Feature 017)
         "src.workers.circuit_calibration_tasks",  # Circuit strength calibration (Feature 20)
         "src.workers.circuit_record_tasks",  # Steered-transcript recorder
+        "src.workers.training_finalize_tasks",  # Finalize stopped training from checkpoint (Feature 021)
+        "src.workers.prune_checkpoints",  # Checkpoint retention pruning (Feature 021)
     ],
     force=True,
 )

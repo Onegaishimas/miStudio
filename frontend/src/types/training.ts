@@ -175,6 +175,12 @@ export interface Training {
   current_step: number;
   /** Total planned training steps */
   total_steps: number;
+  /**
+   * Checkpoint step this run was finalized from after being stopped early.
+   * null/undefined when the run completed normally. status is 'completed' in
+   * both cases, so this is what distinguishes a full run from a salvaged one.
+   */
+  finalized_from_step?: number | null;
 
   // Hyperparameters
   /** Training hyperparameters */
@@ -319,8 +325,12 @@ export interface TrainingCreateRequest {
  * Matches backend TrainingControlRequest schema.
  */
 export interface TrainingControlRequest {
-  /** Control action to perform */
-  action: 'pause' | 'resume' | 'stop';
+  /**
+   * Control action to perform.
+   * 'stop' cancels the run; 'stop_and_finalize' also writes community_format
+   * from the newest checkpoint so the SAE stays importable.
+   */
+  action: 'pause' | 'resume' | 'stop' | 'stop_and_finalize';
 }
 
 /**
@@ -422,4 +432,24 @@ export interface CheckpointCreatedEvent {
   loss: number;
   is_best: boolean;
   storage_path: string;
+}
+
+/**
+ * Result of GET /trainings/{id}/checkpoints/prune-preview.
+ * Read-only report of what the retention policy WOULD delete.
+ */
+export interface CheckpointPrunePreview {
+  training_id: string;
+  policy: {
+    enabled: boolean;
+    dry_run: boolean;
+    keep_last: number;
+    keep_best: boolean;
+    min_age_hours: number;
+  };
+  prunable_steps: number[];
+  kept_steps: number[];
+  checkpoint_count: number;
+  estimated_bytes: number;
+  skipped_reason: string | null;
 }

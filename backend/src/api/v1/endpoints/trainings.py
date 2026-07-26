@@ -249,6 +249,30 @@ async def control_training(
             if db_training and db_training.celery_task_id:
                 revoke_task(db_training.celery_task_id, terminate=True)
             message = "Training stopped"
+        elif action == "stop_and_finalize":
+            # Stop, then rebuild the SAEs from the newest checkpoint and write
+            # community_format. Without the finalize step a stopped run leaves
+            # usable checkpoints that nothing downstream can read.
+            db_training = await TrainingService.stop_training(db, training_id)
+            if db_training and db_training.celery_task_id:
+                revoke_task(db_training.celery_task_id, terminate=True)
+            message = "Training stopped"
+            if db_training:
+                from ....services.training_finalize_service import list_checkpoint_steps
+                from ....workers.training_finalize_tasks import (
+                    finalize_training_from_checkpoint_task,
+                )
+
+                # Only claim a finalize if there is actually a checkpoint to
+                # finalize from — otherwise the user is told their SAE was saved
+                # when nothing was written.
+                if list_checkpoint_steps(training_id):
+                    finalize_training_from_checkpoint_task.delay(training_id, None)
+                    message = "Training stopped; finalizing from latest checkpoint"
+                else:
+                    message = (
+                        "Training stopped, but it has no checkpoints to finalize from"
+                    )
         else:
             raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
 
@@ -388,3 +412,222 @@ async def get_best_checkpoint(
         )
 
     return {"data": [checkpoint]}
+
+
+# ROUTE ORDER MATTERS: the literal "/checkpoints/prune*" paths must be declared
+# BEFORE the parameterised "/checkpoints/{checkpoint_id}" route below. FastAPI
+# matches in declaration order, so a parameterised route declared first would
+# capture "prune-preview" as a checkpoint id.
+
+
+@router.get("/{training_id}/checkpoints/prune-preview")
+async def preview_checkpoint_prune(
+    training_id: str = Path(..., description="Training job ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Report which checkpoints the retention policy would delete.
+
+    Strictly read-only, so it is safe to call at any time — a running training
+    simply reports back as skipped rather than erroring.
+    """
+    from sqlalchemy import select
+
+    from ....models.app_setting import AppSetting
+    from ....models.checkpoint import Checkpoint
+    from ....services.checkpoint_retention import (
+        SETTING_KEYS,
+        plan_from_checkpoints,
+        policy_from_values,
+    )
+
+    db_training = await TrainingService.get_training(db, training_id)
+    if not db_training:
+        raise HTTPException(status_code=404, detail=f"Training not found: {training_id}")
+
+    # load_policy() needs a sync session; read the same rows asynchronously and
+    # hand them to the SHARED builder so this endpoint and the worker can never
+    # disagree about what the policy is.
+    setting_rows = await db.execute(
+        select(AppSetting).where(AppSetting.key.in_(SETTING_KEYS))
+    )
+    policy = policy_from_values({r.key: r.value for r in setting_rows.scalars().all()})
+
+    ckpt_rows = await db.execute(
+        select(Checkpoint).where(Checkpoint.training_id == training_id)
+    )
+    checkpoints = list(ckpt_rows.scalars().all())
+
+    plan = plan_from_checkpoints(
+        training_id=training_id,
+        training_status=db_training.status,
+        checkpoints=checkpoints,
+        policy=policy,
+    )
+
+    return {
+        "data": {
+            "training_id": training_id,
+            "policy": {
+                "enabled": policy.enabled,
+                "dry_run": policy.dry_run,
+                "keep_last": policy.keep_last,
+                "keep_best": policy.keep_best,
+                "min_age_hours": policy.min_age_hours,
+            },
+            "prunable_steps": plan.prunable_steps,
+            "kept_steps": plan.kept_steps,
+            "checkpoint_count": len(plan.checkpoint_ids),
+            "estimated_bytes": plan.estimated_bytes,
+            "skipped_reason": plan.skipped_reason,
+        }
+    }
+
+
+@router.post("/{training_id}/checkpoints/prune", status_code=202)
+async def prune_checkpoints_now(
+    training_id: str = Path(..., description="Training job ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Prune this training's checkpoints now, bypassing the scheduler's enabled flag.
+
+    This is an explicit operator action, so it runs even when the periodic
+    pruner is disabled. Every SAFETY guard still applies (never the best
+    checkpoint, never the newest steps, never an active training), and
+    ``checkpoint_prune_dry_run`` is still honoured.
+    """
+    db_training = await TrainingService.get_training(db, training_id)
+    if not db_training:
+        raise HTTPException(status_code=404, detail=f"Training not found: {training_id}")
+
+    from ....workers.prune_checkpoints import prune_single_training_task
+
+    task = prune_single_training_task.delay(training_id)
+    return {
+        "data": {"training_id": training_id, "task_id": task.id, "status": "queued"}
+    }
+
+
+@router.delete("/{training_id}/checkpoints/{checkpoint_id}", status_code=204)
+async def delete_checkpoint(
+    training_id: str = Path(..., description="Training job ID"),
+    checkpoint_id: str = Path(..., description="Checkpoint ID"),
+    allow_best: bool = Query(
+        False, description="Permit deleting a checkpoint flagged as best"
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a single checkpoint and its file.
+
+    The frontend has called this route for some time while it did not exist
+    (silently 404ing), so implementing it also fixes the existing Checkpoint
+    Management UI.
+    """
+    db_training = await TrainingService.get_training(db, training_id)
+    if not db_training:
+        raise HTTPException(status_code=404, detail=f"Training not found: {training_id}")
+
+    checkpoint = await CheckpointService.get_checkpoint(db, checkpoint_id)
+    if not checkpoint:
+        raise HTTPException(
+            status_code=404, detail=f"Checkpoint not found: {checkpoint_id}"
+        )
+    if checkpoint.training_id != training_id:
+        # Never allow a checkpoint to be deleted via an unrelated training's URL.
+        raise HTTPException(
+            status_code=404,
+            detail=f"Checkpoint {checkpoint_id} does not belong to training {training_id}",
+        )
+
+    from ....services.checkpoint_service import CheckpointFileDeleteError
+
+    try:
+        await CheckpointService.delete_checkpoint(
+            db, checkpoint_id, delete_file=True, allow_best=allow_best
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except CheckpointFileDeleteError as e:
+        # The row was deliberately kept so the file is not stranded — report the
+        # failure rather than 204ing over a delete that did not happen.
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return None
+
+
+@router.post("/{training_id}/finalize", status_code=202)
+async def finalize_training(
+    training_id: str = Path(..., description="Training job ID"),
+    checkpoint_step: Optional[int] = Query(
+        None, description="Checkpoint step to finalize from; defaults to the newest"
+    ),
+    allow_failed: bool = Query(
+        False, description="Permit finalizing a training whose run FAILED"
+    ),
+    force: bool = Query(
+        False,
+        description="Overwrite an existing export on an already-COMPLETED training",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Produce the Community Standard export for a stopped training.
+
+    Stopping a run skips the training loop's finalize block, leaving usable
+    checkpoints that no downstream consumer can read. This rebuilds the SAEs
+    from a checkpoint and writes ``community_format/`` — which is what unlocks
+    "Import to SAEs".
+    """
+    db_training = await TrainingService.get_training(db, training_id)
+    if not db_training:
+        raise HTTPException(status_code=404, detail=f"Training not found: {training_id}")
+
+    # Reuse the retention module's definition so "active" has ONE meaning.
+    # PAUSED belongs here: a paused run's Celery task is still alive and
+    # resumable, and finalizing it would set status=COMPLETED underneath a job
+    # that can later resume and overwrite it.
+    from ....services.checkpoint_retention import ACTIVE_TRAINING_STATUSES
+
+    if db_training.status in ACTIVE_TRAINING_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot finalize a {db_training.status} training; stop it first",
+        )
+
+    # A FAILED run crashed — finalizing would flip it to COMPLETED while its
+    # error_message/traceback stay populated, and the SAE would then import as a
+    # clean run. Require the caller to say explicitly that they want the SAE
+    # from a crashed run.
+    # A COMPLETED run already has the community_format written from its FINAL
+    # weights. Re-finalizing rebuilds from an older checkpoint, overwriting those
+    # weights and stamping finalized_from_step on a run that did go the distance —
+    # so every already-extracted feature would disagree with the on-disk SAE.
+    if db_training.status == TrainingStatus.COMPLETED.value and not force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This training already completed and has an exported SAE. "
+                "Re-send with force=true to overwrite it from a checkpoint."
+            ),
+        )
+
+    if db_training.status == TrainingStatus.FAILED.value and not allow_failed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This training FAILED; its checkpoints may predate the crash. "
+                "Re-send with allow_failed=true to finalize anyway."
+            ),
+        )
+
+    from ....workers.training_finalize_tasks import (
+        finalize_training_from_checkpoint_task,
+    )
+
+    task = finalize_training_from_checkpoint_task.delay(training_id, checkpoint_step)
+    return {
+        "data": {
+            "training_id": training_id,
+            "task_id": task.id,
+            "checkpoint_step": checkpoint_step,
+            "status": "queued",
+        }
+    }

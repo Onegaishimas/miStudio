@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 3.2 (Steered Transcript Recorder — IDL-38)
+**Version:** 3.3 (Training Finalization & Checkpoint Lifecycle — IDL-39)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -3208,6 +3208,86 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 
 ---
 
+### IDL-39: Training finalization from a checkpoint, and step-granular checkpoint retention
+
+**Date:** 2026-07-26
+
+**Context:** Cancelling a training set `status=cancelled` and returned, skipping
+the training loop's finalize block that writes `community_format/`. That
+directory is the sole interchange artifact — `sae_manager_service` scans it and
+circuit capture, Neuronpedia export and analysis all load through it — so a
+stopped run left intact checkpoints that no part of the product could consume,
+and the UI offered only "Retry", which starts a new run from step 0. The
+observed case was `train_969e90af` (granite-4.1-8b, JumpReLU, L34/35/36) stopped
+at step 10,300 with FVU 0.065 and zero dead neurons: a good SAE, forfeited.
+Independently, checkpoints were never reclaimed — 423 rows / 18 trainings /
+78 GB on a volume at 81%. Feature status: **Implemented** (doc chain 020).
+Observed behaviour, not from a supplement BRD.
+
+**Decision:**
+
+1. **Finalize reuses the success path's writer, not a parallel one.** The
+   service rebuilds SAE modules and calls the same
+   `save_multilayer_community_checkpoint` the training loop calls, so a
+   finalized-early export is interchangeable with a normally-completed one. A
+   weights-only converter was rejected: the existing
+   `migrate_mistudio_to_community` hard-requires `encoder.weight` and cannot
+   handle JumpReLU's `W_enc`, which is the architecture in production use.
+
+2. **Dimensions and architecture come from the checkpoint, never from stored
+   hyperparameters.** The training task overwrites `hp['hidden_dim']` in memory
+   after inspecting the activation file and never persists the correction, so
+   the stored value can be wrong. `cfg.json` derives `d_in`/`d_sae`/
+   `architecture` from the hyperparameters handed to the writer, so the resolved
+   values are written into that dict — otherwise the config contradicts the
+   weights beside it (e.g. a JumpReLU labelled `standard`/`relu`, which makes a
+   loader apply plain ReLU to a jump-thresholded SAE: silently wrong features,
+   no error).
+
+3. **Honest completion.** Finalizing sets `status=COMPLETED` because that is what
+   unlocks the SAE import path, but `progress` and `current_step` are left
+   truthful and a nullable `finalized_from_step` column records the step. A run
+   halted at 10k of 50k must never present as a finished 50k-step training. The
+   alternative — a distinct terminal status — was rejected because every
+   downstream consumer gates on `COMPLETED` and would have needed to learn a new
+   state.
+
+4. **The export is atomic and only proceeds from a complete step.** Layers are
+   staged and swapped in. A step is verified against recorded checkpoint
+   metadata first, and when no step was named finalize falls back to the newest
+   *complete* one. Writing in place had left one step's layer beside a previous
+   step's layers — a chimeric SAE spanning two training steps.
+
+5. **The completeness check fails closed.** A database error raises rather than
+   returning "nothing recorded", because that is indistinguishable from the
+   absent-metadata case and would disable the one guard against exporting a torn
+   step as a whole run.
+
+6. **Retention selects whole STEPS, and executes per step.** One row exists per
+   `(step, layer, hook)` sharing a single directory; row-granular selection or
+   row-granular commits leave a half-deleted, unloadable checkpoint — and
+   because the completeness check derives its expected layer set from surviving
+   rows, a later finalize would then treat that torn step as complete.
+
+7. **Deletion unlinks the file first and commits the row only on success.**
+   Committing a row over a failed unlink strands the file permanently: planning
+   is row-driven, so with no row no future prune can ever see it again, while
+   the run reports "0.00 GB freed". Both delete paths (pruner and API) follow
+   this ordering.
+
+8. **Destructive automation ships inert.** Pruning is disabled by default and
+   dry-run when first enabled; unparseable settings fall back to the safe
+   default rather than to `False`, because for `dry_run` a `False` means delete.
+
+**Tradeoffs:** finalizing sets `COMPLETED` on a partial run, mitigated by
+`finalized_from_step` and a UI badge; the atomic swap needs transient double
+disk for one export; step-granular pruning reclaims slightly less than
+row-granular would, accepted because the alternative corrupts checkpoints;
+retention is row-driven so orphaned directories with no row are not reclaimed —
+recorded as follow-up debt.
+
+---
+
 ## Document Control
 
 **Version:** 3.2
@@ -3242,6 +3322,7 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
 | 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
+| 3.3 | 2026-07-26 | IDL-39 (finalize-from-checkpoint; step-granular retention; unlink-before-commit; fail-closed completeness) — Implemented, observed behaviour |
 | 3.2 | 2026-07-22 | IDL-38 (steered transcript recorder: one unified steering core + 3 per-type resolvers with calibration refactored byte-identical; general judge-free recorder for circuit/cluster/feature → `steering_samples` manifest carrying generated TEXT; first-class calibration `transcripts`; `steering_record_runs` GPU-guard marker) — Implemented, from BRD-MIS-RECORDER-001 |
 | 3.1 | 2026-07-21 | IDL-37 (circuit strength calibration: two-detector usable-band search — onset by output-drift, correctness cliff by LLM judge on generated neutral-topic falsifiable probes; adaptive bisection not fixed grid; additive nullable `calibration` block clamps `intensity_range` to `[onset,cliff]` and defaults `intensity` to sweet-spot; badge not gate; provisional cross-plane, probes travel for serve-time re-verify) — Planned, from the served-circuit finding that placeholder strengths ship fluent-but-false |
 
