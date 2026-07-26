@@ -298,7 +298,11 @@ def analyze_features_nlp_task(
 
             logger.info(f"NLP analysis completed for extraction {extraction_job_id}: {statistics}")
             
-            # Check if this extraction is part of a batch and start the next job
+            # BACKSTOP ONLY. The batch chain is released when the EXTRACTION
+            # completes (extraction_service), not here — NLP must never gate the
+            # next SAE. This call remains so a batch still advances if that
+            # earlier release failed, and it is a no-op in the normal case
+            # because _start_next_batch_job claims on celery_task_id IS NULL.
             if extraction_job.batch_id and extraction_job.batch_position:
                 _start_next_batch_job(db, extraction_job)
             
@@ -330,7 +334,7 @@ def analyze_features_nlp_task(
                 }
             )
 
-            # Even if NLP fails, start the next batch job if applicable
+            # Backstop on the failure path too (see the note above).
             try:
                 if extraction_job.batch_id and extraction_job.batch_position:
                     _start_next_batch_job(db, extraction_job)
@@ -430,11 +434,23 @@ def analyze_single_feature_nlp_task(
 
 def _start_next_batch_job(db: Session, current_job) -> None:
     """
-    Start the next extraction job in a batch after the current job's NLP completes.
-    
+    Start the next extraction job in a batch.
+
+    Called when the current job's EXTRACTION completes — NLP analysis is
+    post-processing and must never gate the next extraction. It used to: the
+    chain only advanced from the NLP-completion path, so a batch with auto_nlp
+    enabled stalled for the entire NLP pass (measured at 0.72 features/sec, i.e.
+    ~12.6 hours for a 32,759-feature SAE) before the next SAE even started.
+
+    IDEMPOTENT: several paths call this (extraction complete, extraction failed,
+    NLP complete, NLP-queue failure), so it claims the next job by setting
+    celery_task_id under a row lock and only dispatches if it won the claim.
+    Without that, two callers would both find the same QUEUED row and dispatch
+    the SAME extraction twice.
+
     Args:
         db: Database session
-        current_job: The extraction job that just completed NLP
+        current_job: The extraction job that just finished
     """
     from src.models.extraction_job import ExtractionJob, ExtractionStatus
     from src.workers.extraction_tasks import extract_features_from_sae_task
@@ -446,13 +462,16 @@ def _start_next_batch_job(db: Session, current_job) -> None:
         
         logger.info(f"Batch {batch_id}: Looking for next job at position {next_position}")
         
-        # Find the next job in the batch
+        # Find the next job in the batch and CLAIM it under a row lock.
+        # celery_task_id IS NULL is the claim flag: a job that already has one
+        # has been dispatched, so a second caller must not dispatch it again.
         next_job = db.query(ExtractionJob).filter(
             ExtractionJob.batch_id == batch_id,
             ExtractionJob.batch_position == next_position,
-            ExtractionJob.status == ExtractionStatus.QUEUED.value
-        ).first()
-        
+            ExtractionJob.status == ExtractionStatus.QUEUED.value,
+            ExtractionJob.celery_task_id.is_(None),
+        ).with_for_update(skip_locked=True).first()
+
         if next_job:
             # Get the config from the job
             config = next_job.config or {}

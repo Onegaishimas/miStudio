@@ -976,7 +976,28 @@ class ExtractionService:
                     data=event_data
                 )
 
-                # Queue NLP analysis task if auto_nlp is enabled
+                # RELEASE THE BATCH FIRST — the next extraction must not wait on
+                # this job's NLP.
+                #
+                # The chain used to advance only from the NLP-completion path, so
+                # a batch with auto_nlp enabled stalled for the whole NLP pass
+                # before the next SAE started. Measured at 0.72 features/sec that
+                # is ~12.6 hours for one 32,759-feature SAE, and ~38 hours for a
+                # 3-SAE batch — spent entirely on post-processing that the next
+                # extraction does not depend on.
+                #
+                # NLP is analysis of features already written to the database. It
+                # is queued below and runs independently; nothing waits for it.
+                if extraction_job.batch_id and extraction_job.batch_position:
+                    try:
+                        from ..workers.nlp_analysis_tasks import _start_next_batch_job
+                        _start_next_batch_job(self.db, extraction_job)
+                    except Exception as batch_err:
+                        logger.error(f"Failed to start next batch job: {batch_err}")
+
+                # Queue NLP analysis task if auto_nlp is enabled. This is now
+                # purely additive — it can succeed, fail or be skipped without
+                # affecting whether the rest of the batch runs.
                 if auto_nlp:
                     try:
                         from ..workers.nlp_analysis_tasks import analyze_features_nlp_task
@@ -988,22 +1009,8 @@ class ExtractionService:
                         logger.info(f"Queued NLP analysis task for extraction {extraction_id} (auto_nlp=True)")
                     except Exception as nlp_err:
                         logger.warning(f"Failed to queue NLP analysis for extraction {extraction_id}: {nlp_err}")
-                        # NLP queue failed — start next batch job directly as fallback
-                        if extraction_job.batch_id and extraction_job.batch_position:
-                            try:
-                                from ..workers.nlp_analysis_tasks import _start_next_batch_job
-                                _start_next_batch_job(self.db, extraction_job)
-                            except Exception as batch_err:
-                                logger.error(f"Failed to start next batch job after NLP queue failure: {batch_err}")
                 else:
                     logger.info(f"Skipping NLP analysis for extraction {extraction_id} (auto_nlp=False)")
-                    # No NLP to trigger the batch chain — start next job directly
-                    if extraction_job.batch_id and extraction_job.batch_position:
-                        try:
-                            from ..workers.nlp_analysis_tasks import _start_next_batch_job
-                            _start_next_batch_job(self.db, extraction_job)
-                        except Exception as batch_err:
-                            logger.error(f"Failed to start next batch job: {batch_err}")
 
             elif status == ExtractionStatus.FAILED.value:
                 event_data["error_message"] = error_message
