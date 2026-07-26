@@ -146,14 +146,21 @@ start_service() {
             exec su -s /bin/bash mistudio -c "uvicorn src.main:app --host 0.0.0.0 --port ${API_PORT:-8000} ${UVICORN_ARGS:-}"
             ;;
         "celery-worker")
-            log_info "Starting Celery worker..."
-            # --pool=solo is REQUIRED for CUDA/GPU tasks (fork breaks CUDA initialization)
+            log_info "Starting Celery worker (queues=${CELERY_QUEUES:-default}, name=${CELERY_WORKER_NAME:-worker})..."
+            # --pool=solo is REQUIRED for CUDA/GPU tasks (fork breaks CUDA
+            # initialization), so it stays the default. CELERY_POOL exists for
+            # workers that never touch the GPU.
+            #
+            # CELERY_WORKER_NAME must be UNIQUE per worker process. Two workers
+            # sharing a hostname is not a cosmetic clash: Celery routes control
+            # messages (revoke, ping, shutdown) by node name, so a duplicate
+            # makes revocation hit an arbitrary one of them.
             exec su -s /bin/bash mistudio -c "celery -A src.core.celery_app worker \
                 -Q ${CELERY_QUEUES:-high_priority,datasets,processing,training,extraction,sae,low_priority} \
                 -c ${CELERY_CONCURRENCY:-1} \
-                --pool=solo \
+                --pool=${CELERY_POOL:-solo} \
                 --loglevel=${LOG_LEVEL:-info} \
-                --hostname=worker@%h \
+                --hostname=${CELERY_WORKER_NAME:-worker}@%h \
                 --max-tasks-per-child=${CELERY_MAX_TASKS:-100}"
             ;;
         "celery-beat")

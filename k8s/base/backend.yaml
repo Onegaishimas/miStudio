@@ -70,6 +70,15 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: api
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -117,6 +126,95 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: celery-worker
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
+            # GPU/serialised work ONLY. low_priority is deliberately ABSENT —
+            # see the celery-worker-cpu container below.
+            - name: CELERY_QUEUES
+              value: high_priority,datasets,processing,training,extraction,sae
+            - name: CELERY_WORKER_NAME
+              value: gpu
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url
+            - name: DATABASE_URL_SYNC
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: database-url-sync
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://redis:6379/0
+            - name: CELERY_RESULT_BACKEND
+              value: redis://redis:6379/0
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mistudio-secrets
+                  key: secret-key
+            # Deployment portability env vars
+            - name: DATA_DIR
+              value: /data
+            - name: BACKEND_DIR
+              value: /app
+            - name: INTERNAL_API_URL
+              value: http://mistudio-backend:8000
+            - name: OLLAMA_URL
+              value: http://ollama-proxy:11434
+            # Neuronpedia local instance configuration (optional - remove if not using Neuronpedia)
+            # - name: NEURONPEDIA_LOCAL_DB_URL
+            #   value: postgresql://neuronpedia:YOUR_NEURONPEDIA_PASSWORD@neuronpedia-postgres-service.neuronpedia:5432/neuronpedia
+            # - name: NEURONPEDIA_LOCAL_URL
+            #   value: http://your-neuronpedia-host.local
+          volumeMounts:
+            - name: mistudio-data
+              mountPath: /data
+
+        # Second worker for CPU-only post-processing.
+        #
+        # WHY THIS EXISTS: the single --pool=solo -c 1 worker consumed EVERY
+        # queue, so queue routing was decorative — one slot ran all work in
+        # arrival order. On 2026-07-26 a 32,759-feature NLP pass (~12.6h at the
+        # measured 0.72 features/sec) held that slot, and behind it sat:
+        #   * the next two extractions of the same batch (queued, never started)
+        #   * every cleanup_stuck_* beat task, which is what un-wedges jobs —
+        #     so the janitor could not run precisely while things were wedged
+        #
+        # Splitting the queues is the fix; the code-level decoupling of the
+        # batch chain from NLP is necessary but not sufficient on its own,
+        # because the dispatched task still needs a free worker to pick it up.
+        #
+        # No GPU is requested here, and no task routed to low_priority touches
+        # CUDA. It keeps --pool=solo (the default) so nothing about fork/CUDA
+        # semantics changes; the win is an INDEPENDENT slot, not parallelism.
+        - name: celery-worker-cpu
+          image: hitsai/mistudio-backend:latest
+          env:
+            - name: SERVICE_TYPE
+              value: celery-worker
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
+            - name: CELERY_QUEUES
+              value: low_priority
+            - name: CELERY_WORKER_NAME
+              value: cpu
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -161,6 +259,15 @@ spec:
           env:
             - name: SERVICE_TYPE
               value: celery-beat
+            # Without this the Settings default of "development" applies, which
+            # turns on SQLAlchemy echo. The NLP pass commits per feature, so echo
+            # produced ~20,700 log lines in 13 minutes and rotated away the very
+            # window an incident needed (2026-07-26: the extraction:completed
+            # emit could not be checked because its logs were already gone).
+            # is_development gates ONLY logging verbosity — engine echo, the
+            # socket.io logger, and a task-success print. Nothing behavioural.
+            - name: ENVIRONMENT
+              value: production
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
