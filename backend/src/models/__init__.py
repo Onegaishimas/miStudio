@@ -5,6 +5,7 @@ This module exports all database models for easy import.
 """
 
 from .dataset import Dataset, DatasetStatus
+from .dismissed_operation import DismissedOperation
 from .dataset_tokenization import DatasetTokenization, TokenizationStatus
 from .model import Model, ModelStatus, QuantizationFormat
 from .extraction_template import ExtractionTemplate
@@ -42,6 +43,7 @@ from .steering_record_run import SteeringRecordRun
 from .agent_approval import AgentApprovalRequest, ApprovalStatus
 
 __all__ = [
+    "DismissedOperation",
     "Circuit",
     "CircuitCaptureRun",
     "CircuitDiscoveryRun",
