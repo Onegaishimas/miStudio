@@ -86,7 +86,10 @@ class ExtractionJob(Base):
         nullable=False,
         default=ExtractionStatus.QUEUED
     )
-    progress = Column(Float, nullable=True, default=0.0)  # 0-100
+    # 0.0-1.0 (a FRACTION, unlike trainings.progress which is 0-100).
+    # This comment said 0-100 until 2026-07-26; the Monitor's federator
+    # trusted it and rendered a 98% extraction as "1.0%".
+    progress = Column(Float, nullable=True, default=0.0)
     features_extracted = Column(Integer, nullable=True, default=0)
     total_features = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)

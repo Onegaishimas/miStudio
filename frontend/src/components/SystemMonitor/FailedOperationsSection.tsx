@@ -5,8 +5,14 @@
  * Part of the System Monitor for manual operation management.
  *
  * Rows with can_retry=false are federated from other job tables (trainings,
- * extractions, labeling, pushes) — they are read-only here and managed from
- * their own panels.
+ * extractions, labeling, pushes). They cannot be RETRIED here — that belongs to
+ * their own panel — but they can be DISMISSED, which clears them from this list
+ * without touching the job record.
+ *
+ * Until 2026-07-26 they could only be dismissed in theory: the UI said "manage
+ * in its panel" while, for Neuronpedia pushes, no such control existed anywhere
+ * (the only DELETE in that API targets neuronpedia_exports, a different table).
+ * Four failures from March were unclearable.
  */
 
 import { useEffect, useState } from 'react';
@@ -34,11 +40,19 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
 };
 
 export function FailedOperationsSection() {
-  const { failedTasks, failedLoading, failedError, fetchFailedTasks, deleteTask } =
-    useTaskQueueStore();
+  const {
+    failedTasks,
+    failedLoading,
+    failedError,
+    fetchFailedTasks,
+    deleteTask,
+    dismissFailedTask,
+    dismissAllFailedTasks,
+  } = useTaskQueueStore();
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [retryingTask, setRetryingTask] = useState<TaskQueueEntry | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [confirmingClearAll, setConfirmingClearAll] = useState(false);
 
   // Fetch failed tasks on mount and every 30 seconds (paused while tab hidden)
   useEffect(() => {
@@ -65,6 +79,27 @@ export function FailedOperationsSection() {
 
   const handleRetryClick = (task: TaskQueueEntry) => {
     setRetryingTask(task);
+  };
+
+  const handleDismissClick = async (task: TaskQueueEntry) => {
+    // Same two-click inline confirmation as delete. Dismissing hides a real
+    // failure, so it should not be a single stray click — but it is reversible
+    // (DELETE on the same route restores it), hence no modal.
+    if (confirmingDeleteId !== task.id) {
+      setConfirmingDeleteId(task.id);
+      return;
+    }
+    setConfirmingDeleteId(null);
+    await dismissFailedTask(task.task_type, task.id);
+  };
+
+  const handleClearAllClick = async () => {
+    if (!confirmingClearAll) {
+      setConfirmingClearAll(true);
+      return;
+    }
+    setConfirmingClearAll(false);
+    await dismissAllFailedTasks();
   };
 
   const handleDeleteClick = async (taskId: string) => {
@@ -107,14 +142,34 @@ export function FailedOperationsSection() {
               {failedTasks.length}
             </span>
           </div>
-          <button
-            onClick={() => fetchFailedTasks()}
-            disabled={failedLoading}
-            className="text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors disabled:opacity-50"
-            title="Refresh"
-          >
-            <RefreshCw className={`w-4 h-4 ${failedLoading ? 'animate-spin' : ''}`} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Clears only what is listed RIGHT NOW — not a standing rule, so a
+                failure that happens later still surfaces. */}
+            <button
+              onClick={handleClearAllClick}
+              onBlur={() => setConfirmingClearAll(false)}
+              className={`px-2.5 py-1 rounded text-xs transition-colors ${
+                confirmingClearAll
+                  ? 'bg-red-600 hover:bg-red-700 text-white font-medium'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-red-400 hover:bg-red-500/10'
+              }`}
+              title={
+                confirmingClearAll
+                  ? 'Click again to clear the list'
+                  : 'Clear all listed failures (job records are kept)'
+              }
+            >
+              {confirmingClearAll ? 'Confirm clear all?' : 'Clear all'}
+            </button>
+            <button
+              onClick={() => fetchFailedTasks()}
+              disabled={failedLoading}
+              className="text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-4 h-4 ${failedLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
 
         {failedError && (
@@ -201,12 +256,26 @@ export function FailedOperationsSection() {
                           </button>
                         </>
                       ) : (
-                        <span
-                          className="text-xs text-slate-500 italic"
-                          title="This operation is managed from its own panel"
+                        <button
+                          onClick={() => handleDismissClick(task)}
+                          onBlur={() => setConfirmingDeleteId(null)}
+                          className={`px-2 py-1.5 rounded text-xs transition-colors ${
+                            confirmingDeleteId === task.id
+                              ? 'bg-red-600 hover:bg-red-700 text-white font-medium'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-red-400 hover:bg-red-500/10'
+                          }`}
+                          title={
+                            confirmingDeleteId === task.id
+                              ? 'Click again to clear it from this list'
+                              : 'Clear from this list (the job record is kept; retry from its own panel)'
+                          }
                         >
-                          Manage in its panel
-                        </span>
+                          {confirmingDeleteId === task.id ? (
+                            'Confirm?'
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
+                        </button>
                       )}
                       <button
                         onClick={() => toggleExpanded(task.id)}
