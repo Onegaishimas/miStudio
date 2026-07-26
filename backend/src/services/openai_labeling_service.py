@@ -16,6 +16,33 @@ from src.services.nlp_analysis_service import NLPAnalysisService
 
 logger = logging.getLogger(__name__)
 
+# Appended to every labeling system message, including custom templates.
+#
+# Generation cost is linear in tokens emitted. An unconstrained instruct model
+# narrates before answering ("The provided examples appear to be a repeating
+# sequence of tokens: ...") — measured at 205 output tokens / 11.7s against
+# granite-4.1-8b, versus 99 tokens / 5.8s with this directive. The prose was
+# also what broke the JSON parser, so an entire run silently produced
+# category='uncategorized' with empty descriptions while progress advanced.
+#
+# Note miLLM ignores the OpenAI `response_format` parameter (verified: identical
+# output with and without), so the instruction has to live in the prompt.
+JSON_ONLY_DIRECTIVE = (
+    "\n\nCRITICAL OUTPUT RULE: Respond with ONE JSON object and NOTHING else. "
+    "No preamble, no reasoning, no explanation, no markdown fences. "
+    "Start your reply with '{' and end it with '}'."
+)
+
+
+def _enforce_json_only(system_message: str) -> str:
+    """Append the JSON-only directive unless it is already present."""
+    if not system_message:
+        return JSON_ONLY_DIRECTIVE.strip()
+    if "CRITICAL OUTPUT RULE" in system_message:
+        return system_message
+    return system_message + JSON_ONLY_DIRECTIVE
+
+
 
 class OpenAILabelingService:
     """
@@ -190,6 +217,14 @@ class OpenAILabelingService:
             **kwargs,
         }
 
+        # Ask for JSON natively when the server supports it. Generation cost is
+        # linear in tokens emitted, and an unconstrained model narrates before
+        # answering ("The provided examples all share a common pattern: ...") —
+        # measured at ~204 tokens where ~40 would do, i.e. most of the latency
+        # is spent producing prose that then breaks the parser.
+        # Unsupported servers raise BadRequestError and the retry below drops it.
+        call_kwargs.setdefault("response_format", {"type": "json_object"})
+
         max_retries = 3
         async with self._api_semaphore:
             for attempt in range(max_retries + 1):
@@ -207,6 +242,17 @@ class OpenAILabelingService:
                         logger.error(f"Connection error after {max_retries + 1} attempts: {e}")
                         raise
                 except BadRequestError as e:
+                    # Server does not implement response_format — drop it and
+                    # retry once rather than failing the whole label.
+                    if "response_format" in call_kwargs and (
+                        "response_format" in str(e).lower()
+                        or "unsupported" in str(e).lower()
+                    ):
+                        logger.info(
+                            "Server rejected response_format; retrying without it"
+                        )
+                        call_kwargs.pop("response_format", None)
+                        continue
                     error_msg = str(e).lower()
                     if "unsupported" not in error_msg:
                         raise
@@ -709,7 +755,10 @@ curl -X POST '{endpoint_url}' \\
 
         try:
             # Prepare system message (use custom or default)
-            system_message = self.system_message or "You are an expert in mechanistic interpretability analyzing sparse autoencoder features. Provide both category and specific labels in JSON format."
+            system_message = _enforce_json_only(
+                self.system_message
+                or "You are an expert in mechanistic interpretability analyzing sparse autoencoder features. Provide both category and specific labels in JSON format."
+            )
 
             # Prepare request payload
             request_payload = {
@@ -1105,7 +1154,32 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
                 data = json.loads(cleaned_response)
             except json.JSONDecodeError:
                 decoder = json.JSONDecoder()
-                data, _ = decoder.raw_decode(cleaned_response)
+                try:
+                    data, _ = decoder.raw_decode(cleaned_response)
+                except json.JSONDecodeError:
+                    # raw_decode only works when JSON starts at position 0, so a
+                    # model that narrates BEFORE answering ("The provided examples
+                    # all share a common pattern: ... {json}") fails here even
+                    # though the JSON is present and valid.
+                    #
+                    # Reasoning-style models do this constantly — it is how a
+                    # whole labeling run silently produced category='uncategorized'
+                    # with empty descriptions while the progress counter advanced.
+                    # Scan forward to each '{' and take the first object that
+                    # decodes.
+                    data = None
+                    for idx, ch in enumerate(cleaned_response):
+                        if ch != '{':
+                            continue
+                        try:
+                            data, _ = decoder.raw_decode(cleaned_response[idx:])
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(data, dict):
+                            break
+                        data = None
+                    if data is None:
+                        raise
 
             # Extract category
             category = self._clean_label(data.get("category", "uncategorized"))
@@ -1422,7 +1496,7 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             request_payload = {
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": effective_system_message},
+                    {"role": "system", "content": _enforce_json_only(effective_system_message)},
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": self.temperature,
