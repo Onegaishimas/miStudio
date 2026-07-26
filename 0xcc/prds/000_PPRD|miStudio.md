@@ -1,8 +1,8 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.10 (Feature 20 — Circuit Strength Calibration; the circuits arc's served strengths were uncalibrated placeholders, Planned)
-**Last Updated:** 2026-07-21
+**Version:** 3.11 (Feature 21 — Training Finalization & Checkpoint Lifecycle; stopping a run forfeited its SAE and checkpoints were never reclaimed, Implemented)
+**Last Updated:** 2026-07-26
 **Status:** Active
 
 ---
@@ -84,6 +84,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 18 | Intervention, Validation & Faithfulness | Directional-subtraction intervention (error-preserving); effect-size-vs-null edge validation with manifests; circuit-level faithfulness; heuristic-ablation remediation | Planned |
 | 19 | Circuit Review, Ladder & Portability | Evidence-ladder claims discipline; edge typing (computed/persistence/attention-mediated); review/promotion; `mistudio.circuit-definition/v1` + per-layer v1 projection | Planned |
 | 20 | Circuit Strength Calibration | Automated search for the usable steering band — onset (min influence above none) and the correctness cliff (max before facts break) — judged against generated falsifiable probes; ships an intensity band + default into the circuit contract so a served dial cannot reach the nonsense zone | Planned |
+| 21 | Training Finalization & Checkpoint Lifecycle | Stop-and-finalize: rebuild a stopped run's SAEs from a checkpoint and write the Community Standard export, so a halted training's weights stay importable instead of being forfeited; plus configurable checkpoint retention (keep best + last N steps) that reclaims the unbounded checkpoint footprint, disabled and dry-run by default | Implemented |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -724,6 +725,65 @@ pattern (§3.18); the enhanced-labeling LLM-judge plumbing (§2.3) for cliff sco
 
 ---
 
+### 3.21 Training Finalization & Checkpoint Lifecycle (Implemented)
+
+**Purpose:** make a stopped training's SAE usable, and stop checkpoints growing without bound.
+
+**The problem this closes.** Cancelling a training set `status=cancelled` and
+returned. That skipped the training loop's finalize block — the step that writes
+`community_format/`, which is the *only* artifact downstream consumers read
+(`sae_manager_service` scans it; circuit capture, Neuronpedia export and the
+analysis service all load through `load_sae_auto_detect`). A stopped run
+therefore left behind intact, often excellent checkpoints that nothing in the
+product could consume, and the UI offered only **Retry** — which creates a
+brand-new training from step 0 and orphans them.
+
+This was not hypothetical. `train_969e90af` (granite-4.1-8b, JumpReLU, layers
+34/35/36, 4096→32768) was stopped at step 10,300 after its FVU flattened at
+**0.065 with zero dead neurons** — a good SAE by every metric the run reported,
+and completely unusable. The product's own manual compounded it, promising
+*"Stop: Gracefully end training (saves final checkpoint)"*.
+
+Separately, training writes a checkpoint every `checkpoint_interval` steps and
+nothing ever removed them: 423 checkpoint rows across 18 trainings, ~24 steps
+each, **78 GB** under `/data/trainings` on a volume at 81% capacity.
+
+**Capabilities:**
+
+- **Stop & Finalize** — stop a run *and* write its Community Standard export in
+  one action, so the SAE stays importable.
+- **Finalize** — the rescue path for runs stopped before this existed
+  (including FAILED runs, behind an explicit confirmation): rebuild from the
+  newest complete checkpoint and export.
+- **Honest status** — finalizing sets `status=COMPLETED` so the import path
+  unlocks, but `progress`/`current_step` stay truthful and a new
+  `finalized_from_step` column records where the run actually stopped. The UI
+  badges *"Finalized early @ N"*. A run halted at 10k of 50k never presents as a
+  finished 50k-step training.
+- **Checkpoint retention** — keep the best checkpoint plus the newest N steps,
+  with a read-only preview and a manual per-training prune. **Disabled by
+  default, and dry-run when first enabled**, because deletion is irreversible.
+- **Checkpoint deletion** — `DELETE /trainings/{id}/checkpoints/{ckpt_id}`,
+  which the frontend had been calling against a route that did not exist.
+
+**Normative behaviour:**
+
+- Retention selects whole **steps**, never individual rows. A multi-layer
+  training writes one row per `(step, layer, hook)` sharing one
+  `checkpoint_{step}/` directory; deleting a subset leaves an unloadable
+  checkpoint.
+- Finalize reads SAE dimensions from **checkpoint tensor shapes**, not stored
+  hyperparameters, which the training task corrects in memory and never persists.
+- The export is **atomic** (staged then swapped) and only proceeds from a step
+  verified **complete**; the completeness check fails **closed**.
+- Pruning never touches `is_best`, the newest step, a training in an active
+  state, or a checkpoint younger than the configured minimum age.
+
+**Cross-plane:** none. This is entirely miStudio-side; the artifact it produces
+is the existing `community_format/` export that miLLM and Neuronpedia already
+consume.
+
+
 ## 4. Technology Stack
 
 ### 4.1 Backend
@@ -930,6 +990,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 | 3.3 | 2026-07-12 | Feature 11 implemented: MCP server (33 tools, bearer auth, approval mode), cross-feature grouping (index + REST + Feature Groups UI), mcp_agent provenance, deployment (compose profile + k8s) |
 | 3.4 | 2026-07-15 | Added Feature 12: Steering UX Enhancements (Planned) — §3.12, doc chain 011_FPRD/FTDD/FTID/FTASKS |
 | 3.5 | 2026-07-15 | Feature 12 implemented & deployed: Blended\|Compare toggle, up to 20 features, frequency auto-baseline (default fallback), compact tiles, 20-color palette. K8s-deployed + E2E-verified. |
+| 3.11 | 2026-07-26 | Feature 21 — Training Finalization & Checkpoint Lifecycle (row 21, §3.21); stop-and-finalize + configurable checkpoint retention — Implemented |
 | 3.9 | 2026-07-19 | Circuits arc re-planned against BRD-MIS-CIRCUITS-001 + BRD-MIS-CIRCUITS-002 consumed as one unit (002 amends 001; conflicts resolve to 002). Four features (16–19, §3.16–3.19): multi-SAE steering w/ hazard-v2; capture + sound statistics (PMI/null/FDR/held-out) + cluster-level supernode mining + Tier-2 attribution + Tier-2.5 readiness; intervention engine v2 + effect-size-vs-null validation + faithfulness; evidence ladder + edge typing + contract (pre-freeze amendments) + projection. Substrate pilot (002 Addendum B) recorded as research track — no PPRD row (seed: BRD-MIS-SUBSTRATE-001.seed.md). |
 | 3.7 | 2026-07-16 | Features 13–15 COMPLETE: implemented, 3× review iterations each (28/28/15 findings), deployed via GitOps, Playwright E2E-verified (profile-titled Blended results, applied-features count, budget bar/λ dial, low-cohesion gate, profile save/load/import/export). 013 empirical validation EXECUTED — hard gate PASSED after fitting gain exponent γ=0 (the 1/G boost overdrove ~2×; `0xcc/docs/cluster-strength-validation.md`). IDL-29 step-5 amendment: B = B_dir/max(G,floor)^γ, default γ=0. HF-as-marketplace research recorded (`0xcc/docs/hf-marketplace-cluster-definitions-research.md`) for the follow-on BRD. |
 | 3.6 | 2026-07-16 | Added Features 13–15 from BRD-MIS-CLUSTERS-001 (Planned): Clusters UX & trustworthy blended results (§3.13), cluster strength budget model (§3.14), cluster authoring & portable JSON definitions (§3.15). MILLM/unified-MCP/Open WebUI integration recorded as future arc (separate BRD). |

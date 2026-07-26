@@ -40,7 +40,7 @@ erDiagram
 `id` = `m_{uuid}` · `name`, `repo_id` · `architecture` (family) + `architecture_config` JSONB (discovered dims) · `params_count` · `quantization` (`FP32|FP16|Q8|Q4|Q2`) · `status` (`downloading|loading|quantizing|ready|error`) · `file_path`, `quantized_path` · `memory_required_bytes`, `disk_size_bytes` · `celery_task_id`
 
 ### `trainings`
-`id` = `train_{uuid}` · FK `model_id` · `dataset_id` **and** `dataset_ids` JSONB (multi-dataset) · `extraction_id` and `extraction_ids` JSONB (cached-activation training) · `status` (`pending|initializing|running|paused|completed|failed|cancelled`) · `progress`, `current_step`, `total_steps` · `hyperparameters` JSONB · live stats (`current_loss`, `current_l0_sparsity`, `current_dead_neurons`, `current_learning_rate`) · `celery_task_id`, `checkpoint_dir`, `error_traceback`
+`id` = `train_{uuid}` · FK `model_id` · `dataset_id` **and** `dataset_ids` JSONB (multi-dataset) · `extraction_id` and `extraction_ids` JSONB (cached-activation training) · `status` (`pending|initializing|running|paused|completed|failed|cancelled`) · `progress`, `current_step`, `total_steps` · `hyperparameters` JSONB · live stats (`current_loss`, `current_l0_sparsity`, `current_dead_neurons`, `current_learning_rate`) · `celery_task_id`, `checkpoint_dir`, `finalized_from_step`, `error_traceback`
 
 ### `training_metrics`
 `id BigInteger` · FK `training_id` · `step`, `timestamp`, `layer_idx` (NULL = aggregated series) · `loss`, `loss_reconstructed`, `loss_zero`, `l0_sparsity`, `l1_sparsity`, `dead_neurons`, `fvu`, `learning_rate`, `grad_norm`, `gpu_memory_used_mb`, `samples_per_second` · **UNIQUE `(training_id, step, layer_idx)`**
@@ -102,3 +102,14 @@ In-flight marker for the Steered Transcript Recorder (records `(dial, prompt, un
 :::note Two extraction tables, on purpose
 `activation_extractions` (model → raw activations) and `extraction_jobs` (SAE → features) are distinct pipelines that share a word — see [The Extraction Pipeline](/concepts/extraction-pipeline).
 :::
+
+### `trainings.finalized_from_step`
+
+Nullable integer. Set when a stopped run was finalized from a checkpoint, and
+`NULL` for runs that completed normally.
+
+A finalized run has `status = 'completed'` so the SAE import path unlocks, but
+`progress` and `current_step` keep their real values. This column is what
+distinguishes a salvaged run from one that reached `total_steps`, and it drives
+the "Finalized early @ N" badge. See
+[Training Lifecycle & Checkpoints](/core-workflow/training-lifecycle).
