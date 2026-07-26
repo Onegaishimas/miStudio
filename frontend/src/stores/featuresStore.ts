@@ -208,7 +208,22 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * Fetch all extraction jobs with optional filtering.
    */
   fetchAllExtractions: async (statusFilter?: string[], limit: number = 50, offset: number = 0) => {
-    set({ isLoadingExtractions: true, extractionsError: null });
+    // Only claim "loading" when there is nothing on screen yet.
+    //
+    // ExtractionsPanel renders the grid behind `!isLoadingExtractions`, so
+    // flipping this flag UNMOUNTS every ExtractionJobCard and remounts it when
+    // the response lands. Card-local state goes with it — which is why an
+    // expanded "Live Metrics" panel snapped shut on every refresh.
+    //
+    // That was survivable while refreshes were user-initiated. It stopped being
+    // survivable once this function ran on a timer (the 15s reconciliation
+    // poll) and on every WebSocket completion event: reported 2026-07-26, "the
+    // whole page refreshes ... and closes the expanded progress windows".
+    //
+    // Fixed here rather than in the poll because all four callers cause it.
+    // A refresh of a list already on screen must never blank the list.
+    const isFirstLoad = get().allExtractions.length === 0;
+    set({ isLoadingExtractions: isFirstLoad, extractionsError: null });
 
     try {
       const params: Record<string, any> = {
