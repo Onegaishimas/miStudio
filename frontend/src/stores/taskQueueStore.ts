@@ -31,6 +31,8 @@ interface TaskQueueState {
   fetchActiveTasks: () => Promise<void>;
   retryTask: (taskQueueId: string, request?: RetryRequest) => Promise<void>;
   deleteTask: (taskQueueId: string) => Promise<void>;
+  dismissFailedTask: (taskType: string, sourceId: string) => Promise<void>;
+  dismissAllFailedTasks: () => Promise<number>;
   clearError: () => void;
 }
 
@@ -114,6 +116,45 @@ export const useTaskQueueStore = create<TaskQueueState>((set, get) => ({
         loading: false,
       });
       throw error;
+    }
+  },
+
+  /**
+   * Clear one federated failure from the Monitor.
+   *
+   * Removes it from the list optimistically and re-fetches, so a failure that
+   * the server refuses to dismiss reappears rather than staying hidden on a
+   * lie.
+   */
+  dismissFailedTask: async (taskType: string, sourceId: string) => {
+    const previous = get().failedTasks;
+    set({ failedTasks: previous.filter((t) => t.id !== sourceId) });
+    try {
+      await taskQueueApi.dismissFailedTask(taskType, sourceId);
+    } catch (error) {
+      console.error('[TaskQueueStore] Failed to dismiss operation:', error);
+      set({
+        failedTasks: previous,
+        failedError:
+          error instanceof Error ? error.message : 'Failed to dismiss operation',
+      });
+    }
+  },
+
+  dismissAllFailedTasks: async () => {
+    const previous = get().failedTasks;
+    try {
+      const count = await taskQueueApi.dismissAllFailedTasks();
+      await get().fetchFailedTasks();
+      return count;
+    } catch (error) {
+      console.error('[TaskQueueStore] Failed to dismiss all operations:', error);
+      set({
+        failedTasks: previous,
+        failedError:
+          error instanceof Error ? error.message : 'Failed to dismiss operations',
+      });
+      return 0;
     }
   },
 

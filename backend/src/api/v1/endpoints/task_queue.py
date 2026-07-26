@@ -8,6 +8,7 @@ including failed tasks that can be manually retried.
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.deps import get_db
@@ -67,6 +68,13 @@ def _federated_row(
 
     Federated rows are read-only views: they can't be retried or deleted
     through the task-queue endpoints (can_retry=False signals the UI).
+
+    PROGRESS IS 0-100 ON THIS BOUNDARY. The source tables disagree —
+    ``trainings.progress`` and ``task_queue.progress`` are percentages while
+    ``extraction_jobs.progress`` and ``labeling_jobs.progress`` are fractions —
+    so each federator converts before calling this. Callers render the value
+    directly as a percentage; a fraction leaking through shows a 98% job as
+    "1.0%", which is what it did until 2026-07-26.
     """
     entity_info = {"name": name}
     if details:
@@ -89,6 +97,21 @@ def _federated_row(
         "updated_at": updated_at.isoformat() if updated_at else None,
         "entity_info": entity_info,
     }
+
+
+async def _load_dismissed(db: AsyncSession) -> set:
+    """Return the set of (task_type, id) pairs the operator has cleared.
+
+    Federated failures cannot be deleted through this API — they belong to
+    other tables — so clearing one records a marker instead. The job row keeps
+    its status and error message; only the Monitor listing hides it.
+    """
+    from ....models.dismissed_operation import DismissedOperation
+
+    result = await db.execute(
+        select(DismissedOperation.source_type, DismissedOperation.source_id)
+    )
+    return {(row.source_type, row.source_id) for row in result}
 
 
 async def _fetch_federated(db: AsyncSession, statement, params: dict) -> list:
@@ -192,7 +215,8 @@ async def _federated_extractions(db: AsyncSession, statuses: tuple, limit: int =
                 status="running" if row.status == "extracting" else (
                     "failed" if row.status == "failed" else "queued"
                 ),
-                progress=row.progress,
+                # extraction_jobs.progress is a FRACTION; this boundary is 0-100.
+                progress=(row.progress or 0.0) * 100,
                 name=f"Extraction ({layer_part}{'/' + row.hook_type if row.hook_type else ''})",
                 details=details,
                 error_message=row.error_message,
@@ -473,6 +497,17 @@ async def list_failed_tasks(db: AsyncSession = Depends(get_db)):
     enriched_tasks.extend(await _federated_labeling(db, ("failed",)))
     enriched_tasks.extend(await _federated_pushes(db, ("failed",)))
 
+    # Hide anything the operator has cleared. Filtered here rather than in each
+    # federated query so a source added later is covered without being
+    # remembered — forgetting the filter in one of six queries would silently
+    # resurrect dismissed rows in that one category only.
+    dismissed = await _load_dismissed(db)
+    if dismissed:
+        enriched_tasks = [
+            t for t in enriched_tasks
+            if (t["task_type"], t["id"]) not in dismissed
+        ]
+
     # Newest failure first across all sources
     enriched_tasks.sort(
         key=lambda t: t.get("completed_at") or t.get("updated_at") or t.get("created_at") or "",
@@ -480,6 +515,85 @@ async def list_failed_tasks(db: AsyncSession = Depends(get_db)):
     )
 
     return {"data": enriched_tasks}
+
+
+@router.post("/failed/{task_type}/{source_id}/dismiss")
+async def dismiss_failed_operation(
+    task_type: str,
+    source_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear one federated failure from the Monitor.
+
+    Federated rows live in other tables and cannot be deleted through this API,
+    so this records a marker instead. The training / extraction / labeling job
+    / push keeps its status and error message; only the listing hides it.
+
+    Idempotent: dismissing an already-dismissed operation succeeds.
+
+    Retryable task_queue rows are NOT dismissed here — they have a real DELETE
+    (``/tasks/{id}``) which removes the queue row outright.
+    """
+    from ....models.dismissed_operation import DismissedOperation
+
+    existing = await db.get(DismissedOperation, (task_type, source_id))
+    if existing is None:
+        db.add(DismissedOperation(source_type=task_type, source_id=source_id))
+        await db.commit()
+
+    return {"dismissed": True, "task_type": task_type, "source_id": source_id}
+
+
+@router.post("/failed/dismiss-all")
+async def dismiss_all_failed_operations(db: AsyncSession = Depends(get_db)):
+    """Clear every federated failure currently listed.
+
+    Deliberately dismisses only what /failed reports RIGHT NOW rather than
+    issuing a blanket rule: a failure that appears after this call must still
+    surface, or the Monitor would go quietly blind.
+    """
+    from ....models.dismissed_operation import DismissedOperation
+
+    listing = await list_failed_tasks(db)
+
+    dismissed = 0
+    for task in listing["data"]:
+        if task.get("can_retry") is not False:
+            # Retryable queue rows are deletable; leave them to that path so a
+            # "clear all" cannot orphan a row the user could still retry.
+            continue
+        key = (task["task_type"], task["id"])
+        if await db.get(DismissedOperation, key) is None:
+            db.add(DismissedOperation(source_type=key[0], source_id=key[1]))
+            dismissed += 1
+
+    if dismissed:
+        await db.commit()
+
+    return {"dismissed_count": dismissed}
+
+
+@router.delete("/failed/{task_type}/{source_id}/dismiss")
+async def undismiss_failed_operation(
+    task_type: str,
+    source_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore a dismissed operation to the Monitor.
+
+    Dismissal must be reversible — it hides a real failure, and an operator who
+    clears the wrong row should not have to touch the database.
+    """
+    from ....models.dismissed_operation import DismissedOperation
+
+    await db.execute(
+        sa_delete(DismissedOperation).where(
+            DismissedOperation.source_type == task_type,
+            DismissedOperation.source_id == source_id,
+        )
+    )
+    await db.commit()
+    return {"dismissed": False, "task_type": task_type, "source_id": source_id}
 
 
 @router.get("/active", response_model=TaskQueueListResponse)

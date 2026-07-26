@@ -93,3 +93,27 @@ export async function retryTask(
 export async function deleteTask(taskQueueId: string): Promise<void> {
   await axios.delete(`${API_URL}/${taskQueueId}`);
 }
+
+/**
+ * Clear one federated failure from the Monitor.
+ *
+ * Federated rows (trainings, extractions, labeling, Neuronpedia pushes) live in
+ * other tables and have no DELETE here, so this records a dismissal marker. The
+ * job row keeps its status and error message; only the listing hides it.
+ */
+export async function dismissFailedTask(
+  taskType: string,
+  sourceId: string,
+): Promise<void> {
+  await axios.post(
+    `${API_URL}/failed/${encodeURIComponent(taskType)}/${encodeURIComponent(sourceId)}/dismiss`,
+  );
+}
+
+/** Clear every federated failure currently listed. Returns how many. */
+export async function dismissAllFailedTasks(): Promise<number> {
+  const response = await axios.post<{ dismissed_count: number }>(
+    `${API_URL}/failed/dismiss-all`,
+  );
+  return response.data.dismissed_count;
+}
