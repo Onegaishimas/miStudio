@@ -771,6 +771,54 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
   const progress = (extraction.progress || 0) * 100;
   const deletionProgress = (extraction.deletion_progress || 0) * 100;
 
+  // PHASE 2 DETECTION — extraction has two long phases, and only the first used
+  // to be visible. Sampling leaves total_features NULL; the backend fills it in
+  // when it starts committing feature records, so a job that is still
+  // EXTRACTING with a non-null total_features is in the write phase.
+  //
+  // Both fields are PERSISTED columns, deliberately: the extractions list
+  // refetch replaces store entries wholesale, so anything carried only over
+  // WebSocket is wiped within seconds and the badge would flicker.
+  const isWritingFeatures =
+    extraction.status === 'extracting' &&
+    extraction.total_features != null &&
+    extraction.total_features > 0;
+
+  const featuresWritten = extraction.features_extracted ?? 0;
+
+  // ETA for the write phase, derived client-side from successive counts.
+  // The backend does not emit one here, and deriving it locally means it also
+  // survives the refetch that would clobber a WebSocket-only field.
+  const writeSamplesRef = useRef<{ t: number; n: number }[]>([]);
+  useEffect(() => {
+    if (!isWritingFeatures) {
+      writeSamplesRef.current = [];
+      return;
+    }
+    const samples = writeSamplesRef.current;
+    const last = samples[samples.length - 1];
+    if (!last || last.n !== featuresWritten) {
+      samples.push({ t: Date.now(), n: featuresWritten });
+      // Keep a short window so a rate change (later features carry more
+      // activations and commit slower) is reflected rather than averaged away.
+      if (samples.length > 6) samples.shift();
+    }
+  }, [isWritingFeatures, featuresWritten]);
+
+  const writeEtaSeconds = (() => {
+    if (!isWritingFeatures || !extraction.total_features) return null;
+    const samples = writeSamplesRef.current;
+    if (samples.length < 2) return null;
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const elapsed = (last.t - first.t) / 1000;
+    const written = last.n - first.n;
+    if (elapsed <= 0 || written <= 0) return null;
+    const remaining = extraction.total_features - last.n;
+    if (remaining <= 0) return null;
+    return Math.round(remaining / (written / elapsed));
+  })();
+
   return (
     <div className={`${COMPONENTS.card.base} px-4 py-3 ${COMPONENTS.border.hover} transition-colors`}>
       {/* Compact Header: Status, Title, Info, and Actions - Single Row */}
@@ -1071,18 +1119,34 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       {/* Progress Bar for Active Extractions */}
       {isActive && extraction.progress !== null && extraction.progress !== undefined && (
         <div className="mb-2 space-y-2">
+          {/* Phase banner — only while writing feature records. Without this a
+              near-full bar reads as "almost done" when ~20 minutes of
+              committing remain. */}
+          {isWritingFeatures && (
+            <div className="flex items-center gap-2 text-sm">
+              <Loader className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />
+              <span className="text-amber-400 font-medium">Phase 2 of 2</span>
+              <span className="text-slate-500">·</span>
+              <span className="text-slate-600 dark:text-slate-400">
+                Writing to database
+              </span>
+            </div>
+          )}
+
           {/* Progress info row */}
           <div className="flex items-center justify-between text-sm mb-2">
             <span className="text-slate-600 dark:text-slate-400">
-              {extraction.status_message
-                ? extraction.status_message
-                : extraction.samples_processed != null && extraction.total_samples != null
-                  ? `${extraction.samples_processed.toLocaleString()} / ${extraction.total_samples.toLocaleString()} samples`
-                  : extraction.features_in_heap != null
-                    ? `${extraction.features_in_heap.toLocaleString()} active features found`
-                    : 'Processing...'}
+              {isWritingFeatures && extraction.total_features != null
+                ? `${featuresWritten.toLocaleString()} / ${extraction.total_features.toLocaleString()} features`
+                : extraction.status_message
+                  ? extraction.status_message
+                  : extraction.samples_processed != null && extraction.total_samples != null
+                    ? `${extraction.samples_processed.toLocaleString()} / ${extraction.total_samples.toLocaleString()} samples`
+                    : extraction.features_in_heap != null
+                      ? `${extraction.features_in_heap.toLocaleString()} active features found`
+                      : 'Processing...'}
             </span>
-            <span className="text-emerald-400 font-medium">
+            <span className={isWritingFeatures ? 'text-amber-400 font-medium' : 'text-emerald-400 font-medium'}>
               {progress.toFixed(1)}%
             </span>
           </div>
@@ -1092,10 +1156,18 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               <Clock className="w-4 h-4" />
               <span>Elapsed: {getElapsedTime()}</span>
             </div>
-            {extraction.eta_seconds !== undefined && extraction.eta_seconds > 0 && (
-              <div className="text-purple-400">
-                ETA: {formatEta(extraction.eta_seconds)}
-              </div>
+            {isWritingFeatures ? (
+              writeEtaSeconds != null && (
+                <div className="text-purple-400">
+                  ETA: {formatEta(writeEtaSeconds)}
+                </div>
+              )
+            ) : (
+              extraction.eta_seconds !== undefined && extraction.eta_seconds > 0 && (
+                <div className="text-purple-400">
+                  ETA: {formatEta(extraction.eta_seconds)}
+                </div>
+              )
             )}
           </div>
           <div className={COMPONENTS.progress.container}>
@@ -1122,8 +1194,16 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
           {/* Live Metrics Section */}
           {showMetrics && (
             <div className="border-t border-slate-300 dark:border-slate-700 pt-3 mt-3">
-              {/* Metrics Summary Grid */}
-              <div className="grid grid-cols-4 gap-2 mb-3">
+              {/* Metrics Summary Grid.
+                  These are SAMPLING metrics and stop updating once the write
+                  phase starts, so they are dimmed and labelled rather than
+                  presented as live. */}
+              {isWritingFeatures && (
+                <div className="text-xs text-slate-500 mb-2 italic">
+                  Sampling metrics below are final — phase 1 has finished.
+                </div>
+              )}
+              <div className={`grid grid-cols-4 gap-2 mb-3 ${isWritingFeatures ? 'opacity-50' : ''}`}>
                 {/* Batch Progress */}
                 <div className="bg-slate-100 dark:bg-slate-800/50 rounded-lg p-2">
                   <div className="text-xs text-slate-600 dark:text-slate-400 mb-1">Batch</div>

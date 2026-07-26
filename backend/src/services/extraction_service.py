@@ -864,6 +864,9 @@ class ExtractionService:
             message: Human-readable phase description for the UI. The frontend
                 maps it to status_message, which is how a card can say which of
                 the two long phases it is in.
+            total_features: Denominator for the write phase. Set directly rather
+                than via `statistics`, which would clobber that column with a
+                partial dict if the job then failed.
         """
         result = await self.db.execute(
             select(ExtractionJob).where(ExtractionJob.id == extraction_id)
@@ -903,7 +906,8 @@ class ExtractionService:
         features_extracted: Optional[int] = None,
         statistics: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
-        message: Optional[str] = None
+        message: Optional[str] = None,
+        total_features: Optional[int] = None
     ) -> None:
         """
         Synchronous version of update_extraction_status for use in Celery tasks.
@@ -932,6 +936,9 @@ class ExtractionService:
 
         if features_extracted is not None:
             extraction_job.features_extracted = features_extracted
+
+        if total_features is not None:
+            extraction_job.total_features = total_features
 
         if statistics is not None:
             extraction_job.statistics = statistics
@@ -1626,6 +1633,32 @@ class ExtractionService:
                 torch.cuda.empty_cache()
 
             logger.info("Building final feature records...")
+
+            # Mark the start of phase 2 in PERSISTED columns.
+            #
+            # total_features is NULL for the whole sampling phase and is only
+            # filled from `statistics` at completion, so the UI had no
+            # denominator to render the write phase with. Setting it here gives
+            # the card "N / latent_dim features" from a plain HTTP fetch, and
+            # its transition from NULL -> non-NULL while status is still
+            # EXTRACTING is what identifies phase 2.
+            #
+            # This MUST be persisted rather than sent only over WebSocket: the
+            # extractions list refetch replaces store entries wholesale, so a
+            # WS-only field is wiped within seconds of arriving.
+            #
+            # At completion the value is overwritten with the post-filter count
+            # from `statistics` (dead neurons are dropped), so the temporary
+            # latent_dim here is the honest denominator for "features written",
+            # not the final feature count.
+            self.update_extraction_status_sync(
+                extraction_job.id,
+                ExtractionStatus.EXTRACTING.value,
+                progress=SAMPLING_PROGRESS_SHARE,
+                features_extracted=0,
+                total_features=latent_dim,
+                message=f"Writing features to database: 0/{latent_dim:,}",
+            )
 
             # Get final heaps
             final_heaps = incremental_heap.get_heaps()

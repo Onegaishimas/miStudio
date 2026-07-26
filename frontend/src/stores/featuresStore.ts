@@ -144,6 +144,22 @@ let _cleanupTimeoutId: ReturnType<typeof setTimeout> | null = null;
 /**
  * Features store implementation.
  */
+/**
+ * Fields that exist only on the WebSocket progress payload, never on the REST
+ * extractions response. A refetch must not blank them out mid-run.
+ */
+const TRANSIENT_EXTRACTION_FIELDS = [
+  'status_message',
+  'eta_seconds',
+  'samples_per_second',
+  'samples_processed',
+  'total_samples',
+  'current_batch',
+  'total_batches',
+  'features_in_heap',
+  'heap_examples_count',
+] as const;
+
 export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
   // Initial state
   extractionStatus: {},
@@ -209,8 +225,39 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
         { params }
       );
 
+      // Carry forward the live-metrics fields the REST payload does not
+      // contain. They arrive only over WebSocket, so a wholesale replace wipes
+      // them — and with the 15s reconciliation poll in ExtractionsPanel that
+      // now happens on a timer, making the ETA and status line flicker.
+      //
+      // Server state always wins for anything the server actually returns;
+      // this only restores fields the response omits entirely, and only for a
+      // job that is still running (a terminal job must not keep showing a
+      // stale ETA).
+      const previous = new Map(get().allExtractions.map((e) => [e.id, e]));
+      const merged = response.data.data.map((incoming) => {
+        const prev = previous.get(incoming.id);
+        if (!prev) return incoming;
+
+        const stillRunning =
+          incoming.status === 'queued' ||
+          incoming.status === 'extracting' ||
+          incoming.status === 'finalizing';
+        if (!stillRunning) return incoming;
+
+        const incomingRec = incoming as unknown as Record<string, unknown>;
+        const prevRec = prev as unknown as Record<string, unknown>;
+        const carried: Record<string, unknown> = {};
+        for (const key of TRANSIENT_EXTRACTION_FIELDS) {
+          if (incomingRec[key] === undefined && prevRec[key] !== undefined) {
+            carried[key] = prevRec[key];
+          }
+        }
+        return { ...incoming, ...carried };
+      });
+
       set({
-        allExtractions: response.data.data,
+        allExtractions: merged,
         extractionsMetadata: response.data.meta,
         isLoadingExtractions: false,
       });
