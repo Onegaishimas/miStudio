@@ -55,17 +55,29 @@ def _worker_containers():
     return workers
 
 
+def _queue_name(value):
+    """Normalise a routed queue to its NAME.
+
+    Celery REWRITES conf.task_routes in place the first time the router runs:
+    the string "low_priority" is replaced by a kombu Queue object. So this
+    function sees strings or Queue objects depending on whether anything has
+    routed a task yet — which made this comparison order-dependent and let the
+    suite fail only when test_periodic_task_routing.py ran first.
+    """
+    return getattr(value, "name", value)
+
+
 def _routed_queues():
     from src.core.celery_app import celery_app
 
     queues = set()
     for route in (celery_app.conf.task_routes or {}).values():
         if isinstance(route, dict) and route.get("queue"):
-            queues.add(route["queue"])
+            queues.add(_queue_name(route["queue"]))
     for entry in (celery_app.conf.beat_schedule or {}).values():
         q = (entry.get("options") or {}).get("queue")
         if q:
-            queues.add(q)
+            queues.add(_queue_name(q))
     return queues
 
 
@@ -176,3 +188,37 @@ class TestProductionEnvironmentIsDeclared:
             "containers do not declare ENVIRONMENT=production, so Settings "
             f"falls back to 'development' and turns on SQL echo: {missing}"
         )
+
+
+class TestTheGuardIsNotOrderDependent:
+    """Celery rewrites conf.task_routes in place once the router runs.
+
+    Found 2026-07-26: the full suite failed while this file passed in
+    isolation. test_periodic_task_routing.py calls
+    `celery_app.amqp.router.route(...)`, and that replaces the string
+    "low_priority" in conf.task_routes with a kombu Queue object. This file
+    then compared Queue objects against strings read from the manifest and
+    reported every queue as orphaned.
+
+    A guard that only holds when it runs first is not a guard.
+    """
+
+    def test_queue_names_are_normalised_from_either_representation(self):
+        class FakeQueue:
+            name = "low_priority"
+
+        assert _queue_name("low_priority") == "low_priority"
+        assert _queue_name(FakeQueue()) == "low_priority"
+
+    def test_routing_first_does_not_break_coverage(self):
+        """Reproduces the original order dependency directly."""
+        from src.core.celery_app import celery_app
+
+        # Force the in-place rewrite.
+        celery_app.amqp.router.route({}, "cleanup_stuck_extractions")
+
+        consumed = set()
+        for w in _worker_containers().values():
+            consumed |= set(w["queues"])
+
+        assert not (_routed_queues() - consumed - DYNAMIC_QUEUES)

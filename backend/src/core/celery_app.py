@@ -183,6 +183,34 @@ celery_app.conf.update(
         },
 
         # Cleanup operations: Periodic maintenance tasks
+        # ---------------------------------------------------------------
+        # Janitors and periodic tasks, routed by their EXACT task name.
+        #
+        # These are registered with SHORT names ("cleanup_stuck_extractions"),
+        # and task_routes globs match the TASK NAME — not the module path. So
+        # "src.workers.cleanup_stuck_extractions.*" never matched, and every one
+        # of these resolved to the DEFAULT queue ("datasets") when called
+        # directly. The beat entries pass an explicit options.queue, which is the
+        # only reason the scheduled runs land correctly; any .delay() call put a
+        # CPU janitor on the GPU worker's queue.
+        #
+        # Verified by resolving celery_app.amqp.router.route({}, name), not by
+        # reading the config back — reading it back is what hid this.
+        # ---------------------------------------------------------------
+        "cleanup_stuck_nlp": {"queue": "low_priority"},
+        "cleanup_stuck_extractions": {"queue": "low_priority"},
+        "cleanup_stuck_trainings": {"queue": "low_priority"},
+        "cleanup_stuck_activations": {"queue": "low_priority"},
+        "cleanup_stuck_circuit_runs": {"queue": "low_priority"},
+        "cleanup_stuck_enhanced_labeling": {"queue": "low_priority"},
+        "cleanup_task_queue": {"queue": "low_priority"},
+        "gpu_watchdog": {"queue": "low_priority"},
+        "steering_worker_reconcile": {"queue": "low_priority"},
+
+        # Kept for tasks invoked by their fully-qualified name.
+        "src.workers.cleanup_stuck_nlp.*": {
+            "queue": "low_priority",
+        },
         "src.workers.cleanup_stuck_extractions.*": {
             "queue": "low_priority",
         },
@@ -272,6 +300,23 @@ celery_app.conf.update(
     # src/services/background_monitor.py (not Celery) so it can't be blocked
     # by long-running Celery tasks.
     beat_schedule={
+        # Cleanup stuck NLP analysis passes - runs every 10 minutes.
+        #
+        # nlp_status had no janitor: an NLP pass whose worker died left the row
+        # reading "processing" forever, because every other cleanup_stuck_*
+        # watches ExtractionJob.status, not nlp_status.
+        #
+        # The explicit queue matters. task_routes globs match the TASK NAME, and
+        # this task's name is the short "cleanup_stuck_nlp" — it does NOT match
+        # "src.workers.cleanup_stuck_nlp.*", so without this option it would
+        # silently land on the default queue.
+        "cleanup-stuck-nlp": {
+            "task": "cleanup_stuck_nlp",
+            "schedule": 600.0,
+            "options": {
+                "queue": "low_priority",
+            },
+        },
         # Cleanup stuck extraction jobs - runs every 10 minutes
         "cleanup-stuck-extractions": {
             "task": "cleanup_stuck_extractions",
@@ -382,6 +427,7 @@ celery_app.autodiscover_tasks(
         "src.workers.extraction_tasks",
         "src.workers.labeling_tasks",
         "src.workers.cleanup_stuck_extractions",
+        "src.workers.cleanup_stuck_nlp",
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
         "src.workers.cleanup_stuck_enhanced_labeling",
