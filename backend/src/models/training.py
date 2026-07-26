@@ -55,6 +55,18 @@ class Training(Base):
     progress = Column(Float, nullable=False, default=0.0)  # 0-100
     current_step = Column(Integer, nullable=False, default=0)
     total_steps = Column(Integer, nullable=False)
+    # Set when a stopped run was finalized from a checkpoint. status becomes
+    # COMPLETED so the SAE import path unlocks, but progress/current_step stay
+    # truthful — this column is what lets the UI say "finalized early at step N"
+    # instead of presenting a partial run as a finished one.
+    finalized_from_step = Column(
+        Integer,
+        nullable=True,
+        comment=(
+            "Checkpoint step this training was finalized from when stopped "
+            "early; NULL if it ran to completion"
+        ),
+    )
 
     # Hyperparameters (flexible JSONB storage)
     hyperparameters = Column(JSONB, nullable=False, default=dict)
