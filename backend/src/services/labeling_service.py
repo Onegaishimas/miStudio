@@ -589,6 +589,36 @@ class LabelingService:
 
         return examples_map
 
+    class _LabelingCancelled(Exception):
+        """Raised inside a labeling loop when the job has been cancelled."""
+
+    def _raise_if_cancelled(self, labeling_job_id: str) -> None:
+        """Cooperative cancellation check — call once per batch.
+
+        WHY THIS IS THE ONLY THING THAT WORKS HERE: the Celery worker runs with
+        ``--pool=solo``, so a task executes in the worker's MAIN process. Celery
+        terminates tasks by signalling a CHILD process, which solo does not have,
+        so ``revoke(terminate=True)`` cannot stop a running task — and while the
+        task runs the main process never services control messages, so the revoke
+        is not even read. With ``-c 1`` that one task blocks EVERY queue.
+
+        Cancelling therefore used to set status='cancelled' and change nothing:
+        the loop ran on for hours, holding the worker. This check makes the loop
+        notice, which works regardless of pool type.
+        """
+        try:
+            row = (
+                self.db.query(LabelingJob)
+                .filter(LabelingJob.id == labeling_job_id)
+                .first()
+            )
+        except Exception:  # noqa: BLE001 - never let the check break the job
+            return
+        if row is not None and row.status == LabelingStatus.CANCELLED.value:
+            raise LabelingService._LabelingCancelled(
+                f"Labeling job {labeling_job_id} was cancelled"
+            )
+
     def label_features_for_extraction(
         self,
         labeling_job_id: str
@@ -878,6 +908,9 @@ class LabelingService:
                         logger.info(f"Starting incremental labeling: {total_features} features in batches of {LABEL_BATCH_SIZE}")
 
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
+                            # Stop promptly when the user cancels (see
+                            # _raise_if_cancelled: revoke cannot kill a solo-pool task).
+                            self._raise_if_cancelled(labeling_job_id)
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
                             batch_examples = features_examples[batch_start:batch_end]
@@ -1077,6 +1110,9 @@ class LabelingService:
                             logger.info(f"Pre-loaded logit effects for {len(feature_logit_effects)}/{len(feature_ids)} features")
 
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
+                            # Stop promptly when the user cancels (see
+                            # _raise_if_cancelled: revoke cannot kill a solo-pool task).
+                            self._raise_if_cancelled(labeling_job_id)
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
                             batch_examples = features_examples[batch_start:batch_end]
@@ -1279,6 +1315,9 @@ class LabelingService:
                             logger.info(f"Pre-loaded logit effects for {len(feature_logit_effects)}/{len(feature_ids)} features")
 
                         for batch_start in range(0, total_features, LABEL_BATCH_SIZE):
+                            # Stop promptly when the user cancels (see
+                            # _raise_if_cancelled: revoke cannot kill a solo-pool task).
+                            self._raise_if_cancelled(labeling_job_id)
                             batch_end = min(batch_start + LABEL_BATCH_SIZE, total_features)
                             batch_features = features[batch_start:batch_end]
                             batch_examples = features_examples[batch_start:batch_end]
