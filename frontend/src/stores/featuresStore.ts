@@ -144,6 +144,22 @@ let _cleanupTimeoutId: ReturnType<typeof setTimeout> | null = null;
 /**
  * Features store implementation.
  */
+/**
+ * Fields that exist only on the WebSocket progress payload, never on the REST
+ * extractions response. A refetch must not blank them out mid-run.
+ */
+const TRANSIENT_EXTRACTION_FIELDS = [
+  'status_message',
+  'eta_seconds',
+  'samples_per_second',
+  'samples_processed',
+  'total_samples',
+  'current_batch',
+  'total_batches',
+  'features_in_heap',
+  'heap_examples_count',
+] as const;
+
 export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
   // Initial state
   extractionStatus: {},
@@ -192,7 +208,22 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * Fetch all extraction jobs with optional filtering.
    */
   fetchAllExtractions: async (statusFilter?: string[], limit: number = 50, offset: number = 0) => {
-    set({ isLoadingExtractions: true, extractionsError: null });
+    // Only claim "loading" when there is nothing on screen yet.
+    //
+    // ExtractionsPanel renders the grid behind `!isLoadingExtractions`, so
+    // flipping this flag UNMOUNTS every ExtractionJobCard and remounts it when
+    // the response lands. Card-local state goes with it — which is why an
+    // expanded "Live Metrics" panel snapped shut on every refresh.
+    //
+    // That was survivable while refreshes were user-initiated. It stopped being
+    // survivable once this function ran on a timer (the 15s reconciliation
+    // poll) and on every WebSocket completion event: reported 2026-07-26, "the
+    // whole page refreshes ... and closes the expanded progress windows".
+    //
+    // Fixed here rather than in the poll because all four callers cause it.
+    // A refresh of a list already on screen must never blank the list.
+    const isFirstLoad = get().allExtractions.length === 0;
+    set({ isLoadingExtractions: isFirstLoad, extractionsError: null });
 
     try {
       const params: Record<string, any> = {
@@ -209,8 +240,39 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
         { params }
       );
 
+      // Carry forward the live-metrics fields the REST payload does not
+      // contain. They arrive only over WebSocket, so a wholesale replace wipes
+      // them — and with the 15s reconciliation poll in ExtractionsPanel that
+      // now happens on a timer, making the ETA and status line flicker.
+      //
+      // Server state always wins for anything the server actually returns;
+      // this only restores fields the response omits entirely, and only for a
+      // job that is still running (a terminal job must not keep showing a
+      // stale ETA).
+      const previous = new Map(get().allExtractions.map((e) => [e.id, e]));
+      const merged = response.data.data.map((incoming) => {
+        const prev = previous.get(incoming.id);
+        if (!prev) return incoming;
+
+        const stillRunning =
+          incoming.status === 'queued' ||
+          incoming.status === 'extracting' ||
+          incoming.status === 'finalizing';
+        if (!stillRunning) return incoming;
+
+        const incomingRec = incoming as unknown as Record<string, unknown>;
+        const prevRec = prev as unknown as Record<string, unknown>;
+        const carried: Record<string, unknown> = {};
+        for (const key of TRANSIENT_EXTRACTION_FIELDS) {
+          if (incomingRec[key] === undefined && prevRec[key] !== undefined) {
+            carried[key] = prevRec[key];
+          }
+        }
+        return { ...incoming, ...carried };
+      });
+
       set({
-        allExtractions: response.data.data,
+        allExtractions: merged,
         extractionsMetadata: response.data.meta,
         isLoadingExtractions: false,
       });
