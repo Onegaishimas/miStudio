@@ -8,6 +8,7 @@
 
 import { Activity, HardDrive, Thermometer, Cpu, MemoryStick } from 'lucide-react';
 import { useSystemMonitorStore } from '../../stores/systemMonitorStore';
+import { useSystemMetricsWatchdog } from '../../hooks/useSystemMetricsWatchdog';
 import { MetricValue } from './MetricValue';
 import { getTemperatureColor } from '../../utils/metricHelpers';
 import { useEffect } from 'react';
@@ -28,6 +29,12 @@ export function CompactGPUStatus({ onClickMonitor }: CompactGPUStatusProps) {
     startPolling,
     fetchAllGpuMetrics,
   } = useSystemMonitorStore();
+
+  // Self-heal if metrics stop arriving. This component is on EVERY page, and
+  // the system/* WebSocket channels are subscribed only on the Monitor page —
+  // so leaving that page silently ends updates here while the socket stays
+  // "connected". See useSystemMetricsWatchdog.
+  useSystemMetricsWatchdog(updateInterval);
 
   // Start lightweight polling when component mounts
   useEffect(() => {

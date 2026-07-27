@@ -8,6 +8,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Activity, Settings } from 'lucide-react';
 import { useSystemMonitorStore } from '../../stores/systemMonitorStore';
+import { useSystemMetricsWatchdog } from '../../hooks/useSystemMetricsWatchdog';
 import { useHistoricalData } from '../../hooks/useHistoricalData';
 import { useSystemMonitorWebSocket } from '../../hooks/useSystemMonitorWebSocket';
 import { UtilizationChart } from './UtilizationChart';
@@ -46,8 +47,6 @@ export function SystemMonitor() {
     setSelectedGPU,
     setUpdateInterval,
     setViewMode,
-    startPolling,
-    stopPolling,
     clearError,
     retryConnection,
   } = useSystemMonitorStore();
@@ -88,35 +87,11 @@ export function SystemMonitor() {
     return undefined;
   }, [viewMode, gpuAvailable, fetchAllGpuMetrics, updateInterval]);
 
-  // Polling fallback on WebSocket disconnect is handled by
-  // systemMonitorStore.setIsWebSocketConnected (single controller).
-  //
-  // Staleness watchdog: a connected socket does not guarantee metric events
-  // are flowing (e.g. backend emission failures). If no data has arrived for
-  // 10s while we believe the WebSocket is healthy, resume polling; the store
-  // stops it again on the next reconnect.
-  useEffect(() => {
-    const STALE_MS = 10_000;
-    const watchdog = setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      const { isPolling: polling, isWebSocketConnected: wsConnected, lastSuccessfulFetch } =
-        useSystemMonitorStore.getState();
-      const stale =
-        lastSuccessfulFetch === null || Date.now() - lastSuccessfulFetch > STALE_MS;
-      if (wsConnected && !polling && stale) {
-        console.warn(
-          '[SystemMonitor] WebSocket connected but metrics are stale, resuming polling fallback'
-        );
-        startPolling(updateInterval);
-      }
-    }, 5000);
-
-    return () => {
-      clearInterval(watchdog);
-      // Stop any polling this page started when navigating away
-      stopPolling();
-    };
-  }, [updateInterval, startPolling, stopPolling]);
+  // Staleness watchdog — shared with the global header via one hook, so the
+  // two cannot drift. It previously lived here only, which meant it healed the
+  // Monitor page (the one page still receiving WebSocket metrics) and not the
+  // header on every other page.
+  useSystemMetricsWatchdog(updateInterval);
 
   // Update historical data when new metrics arrive
   useEffect(() => {
