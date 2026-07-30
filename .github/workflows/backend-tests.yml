@@ -80,9 +80,11 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: |
-          # test_activation_service.py does real GPU forward passes ("NO MOCKING") - requires CUDA
+          # test_activation_service.py is no longer ignored. Its CUDA-bound tests
+          # carry @requires_cuda and skip themselves on a runner with no GPU, so
+          # the four tests in that file which need no GPU now actually run here —
+          # ignoring the whole file had been discarding them silently.
           python -m pytest tests/ \
             --ignore=tests/integration \
-            --ignore=tests/unit/test_activation_service.py \
             -m "not slow" \
             -v --no-cov --tb=short
