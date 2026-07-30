@@ -19,6 +19,24 @@ from src.models.model import QuantizationFormat
 from tests.unit.test_forward_hooks import SimpleLlamaModel, SimpleGPT2Model
 
 
+# These tests exercise REAL GPU forward passes ("NO MOCKING", see the module
+# docstring above): ActivationService hard-requires CUDA at
+# activation_service.py:350 and raises before doing anything else.
+#
+# Marked skipif rather than left failing. Until 2026-07-30 they simply FAILED on
+# any machine without a GPU — 15 permanent reds that everyone learned to scroll
+# past, which is exactly the condition under which a real regression hides. CI
+# sidestepped it by ignoring the whole file, which also silently discarded the
+# four tests below that need no GPU at all.
+#
+# NOTE the model is NOT the reason: real_model_dir builds a synthetic Llama
+# (hidden_size=64, 3 layers) of a few MB. Only the CUDA guard stops these.
+requires_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="ActivationService requires CUDA (real GPU forward passes, no mocking)",
+)
+
+
 # Fixtures
 
 
@@ -108,6 +126,7 @@ class TestActivationService:
         assert activation_service.activations_dir.exists()
         assert activation_service.activations_dir.is_dir()
 
+    @requires_cuda
     def test_extract_activations_basic(self, activation_service, real_model_dir, real_dataset_dir):
         """Test basic activation extraction with real model and dataset."""
         result = activation_service.extract_activations(
@@ -137,6 +156,7 @@ class TestActivationService:
         assert (output_dir / "layer_0_residual.npy").exists()
         assert (output_dir / "layer_2_residual.npy").exists()
 
+    @requires_cuda
     def test_extract_multiple_hook_types(self, activation_service, real_model_dir, real_dataset_dir):
         """Test extraction with multiple hook types."""
         result = activation_service.extract_activations(
@@ -163,6 +183,7 @@ class TestActivationService:
         for filename in expected_files:
             assert (output_dir / filename).exists()
 
+    @requires_cuda
     def test_max_samples_limit(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that max_samples correctly limits dataset size."""
         # Extract with max_samples=3 (dataset has 5 samples)
@@ -188,6 +209,7 @@ class TestActivationService:
         # Shape should be (3, 10, 64) - 3 samples, seq_len=10, hidden_dim=64
         assert activations.shape[0] == 3
 
+    @requires_cuda
     def test_batch_size_processing(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that different batch sizes produce consistent shapes and results."""
         # Extract with batch_size=1
@@ -227,6 +249,7 @@ class TestActivationService:
         # Both should process all samples
         assert result1["num_samples"] == result2["num_samples"] == 5
 
+    @requires_cuda
     def test_statistics_calculation(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that activation statistics are correctly calculated."""
         result = activation_service.extract_activations(
@@ -263,6 +286,7 @@ class TestActivationService:
         assert 0 <= stats["sparsity_percent"] <= 100
         assert stats["size_mb"] > 0
 
+    @requires_cuda
     def test_metadata_contents(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that metadata.json contains all required fields."""
         import json
@@ -302,6 +326,7 @@ class TestActivationService:
         assert "saved_files" in metadata
         assert "statistics" in metadata
 
+    @requires_cuda
     def test_get_extraction_info(self, activation_service, real_model_dir, real_dataset_dir):
         """Test retrieving extraction information."""
         # Create an extraction
@@ -330,6 +355,7 @@ class TestActivationService:
         info = activation_service.get_extraction_info("nonexistent-extraction")
         assert info is None
 
+    @requires_cuda
     def test_list_extractions(self, activation_service, real_model_dir, real_dataset_dir):
         """Test listing all extractions."""
         # Create multiple extractions
@@ -356,6 +382,7 @@ class TestActivationService:
         assert "test-extraction-1" in extraction_ids
         assert "test-extraction-2" in extraction_ids
 
+    @requires_cuda
     def test_delete_extraction(self, activation_service, real_model_dir, real_dataset_dir):
         """Test deleting an extraction."""
         # Create extraction
@@ -389,6 +416,7 @@ class TestActivationService:
         success = activation_service.delete_extraction("nonexistent")
         assert success is False
 
+    @requires_cuda
     def test_auto_generated_extraction_id(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that extraction_id is auto-generated if not provided."""
         result = activation_service.extract_activations(
@@ -413,6 +441,7 @@ class TestActivationService:
         with pytest.raises(FileNotFoundError):
             activation_service._load_dataset("/nonexistent/path", 10)
 
+    @requires_cuda
     def test_architecture_propagation(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that architecture is correctly passed to hooks."""
         # This will fail if architecture isn't properly propagated to HookManager
@@ -431,6 +460,7 @@ class TestActivationService:
         # Should successfully extract all requested hooks
         assert len(result["saved_files"]) == 9  # 3 layers × 3 hook types
 
+    @requires_cuda
     def test_activation_shapes(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that saved activation arrays have correct shapes."""
         import numpy as np
@@ -459,6 +489,7 @@ class TestActivationService:
             # System uses FP16 for memory efficiency (Phase 18 optimization)
             assert activations.dtype == np.float16
 
+    @requires_cuda
     def test_different_architectures(self, activation_service, real_dataset_dir):
         """Test extraction works with different model architectures."""
         from transformers import GPT2Config, GPT2LMHeadModel, AutoTokenizer
@@ -501,6 +532,7 @@ class TestActivationService:
             assert len(result["saved_files"]) == 4  # 2 layers × 2 hook types
             assert result["num_samples"] == 5
 
+    @requires_cuda
     def test_all_samples_when_max_zero(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that max_samples=0 or negative uses all samples."""
         result = activation_service.extract_activations(
@@ -518,6 +550,7 @@ class TestActivationService:
         # Should process all 5 samples in dataset
         assert result["num_samples"] == 5
 
+    @requires_cuda
     def test_extraction_consistency(self, activation_service, real_model_dir, real_dataset_dir):
         """Test that running extraction twice produces identical results."""
         import numpy as np
