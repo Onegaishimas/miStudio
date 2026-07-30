@@ -45,6 +45,76 @@ from src.services.checkpoint_service import CheckpointService
 logger = logging.getLogger(__name__)
 
 
+
+def load_unembedding_matrix(
+    model_dir: "Path", device: str = "cpu"
+) -> "torch.Tensor":
+    """Load ONLY the unembedding matrix (lm_head), not the whole model.
+
+    Logit lens is `W_dec[feature] @ W_U`. It needs the output embedding matrix
+    and nothing else — no layers, no forward pass. Instantiating the full model
+    to reach one tensor cost ~17 GB for granite-4.1-8b and made the feature fail
+    outright once miLLM was holding the card:
+
+        Out of memory loading ibm-granite/granite-4.1-8b even with FP32.
+
+    W_U here is 100,352 x 4,096 fp16 ~= 820 MB — about 20x less, and it reads
+    straight out of the safetensors shard without materialising anything else.
+
+    Falls back to the input embeddings when a model ties them
+    (granite-4.1-8b sets tie_word_embeddings=true), which is the same matrix.
+    """
+    import json
+
+    from safetensors import safe_open
+
+    candidates = ["lm_head.weight", "model.embed_tokens.weight"]
+
+    index_path = model_dir / "model.safetensors.index.json"
+    if index_path.exists():
+        weight_map = json.loads(index_path.read_text())["weight_map"]
+        for key in candidates:
+            shard = weight_map.get(key)
+            if shard is None:
+                continue
+            with safe_open(str(model_dir / shard), framework="pt", device=device) as f:
+                return f.get_tensor(key)
+        raise ValueError(
+            f"No unembedding tensor found in {index_path}; tried {candidates}"
+        )
+
+    single = model_dir / "model.safetensors"
+    if single.exists():
+        with safe_open(str(single), framework="pt", device=device) as f:
+            available = set(f.keys())
+            for key in candidates:
+                if key in available:
+                    return f.get_tensor(key)
+        raise ValueError(
+            f"No unembedding tensor in {single}; tried {candidates}"
+        )
+
+    raise FileNotFoundError(f"No safetensors weights under {model_dir}")
+
+
+def resolve_snapshot_dir(cache_dir: "Path", repo_id: str) -> "Optional[Path]":
+    """Find the HuggingFace snapshot directory holding a model's weights."""
+    hub_name = "models--" + repo_id.replace("/", "--")
+    for base in (cache_dir / hub_name, cache_dir):
+        snapshots = base / "snapshots"
+        if snapshots.is_dir():
+            for snap in sorted(snapshots.iterdir()):
+                if (snap / "model.safetensors.index.json").exists() or (
+                    snap / "model.safetensors"
+                ).exists():
+                    return snap
+        if (base / "model.safetensors.index.json").exists() or (
+            base / "model.safetensors"
+        ).exists():
+            return base
+    return None
+
+
 class AnalysisService:
     """
     Service for feature interpretability analysis.
@@ -102,9 +172,18 @@ class AnalysisService:
             return None
 
         try:
-            # Determine device
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Using device: {device}")
+            # CPU, deliberately, even when a GPU is present.
+            #
+            # Logit lens is one vector-matrix product: [4096] @ [4096, 100352],
+            # about 0.4 GFLOP. It finishes in milliseconds on CPU and gains
+            # nothing from the device.
+            #
+            # Running it on CUDA made it fail whenever anything else held the
+            # card. With miLLM serving granite in fp16 (~17.5 GB of 24 GB) every
+            # request 500'd. An analysis this small must not compete with
+            # serving for VRAM.
+            device = "cpu"
+            logger.info(f"Using device: {device} (logit lens is CPU-only by design)")
 
             # Two paths: training-based SAE or external SAE
             sae = None
@@ -248,16 +327,48 @@ class AnalysisService:
             # HuggingFace API calls that require authentication for gated models
             resolved_model_path = settings.resolve_data_path(model_record.file_path) if model_record.file_path else None
             model_is_downloaded = resolved_model_path and resolved_model_path.exists()
-            base_model, tokenizer, model_config, metadata = load_model_from_hf(
-                repo_id=model_record.repo_id,
-                quant_format=QuantizationFormat(model_record.quantization),
-                cache_dir=resolved_model_path,
-                device_map=device,
-                local_files_only=model_is_downloaded,
-            )
-            base_model.eval()
 
-            logger.info(f"Base model loaded successfully")
+            # Load ONLY the unembedding matrix, never the full model.
+            #
+            # This used to instantiate all 8B parameters to reach one tensor.
+            # Once miLLM held the card with granite in fp16 (~17.5 GB of 24 GB)
+            # there was no room left and EVERY logit-lens request 500'd with
+            # "Out of memory loading ibm-granite/granite-4.1-8b even with FP32".
+            #
+            # The tokenizer is still needed (to turn ids back into strings) but
+            # it is CPU-only and cheap.
+            W_U_source = None
+            if model_is_downloaded:
+                snapshot = resolve_snapshot_dir(resolved_model_path, model_record.repo_id)
+                if snapshot is not None:
+                    logger.info(f"Loading unembedding matrix only from {snapshot}")
+                    W_U_source = load_unembedding_matrix(snapshot, device="cpu")
+
+            if W_U_source is None:
+                # No local weights to read directly — fall back to the old path
+                # so behaviour is unchanged for models that are not cached.
+                logger.warning(
+                    "Falling back to full model load for logit lens "
+                    f"(repo_id={model_record.repo_id}); this needs the whole "
+                    "model resident and will fail if the GPU is occupied"
+                )
+                base_model, tokenizer, model_config, metadata = load_model_from_hf(
+                    repo_id=model_record.repo_id,
+                    quant_format=QuantizationFormat(model_record.quantization),
+                    cache_dir=resolved_model_path,
+                    device_map=device,
+                    local_files_only=model_is_downloaded,
+                )
+                base_model.eval()
+                W_U_source = base_model.lm_head.weight
+            else:
+                from transformers import AutoTokenizer
+
+                tokenizer = AutoTokenizer.from_pretrained(
+                    str(snapshot), local_files_only=True
+                )
+
+            logger.info(f"Unembedding matrix ready: {tuple(W_U_source.shape)}")
 
             # Logit lens is a WEIGHT-BASED analysis, not a forward pass!
             # Formula: logits = W_dec[feature_idx] @ W_U
@@ -306,7 +417,7 @@ class AnalysisService:
                 # Get the unembedding matrix (LM head weights)
                 # base_model.lm_head.weight shape: [vocab_size, hidden_dim]
                 # We need it transposed: [hidden_dim, vocab_size]
-                W_U = base_model.lm_head.weight.T
+                W_U = W_U_source.T
 
                 # Ensure same dtype and device for matrix multiplication
                 # Convert both to the same dtype (use model's dtype, which is likely FP16)
@@ -358,9 +469,15 @@ class AnalysisService:
                 }
             )
 
-            # Clean up to free GPU memory
+            # Clean up to free GPU memory.
+            #
+            # base_model only exists on the fallback path now — the fast path
+            # never instantiates it — so deleting it unconditionally would
+            # NameError and turn a successful computation into a 500.
             del sae
-            del base_model
+            del W_U_source
+            if "base_model" in locals():
+                del base_model
             if device == "cuda":
                 torch.cuda.empty_cache()
 
