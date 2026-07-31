@@ -53,7 +53,7 @@
 - [ ] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
 - [ ] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
       uses the default queue.
-- [ ] 4.4 Artifact + report endpoints.
+- [x] 4.4 Artifact list + validate endpoints. Band-report and gate endpoints wait on Phase 4.5.
 - [ ] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
 
 ## Phase 5: Band report and gate
@@ -68,10 +68,13 @@
 
 ## Phase 6: MCP parity (BR-027)
 
-- [ ] 6.1 Reachability test written **first**.
-- [ ] 6.2 Tools: fit, validate, list artifacts, band report, replication report, gate decision.
-- [ ] 6.3 Registered with the server; presence asserted in the **live registry**.
-- [ ] 6.4 Payload and call count asserted — "was called" passes against wrong arguments.
+- [x] 6.1 Reachability test written **first**.
+- [x] 6.2 Tools shipped for what EXISTS: `list_jlens_artifacts`, `validate_jlens_artifact`. Fit,
+      band-report, replication and gate tools land with their endpoints — a tool calling a route
+      that does not exist is the same defect in a new place.
+- [x] 6.3 Registered with the server; presence asserted in the **live registry** and in the real
+      `build_server()`, not a hand-called `register()`.
+- [x] 6.4 Payload and call count asserted — "was called" passes against wrong arguments.
 
 ## Phase 7: UI
 
@@ -189,6 +192,11 @@ a passing report. 20 tests, 6 mutation controls.
 
 That removes Phase 1 (ORM + migration) from the critical path — it is now optional bookkeeping over
 a filesystem that is already authoritative.
+
+**Also implemented since:** the artifact list/validate endpoints and the `jlens` MCP category
+(`list_jlens_artifacts`, `validate_jlens_artifact`), registered and covered by a reachability harness
+written before the tools. Five mutation controls, including unregistering the category — the exact
+defect that once shipped 16 tools nobody could call.
 
 **Outstanding for this feature:** Phase 4.2-4.5 (acquisition weight-identity check, Celery task,
 endpoints, readout binding — **the 501 stays until then**), Phase 6 (MCP tools + reachability),

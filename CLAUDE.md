@@ -454,11 +454,26 @@ lens) reading what a model is *poised to say* at every layer and position. 32 bu
   elementwise rescaling*; *replay the layer's recorded kwargs — a decoder layer called with hidden
   states alone silently takes a default path and fits a lens for a model that was never run that way*;
   *a mutation that "survives" may simply never have applied — check the edit landed before concluding*.
-- **Outstanding:** Phase 1 (ORM/migration), Phase 4 (lifecycle, endpoints, **`/jlens/readout` stays
-  501** until then), Phase 6 (MCP + reachability), Phase 7 (UI), Phase 8.1/8.6 (two-architecture and
-  **hardware acceptance on the local 3080 Ti**), review rounds 2–3. The cross-implementation and
-  round-trip checks are written and tested but not yet wired to a live consumer; `ValidationReport`
-  fails closed on a class that never ran, so nothing can publish on their absence.
+- **Artifact lifecycle + MCP parity also shipped:** `services/jlens_artifact_service.py` (stage →
+  validate → commit → serve), the `/jlens/artifacts` list and `/jlens/artifacts/{slug}/validate`
+  endpoints, and the **`jlens` MCP category** (`list_jlens_artifacts`, `validate_jlens_artifact`)
+  registered and covered by a reachability harness **written before the tools**. Commits
+  7a2956a→HEAD.
+- **The filesystem is the registry, not a DB table** (PADR IDL-46). A J-lens artifact is consumed by
+  MOUNTING a conformant directory; there is no upload path, so a DB row as source of truth would
+  invent a second registry that can silently disagree with the one the consumer reads. This removed
+  Phase 1 (ORM/migration) from the critical path. Stage-then-commit: `<slug>.staging` is excluded
+  from discovery, because a half-written artifact in the mounted directory gets served.
+- Durable lessons: *the envelope check compares a FILE size to a TENSOR size — a flat overhead
+  allowance then exceeded a small model's entire materialised dictionary, so it must be bounded at
+  BOTH ends*; *artifacts load `weights_only=True` — an artifact is an untrusted file and the
+  unrestricted loader executes pickled code*.
+- **Outstanding:** Phase 4.2/4.3/4.5 (acquisition weight-identity check, Celery task, **readout
+  binding — `/jlens/readout` stays 501**), band-report/gate/fit endpoints + their MCP tools, Phase 7
+  (UI), Phase 8.1/8.6 (two-architecture and **hardware acceptance on the local 3080 Ti**), review
+  rounds 2–3. The cross-implementation and round-trip checks are written and tested but not yet
+  wired to a live consumer; `ValidationReport` fails closed on a class that never ran, so nothing can
+  publish on their absence.
 
 ### Feature Documents
 *[Add as features are identified and developed]*
