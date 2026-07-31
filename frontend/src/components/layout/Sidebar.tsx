@@ -14,15 +14,19 @@ import {
   BookOpen,
   Boxes,
   GitBranch,
+  Sparkles,
 } from 'lucide-react';
 import logoSvg from '../../assets/logo.svg';
 import { useUIStore } from '../../stores/uiStore';
+import type { ActivePanel } from '../../config/panels';
 
 const APP_VERSION = '0.5.0';
 
-type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'feature-groups' | 'circuits' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
-
-const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
+/**
+ * Nav order IS array order — there is no sort key anywhere. Exported so tests
+ * assert placement against the real registry rather than against a copy of it.
+ */
+export const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'models', label: 'Models', icon: Server },
   { id: 'datasets', label: 'Datasets', icon: Database },
   { id: 'saes', label: 'SAEs', icon: Network },
@@ -32,11 +36,14 @@ const navItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'labeling', label: 'Labeling', icon: Tags },
   { id: 'feature-groups', label: 'Clusters', icon: Boxes },
   { id: 'circuits', label: 'Circuits', icon: GitBranch },
+  // Ordering here IS the nav order — there is no sort key. J-Lens sits
+  // immediately before Steering (FPRD §3.1); moving this line moves the tab.
+  { id: 'jlens', label: 'J-Lens', icon: Sparkles },
   { id: 'steering', label: 'Steering', icon: Sliders },
   { id: 'system', label: 'Monitor', icon: Activity },
 ];
 
-const bottomNavItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
+export const bottomNavItems: { id: ActivePanel; label: string; icon: typeof Database }[] = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 

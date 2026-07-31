@@ -72,6 +72,12 @@ export default defineConfig({
           if (id.includes('/components/SystemMonitor/')) {
             return 'feature-monitor';
           }
+          // These rules match SUB-COMPONENT directories, never
+          // /components/panels/ — which is why the J-Lens trajectory chart
+          // (recharts) lives under /components/jlens/ rather than in the panel.
+          if (id.includes('/components/jlens/') || id.includes('/stores/jlensStore')) {
+            return 'feature-jlens';
+          }
         },
       },
     },

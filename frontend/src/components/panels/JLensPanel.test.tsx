@@ -1,0 +1,510 @@
+/**
+ * J-Lens panel — the four ways this port could look right and be wrong.
+ *
+ * The reference implementation (`0xcc/brds/JSpacePanel.jsx`) hardcodes three
+ * model-specific constants and ships a fixture generator. Every one of them
+ * renders a complete, plausible panel after a straight paste:
+ *
+ *   LAYERS = 21 layers at 0,5,...,100   -> a grid of the wrong height
+ *   BAND   = { 40, 90 }                 -> Sonnet-4.5 boundaries on any model
+ *   TOP_N  = 8                          -> a mis-scaled heatmap ramp
+ *   FIXTURES/buildFixture               -> synthetic readouts indistinguishable
+ *                                          from real ones
+ *
+ * MUTATION CONTROLS (each must turn this file red):
+ *   * hardcode the grid axis to a constant             -> "layer axis" fails
+ *   * enable Jacobian regardless of meta.types         -> "disablement" fails
+ *   * default bandReport to { 40, 90 }                 -> "bands" fails
+ *   * hardcode topN in rankColor                       -> "top-n ramp" fails
+ *   * drop the interpretability caveat                 -> "framing" fails
+ *   * clear meta/tokens at the start of fetchReadout   -> "refetch" fails
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { renderWithProviders as render } from '../../test/renderWithProviders';
+import { JLensPanel } from './JLensPanel';
+import { useJLensStore } from '../../stores/jlensStore';
+import { rankColor } from '../jlens/utils';
+import type { LensType, ReadoutResponse } from '../../types/jlens';
+
+vi.mock('../../stores/modelsStore');
+vi.mock('../../api/jlens', () => ({
+  jlensApi: { readout: vi.fn() },
+}));
+
+import { jlensApi } from '../../api/jlens';
+import { useModelsStore } from '../../stores/modelsStore';
+
+const MODELS = [
+  { id: 'm_lfm2', name: 'LFM2.5-1.2B-Instruct', status: 'ready' },
+  { id: 'm_gemma', name: 'gemma-2-2b-it', status: 'ready' },
+];
+
+/**
+ * A readout with an arbitrary layer axis. `layers` is passed explicitly at every
+ * call site so no test can accidentally agree with a hardcoded default — the
+ * "fixtures agree by construction" trap.
+ */
+function makeReadout(
+  layers: number[],
+  types: LensType[] = ['LOGIT_LENS'],
+  topN = 4
+): ReadoutResponse {
+  const words = ['Paris', 'France', 'capital', 'city', 'the', 'a', 'of', 'is'];
+  const tokens = ['The', ' capital', ' of', ' France', ' is'].map((tok, pos) => ({
+    kind: 'token' as const,
+    position: pos,
+    token: tok,
+    id: 1000 + pos,
+    is_generated: false,
+    results: types.map((type) => ({
+      type,
+      top_tokens: layers.map((_, li) =>
+        Array.from({ length: topN }, (_, k) => words[(li + k + pos) % words.length])
+      ),
+      top_probs: layers.map((_, li) =>
+        // Later layers are confident; the earliest are diffuse, which is the
+        // real shape and what the "expected to be uninterpretable" marking keys on.
+        Array.from({ length: topN }, (_, k) =>
+          (li / Math.max(layers.length - 1, 1)) * 0.8 * (1 - k / (topN + 1))
+        )
+      ),
+    })),
+  }));
+
+  return {
+    meta: {
+      kind: 'meta',
+      model: 'test-model',
+      types,
+      layers_by_type: Object.fromEntries(types.map((t) => [t, layers])),
+      top_n: topN,
+      prompt_len: tokens.length,
+    },
+    tokens,
+  };
+}
+
+function seed(response: ReadoutResponse) {
+  act(() => {
+    useJLensStore.setState({
+      modelId: 'm_lfm2',
+      prompt: 'The capital of France is',
+      meta: response.meta,
+      tokens: response.tokens,
+      provenance: { artifact_id: null },
+      lensMode: 'LOGIT_LENS',
+      selPos: 0,
+      selLayerIdx: 0,
+      pinned: [],
+      hover: null,
+      isLoading: false,
+      error: null,
+      bandReport: null,
+    });
+  });
+}
+
+/** Grid body rows = one per layer, plus the token footer row. */
+function gridRowCount(container: HTMLElement): number {
+  return container.querySelectorAll('table tbody tr').length - 1;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  act(() => useJLensStore.getState().reset());
+  // Selector-aware: the panel subscribes with selectors so a models-store tick
+  // does not re-render the readout grid.
+  const modelsState = { models: MODELS, fetchModels: vi.fn() };
+  (useModelsStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+    (selector?: (s: typeof modelsState) => unknown) =>
+      selector ? selector(modelsState) : modelsState
+  );
+});
+
+describe('layer axis is model-derived', () => {
+  it.each([
+    ['16-layer hybrid', Array.from({ length: 16 }, (_, i) => i)],
+    ['26-layer dense', Array.from({ length: 26 }, (_, i) => i)],
+    ['sparse axis', [0, 3, 7, 11, 15]],
+  ])('follows layers_by_type for a %s model', (_label, layers) => {
+    const { container } = render(<JLensPanel />);
+    seed(makeReadout(layers));
+    expect(gridRowCount(container)).toBe(layers.length);
+  });
+
+  it('labels rows with ABSOLUTE layer numbers, not row indices', () => {
+    // A sparse axis is the only shape that distinguishes "layer" from "index".
+    render(<JLensPanel />);
+    seed(makeReadout([0, 3, 7, 11, 15]));
+    expect(screen.getAllByText('L15').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('L11').length).toBeGreaterThan(0);
+    expect(screen.queryByText('L4')).toBeNull();
+  });
+});
+
+describe('positions are looked up by position, not by array index', () => {
+  /**
+   * Every other fixture here numbers positions 0..n-1, where index and position
+   * agree by construction — so an index-based lookup passes all of them. The
+   * wire format permits a readout over a SUBSET of positions, and that is the
+   * only shape that tells the two apart.
+   */
+  function slicedReadout() {
+    const base = makeReadout([0, 1, 2]);
+    base.tokens = base.tokens.slice(0, 3).map((t, i) => ({
+      ...t,
+      position: i * 2, // 0, 2, 4
+    }));
+    base.meta.prompt_len = 5;
+    return base;
+  }
+
+  it('shows the token at the SELECTED POSITION in the by-layer rail', () => {
+    render(<JLensPanel />);
+    seed(slicedReadout());
+    act(() => useJLensStore.setState({ selPos: 4 }));
+
+    // Array index 4 does not exist; position 4 is the third token, " of".
+    const header = screen.getByText(/By layer · position 4/);
+    expect(header.textContent).toContain('·of');
+  });
+
+  it('clamps a vanished position onto a real one rather than to an index', async () => {
+    seed(makeReadout([0, 1, 2]));
+    act(() => useJLensStore.setState({ selPos: 9 }));
+
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(slicedReadout());
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    // 4 is the last real position; 2 would be the last array INDEX.
+    expect(useJLensStore.getState().selPos).toBe(4);
+  });
+});
+
+describe('lens-mode disablement is derived from what the stream carries', () => {
+  it('disables Jacobian and Diff with a stated reason on a logit-only readout', () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS']));
+
+    const jacobian = screen.getByRole('button', { name: /Jacobian/ });
+    const diff = screen.getByRole('button', { name: /Diff/ });
+
+    expect(jacobian).toBeDisabled();
+    expect(diff).toBeDisabled();
+    expect(screen.getByText(/No validated J-lens artifact/i)).toBeInTheDocument();
+    expect(screen.getByText(/only one is present/i)).toBeInTheDocument();
+  });
+
+  it('enables them when the readout actually carries both lenses', () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
+
+    expect(screen.getByRole('button', { name: /Jacobian/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Diff/ })).toBeEnabled();
+  });
+
+  it('never renders logit data under a Jacobian label', () => {
+    // With only LOGIT_LENS transported, clicking Jacobian must not switch mode.
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS']));
+
+    fireEvent.click(screen.getByRole('button', { name: /Jacobian/ }));
+    expect(useJLensStore.getState().lensMode).toBe('LOGIT_LENS');
+  });
+});
+
+describe('bands are earned, never defaulted', () => {
+  it('draws no bands and says why when no report exists', () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2]));
+
+    expect(screen.getByTestId('jlens-no-bands')).toHaveTextContent(
+      /No band report for this model/i
+    );
+    expect(screen.queryByText('Workspace')).toBeNull();
+    expect(screen.queryByText('Motor')).toBeNull();
+  });
+
+  it('has no band constant anywhere in the feature source', () => {
+    // BR-002 requires porting the paper's L40/L90 to be impossible by
+    // construction, so the guard is over the SOURCE, not the render.
+    const roots = [
+      path.resolve(__dirname, '../jlens'),
+      path.resolve(__dirname, 'JLensPanel.tsx'),
+      path.resolve(__dirname, '../../stores/jlensStore.ts'),
+      path.resolve(__dirname, '../../types/jlens.ts'),
+    ];
+    const files = roots.flatMap((p) =>
+      fs.statSync(p).isDirectory()
+        ? fs.readdirSync(p).map((f) => path.join(p, f))
+        : [p]
+    );
+    for (const file of files) {
+      if (file.endsWith('.test.tsx') || file.endsWith('.test.ts')) continue;
+      const code = stripComments(fs.readFileSync(file, 'utf8'));
+      // Two shapes, because renaming the constant is the obvious way to get
+      // past a name-only guard: an explicit boundary field with a number, and
+      // any `BAND`-ish binding holding numeric literals.
+      expect(code, `${file} defines a band boundary`).not.toMatch(
+        /(workspace|motor|sensory)\w*\s*[:=]\s*-?\d/i
+      );
+      expect(code, `${file} binds a band constant`).not.toMatch(
+        /\bband\w*\s*=\s*\{[^}]*\d/i
+      );
+    }
+  });
+});
+
+describe('the colour ramp is scaled by the top-n the server sent', () => {
+  it('gives the same rank different weight at different top-n', () => {
+    // Hardcoding TOP_N=8 makes these identical, and the heatmap mis-scales
+    // silently on any readout with a different depth.
+    expect(rankColor(3, 4)).not.toBe(rankColor(3, 40));
+  });
+
+  it('renders the top-n the readout declares in the hover hint', () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 5));
+    expect(screen.getByText(/full top-5 readout/i)).toBeInTheDocument();
+  });
+});
+
+describe('interpretability framing', () => {
+  beforeEach(() => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2]));
+  });
+
+  it('carries the evidence rung and what would raise it', () => {
+    expect(screen.getByText(/Rung 0 · Readout/)).toBeInTheDocument();
+    expect(screen.getByText(/coordinate swap with a matched control/i)).toBeInTheDocument();
+  });
+
+  it('states the single-token limitation', () => {
+    expect(screen.getByText(/single-token names/i)).toBeInTheDocument();
+  });
+
+  it('states that an uninterpretable readout is not a null result', () => {
+    expect(screen.getByText(/is not a null result/i)).toBeInTheDocument();
+  });
+
+  it('states that absence of a signal is not evidence of absence', () => {
+    expect(
+      screen.getByText(/not evidence that the underlying computation did not occur/i)
+    ).toBeInTheDocument();
+  });
+
+  it('says explicitly that the logit lens involves no artifact', () => {
+    expect(screen.getByTestId('jlens-no-artifact')).toHaveTextContent(
+      /no artifact involved/i
+    );
+  });
+
+  it('marks diffuse readouts rather than presenting them as content', () => {
+    expect(screen.getAllByText('diffuse').length).toBeGreaterThan(0);
+  });
+});
+
+describe('pinning turns the grid into a rank heatmap', () => {
+  it('pins from the hover list and shows the pinned token in the rail', async () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2]));
+
+    const cells = document.querySelectorAll('table tbody tr td');
+    fireEvent.mouseEnter(cells[1]);
+
+    // Scoped to the hover panel: the prompt strip renders buttons with the same
+    // token text, and an unscoped query pins by clicking the wrong control.
+    const detail = screen.getByTestId('jlens-hover-detail');
+    const hoverTokens = await waitFor(() => {
+      const found = Array.from(detail.querySelectorAll('button'));
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
+    fireEvent.click(hoverTokens[0]);
+
+    expect(useJLensStore.getState().pinned).toEqual([
+      hoverTokens[0].textContent?.replace(/^·/, ' '),
+    ]);
+  });
+});
+
+describe('a refetch never blanks the readout', () => {
+  it('keeps meta, tokens and pins across a slow refetch', async () => {
+    const first = makeReadout([0, 1, 2, 3]);
+    seed(first);
+    act(() => useJLensStore.setState({ pinned: ['Paris'] }));
+
+    let resolve!: (r: ReadoutResponse) => void;
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise<ReadoutResponse>((r) => {
+        resolve = r;
+      })
+    );
+
+    const pending = useJLensStore.getState().fetchReadout();
+
+    // Mid-flight: the readout is still on screen and the pins survive. Clearing
+    // state here is what unmounted the grid and dropped the user's work.
+    expect(useJLensStore.getState().isLoading).toBe(true);
+    expect(useJLensStore.getState().tokens.length).toBe(first.tokens.length);
+    expect(useJLensStore.getState().pinned).toEqual(['Paris']);
+
+    await act(async () => {
+      resolve(makeReadout([0, 1, 2, 3]));
+      await pending;
+    });
+
+    expect(useJLensStore.getState().pinned).toEqual(['Paris']);
+  });
+
+  it('clamps a stale selection into a shorter new readout', async () => {
+    seed(makeReadout(Array.from({ length: 26 }, (_, i) => i)));
+    act(() => useJLensStore.setState({ selLayerIdx: 25, selPos: 4 }));
+
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeReadout(Array.from({ length: 16 }, (_, i) => i))
+    );
+
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    expect(useJLensStore.getState().selLayerIdx).toBe(15);
+  });
+});
+
+describe('a mode the new readout cannot serve is not left selected', () => {
+  it('falls back to the logit lens when the Jacobian is no longer carried', async () => {
+    seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
+    act(() => useJLensStore.setState({ lensMode: 'DIFF' }));
+
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeReadout([0, 1, 2], ['LOGIT_LENS'])
+    );
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    // Leaving DIFF selected renders an empty grid, which reads as "this lens
+    // found nothing" while the disabled tab says "this lens is not present".
+    expect(useJLensStore.getState().lensMode).toBe('LOGIT_LENS');
+  });
+
+  it('keeps a mode the new readout still carries', async () => {
+    seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
+    act(() => useJLensStore.setState({ lensMode: 'DIFF' }));
+
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS'])
+    );
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    expect(useJLensStore.getState().lensMode).toBe('DIFF');
+  });
+});
+
+describe('request hygiene', () => {
+  it('drops a slow earlier response in favour of a fast later one', async () => {
+    seed(makeReadout([0, 1]));
+    const store = useJLensStore.getState();
+
+    let resolveSlow!: (r: ReadoutResponse) => void;
+    (jlensApi.readout as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(
+        new Promise<ReadoutResponse>((r) => {
+          resolveSlow = r;
+        })
+      )
+      .mockResolvedValueOnce(makeReadout([0, 1, 2, 3, 4, 5, 6]));
+
+    const slow = store.fetchReadout();
+    await act(async () => {
+      await store.fetchReadout();
+    });
+    expect(useJLensStore.getState().tokens.length).toBeGreaterThan(0);
+    const afterFast = useJLensStore.getState().meta?.layers_by_type.LOGIT_LENS;
+
+    await act(async () => {
+      resolveSlow(makeReadout([0, 1]));
+      await slow;
+    });
+
+    // The stale response must not land: settling on the superseded readout is
+    // indistinguishable from the newer request having returned that data.
+    expect(useJLensStore.getState().meta?.layers_by_type.LOGIT_LENS).toEqual(afterFast);
+  });
+
+  it('refuses a prompt longer than the server accepts, without a round trip', async () => {
+    act(() =>
+      useJLensStore.setState({ modelId: 'm_lfm2', prompt: 'x'.repeat(8001) })
+    );
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    expect(jlensApi.readout).not.toHaveBeenCalled();
+    expect(useJLensStore.getState().error).toMatch(/at most 8000/);
+  });
+
+  it('drops pins and the readout when the model changes', () => {
+    seed(makeReadout([0, 1, 2]));
+    act(() => useJLensStore.setState({ pinned: ['Paris'] }));
+
+    act(() => useJLensStore.getState().setModelId('m_gemma'));
+
+    // Pins are token strings from the previous model's vocabulary; carried
+    // across they draw empty lines that look like a measured absence.
+    expect(useJLensStore.getState().pinned).toEqual([]);
+    expect(useJLensStore.getState().meta).toBeNull();
+  });
+
+  it('keeps pins when the model is re-selected unchanged', () => {
+    seed(makeReadout([0, 1, 2]));
+    act(() => useJLensStore.setState({ pinned: ['Paris'] }));
+
+    act(() => useJLensStore.getState().setModelId('m_lfm2'));
+
+    expect(useJLensStore.getState().pinned).toEqual(['Paris']);
+  });
+});
+
+describe('nothing synthetic ships', () => {
+  it('has no fixture generator anywhere under src/', () => {
+    const offenders: string[] = [];
+    walk(path.resolve(__dirname, '../..'), (file) => {
+      if (!/\.(ts|tsx)$/.test(file)) return;
+      if (/\.test\.tsx?$/.test(file)) return;
+      const code = stripComments(fs.readFileSync(file, 'utf8'));
+      if (/\b(FIXTURES|buildFixture|scoreAt)\b/.test(code)) offenders.push(file);
+    });
+    expect(offenders).toEqual([]);
+  });
+});
+
+function walk(dir: string, visit: (file: string) => void) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, visit);
+    else visit(full);
+  }
+}
+
+/**
+ * Strip comments before scanning.
+ *
+ * Without this, the guards flag the very docblocks that WARN about the
+ * constants they forbid — a self-defeating assertion that forces the
+ * explanation out of the code. (Feature 022 shipped exactly this bug twice.)
+ */
+function stripComments(code: string): string {
+  return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}

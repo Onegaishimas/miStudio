@@ -1,0 +1,543 @@
+"""
+J-space readout: what a model is poised to say, per layer and per position.
+
+MODEL-AGNOSTIC BY CONSTRUCTION (BR-032, PADR IDL-41). Structure is resolved
+through `discover_transformer_structure`, never an architecture whitelist, a
+model-name branch, or an upstream fitter's layout detection. miStudio already
+deleted its SUPPORTED_ARCHITECTURES whitelist once; this module does not
+reintroduce one. There is deliberately no architecture name anywhere in the
+executable path.
+
+THE HOOK POINT IS THE DECODER-LAYER OUTPUT, NEVER A NORM MODULE.
+`TransformerStructure.residual_norm_module` sounds like the residual stream and
+is not. On a hybrid model it resolves to a post-attention RMSNorm, and this
+project has already paid for that confusion once: in steering, a vector applied
+there was renormalised away and steered output was byte-identical to unsteered
+at every dial (see steering_core.py:230, PADR IDL-38). A readout taken at a norm
+fails the same way and is HARDER to notice — plausibly-shaped numbers with the
+signal scaled out. See `_capture_residuals`.
+
+CPU BY DESIGN. A readout is one matvec per (layer, position) — fractions of a
+GFLOP. It gains nothing from CUDA and everything it touches is contended: the
+previous logit-lens implementation ran on GPU and failed outright the moment
+serving occupied the card. Residual capture is the one GPU-touching step and its
+device is chosen explicitly rather than inherited.
+
+NEVER MATERIALISE `W_U J` (BR-006, PADR IDL-42). Token directions are
+synthesised on demand. The envelope bound is derived from the loaded model's own
+dimensions, never a constant — the required-vs-materialised ratio scales with
+vocabulary (~32x at 65k, ~111x at 256k), so a hardcoded bound passes on one
+model while missing a real materialisation on another.
+"""
+
+from __future__ import annotations
+
+import logging
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+
+import torch
+
+from ..schemas.jlens import (
+    LayerApplicability,
+    LensDoneMessage,
+    LensMetaMessage,
+    LensTokenMessage,
+    LensTypeSlice,
+)
+
+logger = logging.getLogger(__name__)
+
+# Readouts run here. Not configurable by accident: see the module docstring.
+READOUT_DEVICE = "cpu"
+
+# Config keys that describe per-layer kind on hybrid architectures. Read
+# generically — this is a property lookup, not an architecture branch.
+_LAYER_TYPE_KEYS = ("layer_types", "layer_type_list", "block_types")
+
+# Substrings that mark a layer as performing attention. Kept as data so a new
+# architecture is a list entry rather than a code change.
+_ATTENTION_MARKERS = ("attention", "attn")
+
+# Final-norm attribute names across families. Data, not a branch: a new family
+# is an entry here, never an `if architecture == ...`.
+_FINAL_NORM_NAMES = (
+    "norm",
+    "ln_f",
+    "final_layernorm",
+    "final_layer_norm",
+    "embedding_norm",
+)
+
+
+class LensTransport(ABC):
+    """Maps a residual-stream activation into readout space.
+
+    THE SINGLE SUBSTITUTION POINT (PADR IDL-40). The logit lens is the
+    degenerate case J = I; the Jacobian lens is one extra d_model^2 matvec.
+    Consumers never branch on lens type — they hold a transport.
+    """
+
+    #: Wire-format lens type this transport produces.
+    lens_type: str
+
+    @abstractmethod
+    def apply(self, h: torch.Tensor, layer: int) -> torch.Tensor:
+        """Transport one activation. `h` is [d_model]; returns [d_model]."""
+
+    @abstractmethod
+    def requires_artifact(self) -> bool:
+        ...
+
+
+class IdentityTransport(LensTransport):
+    """Logit lens: J = I. Requires no artifact at all (BR-005).
+
+    This is why the substrate ships before any fitting exists.
+    """
+
+    lens_type = "LOGIT_LENS"
+
+    def apply(self, h: torch.Tensor, layer: int) -> torch.Tensor:
+        return h
+
+    def requires_artifact(self) -> bool:
+        return False
+
+
+class JacobianTransport(LensTransport):
+    """Jacobian lens: one d_model x d_model matrix per analysed layer.
+
+    Holds per-layer matrices on CPU and never forms `W_U J`. A layer absent from
+    the artifact raises rather than silently falling back to identity — serving
+    logit data under a Jacobian label is prohibited (BR-019 rung discipline).
+    """
+
+    lens_type = "JACOBIAN_LENS"
+
+    def __init__(
+        self, jacobians: Dict[int, torch.Tensor], compute_dtype: torch.dtype = torch.float32
+    ):
+        if not jacobians:
+            raise ValueError("JacobianTransport requires at least one layer matrix")
+        for layer, j in jacobians.items():
+            if j.ndim != 2 or j.shape[0] != j.shape[1]:
+                raise ValueError(
+                    f"J[{layer}] has shape {tuple(j.shape)}; expected a square "
+                    "[d_model, d_model] matrix"
+                )
+        # Cast ONCE at construction, not per call. Artifacts are serialised
+        # fp16 and the readout computes in fp32; casting inside apply() would
+        # copy a d_model^2 matrix on every (layer, position) — 8 MB per call at
+        # d_model 2048, thousands of times per readout.
+        self._j = {layer: j.to(compute_dtype) for layer, j in jacobians.items()}
+        self._compute_dtype = compute_dtype
+
+    def apply(self, h: torch.Tensor, layer: int) -> torch.Tensor:
+        j = self._j.get(layer)
+        if j is None:
+            raise KeyError(
+                f"No Jacobian for layer {layer}. Refusing to fall back to "
+                "identity: that would serve logit-lens data under a "
+                "JACOBIAN_LENS label."
+            )
+        return j @ h.to(self._compute_dtype)
+
+    def requires_artifact(self) -> bool:
+        return True
+
+
+@dataclass
+class CapturedResiduals:
+    """Residual stream per analysed layer: {layer: [positions, d_model]}."""
+
+    by_layer: Dict[int, torch.Tensor]
+    hook_target: str  # recorded so a wrong-hook run is diagnosable after the fact
+
+
+def build_layer_applicability(
+    structure: Any, model_config: Any
+) -> List[LayerApplicability]:
+    """Classify each layer by what is computable there (BR-032).
+
+    Layer kind is per-layer state, not a model property: a hybrid model
+    interleaves convolutional and attention layers, so "freeze Q/K" is undefined
+    on some of them and attention-broadcast metrics are computable on others.
+
+    Inapplicable is expressed as None, never False. A False would be averaged by
+    a downstream consumer and would silently understate; None forces the
+    consumer to decide.
+    """
+    n_layers = int(getattr(structure, "num_layers", 0) or 0)
+
+    layer_types: Optional[Sequence[Any]] = None
+    for key in _LAYER_TYPE_KEYS:
+        value = getattr(model_config, key, None)
+        if isinstance(value, (list, tuple)) and value:
+            layer_types = value
+            break
+
+    out: List[LayerApplicability] = []
+    for i in range(n_layers):
+        if layer_types is not None and i < len(layer_types):
+            kind = str(layer_types[i]).lower()
+            has_attention = any(m in kind for m in _ATTENTION_MARKERS)
+        else:
+            # Homogeneous model: no per-layer kind published. Every layer
+            # attends if the structure discovered an attention module at all.
+            has_attention = bool(getattr(structure, "attention_module", None))
+
+        out.append(
+            LayerApplicability(
+                layer=i,
+                has_attention=has_attention,
+                # None (absent) when the concept does not apply here.
+                frozen_qk_applicable=True if has_attention else None,
+                broadcast_metrics_applicable=True if has_attention else None,
+            )
+        )
+    return out
+
+
+class ReadoutService:
+    """Produces wire-format readout streams for any loadable model."""
+
+    def __init__(
+        self,
+        model: Any,
+        tokenizer: Any,
+        structure: Any,
+        unembedding: torch.Tensor,
+        model_name: str,
+        capture_device: Optional[str] = None,
+    ):
+        """
+        Args:
+            unembedding: W_U as [n_vocab, d_model]. Loaded WITHOUT instantiating
+                a second copy of the model — see
+                analysis_service.load_unembedding_matrix.
+            capture_device: device for the forward pass only. The readout itself
+                always runs on CPU (READOUT_DEVICE).
+        """
+        self.model = model
+        self.tokenizer = tokenizer
+        self.structure = structure
+        self.model_name = model_name
+        self.capture_device = capture_device or "cpu"
+
+        # W_U stays on CPU with the readout. [n_vocab, d_model].
+        self.W_U = unembedding.to(READOUT_DEVICE)
+        self.n_vocab, self.d_model = self.W_U.shape
+
+        # The model's own final norm, resolved once. Looked up by attribute
+        # shape rather than architecture name (BR-032): different families call
+        # it norm / ln_f / final_layernorm.
+        self._final_norm = self._resolve_final_norm(model)
+
+        # Decoded-token cache. A readout decodes the same high-frequency ids at
+        # every (layer, position); without this the tokenizer dominates runtime.
+        self._decode_cache: Dict[int, str] = {}
+
+    @staticmethod
+    def _resolve_final_norm(model: Any) -> Optional[Any]:
+        """Find the model's final normalisation module, if it exposes one.
+
+        Attribute-name search over a data list, not an architecture branch —
+        adding a family is a list entry.
+        """
+        for owner in (getattr(model, "model", None), model):
+            if owner is None:
+                continue
+            for name in _FINAL_NORM_NAMES:
+                candidate = getattr(owner, name, None)
+                # isinstance(nn.Module), not callable(). `callable` is far too
+                # loose here: a BOUND METHOD named `norm` passes it, and so
+                # does any other callable attribute that happens to share a
+                # name. Silently normalising with the wrong object produces a
+                # readout that looks fine and ranks tokens wrongly — the same
+                # class of silent failure as hooking the wrong module.
+                if isinstance(candidate, torch.nn.Module):
+                    return candidate
+        return None
+
+    # ---------------------------------------------------------------- capture
+
+    def _capture_residuals(self, input_ids: torch.Tensor, layers: Sequence[int]) -> CapturedResiduals:
+        """Capture resid_post at each requested layer.
+
+        HOOK TARGET IS `structure.layers_module[L]` — the decoder layer itself,
+        whose output IS the residual stream after that block. NOT
+        `structure.residual_norm_module`, which on a hybrid model is a
+        post-attention RMSNorm that renormalises the signal away (module
+        docstring; PADR IDL-38).
+        """
+        captured: Dict[int, torch.Tensor] = {}
+        handles = []
+
+        def make_hook(layer_idx: int):
+            def hook(_module, _inputs, output):
+                # Decoder blocks commonly return a tuple whose first element is
+                # the hidden state. Handle both shapes without knowing the
+                # architecture.
+                hidden = output[0] if isinstance(output, tuple) else output
+                # [batch, positions, d_model] -> [positions, d_model], on CPU
+                # so the readout never holds device memory.
+                captured[layer_idx] = hidden[0].detach().to(READOUT_DEVICE)
+
+            return hook
+
+        try:
+            for layer_idx in layers:
+                module = self.structure.layers_module[layer_idx]
+                handles.append(module.register_forward_hook(make_hook(layer_idx)))
+
+            with torch.no_grad():
+                self.model(input_ids=input_ids)
+        finally:
+            for h in handles:
+                h.remove()
+
+        return CapturedResiduals(
+            by_layer=captured,
+            hook_target="layers_module[L]",
+        )
+
+    # ---------------------------------------------------------------- readout
+
+    def _normalize(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the model's OWN final norm before unembedding.
+
+        A plain L2 normalisation is NOT what a transformer does: RMSNorm divides
+        by sqrt(mean(x^2)) and then applies a learned per-dimension weight, and
+        LayerNorm additionally re-centres. Substituting L2 rescales every logit
+        by a per-position constant and drops the learned weighting entirely —
+        the readout still looks plausible (it is a monotone rescale for a single
+        position) but token RANKINGS shift wherever the learned weight is not
+        uniform, which is the whole output of this service.
+
+        Falls back to RMS only when the model exposes no final norm, and records
+        that it did so rather than pretending equivalence.
+        """
+        if self._final_norm is not None:
+            with torch.no_grad():
+                return self._final_norm(x)
+        # Documented fallback: RMS without learned weights.
+        rms = x.pow(2).mean().sqrt().clamp_min(1e-6)
+        return x / rms
+
+    def _rank_at(
+        self, h: torch.Tensor, layer: int, transport: LensTransport, top_n: int
+    ) -> Tuple[List[str], List[float]]:
+        """Full ranked readout at one (layer, position).
+
+        `softmax(W_U . norm(J . h))`, then top-n. One matvec over the
+        unembedding call; no n_vocab x d_model array is ever formed.
+        """
+        transported = transport.apply(h.to(READOUT_DEVICE), layer)
+        normed = self._normalize(transported)
+
+        logits = self.W_U @ normed            # [n_vocab]
+        probs = torch.softmax(logits.float(), dim=-1)
+
+        k = min(top_n, probs.numel())
+        top = torch.topk(probs, k)
+        # Batch-decode: one call instead of top_n calls per (layer, position).
+        # At 16 layers x 20 positions x 8 that is 2,560 decode calls collapsed
+        # to 320.
+        tokens = self._decode_batch([int(i) for i in top.indices])
+        return tokens, [float(p) for p in top.values]
+
+    def _decode_batch(self, ids: Sequence[int]) -> List[str]:
+        """Decode ids individually but through one cached path.
+
+        Each id must decode on its own — decoding the list as a sequence would
+        merge sub-word pieces into a single string and lose the per-rank
+        alignment the wire format requires.
+        """
+        out: List[str] = []
+        for i in ids:
+            cached = self._decode_cache.get(i)
+            if cached is None:
+                cached = self.tokenizer.decode([i])
+                self._decode_cache[i] = cached
+            out.append(cached)
+        return out
+
+    def stream(
+        self,
+        prompt: str,
+        transports: Sequence[LensTransport],
+        layers: Optional[Sequence[int]] = None,
+        top_n: int = 8,
+    ) -> Iterator[Any]:
+        """Yield meta -> token* -> done in the upstream wire format (BR-029)."""
+        if not transports:
+            raise ValueError("at least one transport is required")
+
+        n_layers = int(self.structure.num_layers)
+        selected = list(layers) if layers is not None else list(range(n_layers))
+        out_of_range = [l for l in selected if l < 0 or l >= n_layers]
+        if out_of_range:
+            raise ValueError(
+                f"layers {out_of_range} outside range 0..{n_layers - 1}"
+            )
+
+        encoded = self.tokenizer(prompt, return_tensors="pt")
+        input_ids = encoded["input_ids"].to(self.capture_device)
+        ids = [int(i) for i in input_ids[0]]
+
+        # Bound the PRODUCT before doing any work. Per-field limits do not:
+        # see check_readout_budget.
+        check_readout_budget(len(ids), len(selected), self.d_model)
+
+        residuals = self._capture_residuals(input_ids, selected)
+
+        applicability = build_layer_applicability(
+            self.structure, getattr(self.model, "config", None)
+        )
+
+        yield LensMetaMessage(
+            model=self.model_name,
+            types=[t.lens_type for t in transports],
+            layers_by_type={t.lens_type: list(selected) for t in transports},
+            top_n=top_n,
+            prompt_len=len(ids),
+            layer_applicability=applicability,
+        )
+
+        for position, token_id in enumerate(ids):
+            slices: List[LensTypeSlice] = []
+            for transport in transports:
+                per_layer_tokens: List[List[str]] = []
+                per_layer_probs: List[List[float]] = []
+                for layer in selected:
+                    h = residuals.by_layer[layer][position]
+                    toks, probs = self._rank_at(h, layer, transport, top_n)
+                    per_layer_tokens.append(toks)
+                    per_layer_probs.append(probs)
+                slices.append(
+                    LensTypeSlice(
+                        type=transport.lens_type,
+                        top_tokens=per_layer_tokens,
+                        top_probs=per_layer_probs,
+                    )
+                )
+
+            yield LensTokenMessage(
+                position=position,
+                token=self.tokenizer.decode([token_id]),
+                id=token_id,
+                is_generated=False,
+                results=slices,
+            )
+
+        yield LensDoneMessage()
+
+    # ------------------------------------------------------------------ probe
+
+    def probe(
+        self,
+        h: torch.Tensor,
+        layer: int,
+        token_strings: Sequence[str],
+        transport: LensTransport,
+    ) -> Dict[str, float]:
+        """Score an activation against named directions without ranking (BR-008).
+
+        A token's lens direction is row t of `W_U J` — synthesised on demand as
+        `W_U[t,:] @ J`, one vector-matrix product. The dictionary is never
+        formed.
+
+        NOTE the probe score and the full-ranking position can disagree, because
+        the ranking applies a data-dependent normalisation this does not. Which
+        mode is canonical must be recorded per analysis (BR-008).
+        """
+        transported = transport.apply(h.to(READOUT_DEVICE), layer)
+        scores: Dict[str, float] = {}
+        for s in token_strings:
+            ids = self.tokenizer.encode(s, add_special_tokens=False)
+            if not ids:
+                continue
+            direction = self.W_U[ids[0]]          # [d_model]
+            scores[s] = float(direction @ transported)
+        return scores
+
+
+class ReadoutTooLarge(ValueError):
+    """A request whose COST exceeds the envelope (BR-028).
+
+    Distinct from a malformed request: the shape is valid, the work is not.
+    BR-028 requires operations that cannot fit the envelope to fail with a
+    stated reason rather than degrade silently.
+    """
+
+
+# Cost ceilings for a single readout. These bound the PRODUCT, which per-field
+# limits do not: prompt<=8000 chars, layers<=512 and top_n<=100 are each
+# reasonable and together permit ~102 million ranked readouts holding ~8.4 GB
+# of residuals — found in review round 2, after round 1 had bounded the fields
+# individually and considered the matter closed.
+MAX_READOUT_CELLS = 200_000        # positions x layers
+MAX_RESIDUAL_BYTES = 512 * 1024 * 1024
+
+
+def check_readout_budget(
+    n_positions: int, n_layers: int, d_model: int, dtype_bytes: int = 4
+) -> None:
+    """Refuse a request whose cost exceeds the envelope, with the numbers.
+
+    Called BEFORE capture, so an oversized request costs nothing rather than
+    OOMing partway through a forward pass.
+    """
+    cells = n_positions * n_layers
+    if cells > MAX_READOUT_CELLS:
+        raise ReadoutTooLarge(
+            f"readout would compute {cells:,} (position x layer) cells, over "
+            f"the {MAX_READOUT_CELLS:,} limit. Narrow the layer selection or "
+            "shorten the prompt."
+        )
+
+    resid = n_positions * n_layers * d_model * dtype_bytes
+    if resid > MAX_RESIDUAL_BYTES:
+        raise ReadoutTooLarge(
+            f"readout would hold {resid / 1e9:.2f} GB of residuals, over the "
+            f"{MAX_RESIDUAL_BYTES / 1e9:.2f} GB limit. Narrow the layer "
+            "selection or shorten the prompt."
+        )
+
+
+@contextmanager
+def jlens_budget_override(
+    max_cells: Optional[int] = None, max_residual_bytes: Optional[int] = None
+):
+    """Temporarily tighten (or relax) the readout budget.
+
+    Exists so a test can exercise the refusal path without allocating the
+    gigabytes the real ceiling permits. Restores the previous values on exit,
+    including when the body raises.
+    """
+    global MAX_READOUT_CELLS, MAX_RESIDUAL_BYTES
+    prev_cells, prev_bytes = MAX_READOUT_CELLS, MAX_RESIDUAL_BYTES
+    if max_cells is not None:
+        MAX_READOUT_CELLS = max_cells
+    if max_residual_bytes is not None:
+        MAX_RESIDUAL_BYTES = max_residual_bytes
+    try:
+        yield
+    finally:
+        MAX_READOUT_CELLS, MAX_RESIDUAL_BYTES = prev_cells, prev_bytes
+
+
+def envelope_bound_bytes(
+    d_model: int, n_layers: int, dtype_bytes: int = 2, tolerance: float = 1.5
+) -> int:
+    """Maximum acceptable artifact size for THIS model (BR-006).
+
+    Derived from the model's own dimensions, never a constant. The
+    required-vs-materialised ratio scales with vocabulary — about 32x at a 65k
+    vocabulary, about 111x at 256k — so a bound hardcoded for one model passes
+    on another while missing a real materialisation.
+    """
+    return int(d_model * d_model * dtype_bytes * n_layers * tolerance)
