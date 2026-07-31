@@ -2,7 +2,7 @@
 
 **Document ID:** 021_FTASKS|JSpace_Fitting_And_Gate
 **Version:** 1.0
-**Status:** Planned
+**Status:** ⏳ In progress — Phases 2, 3 and 5 implemented and review-round-1 clean; Phases 1, 4, 6, 7 outstanding
 **Related:** 021_FPRD · 021_FTDD · 021_FTID · PPRD §3.22 · PADR IDL-40..46
 
 | Phase | Delivers | Gates |
@@ -26,23 +26,25 @@
 
 ## Phase 2: Fitter
 
-- [ ] 2.1 `discover_transformer_structure()` for all structure; **no architecture name in the module**.
-- [ ] 2.2 Capture at `structure.layers_module[L]` (resid_post) — **never** `residual_norm_module`.
-- [ ] 2.3 Backward pass with attention patterns and normalisation statistics frozen.
-- [ ] 2.4 Per-layer applicability recorded; inapplicable = absent.
-- [ ] 2.5 Convergence stopping, floor 100 prompts; convergence measured on the change in accumulated
+- [x] 2.1 `discover_transformer_structure()` for all structure; **no architecture name in the module**.
+- [x] 2.2 Capture at `structure.layers_module[L]` (resid_post) — **never** `residual_norm_module`.
+- [x] 2.3 Backward pass with attention patterns and normalisation statistics frozen.
+- [x] 2.4 Per-layer applicability recorded; inapplicable = absent.
+- [x] 2.5 Convergence stopping, floor 100 prompts; convergence measured on the change in accumulated
       `J`, **not** on any readout-quality proxy.
-- [ ] 2.6 Corpus sharding + merge; never split the model.
-- [ ] 2.7 fp16; store only `d_model × d_model` per layer; **never** form `W_U J`.
-- [ ] 2.8 Conformant on-disk layout: `<slug>_jacobian_lens.pt` + `config.yaml`.
-- [ ] 2.9 **Negative control**: fit at `residual_norm_module`, assert measurable degradation.
+- [x] 2.6 Corpus sharding + merge; never split the model.
+- [x] 2.7 fp16; store only `d_model × d_model` per layer; **never** form `W_U J`.
+- [ ] 2.8 (outstanding) Conformant on-disk layout: `<slug>_jacobian_lens.pt` + `config.yaml`.
+- [x] 2.9 **Negative control**: fit at `residual_norm_module`, assert measurable degradation.
 
 ## Phase 3: Validation suite (BR-030)
 
-- [ ] 3.1 STRUCTURAL · 3.2 NAMING · 3.3 ENVELOPE (model-derived bound) · 3.4 SEMANTIC
-- [ ] 3.5 CROSS-IMPLEMENTATION against the local Neuronpedia instance, both modes.
-- [ ] 3.6 ROUND-TRIP: mount, serve, request, confirm non-empty. **Explicit, never assumed.**
-- [ ] 3.7 Each class independently fails against its own violation.
+- [x] 3.1 STRUCTURAL · 3.2 NAMING · 3.3 ENVELOPE (model-derived bound) · 3.4 SEMANTIC
+- [x] 3.5 CROSS-IMPLEMENTATION check written; an unreachable consumer is NOT_RUN, never PASS.
+      **Wiring to a live instance is Phase 4.**
+- [x] 3.6 ROUND-TRIP check written; an empty served readout is a FAIL, not an empty pass.
+      **Wiring to a live instance is Phase 4.**
+- [x] 3.7 Each class independently fails against its own violation.
 
 ## Phase 4: Lifecycle, endpoints, readout binding
 
@@ -55,13 +57,13 @@
 
 ## Phase 5: Band report and gate
 
-- [ ] 5.1 Seven metrics (BR-002).
-- [ ] 5.2 Position-shuffled null for autocorrelation; size-matched random-direction control for
+- [x] 5.1 Seven metrics (BR-002).
+- [x] 5.2 Position-shuffled null for autocorrelation; size-matched random-direction control for
       excess FVE, with `control_seed` recorded.
-- [ ] 5.3 Boundaries derived from this model's own profile; **no default BandReport anywhere**.
-- [ ] 5.4 Agreement REPORTED as a layer profile, never SCORED (BR-004).
+- [x] 5.3 Boundaries derived from this model's own profile; **no default BandReport anywhere**.
+- [x] 5.4 Agreement REPORTED as a layer profile, never SCORED (BR-004).
 - [ ] 5.5 Replication report (BR-001), vendored at a recorded commit, published either way.
-- [ ] 5.6 GO / NO-GO / GO-AT-LARGER-SCALE recorded with evidence.
+- [x] 5.6 GO / NO-GO / GO-AT-LARGER-SCALE recorded with evidence.
 
 ## Phase 6: MCP parity (BR-027)
 
@@ -80,9 +82,10 @@
 ## Phase 8: Verification and acceptance
 
 - [ ] 8.1 Two architectures, one hybrid and one dense, both producing valid artifacts.
-- [ ] 8.2 Source guard: no architecture name in the fit/readout modules.
+- [x] 8.2 Source guard: no architecture name in the fit/readout modules.
 - [ ] 8.3 No `n_vocab × d_model` allocation on either path.
-- [ ] 8.4 A test that fails if next-token agreement enters a scoring or gating path.
+- [x] 8.4 A test that fails if next-token agreement enters a scoring or gating path — AST guards
+      over both `jlens_validation` and `jlens_band_report`.
 - [ ] 8.5 Mutation controls, each red: hook the norm module; `False` for inapplicable; materialise
       `W_U J`; hardcode the envelope; score the gate on agreement; skip ROUND-TRIP; publish before
       validation; drop an MCP registration; accept a weight-identity mismatch.
@@ -138,3 +141,44 @@ harness.
   absolute values, not its comparison against the control.
 - **Layer subsampling** — resolved at reference scale (16 layers analysed in full); survives only for
   models larger than the subsampling target.
+
+
+---
+
+## Progress record (2026-07-31)
+
+**Implemented and review-round-1 clean:** the fitter (`jlens_fitter.py`), the six-class validation
+suite (`jlens_validation.py`), the band metrics with their null controls (`jlens_metrics.py`), and
+the band report + gate (`jlens_band_report.py`). 52 tests. Backend suite 2138, green.
+
+**Round-1 findings, all mine, all fixed:**
+
+1. **The fitter could not have run.** `jacobian_of` took one forward-mode pass per input dimension —
+   d_model x n_layers x n_prompts is millions of passes on the reference model. Freezing makes the
+   map AFFINE, so the columns come from one batched call per chunk: `J[:, i] = fn(e_i) - fn(0)`.
+   The jvp version is kept as `jacobian_by_jvp` and a test asserts the two agree, so the assumption
+   the fast path rests on is verified rather than asserted.
+2. **The affine assumption was unchecked.** If a norm or an attention pattern escapes the freeze the
+   extracted matrix is a local linearisation of nothing in particular — and is the right shape and
+   size, so it passes STRUCTURAL, NAMING and ENVELOPE. `affine_residual` measures the departure and
+   the fit is REFUSED above the limit. Fit time is the only point where this is detectable.
+3. **Downstream layers were replayed with hidden states alone.** A real decoder layer needs position
+   ids, an attention mask and rotary embeddings; calling it without them either raises or silently
+   takes a default path and fits a lens for a model that was never run that way. Kwargs are now
+   recorded during the reference forward and replayed.
+4. **`_norm_modules` matched "norm" anywhere in a class name**, capturing a decoder block named
+   `NormedBlock`. Freezing a decoder block replaces it with an elementwise rescaling. Tightened to
+   `endswith("norm")` plus an independent tensor-output guard.
+
+**Two mutations survived their first run** — the affine guard and the norm-name rule — and both are
+now pinned by regressions re-verified as negative controls. Nine mutation controls verified biting
+across the fitter; six across the band report and gate.
+
+**Outstanding for this feature:** Phase 1 (ORM + migration), Phase 4 (lifecycle, endpoints, readout
+binding — the 501 stays until then), Phase 6 (MCP tools + reachability), Phase 7 (UI), Phase 8.1/8.6
+(two-architecture and hardware acceptance), and review rounds 2-3.
+
+**The cross-implementation and round-trip checks are written but not yet wired to a live consumer.**
+They are correct and independently tested; until Phase 4 they cannot run against a real instance,
+and `ValidationReport.passed` fails closed on a class that never ran, so nothing can be published on
+their absence.

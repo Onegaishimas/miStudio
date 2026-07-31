@@ -54,6 +54,12 @@ DEFAULT_CHUNK = 128
 DEFAULT_CONVERGENCE_DELTA = 1e-3
 PATIENCE = 2
 
+# How far the frozen sub-network may depart from its own linearisation before
+# the fit is refused. Non-zero only to absorb floating-point error: freezing is
+# meant to make the map exactly affine, so anything above this means a norm or
+# an attention pattern escaped the freeze and the extracted matrix is not a lens.
+MAX_AFFINE_RESIDUAL = 1e-3
+
 
 @dataclass
 class FitProgress:
@@ -191,38 +197,92 @@ def _freeze_norm(module: Any) -> Callable[[], None]:
 # --------------------------------------------------------------------------
 
 
-def jacobian_of(
+def jacobian_by_jvp(
+    fn: Callable[[torch.Tensor], torch.Tensor],
+    point: torch.Tensor,
+) -> torch.Tensor:
+    """`d fn / d point` by one forward-mode pass per input dimension.
+
+    THE REFERENCE IMPLEMENTATION, not the production path. It makes no
+    assumption about `fn` at all, which is exactly what makes it the right thing
+    to check the fast path against — and exactly what makes it unusable at
+    scale: d_model jvp calls per layer per prompt is millions of forward passes
+    on a real model.
+
+    `jacobian_batched` is what actually runs. `test_jlens_fitter` asserts the
+    two agree, so the assumption the fast path depends on is verified rather
+    than asserted.
+    """
+    d_in = point.numel()
+    columns: List[torch.Tensor] = []
+    for i in range(d_in):
+        tangent_in = torch.zeros_like(point).reshape(-1)
+        tangent_in[i] = 1.0
+        _, tangent = torch.autograd.functional.jvp(
+            fn, point, tangent_in.view_as(point), create_graph=False
+        )
+        columns.append(tangent.reshape(-1))
+    return torch.stack(columns, dim=1)
+
+
+def jacobian_batched(
     fn: Callable[[torch.Tensor], torch.Tensor],
     point: torch.Tensor,
     chunk: int = DEFAULT_CHUNK,
 ) -> torch.Tensor:
-    """`d fn / d point` as a `[out_dim, in_dim]` matrix.
+    """`d fn / d point` in a handful of BATCHED passes, exploiting linearity.
 
-    Forward-mode, chunked over basis vectors. Forward mode costs one pass per
-    INPUT dimension and reverse mode one per OUTPUT dimension; here they are
-    both d_model, and forward mode avoids retaining a graph across the whole
-    stack.
+    WHY THIS IS EXACT RATHER THAN AN APPROXIMATION. With attention patterns and
+    normalisation statistics frozen, `fn` is AFFINE: `fn(h) = J h + b`. So
 
-    Chunking bounds peak memory. It is not an approximation — every basis vector
-    is pushed through, just not all at once.
+        J[:, i] = fn(e_i) - fn(0)
+
+    and every column can be evaluated in one batched call. That turns d_model
+    sequential passes into d_model/chunk batched ones — the difference between
+    a fit that runs and a fit that does not.
+
+    The affine assumption is load-bearing, so it is CHECKED rather than trusted:
+    `_affine_residual` measures how far `fn` departs from its own linearisation
+    and the caller refuses a fit that departs materially. A silently non-linear
+    `fn` would otherwise yield a plausible matrix that is a local linearisation
+    of nothing in particular.
     """
     d_in = point.numel()
-    columns: List[torch.Tensor] = []
+    zero = fn(torch.zeros_like(point)).detach().reshape(-1)
 
+    columns: List[torch.Tensor] = []
     for start in range(0, d_in, chunk):
         stop = min(start + chunk, d_in)
         basis = torch.zeros(stop - start, d_in, dtype=point.dtype, device=point.device)
         for row, col in enumerate(range(start, stop)):
             basis[row, col] = 1.0
+        # One call for the whole chunk. `fn` must accept a leading batch dim,
+        # which `_sub_network` guarantees by construction.
+        out = fn(basis.view(stop - start, *point.shape)).detach()
+        columns.append(out.reshape(stop - start, -1) - zero)
 
-        for row in range(basis.shape[0]):
-            _, tangent = torch.autograd.functional.jvp(
-                fn, point, basis[row].view_as(point), create_graph=False
-            )
-            columns.append(tangent.reshape(-1))
+    # rows[i] is fn(e_i) - fn(0) = the i-th COLUMN of J, so transpose.
+    return torch.cat(columns, dim=0).T
 
-    # columns[i] is d fn / d point_i — the i-th COLUMN of J.
-    return torch.stack(columns, dim=1)
+
+def affine_residual(
+    fn: Callable[[torch.Tensor], torch.Tensor], point: torch.Tensor, jacobian: torch.Tensor
+) -> float:
+    """Relative error of `J h + b` against `fn(h)` at the fitting point.
+
+    The batched extraction is exact ONLY if `fn` is affine, which holds when
+    freezing is complete. If a norm or an attention pattern escaped the freeze,
+    this is where it shows up — as a number, before the artifact is written,
+    rather than as a plausible lens nobody can tell is wrong.
+    """
+    with torch.no_grad():
+        bias = fn(torch.zeros_like(point)).reshape(-1)
+        predicted = jacobian @ point.reshape(-1) + bias
+        actual = fn(point).reshape(-1)
+        denom = float(torch.linalg.norm(actual.to(torch.float32)))
+        if denom == 0.0:
+            return 0.0
+        return float(torch.linalg.norm((predicted - actual).to(torch.float32)) / denom)
 
 
 # --------------------------------------------------------------------------
@@ -280,6 +340,33 @@ def relative_change(previous: Dict[int, torch.Tensor], current: Dict[int, torch.
     return (num / den) ** 0.5
 
 
+def _batch_kwargs(kwargs: Dict[str, Any], batch: int) -> Dict[str, Any]:
+    """Reshape recorded layer kwargs to the extraction batch size.
+
+    The reference forward ran with batch 1 and the real sequence length; the
+    extraction runs with batch `n` and ONE position. Tensors whose leading
+    dimension is the batch are expanded and their sequence dimension truncated
+    to the final position — the position the lens is taken at.
+
+    Anything not recognisably batch-shaped is passed through untouched rather
+    than reshaped on a guess: a wrong reshape here produces a running model and
+    a wrong lens.
+    """
+    out: Dict[str, Any] = {}
+    for key, value in kwargs.items():
+        if isinstance(value, torch.Tensor) and value.dim() >= 2 and value.shape[0] == 1:
+            sliced = value[:, -1:] if value.shape[1] > 1 else value
+            out[key] = sliced.expand(batch, *sliced.shape[1:])
+        elif isinstance(value, tuple) and value and all(
+            isinstance(v, torch.Tensor) for v in value
+        ):
+            # Rotary embeddings arrive as a (cos, sin) tuple.
+            out[key] = tuple(_batch_kwargs({"v": v}, batch)["v"] for v in value)
+        else:
+            out[key] = value
+    return out
+
+
 class JacobianFitter:
     """Fits `J` per layer over a corpus, with convergence-based stopping."""
 
@@ -293,6 +380,7 @@ class JacobianFitter:
         convergence_delta: float = DEFAULT_CONVERGENCE_DELTA,
         min_prompts: int = MIN_PROMPTS,
         chunk: int = DEFAULT_CHUNK,
+        max_affine_residual: float = MAX_AFFINE_RESIDUAL,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -301,6 +389,7 @@ class JacobianFitter:
         self.convergence_delta = convergence_delta
         self.min_prompts = min_prompts
         self.chunk = chunk
+        self.max_affine_residual = max_affine_residual
 
     def fit(
         self,
@@ -371,7 +460,20 @@ class JacobianFitter:
 
         for layer in layers:
             point, forward = self._sub_network(input_ids, layer)
-            out[layer] = jacobian_of(forward, point, chunk=self.chunk).detach()
+            jacobian = jacobian_batched(forward, point, chunk=self.chunk).detach()
+
+            # The batched extraction is exact only while `fn` is affine. If a
+            # norm or an attention pattern escaped the freeze, the matrix is a
+            # local linearisation of nothing in particular — and looks fine.
+            residual = affine_residual(forward, point, jacobian)
+            if residual > self.max_affine_residual:
+                raise ValueError(
+                    f"layer {layer}: the frozen sub-network departs from its own "
+                    f"linearisation by {residual:.3f} (limit "
+                    f"{self.max_affine_residual}). Freezing is incomplete, so the "
+                    "extracted matrix is not a lens. Refusing to write it."
+                )
+            out[layer] = jacobian
         return out
 
     def _sub_network(self, input_ids: torch.Tensor, layer: int):
@@ -379,33 +481,66 @@ class JacobianFitter:
 
         HOOKED AT `structure.layers_module[layer]` — the decoder layer's own
         output. Not a norm module: see the module docstring.
-        """
-        captured: Dict[str, torch.Tensor] = {}
 
-        def capture(_module, _inputs, output):
+        The returned callable accepts EITHER a single point of shape [d_model]
+        or a batch of shape [n, d_model], because `jacobian_batched` evaluates
+        a whole chunk of basis vectors in one call.
+
+        THE DOWNSTREAM LAYERS ARE REPLAYED WITH THEIR REAL KWARGS. A decoder
+        layer generally needs position ids, an attention mask and rotary
+        embeddings; calling it with hidden states alone either raises or —
+        worse on some families — silently takes a default path and fits a lens
+        for a model that was never run that way. The kwargs are recorded during
+        the reference forward and replayed, so the sub-network is the same
+        computation the model actually performed.
+        """
+        captured: Dict[str, Any] = {}
+        recorded_kwargs: Dict[int, Dict[str, Any]] = {}
+
+        def capture_output(_module, _inputs, output):
             hidden = output[0] if isinstance(output, tuple) else output
             captured["h"] = hidden[0, -1].detach().clone()
 
-        handle = self.structure.layers_module[layer].register_forward_hook(capture)
+        def make_kwarg_recorder(idx: int):
+            def recorder(_module, _args, kwargs):
+                # Positional args beyond hidden_states are not replayed: every
+                # transformers decoder layer in this codebase takes them by
+                # keyword, and silently dropping one would be invisible.
+                recorded_kwargs[idx] = dict(kwargs)
+                return None
+
+            return recorder
+
+        handles = [self.structure.layers_module[layer].register_forward_hook(capture_output)]
+        for idx in range(layer + 1, self.structure.num_layers):
+            handles.append(
+                self.structure.layers_module[idx].register_forward_pre_hook(
+                    make_kwarg_recorder(idx), with_kwargs=True
+                )
+            )
         try:
             with torch.no_grad():
                 self.model(input_ids=input_ids)
         finally:
-            handle.remove()
+            for handle in handles:
+                handle.remove()
 
         point = captured["h"]
 
         def forward(h: torch.Tensor) -> torch.Tensor:
-            """Run the remaining blocks from `layer` onward on a single position.
+            """Run the remaining blocks from `layer` onward, on one position.
 
-            Every block after `layer` is applied in order. With attention and
-            norms frozen this composition is linear in `h`, which is what makes
-            the resulting Jacobian a lens rather than a local approximation.
+            With attention and norms frozen this composition is AFFINE in `h`,
+            which is what makes the extracted matrix a lens rather than a local
+            approximation — and what lets `jacobian_batched` take the whole
+            chunk in one call.
             """
-            hidden = h.view(1, 1, -1)
+            batched = h.dim() > 1
+            hidden = h.reshape(-1, 1, h.shape[-1]) if batched else h.view(1, 1, -1)
             for idx in range(layer + 1, self.structure.num_layers):
-                result = self.structure.layers_module[idx](hidden)
+                kwargs = _batch_kwargs(recorded_kwargs.get(idx, {}), hidden.shape[0])
+                result = self.structure.layers_module[idx](hidden, **kwargs)
                 hidden = result[0] if isinstance(result, tuple) else result
-            return hidden.view(-1)
+            return hidden.reshape(hidden.shape[0], -1) if batched else hidden.view(-1)
 
         return point, forward

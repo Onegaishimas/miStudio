@@ -24,7 +24,9 @@ import torch
 from src.ml.jlens_fitter import (
     MIN_PROMPTS,
     JacobianFitter,
-    jacobian_of,
+    affine_residual,
+    jacobian_batched,
+    jacobian_by_jvp,
     merge_shards,
     relative_change,
 )
@@ -113,18 +115,75 @@ def analytic_jacobian(weights, scales, layer: int) -> torch.Tensor:
     return j
 
 
-def test_jacobian_of_matches_a_known_linear_map():
+def batchable(w, bias=None):
+    """A map accepting [d] or [n, d], like the real sub-network."""
+
+    def fn(h):
+        out = h @ w.T if h.dim() > 1 else w @ h
+        return out if bias is None else out + bias
+
+    return fn
+
+
+def test_batched_extraction_matches_a_known_linear_map():
     torch.manual_seed(1)
     w = torch.randn(D, D)
-    j = jacobian_of(lambda h: w @ h, torch.randn(D), chunk=2)
+    j = jacobian_batched(batchable(w), torch.randn(D), chunk=2)
     assert torch.allclose(j, w, atol=1e-4)
 
 
-def test_jacobian_of_is_not_the_transpose():
+def test_batched_extraction_recovers_J_from_an_AFFINE_map():
+    """Blocks have biases, so the map is affine, not linear.
+
+    Subtracting fn(0) is what makes the extraction exact. Without it every
+    column carries the bias and the lens is wrong by a constant that looks like
+    signal.
+    """
+    torch.manual_seed(9)
+    w = torch.randn(D, D)
+    bias = torch.randn(D) * 3.0
+    j = jacobian_batched(batchable(w, bias), torch.randn(D), chunk=3)
+    assert torch.allclose(j, w, atol=1e-4)
+
+
+def test_batched_extraction_agrees_with_the_jvp_reference():
+    """The fast path assumes affineness; the reference assumes nothing.
+
+    d_model jvp calls per layer per prompt is millions of forward passes on a
+    real model, so the batched path is what runs. Its assumption is therefore
+    verified against the general method rather than asserted.
+    """
+    torch.manual_seed(10)
+    w = torch.randn(D, D)
+    bias = torch.randn(D)
+    point = torch.randn(D)
+    fast = jacobian_batched(batchable(w, bias), point, chunk=4)
+    reference = jacobian_by_jvp(batchable(w, bias), point)
+    assert torch.allclose(fast, reference, atol=1e-4)
+
+
+def test_affine_residual_flags_a_map_that_escaped_the_freeze():
+    """An incomplete freeze yields a plausible matrix that is not a lens."""
+    torch.manual_seed(11)
+    w = torch.randn(D, D)
+    point = torch.randn(D)
+
+    linear = batchable(w)
+    assert affine_residual(linear, point, jacobian_batched(linear, point)) < 1e-5
+
+    def nonlinear(h):
+        base = h @ w.T if h.dim() > 1 else w @ h
+        return base + torch.tanh(base) * 5.0
+
+    j = jacobian_batched(nonlinear, point, chunk=3)
+    assert affine_residual(nonlinear, point, j) > 1e-2
+
+
+def test_extraction_is_not_the_transpose():
     """A transposed assembly is symmetric-looking and passes a norm check."""
     torch.manual_seed(2)
     w = torch.randn(D, D)
-    j = jacobian_of(lambda h: w @ h, torch.randn(D), chunk=3)
+    j = jacobian_batched(batchable(w), torch.randn(D), chunk=3)
     assert not torch.allclose(j, w.T, atol=1e-3), "fixture is accidentally symmetric"
     assert torch.allclose(j, w, atol=1e-4)
 
@@ -173,13 +232,14 @@ class NormHookedFitter(JacobianFitter):
             handle.remove()
 
         def forward(h):
-            hidden = h.view(1, 1, -1)
+            batched = h.dim() > 1
+            hidden = h.reshape(-1, 1, h.shape[-1]) if batched else h.view(1, 1, -1)
             # Skips the norm the correct map would include.
             hidden = hidden @ self.structure.layers_module[layer + 1].weight.T
             for idx in range(layer + 2, self.structure.num_layers):
                 result = self.structure.layers_module[idx](hidden)
                 hidden = result[0] if isinstance(result, tuple) else result
-            return hidden.view(-1)
+            return hidden.reshape(hidden.shape[0], -1) if batched else hidden.view(-1)
 
         return captured["h"], forward
 
@@ -284,3 +344,67 @@ def test_fitter_module_names_no_architecture():
                 arch in node.id.lower()
                 for arch in ("lfm2", "gemma", "llama", "granite", "qwen", "mistral")
             ), f"architecture name in executable path: {node.id}"
+
+
+def test_norm_discovery_does_not_capture_a_block_merely_named_for_a_norm():
+    """`endswith("norm")`, not `contains`.
+
+    A substring match captures anything NAMED for a norm — `NormedBlock` here,
+    a `NormalizedAttention` elsewhere — and freezing a decoder block is not a
+    no-op: it replaces the whole block with an elementwise rescaling and yields
+    a lens with no error anywhere. This fixture exists because that is exactly
+    what happened when the rule was `contains`.
+    """
+    from src.ml.jlens_fitter import _norm_modules
+
+    stack, _, _ = make_stack(20)
+    found = _norm_modules(stack)
+
+    assert found, "no norm modules discovered at all"
+    assert all(type(m).__name__ == "ScaleNorm" for m in found), (
+        f"captured a non-norm module: {[type(m).__name__ for m in found]}"
+    )
+    assert not any(isinstance(m, NormedBlock) for m in found)
+
+
+class LeakyFitter(JacobianFitter):
+    """A fitter whose sub-network is NOT affine — an incomplete freeze.
+
+    Reproduces the failure the affine guard exists for: if a norm or an
+    attention pattern escapes the freeze, the extracted matrix is a local
+    linearisation of nothing in particular, and it is a well-shaped tensor of
+    plausible magnitude.
+    """
+
+    def _sub_network(self, input_ids, layer):
+        point, forward = super()._sub_network(input_ids, layer)
+
+        def leaky(h):
+            out = forward(h)
+            return out + torch.tanh(out) * 5.0
+
+        return point, leaky
+
+
+def test_a_fit_whose_freeze_leaked_is_REFUSED_not_written():
+    """The guard must stop the artifact, not annotate it.
+
+    An artifact written here passes STRUCTURAL, NAMING and ENVELOPE validation
+    — it is the right shape and the right size — and reads out plausible
+    nonsense. Refusing at fit time is the only point where it is detectable.
+    """
+    stack, _, _ = make_stack(21)
+    fitter = LeakyFitter(
+        stack, Tokenizer(), Structure(stack), freeze_qk=False, min_prompts=1, chunk=3
+    )
+    with pytest.raises(ValueError, match="not a lens"):
+        fitter.fit(["abc"])
+
+
+def test_a_properly_frozen_fit_is_accepted():
+    """Negative control for the guard: it must not refuse a good fit."""
+    stack, _, _ = make_stack(22)
+    fitter = JacobianFitter(
+        stack, Tokenizer(), Structure(stack), freeze_qk=False, min_prompts=1, chunk=3
+    )
+    assert fitter.fit(["abc"]).jacobians
