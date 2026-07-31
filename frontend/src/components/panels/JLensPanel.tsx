@@ -88,6 +88,17 @@ export function JLensPanel() {
   const selSlice = sliceFor(selToken, readType);
   const overLimit = promptDraft.length > MAX_PROMPT_CHARS;
 
+  // The readout detail follows the pointer when there is one and the SELECTION
+  // otherwise, so the top-k list — and therefore pinning — stays reachable
+  // without a mouse.
+  const detail = useMemo(() => {
+    const source = hover ?? { pos: selPos, layerIdx: selLayerIdx };
+    const token = tokenAtPosition(tokens, source.pos);
+    const row = sliceFor(token, readType)?.top_tokens[source.layerIdx];
+    if (!token || !row) return null;
+    return { ...source, tokens: row };
+  }, [hover, selPos, selLayerIdx, tokens, readType]);
+
   const submit = () => {
     setPrompt(promptDraft);
     // setPrompt lands before fetchReadout reads it: zustand's set is synchronous.
@@ -235,20 +246,24 @@ export function JLensPanel() {
                 onHover={setHover}
               />
 
-              {/* hover detail — the only place the full top-k is visible, and
-                  the only way to pin a token */}
+              {/* Readout detail. Falls back to the SELECTED cell when nothing
+                  is hovered, because hover is pointer-only: with a placeholder
+                  here instead, pinning — the panel's core interaction — had no
+                  keyboard path at all. The prompt strip and the by-layer rail
+                  are buttons, so selecting a cell is reachable; this makes the
+                  top-k of that cell reachable too. */}
               <div
                 data-testid="jlens-hover-detail"
                 className="mt-2 min-h-[54px] rounded border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900"
               >
-                {hover && tokenAtPosition(tokens, hover.pos) ? (
+                {detail ? (
                   <>
                     <div className="mb-1 font-mono text-[10px] text-slate-500">
-                      L{axis[hover.layerIdx]} · pos {hover.pos}
+                      L{axis[detail.layerIdx]} · pos {detail.pos}
+                      {!hover && <span className="ml-1">(selected)</span>}
                     </div>
                     <div className="flex flex-wrap gap-1">
-                      {(sliceFor(tokenAtPosition(tokens, hover.pos), readType)
-                        ?.top_tokens[hover.layerIdx] ?? []).map((t, k) => (
+                      {detail.tokens.map((t, k) => (
                         <button
                           key={k}
                           type="button"
@@ -263,11 +278,13 @@ export function JLensPanel() {
                         </button>
                       ))}
                     </div>
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-600">
+                      Full top-{topN} readout. Click a token to pin it.
+                    </p>
                   </>
                 ) : (
                   <p className="text-[11px] text-slate-500 dark:text-slate-600">
-                    Hover a cell for its full top-{topN} readout. Click a readout
-                    token to pin it.
+                    Hover or select a cell for its full top-{topN} readout.
                   </p>
                 )}
               </div>

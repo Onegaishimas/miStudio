@@ -165,28 +165,35 @@ export const useJLensStore = create<JLensState>()(
 
           if (seq !== requestSeq) return;
 
-          const axis = axisFor(response.meta, 'LOGIT_LENS');
-          set((state) => ({
-            meta: response.meta,
-            tokens: response.tokens,
-            // Logit lens involves no artifact at all — say so rather than
-            // leaving the provenance strip blank (BR-007).
-            provenance: { artifact_id: null },
-            isLoading: false,
-            error: null,
-            // Clamp both selections into the NEW readout's extents. A stale
-            // index survives a model change and indexes a shorter array.
-            selPos: clampPosition(state.selPos, response.tokens),
-            selLayerIdx: clamp(state.selLayerIdx, axis.length),
+          set((state) => {
             // A mode the new readout cannot serve must not stay SELECTED. It
             // renders empty, which reads as "this lens found nothing" rather
             // than "this lens is not in this readout" — the disabled tab says
             // the latter, and the two must not contradict each other.
-            lensMode: modeAvailability(response.meta, state.lensMode).enabled
+            const lensMode = modeAvailability(response.meta, state.lensMode).enabled
               ? state.lensMode
-              : 'LOGIT_LENS',
-            hover: null,
-          }));
+              : ('LOGIT_LENS' as const);
+            // Clamp against the axis the panel will actually READ, not against
+            // a fixed type: two lens types may carry different layer counts,
+            // and clamping to the wrong one leaves an out-of-range row index.
+            const axis = axisFor(response.meta, readTypeFor(lensMode));
+
+            return {
+              meta: response.meta,
+              tokens: response.tokens,
+              // Logit lens involves no artifact at all — say so rather than
+              // leaving the provenance strip blank (BR-007).
+              provenance: { artifact_id: null },
+              isLoading: false,
+              error: null,
+              // Clamp both selections into the NEW readout's extents. A stale
+              // index survives a model change and indexes a shorter array.
+              selPos: clampPosition(state.selPos, response.tokens),
+              selLayerIdx: clamp(state.selLayerIdx, axis.length),
+              lensMode,
+              hover: null,
+            };
+          });
         } catch (err) {
           if (seq !== requestSeq) return;
           set({
@@ -196,7 +203,12 @@ export const useJLensStore = create<JLensState>()(
         }
       },
 
-      reset: () => set({ ...INITIAL }),
+      // Bumping the sequence is part of the reset: without it an in-flight
+      // request lands afterwards and repopulates a store the user just cleared.
+      reset: () => {
+        requestSeq += 1;
+        set({ ...INITIAL });
+      },
     }),
     { name: 'jlens-store' }
   )

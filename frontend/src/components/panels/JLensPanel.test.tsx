@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { JLensPanel } from './JLensPanel';
 import { useJLensStore } from '../../stores/jlensStore';
@@ -409,6 +410,111 @@ describe('a mode the new readout cannot serve is not left selected', () => {
     });
 
     expect(useJLensStore.getState().lensMode).toBe('DIFF');
+  });
+});
+
+describe('the panel sends the request it appears to send', () => {
+  /**
+   * Asserts the PAYLOAD and the CALL COUNT, not merely that a call happened —
+   * "was called" passes against a call that sends the wrong model, an empty
+   * prompt, or a lens type the server cannot serve without an artifact.
+   */
+  it('submits the model and prompt exactly once, requesting the logit lens', async () => {
+    const user = userEvent.setup();
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeReadout([0, 1, 2])
+    );
+    render(<JLensPanel />);
+
+    await user.selectOptions(screen.getByRole('combobox'), 'm_gemma');
+    await user.type(screen.getByPlaceholderText(/capital of France/), 'hello');
+    await user.click(screen.getByRole('button', { name: /Read out/ }));
+
+    expect(jlensApi.readout).toHaveBeenCalledTimes(1);
+    expect(jlensApi.readout).toHaveBeenCalledWith({
+      model_id: 'm_gemma',
+      prompt: 'hello',
+      // Never JACOBIAN_LENS: the server refuses it without an artifact_id, and
+      // requesting it anyway surfaces a 422 the user cannot act on.
+      types: ['LOGIT_LENS'],
+    });
+  });
+
+  it('does not fire at all without a model', async () => {
+    const user = userEvent.setup();
+    render(<JLensPanel />);
+
+    await user.type(screen.getByPlaceholderText(/capital of France/), 'hello');
+    expect(screen.getByRole('button', { name: /Read out/ })).toBeDisabled();
+    expect(jlensApi.readout).not.toHaveBeenCalled();
+  });
+});
+
+describe('pinning is reachable without a pointer', () => {
+  it('shows the selected cell top-k when nothing is hovered', () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2]));
+
+    const detail = screen.getByTestId('jlens-hover-detail');
+    expect(detail.textContent).toMatch(/\(selected\)/);
+    // Hover is pointer-only; without this fallback the top-k list — and so
+    // pinning, the panel's core interaction — had no keyboard path.
+    expect(detail.querySelectorAll('button').length).toBeGreaterThan(0);
+  });
+
+  it('pins from the selected-cell list', () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2]));
+
+    const first = screen
+      .getByTestId('jlens-hover-detail')
+      .querySelector('button') as HTMLButtonElement;
+    fireEvent.click(first);
+
+    expect(useJLensStore.getState().pinned.length).toBe(1);
+  });
+});
+
+describe('the layer clamp follows the lens the panel will actually read', () => {
+  /**
+   * Two lens types may carry DIFFERENT layer counts — a Jacobian artifact can
+   * be fitted over a subset of layers while the logit lens covers all of them.
+   * Every other fixture here gives both types the same axis, where clamping
+   * against either one gives the same answer: the "agree by construction" trap
+   * that let this survive its first mutation control.
+   */
+  function unevenAxes(): ReadoutResponse {
+    const logit = Array.from({ length: 12 }, (_, i) => i);
+    const jac = [0, 1, 2];
+    const base = makeReadout(logit, ['JACOBIAN_LENS', 'LOGIT_LENS']);
+    base.meta.layers_by_type = { JACOBIAN_LENS: jac, LOGIT_LENS: logit };
+    base.tokens = base.tokens.map((t) => ({
+      ...t,
+      results: t.results.map((r) =>
+        r.type === 'JACOBIAN_LENS'
+          ? {
+              ...r,
+              top_tokens: r.top_tokens.slice(0, jac.length),
+              top_probs: r.top_probs.slice(0, jac.length),
+            }
+          : r
+      ),
+    }));
+    return base;
+  }
+
+  it('clamps into the Jacobian axis when the Jacobian lens is selected', async () => {
+    seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
+    act(() => useJLensStore.setState({ lensMode: 'JACOBIAN_LENS', selLayerIdx: 11 }));
+
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(unevenAxes());
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    // The Jacobian axis has 3 layers; clamping against the 12-layer logit axis
+    // leaves an index that reads past the end of every Jacobian slice row.
+    expect(useJLensStore.getState().selLayerIdx).toBe(2);
   });
 });
 

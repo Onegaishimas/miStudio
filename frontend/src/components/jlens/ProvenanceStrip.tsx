@@ -49,7 +49,9 @@ export function ProvenanceStrip({ provenance, bandsAvailable }: ProvenanceStripP
             {provenance.dtype && <span>dtype={provenance.dtype}</span>}
           </>
         )}
-        {!bandsAvailable && <span>bands=none (no report for this model)</span>}
+        {provenance != null && !bandsAvailable && (
+          <span>bands=none (no report for this model)</span>
+        )}
       </div>
       <div className="mt-1 flex items-start gap-1.5 text-[10px] leading-snug text-slate-500 dark:text-slate-600">
         <Info className="mt-px h-3 w-3 shrink-0" />
