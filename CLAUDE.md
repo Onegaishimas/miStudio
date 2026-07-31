@@ -436,6 +436,30 @@ lens) reading what a model is *poised to say* at every layer and position. 32 bu
   resolution; band rendering is unreachable from the panel until a band report exists; MCP parity is
   owned by files `028_*`.
 
+#### Feature 022 (= files `021_*`) — J-Space Fitting, Validation & the Phase-0 Gate (⏳ In progress 2026-07-31)
+- ✅ 021_FPRD/FTDD/FTID/FTASKS|JSpace_Fitting_And_Gate
+- **Shipped:** `ml/jlens_fitter.py` (model-agnostic fit; freezing by patching the OPERATIONS, not the
+  modules), `services/jlens_validation.py` (the six BR-030 classes, fail-closed), `ml/jlens_metrics.py`
+  (seven band metrics + both null controls), `services/jlens_band_report.py` (boundaries + GO/NO-GO
+  gate). 52 tests; backend suite 2138 green. Commits 9ab2330→56c3c20.
+- **The fitter as first committed COULD NOT HAVE RUN** — one forward-mode pass per input dimension is
+  millions of passes on the reference model. Freezing makes the map **affine**, so `J[:,i] = fn(e_i) −
+  fn(0)` comes out of one batched call per chunk. The jvp version survives as `jacobian_by_jvp` and a
+  test asserts the two agree, so the fast path's assumption is *verified*, not asserted.
+- **`affine_residual` refuses a fit whose freeze leaked.** An incomplete freeze yields a matrix of the
+  right shape and size that passes STRUCTURAL/NAMING/ENVELOPE and reads out plausible nonsense; fit
+  time is the only point where it is detectable.
+- Durable lessons: *`_norm_modules` must be `endswith("norm")`, not `contains` — a substring match
+  captured a decoder block named `NormedBlock`, and freezing a decoder block replaces it with an
+  elementwise rescaling*; *replay the layer's recorded kwargs — a decoder layer called with hidden
+  states alone silently takes a default path and fits a lens for a model that was never run that way*;
+  *a mutation that "survives" may simply never have applied — check the edit landed before concluding*.
+- **Outstanding:** Phase 1 (ORM/migration), Phase 4 (lifecycle, endpoints, **`/jlens/readout` stays
+  501** until then), Phase 6 (MCP + reachability), Phase 7 (UI), Phase 8.1/8.6 (two-architecture and
+  **hardware acceptance on the local 3080 Ti**), review rounds 2–3. The cross-implementation and
+  round-trip checks are written and tested but not yet wired to a live consumer; `ValidationReport`
+  fails closed on a class that never ran, so nothing can publish on their absence.
+
 ### Feature Documents
 *[Add as features are identified and developed]*
 
