@@ -42,13 +42,21 @@ vi.mock('./hooks/useDatasetProgress', () => ({ useGlobalDatasetProgress: () => {
 
 // The panel under test is NOT stubbed — but its data sources are, so the test
 // exercises the route rather than the network.
+// STABLE identities, defined once outside the hook. A mock that builds a fresh
+// object per call hands back a new `fetchModels` on every render, which turns
+// any effect keyed on it into an infinite loop — and that is a defect in the
+// mock, not in the component.
+const MODELS_STATE = { models: [], fetchModels: () => {} };
 vi.mock('./stores/modelsStore', () => ({
-  useModelsStore: (selector?: (s: unknown) => unknown) => {
-    const state = { models: [], fetchModels: () => {} };
-    return selector ? selector(state) : state;
-  },
+  useModelsStore: Object.assign(
+    (selector?: (s: unknown) => unknown) =>
+      selector ? selector(MODELS_STATE) : MODELS_STATE,
+    { getState: () => MODELS_STATE }
+  ),
 }));
-vi.mock('./api/jlens', () => ({ jlensApi: { readout: vi.fn() } }));
+vi.mock('./api/jlens', () => ({
+  jlensApi: { readout: vi.fn(), listArtifacts: vi.fn().mockResolvedValue([]) },
+}));
 
 beforeEach(() => {
   localStorage.clear();

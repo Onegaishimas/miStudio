@@ -18,11 +18,21 @@
 
 ---
 
-## Phase 1: Data layer
+## Phase 1: Data layer — **SUPERSEDED, deliberately**
 
-- [ ] 1.1 ORM: `jlens_artifacts`, `jlens_validation_results`, `jlens_band_reports`, `jlens_gate_decisions`.
-- [ ] 1.2 Migration; `NO_GO` representable as a first-class enum value.
-- [ ] 1.3 Per-layer applicability persisted with inapplicable stored as **NULL**, never false.
+**Not built, and not an omission.** PADR IDL-46 makes the FILESYSTEM the artifact registry: an
+artifact is consumed by MOUNTING a conformant directory and there is no upload path. Adding
+`jlens_artifacts` as a source of truth would invent a SECOND registry that can disagree with the one
+the consumer actually reads — and the consumer's disagreement is silent, which is the failure this
+whole feature is built around.
+
+- [x] 1.1 ~~ORM tables~~ → the mounted directory IS the registry (`jlens_artifact_service.py`).
+- [x] 1.2 ~~Migration~~ → `GateDecision.NO_GO` is a first-class enum value in the service layer.
+- [x] 1.3 Per-layer applicability recorded with inapplicable as **null**, in the artifact's
+      `config.yaml` rather than a column — it travels WITH the artifact, so a mounted artifact
+      carries its own provenance instead of depending on a database it may outlive.
+
+Should durable job history be wanted later, that is a `task_queue` row, not a second registry.
 
 ## Phase 2: Fitter
 
@@ -50,11 +60,11 @@
 
 - [x] 4.1 Fit → validate → publish; **publish only after all six classes pass**. Stage-then-commit,
       so a half-written artifact is never mounted.
-- [ ] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
-- [ ] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
+- [x] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
+- [x] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
       uses the default queue.
 - [x] 4.4 Artifact list + validate endpoints. Band-report and gate endpoints wait on Phase 4.5.
-- [ ] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
+- [x] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
 
 ## Phase 5: Band report and gate
 
@@ -78,10 +88,10 @@
 
 ## Phase 7: UI
 
-- [ ] 7.1 Artifacts surface in J-Lens: fit, progress, per-check validation results.
+- [x] 7.1 Artifacts surface in J-Lens: fit, progress, per-check validation results.
 - [ ] 7.2 Band report + gate rendered, `NO_GO` included.
-- [ ] 7.3 Jacobian/Diff light up via `meta.types` — **no change to the readout panel**.
-- [ ] 7.4 Band shading appears for a model with a report and nowhere else.
+- [x] 7.3 Jacobian/Diff light up via `meta.types` — **no change to the readout panel**.
+- [x] 7.4 Band shading appears for a model with a report and nowhere else.
 
 ## Phase 8: Verification and acceptance
 

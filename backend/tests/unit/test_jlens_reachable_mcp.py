@@ -33,7 +33,12 @@ import pytest
 from src.mcp_server.config import DEFAULT_CATEGORIES, VALID_CATEGORIES
 from src.mcp_server.tools import CATEGORY_MODULES
 
-EXPECTED_TOOLS = {"list_jlens_artifacts", "validate_jlens_artifact"}
+EXPECTED_TOOLS = {
+    "list_jlens_artifacts",
+    "validate_jlens_artifact",
+    "jlens_readout",
+    "fit_jlens_artifact",
+}
 
 
 # ── Shape 1: registry ──────────────────────────────────────────────────────
@@ -156,6 +161,49 @@ class TestCaller:
             "n_vocab": 256000,
         }
 
+    def test_readout_issues_a_POST_with_the_prompt_and_model(self):
+        mcp, client, names = self._tools()
+        assert "jlens_readout" in names
+
+        asyncio.run(
+            mcp.call_tool(
+                "jlens_readout",
+                {"model_id": "m_abc", "prompt": "The capital of France is"},
+            )
+        )
+
+        assert client.post.await_count == 1
+        assert client.post.await_args.args[0] == "/jlens/readout"
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["model_id"] == "m_abc"
+        assert body["prompt"] == "The capital of France is"
+        # No artifact_id and no types: the logit lens is the default and needs
+        # neither. Sending JACOBIAN_LENS by default would 422 every call.
+        assert "artifact_id" not in body
+        assert "types" not in body
+
+    def test_fit_issues_a_POST_carrying_the_corpus_name(self):
+        """The corpus is part of the recipe (BR-007).
+
+        Dropping it still queues a fit and still produces an artifact — one
+        whose provenance says nothing about what it was fitted on.
+        """
+        mcp, client, names = self._tools()
+        assert "fit_jlens_artifact" in names
+
+        asyncio.run(
+            mcp.call_tool(
+                "fit_jlens_artifact",
+                {"model_id": "m_abc", "prompts": ["a", "b"], "corpus_name": "wikitext-103"},
+            )
+        )
+
+        assert client.post.await_count == 1
+        assert client.post.await_args.args[0] == "/jlens/fit"
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["corpus_name"] == "wikitext-103"
+        assert body["prompts"] == ["a", "b"]
+
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""
         _mcp, _client, names = self._tools()
@@ -186,7 +234,12 @@ class TestRoutesExist:
             paths.add(getattr(route, "path", ""))
         return paths
 
-    def test_the_artifact_routes_are_registered(self):
+    def test_every_route_a_tool_calls_is_registered(self):
         paths = self._paths()
-        assert any(p.endswith("/jlens/artifacts") for p in paths)
-        assert any("/jlens/artifacts/{slug}/validate" in p for p in paths)
+        for expected in (
+            "/jlens/artifacts",
+            "/jlens/artifacts/{slug}/validate",
+            "/jlens/readout",
+            "/jlens/fit",
+        ):
+            assert any(expected in p for p in paths), f"{expected} is not routed"

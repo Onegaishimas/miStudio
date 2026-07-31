@@ -259,15 +259,22 @@ class JLensArtifactService:
     def load_for_readout(
         self, repo_id: str, report: Optional[ValidationReport] = None
     ) -> Dict[int, torch.Tensor]:
-        """Tensors for `JacobianTransport`, only if validation passed.
+        """Tensors for `JacobianTransport`, only if validation is SERVICEABLE.
 
         `report=None` is refused rather than defaulted to trusting the file.
         Serving an unvalidated artifact is precisely the failure BR-030 exists
         for, and it surfaces as an empty readout rather than an error.
+
+        Gated on `serviceable`, not `passed`: the two consumer-interop classes
+        need a live external consumer, so requiring them here would make the
+        Jacobian path unreachable from miStudio itself. `commit` still requires
+        the full `passed` before anything is published for handover.
         """
-        if report is None or not report.passed:
+        if report is None or not report.serviceable:
             raise ArtifactNotValidated(
-                f"{repo_id} has no passing validation report; refusing to serve it"
+                f"{repo_id} has no serviceable validation report; refusing to "
+                "serve it. Run the validation suite first — an unvalidated "
+                "artifact reads out plausible nonsense rather than failing."
             )
         ref = self.find(repo_id)
         if ref is None:

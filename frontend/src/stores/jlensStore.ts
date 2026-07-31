@@ -21,6 +21,7 @@ import { devtools } from 'zustand/middleware';
 import { jlensApi } from '../api/jlens';
 import type {
   BandReport,
+  JLensArtifactSummary,
   LensMetaMessage,
   LensMode,
   LensTokenMessage,
@@ -62,10 +63,16 @@ interface JLensState {
   pinned: string[];
   hover: { pos: number; layerIdx: number } | null;
 
+  /** Artifacts present in the mounted registry. Presence, NOT validity. */
+  artifacts: JLensArtifactSummary[];
+  /** Repo id of the selected model, used to derive its artifact slug. */
+  modelRepoId: string;
+
   isLoading: boolean;
   error: string | null;
 
-  setModelId: (id: string) => void;
+  setModelId: (id: string, repoId?: string) => void;
+  fetchArtifacts: () => Promise<void>;
   setPrompt: (p: string) => void;
   setLensMode: (m: LensMode) => void;
   setSelPos: (p: number) => void;
@@ -79,6 +86,8 @@ interface JLensState {
 
 const INITIAL = {
   modelId: '',
+  modelRepoId: '',
+  artifacts: [] as JLensArtifactSummary[],
   prompt: '',
   meta: null,
   tokens: [],
@@ -98,11 +107,12 @@ export const useJLensStore = create<JLensState>()(
     (set, get) => ({
       ...INITIAL,
 
-      setModelId: (modelId) =>
+      setModelId: (modelId, repoId) =>
         set((state) =>
           state.modelId === modelId
-            ? { modelId }
+            ? { modelId, modelRepoId: repoId ?? state.modelRepoId }
             : {
+                modelRepoId: repoId ?? '',
                 // Pins are token strings from ANOTHER model's vocabulary.
                 // Carrying them across draws empty trajectory lines that look
                 // like "this concept is absent" rather than "this pin does not
@@ -115,6 +125,17 @@ export const useJLensStore = create<JLensState>()(
                 hover: null,
               }
         ),
+      fetchArtifacts: async () => {
+        try {
+          set({ artifacts: await jlensApi.listArtifacts() });
+        } catch {
+          // A registry that cannot be listed is not an error the readout path
+          // needs to surface: the logit lens works regardless, and the Jacobian
+          // tab already states why it is unavailable.
+          set({ artifacts: [] });
+        }
+      },
+
       setPrompt: (prompt) => set({ prompt }),
       setLensMode: (lensMode) => set({ lensMode }),
       setSelPos: (selPos) => set({ selPos }),
@@ -154,13 +175,19 @@ export const useJLensStore = create<JLensState>()(
         set({ isLoading: true, error: null });
 
         try {
-          // LOGIT_LENS only for now. A Jacobian request needs an artifact_id and
-          // the server refuses it without one; asking for a type we cannot
-          // supply an artifact for would surface as a 422 the user cannot act on.
+          // Ask for the Jacobian lens ONLY when this model has an artifact.
+          // Requesting it otherwise is refused by the schema (it needs an
+          // artifact_id) and surfaces as a 422 the user cannot act on.
+          const slug = artifactSlugFor(get().modelRepoId);
+          const artifact = slug
+            ? get().artifacts.find((a) => a.slug === slug)
+            : undefined;
+
           const response = await jlensApi.readout({
             model_id: modelId,
             prompt,
-            types: ['LOGIT_LENS'],
+            types: artifact ? ['JACOBIAN_LENS', 'LOGIT_LENS'] : ['LOGIT_LENS'],
+            ...(artifact ? { artifact_id: artifact.slug } : {}),
           });
 
           if (seq !== requestSeq) return;
@@ -213,6 +240,24 @@ export const useJLensStore = create<JLensState>()(
     { name: 'jlens-store' }
   )
 );
+
+/**
+ * The artifact slug a repo id would produce — mirrors the server's `slug_for`.
+ *
+ * The slug is how weight identity is checked: a base model and its
+ * instruction-tuned variant differ by a suffix and produce different slugs, so
+ * a lens fitted for one is never matched to the other. Deriving it here only
+ * decides which lens to REQUEST; the server re-derives and refuses a mismatch,
+ * so a drift in this function costs a 409 rather than a wrong readout.
+ */
+export function artifactSlugFor(repoId: string): string {
+  if (!repoId) return '';
+  const tail = repoId.split('/').pop() ?? '';
+  return tail
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 /** Monotonic request counter backing the stale-response guard. */
 let requestSeq = 0;
