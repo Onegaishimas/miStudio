@@ -328,6 +328,16 @@ describe('DatasetsPanel', () => {
       // Should not crash the component
       expect(screen.getByTestId('download-form')).toBeInTheDocument();
 
+      // ...and the failure must actually be HANDLED. Without this the test
+      // passed while the rejection escaped to the window unhandled, which is
+      // the very thing its name claims to cover.
+      await waitFor(() => {
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          'Failed to start dataset download:',
+          expect.any(Error)
+        );
+      });
+
       consoleErrorSpy.mockRestore();
     });
   });

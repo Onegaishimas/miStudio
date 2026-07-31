@@ -64,7 +64,15 @@ export function DatasetsPanel() {
   }, [fetchDatasets]);
 
   const handleDownload = async (repoId: string, accessToken?: string, split?: string, config?: string) => {
-    await downloadDataset(repoId, accessToken, split, config);
+    // Guarded like its siblings below. Without the catch a failed download
+    // rejects unhandled: the store's error state still renders, but the
+    // rejection escapes to the window, and the test covering this case passed
+    // while nothing handled it.
+    try {
+      await downloadDataset(repoId, accessToken, split, config);
+    } catch (error) {
+      console.error('Failed to start dataset download:', error);
+    }
   };
 
   const handleDatasetClick = (dataset: Dataset) => {

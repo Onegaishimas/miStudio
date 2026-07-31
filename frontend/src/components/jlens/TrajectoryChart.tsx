@@ -43,10 +43,23 @@ export function TrajectoryChart({
   selPos,
   bandReport,
 }: TrajectoryChartProps) {
+  /**
+   * Series are keyed by an ALIAS, never by the token text.
+   *
+   * Each chart row is a flat object that also carries the x-axis value under
+   * `layer`. Token text goes into the SAME namespace, so pinning the token
+   * "layer" — an ordinary English word, and a token in every vocabulary here —
+   * overwrites the x-axis value with a rank. The chart then plots every point
+   * at x = its own rank, which is wrong in a way that still looks like a chart.
+   * Aliasing keeps the two namespaces apart for any token at all; the token
+   * text still reaches the tooltip via `name`.
+   */
+  const series = pinned.map((token, i) => ({ token, key: `s${i}` }));
+
   const data = axis.map((layer, i) => {
     const row: Record<string, number | null> = { layer };
-    for (const token of pinned) {
-      row[token] = rankOf(slice, i, token);
+    for (const { token, key } of series) {
+      row[key] = rankOf(slice, i, token);
     }
     return row;
   });
@@ -75,6 +88,13 @@ export function TrajectoryChart({
             )}
             <XAxis
               dataKey="layer"
+              // NUMERIC, not the default category axis. A band ReferenceArea is
+              // positioned by layer NUMBER, and on a category axis those
+              // numbers are matched against category labels — which lands the
+              // shading in the wrong place, or nowhere, on any sparse axis.
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              allowDecimals={false}
               stroke="#64748b"
               tick={{ fontSize: 10 }}
               label={{
@@ -101,11 +121,12 @@ export function TrajectoryChart({
               }}
               labelStyle={{ color: '#94a3b8' }}
             />
-            {pinned.map((token, i) => (
+            {series.map(({ token, key }, i) => (
               <Line
-                key={token}
+                key={key}
                 type="monotone"
-                dataKey={token}
+                dataKey={key}
+                name={token}
                 stroke={PIN_COLORS[i % PIN_COLORS.length]}
                 strokeWidth={2}
                 dot={false}

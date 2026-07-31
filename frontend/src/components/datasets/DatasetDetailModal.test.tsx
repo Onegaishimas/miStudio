@@ -97,9 +97,12 @@ describe('DatasetDetailModal', () => {
         <DatasetDetailModal dataset={dataset} onClose={mockOnClose} />
       );
 
-      const modal = container.querySelector('.bg-slate-900');
+      // The modal surface went dual-mode, so '.bg-slate-900' no longer exists
+      // as a bare class. Identify it by the width constraint that is actually
+      // its own, then assert the surface class in its dark-mode spelling.
+      const modal = container.querySelector('.max-w-6xl');
       expect(modal).toBeInTheDocument();
-      expect(modal?.className).toContain('max-w-6xl');
+      expect(modal?.className).toContain('dark:bg-slate-900');
     });
 
     it('should render dataset name in header', () => {

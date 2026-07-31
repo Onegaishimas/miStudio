@@ -36,6 +36,21 @@ vi.mock('../../api/jlens', () => ({
   jlensApi: { readout: vi.fn() },
 }));
 
+// ResponsiveContainer measures its parent, and jsdom reports every element as
+// 0x0 — so recharts renders nothing at all and a chart assertion would pass
+// vacuously against a broken series. Fixed dimensions make the SVG real.
+vi.mock('recharts', async () => {
+  const actual = await vi.importActual<typeof import('recharts')>('recharts');
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement }) => (
+      <actual.ResponsiveContainer width={800} height={300}>
+        {children}
+      </actual.ResponsiveContainer>
+    ),
+  };
+});
+
 import { jlensApi } from '../../api/jlens';
 import { useModelsStore } from '../../stores/modelsStore';
 
@@ -515,6 +530,48 @@ describe('the layer clamp follows the lens the panel will actually read', () => 
     // The Jacobian axis has 3 layers; clamping against the 12-layer logit axis
     // leaves an index that reads past the end of every Jacobian slice row.
     expect(useJLensStore.getState().selLayerIdx).toBe(2);
+  });
+});
+
+describe('trajectories survive tokens that collide with chart internals', () => {
+  /**
+   * A chart row is a flat object carrying the x value under `layer`. Keying
+   * series by token text puts token data in the SAME namespace, so pinning the
+   * token "layer" overwrites the x value with a rank — every point plots at
+   * x = its own rank, and the result still looks like a chart.
+   *
+   * Every other fixture here pins tokens that happen not to collide, which is
+   * why this needs its own vocabulary.
+   */
+  function collidingReadout(): ReadoutResponse {
+    const base = makeReadout([0, 10, 20, 30]);
+    base.tokens = base.tokens.map((t) => ({
+      ...t,
+      results: t.results.map((r) => ({
+        ...r,
+        top_tokens: r.top_tokens.map((row) => ['layer', '.', ...row.slice(2)]),
+      })),
+    }));
+    return base;
+  }
+
+  it('keeps the layer axis when a pinned token is named "layer"', () => {
+    render(<JLensPanel />);
+    seed(collidingReadout());
+    act(() => useJLensStore.setState({ pinned: ['layer', '.'] }));
+
+    const curves = document.querySelectorAll('.recharts-line-curve');
+    expect(curves.length).toBe(2);
+    for (const curve of curves) {
+      expect(curve.getAttribute('d')).toMatch(/^M/);
+    }
+
+    // The x axis must still be the LAYER axis. With the collision, the ticks
+    // become ranks (1..top_n) instead of 0,10,20,30.
+    const ticks = Array.from(
+      document.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick-value')
+    ).map((t) => t.textContent);
+    expect(ticks).toContain('30');
   });
 });
 

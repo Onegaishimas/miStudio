@@ -70,6 +70,9 @@ export function ByLayerRail({
                 L{layer}
               </span>
               <span className="flex flex-wrap gap-1">
+                {/* A display truncation of the row, NOT a top-n: the rail is a
+                    scan surface and the full top-k lives in the detail panel.
+                    Nothing here is derived from meta.top_n on purpose. */}
                 {row.slice(0, 4).map((t, k) => (
                   <span
                     key={k}
