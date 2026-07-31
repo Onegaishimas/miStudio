@@ -154,6 +154,31 @@ def test_envelope_rejects_a_materialised_dictionary():
     assert "MATERIALISED" in result.detail
 
 
+def test_envelope_allows_container_overhead_without_widening_the_multiplier():
+    """A file is bigger than the tensors it holds.
+
+    The allowance is absolute so it stays constant as the model grows; a wider
+    MULTIPLIER would scale with the model and open a gap a partial
+    materialisation could hide in.
+    """
+    from src.services.jlens_validation import (
+        CONTAINER_OVERHEAD_BYTES,
+        container_allowance,
+    )
+
+    # Toy scale: the flat allowance alone would exceed this model's ENTIRE
+    # materialised dictionary, blinding the check where the numbers are
+    # smallest. The half-required cap is what stops that.
+    d, n, v = 8, 3, 512
+    required = d * d * 2 * n
+    assert check_envelope(required + 2048, d, n, v).passed
+    assert not check_envelope(v * d * 2 * n, d, n, v).passed
+
+    # Real scale: the cap never binds and the allowance is noise.
+    big_required = 2048 * 2048 * 2 * 16
+    assert container_allowance(big_required) == CONTAINER_OVERHEAD_BYTES
+
+
 def test_envelope_rejects_a_truncated_artifact():
     """Truncation loads fine and reads out nothing useful."""
     d, n, v = 2048, 16, 65536

@@ -34,7 +34,7 @@
       `J`, **not** on any readout-quality proxy.
 - [x] 2.6 Corpus sharding + merge; never split the model.
 - [x] 2.7 fp16; store only `d_model × d_model` per layer; **never** form `W_U J`.
-- [ ] 2.8 (outstanding) Conformant on-disk layout: `<slug>_jacobian_lens.pt` + `config.yaml`.
+- [x] 2.8 Conformant on-disk layout: `<slug>_jacobian_lens.pt` + `config.yaml`.
 - [x] 2.9 **Negative control**: fit at `residual_norm_module`, assert measurable degradation.
 
 ## Phase 3: Validation suite (BR-030)
@@ -48,7 +48,8 @@
 
 ## Phase 4: Lifecycle, endpoints, readout binding
 
-- [ ] 4.1 Fit → validate → publish; **publish only after all six classes pass**.
+- [x] 4.1 Fit → validate → publish; **publish only after all six classes pass**. Stage-then-commit,
+      so a half-written artifact is never mounted.
 - [ ] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
 - [ ] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
       uses the default queue.
@@ -166,7 +167,12 @@ the band report + gate (`jlens_band_report.py`). 52 tests. Backend suite 2138, g
    ids, an attention mask and rotary embeddings; calling it without them either raises or silently
    takes a default path and fits a lens for a model that was never run that way. Kwargs are now
    recorded during the reference forward and replayed.
-4. **`_norm_modules` matched "norm" anywhere in a class name**, capturing a decoder block named
+4. **The envelope allowance was wrong at both ends.** The check compares a FILE size against a
+   TENSOR size, so the container's own bytes sit between them — fine at 134 MB, dominant at test
+   scale. A flat allowance fixed that and then exceeded a small model's ENTIRE materialised
+   dictionary, blinding the check exactly where the numbers are smallest. Now bounded at both ends,
+   and the cap never binds at real scale.
+5. **`_norm_modules` matched "norm" anywhere in a class name**, capturing a decoder block named
    `NormedBlock`. Freezing a decoder block replaces it with an elementwise rescaling. Tightened to
    `endswith("norm")` plus an independent tensor-output guard.
 
@@ -174,9 +180,19 @@ the band report + gate (`jlens_band_report.py`). 52 tests. Backend suite 2138, g
 now pinned by regressions re-verified as negative controls. Nine mutation controls verified biting
 across the fitter; six across the band report and gate.
 
-**Outstanding for this feature:** Phase 1 (ORM + migration), Phase 4 (lifecycle, endpoints, readout
-binding — the 501 stays until then), Phase 6 (MCP tools + reachability), Phase 7 (UI), Phase 8.1/8.6
-(two-architecture and hardware acceptance), and review rounds 2-3.
+**Also implemented since:** `jlens_artifact_service.py` — the artifact lifecycle. **The filesystem is
+the registry, not a database table** (PADR IDL-46): a J-lens artifact is consumed by MOUNTING a
+conformant directory and there is no upload path, so a DB row as source of truth would invent a
+second registry that can disagree with the one the consumer actually reads — silently. Stage-then-
+commit; `commit` refuses anything short of a full pass; `load_for_readout` refuses to serve without
+a passing report. 20 tests, 6 mutation controls.
+
+That removes Phase 1 (ORM + migration) from the critical path — it is now optional bookkeeping over
+a filesystem that is already authoritative.
+
+**Outstanding for this feature:** Phase 4.2-4.5 (acquisition weight-identity check, Celery task,
+endpoints, readout binding — **the 501 stays until then**), Phase 6 (MCP tools + reachability),
+Phase 7 (UI), Phase 8.1/8.6 (two-architecture and hardware acceptance), and review rounds 2-3.
 
 **The cross-implementation and round-trip checks are written but not yet wired to a live consumer.**
 They are correct and independently tested; until Phase 4 they cannot run against a real instance,

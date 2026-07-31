@@ -104,6 +104,26 @@ class ValidationReport:
 # regex that lost an anchor.
 LENS_FILENAME = re.compile(r"^([a-z0-9][a-z0-9._-]*)_jacobian_lens\.pt$")
 
+# Serialisation container overhead: zip headers, the pickle, per-tensor records.
+# Capped at this, and additionally at half the required size, because a FLAT
+# allowance larger than a small model's whole materialised dictionary would
+# blind the check exactly where the numbers are smallest. See
+# `container_allowance`.
+CONTAINER_OVERHEAD_BYTES = 64 * 1024
+
+
+def container_allowance(required_bytes: int) -> int:
+    """Bytes of container overhead to forgive, bounded at both ends.
+
+    An absolute allowance rather than a wider multiplier: a multiplier scales
+    with the model and opens a gap a partial materialisation could hide in.
+    But an absolute allowance that exceeds a small model's entire materialised
+    dictionary is just as blind, so it is also capped at half the required
+    size. At real scale (~134 MB required) the cap never binds and the
+    allowance is noise.
+    """
+    return max(4096, min(CONTAINER_OVERHEAD_BYTES, required_bytes // 2))
+
 
 def check_naming(directory: Path) -> CheckResult:
     """Exactly one conformant lens file in the mounted directory.
@@ -221,7 +241,12 @@ def check_envelope(
     """
     required = d_model * d_model * dtype_bytes * n_layers
     materialised = n_vocab * d_model * dtype_bytes * n_layers
-    ceiling = int(required * tolerance)
+    # The measured figure is a FILE size and the derived one is a TENSOR size,
+    # so the container's own bytes sit between them. Negligible against a real
+    # artifact (~134 MB) and dominant against a small one, hence an absolute
+    # allowance rather than a larger multiplier: widening the multiplier would
+    # also widen the gap a partial materialisation could hide in.
+    ceiling = int(required * tolerance) + container_allowance(required)
 
     evidence = {
         "size_bytes": size_bytes,
