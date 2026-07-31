@@ -47,6 +47,7 @@ const sidebars: SidebarsConfig = {
         'core-workflow/enhanced-labeling',
         'core-workflow/steering',
         'core-workflow/circuits',
+        'core-workflow/jlens',
       ],
     },
     {
