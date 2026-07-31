@@ -1,7 +1,7 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.11 (Feature 21 — Training Finalization & Checkpoint Lifecycle; stopping a run forfeited its SAE and checkpoints were never reclaimed, Implemented)
+**Version:** 3.12 (Features 22–29 — J-Space capability family: a training-free, model-agnostic second dictionary substrate (Jacobian lens) reading what a model is poised to say per layer and position, annotating SAE dictionaries with workspace membership, and emitting a runtime watchlist for miLLM; opened by BRD-MIS-JSPACE-001 v0.3, Planned)
 **Last Updated:** 2026-07-26
 **Status:** Active
 
@@ -85,6 +85,14 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 19 | Circuit Review, Ladder & Portability | Evidence-ladder claims discipline; edge typing (computed/persistence/attention-mediated); review/promotion; `mistudio.circuit-definition/v1` + per-layer v1 projection | Planned |
 | 20 | Circuit Strength Calibration | Automated search for the usable steering band — onset (min influence above none) and the correctness cliff (max before facts break) — judged against generated falsifiable probes; ships an intensity band + default into the circuit contract so a served dial cannot reach the nonsense zone | Planned |
 | 21 | Training Finalization & Checkpoint Lifecycle | Stop-and-finalize: rebuild a stopped run's SAEs from a checkpoint and write the Community Standard export, so a halted training's weights stay importable instead of being forfeited; plus configurable checkpoint retention (keep best + last N steps) that reclaims the unbounded checkpoint footprint, disabled and dry-run by default | Implemented |
+| 22 | J-Space Phase 0: Lens Fitting, Validation & Gate | Fit a Jacobian lens for any loadable model using miStudio's own architecture discovery; validate it against six acceptance classes before any consumer sees it (upstream loading fails silently); reproduce the source paper's six evaluation distributions; produce a per-model workspace-band report and record an explicit GO/NO-GO | Planned |
+| 23 | J-Space Readout Substrate & Wire Format | Logit-lens readout path (J=I, no artifact required) plus the artifact class, three distinct readout modes (full ranked / probe / sparse decomposition by gradient pursuit), recipe provenance, and a readout stream mirroring Neuronpedia's lens wire format so the viewer is driven by either source without a translation layer | Planned |
+| 24 | J-Lens Readout Viewer | Position × layer readout panel: top-token grid with hover, pinned-token rank heatmap, rank-vs-layer trajectories, per-position and per-layer readouts, Jacobian/logit/diff lens modes, model-derived layer bands, and the interpretability caveats that stop an uninterpretable readout being read as a null result | Planned |
+| 25 | SAE Workspace Annotation & Weight-Space Readouts | Annotate every dictionary feature with dual geometric (lens kurtosis) and behavioral (motor vs workspace) classification; raise a label-disagreement queue where the auto-label and the lens readout diverge; project SAE decoders, transcoder pairs and attention Q/K/V/O through the lens with no activations at all | Planned |
+| 26 | J-Space Intervention Engine Extension | Paired-run execution with clamping (the capability every mediation analysis needs), projective ablation, dynamic top-k workspace ablation with clean-pass exclusion, and scale-aware lens-coordinate swap — each with a mandatory size-matched random-direction control | Planned |
+| 27 | J-Space Claims Discipline | Assign J-space evidence to rungs on the existing evidence ladder and enforce that a readout is never presented in causal language; state that absence of a signal is not evidence of absence; hold framing to functional and mechanistic terms | Planned |
+| 28 | J-Space Contracts & Neuronpedia Conformance | Additive interchange kinds for the lens artifact, workspace annotation and watchlist, with projections so miLLM-as-shipped works unchanged; Track A supplies a conformant artifact to a local Neuronpedia instance by mounted directory; Track B exports workspace annotations through the existing feature upload path | Planned |
+| 29 | J-Space Runtime Handoff & Full MCP Parity | FULL MCP parity across the J-space surface — every capability reachable in the workbench is reachable by an agent, with tools shipped alongside the feature that creates them and each covered by the reachability harness; plus author, validate, version and export watchlists — named concept sets with detection thresholds that miLLM evaluates per token at the cost of an inner product — plus a validated reference evaluation-awareness watchlist, MCP surface, and cost-envelope reporting for every J-space operation class | Planned |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -784,6 +792,223 @@ is the existing `community_format/` export that miLLM and Neuronpedia already
 consume.
 
 
+### 3.22 J-Space Phase 0: Lens Fitting, Validation & Gate (Planned)
+
+**Purpose:** produce a trustworthy Jacobian lens for *any* model the workbench can load, and
+decide — on evidence — whether the workspace claim set holds at the scales we serve.
+
+**Why fitting, not downloading.** Pre-fitted lenses exist upstream for 36 models. The reference
+model here, `LFM2.5-1.2B-Instruct`, is not among them, and neither is most of what this workbench
+loads. A capability that only works for pre-fitted models is not the capability. Acquisition stays
+as a cost optimisation when a conformant lens exists for the *exact* weights — a distinction that
+matters: the workbench holds `gemma-2-2b-it`, whose weights differ from the `gemma-2-2b` base model
+the upstream lens is fitted for, so downloading would have silently supplied an invalid artifact.
+
+**Capabilities:**
+
+- **Model-agnostic fitting** through miStudio's own `discover_transformer_structure`, not an
+  upstream fitter's layout auto-detection. Convergence-based stopping from a floor of 100 prompts;
+  corpus-slice parallelism with merge rather than splitting the model.
+- **Six-class validation** before any consumer sees an artifact — structural, naming, envelope,
+  semantic, cross-implementation, round-trip.
+- **Replication** of the source paper's six evaluation distributions against the vendored upstream
+  harness, reported per distribution rather than pooled.
+- **Workspace-band report** deriving *that model's own* sensory / workspace / motor boundaries.
+- **Recorded GO / NO-GO / GO-AT-LARGER-SCALE**, published either way.
+
+**Normative behaviour:**
+
+- Validation is **mandatory and explicit**, because upstream lens loading is best-effort: a
+  malformed artifact does not fail at deploy time, it fails at request time inside the webapp. The
+  round-trip check must be an actual request, never inferred from a clean startup log.
+- The envelope check derives its bound from the model's **own** `d_model`, `n_vocab`, `n_layers`.
+  For the reference model that is ~134 MB required against ~4.3 GB materialised — a ratio of ~32×,
+  not the ~111× that holds for a 256k-vocabulary model. The rule is portable; the arithmetic is not.
+- Layer bands are **never inherited**. The source paper's L38–92 figures are Sonnet-4.5's, and the
+  product makes porting them impossible by construction.
+- Next-token agreement is **not** a quality metric anywhere — the lens is deliberately worse on it
+  than the logit lens through most of the network. A gate that rewards it is a defect.
+
+**Cross-plane:** none. Artifacts are consumed locally and, optionally, by a local Neuronpedia
+instance via a mounted directory (§3.28).
+
+### 3.23 J-Space Readout Substrate & Wire Format (Planned)
+
+**Purpose:** make "what is this model poised to say here" a cheap, routine query.
+
+**Capabilities:**
+
+- **Logit-lens path (`J = I`) first**, as a complete shippable capability requiring **no artifact**.
+  Everything above it — viewer, analysis suite, interventions — is built and validated against it,
+  and the Jacobian substitutes at a single call site with no consumer change.
+- **Three distinct readout modes**: full ranked over the vocabulary; single-direction probe; sparse
+  non-negative decomposition by gradient pursuit.
+- **Artifact class** with full recipe provenance — target layer, attention-gradient treatment,
+  target-position scope, aggregation, corpus, convergence criterion, library commits.
+- **Readout stream mirroring Neuronpedia's lens wire format**, so a miStudio stream and a
+  Neuronpedia stream are interchangeable at the client.
+
+**Normative behaviour:**
+
+- **Never materialise `W_U J`.** Token directions are synthesised on demand and cached by working
+  set. This is a hard constraint with a CI envelope guard, not an optimisation.
+- Occupancy, variance and J-space/non-J-space splits come from **sparse decomposition only**.
+  Top-k by inner product is not a substitute — on an overcomplete non-orthogonal frame it gives a
+  different and more redundant answer.
+- Decomposition is non-unique by construction, so solver parameters and control seeds are
+  **mandatory provenance**; figures lacking them are invalid.
+- The residual stream is captured at the **decoder-layer output**, never at a discovered
+  normalisation module — on a hybrid model the module a naive search calls "residual" is a
+  post-attention RMSNorm, and reading there fails silently with plausible-looking numbers.
+
+**Cross-plane:** the wire format is shared with Neuronpedia's webapp and, later, miLLM.
+
+### 3.24 J-Lens Readout Viewer (Planned)
+
+**Purpose:** a first-class panel for reading a model layer by layer and position by position.
+
+**Capabilities:** prompt strip with per-token selection; a top-ranked-token grid over
+(position × layer) with hover for the full top-k; a rank heatmap for pinned tokens; full ranked
+readouts at a selected position or layer; rank-vs-layer trajectories; and a lens-mode control
+offering Jacobian, logit and diff.
+
+**Normative behaviour:**
+
+- Bands are drawn from **that model's** band report, or not at all. No default L40/L90.
+- The layer axis comes from the stream's `layers_by_type`, never a hardcoded count.
+- Jacobian and diff modes are **visibly disabled with a stated reason** until a validated artifact
+  exists. Logit data is never rendered under a Jacobian label.
+- Early-layer readouts are marked as *expected to be uninterpretable*, and the panel states that a
+  readout resisting interpretation is not a null result — it may be averaging noise, a multi-token
+  concept, or genuine content we cannot yet name.
+- Every readout carries its evidence rung. A readout is rung 0 and is not a causal claim.
+
+**Cross-plane:** the viewer is driven by either a miStudio or a Neuronpedia stream without a
+translation layer.
+
+### 3.25 SAE Workspace Annotation & Weight-Space Readouts (Planned)
+
+**Purpose:** give the accumulated dictionary — labels, clusters, validated circuits — a
+reportability dimension without retraining anything.
+
+**Capabilities:** per-feature workspace classification; a label-disagreement queue; and weight-space
+readouts for SAE decoders, transcoder encoder/decoder pairs, and attention Q/K/V/O matrices.
+
+**Normative behaviour:**
+
+- Classification uses **two independent fields**, never one score: a geometric field (lens kurtosis
+  against a covariance-matched null) and a behavioural field separating **motor** from **workspace**
+  features. Motor features share high kurtosis with workspace features; a single "workspace score"
+  would present output-driving features as reportable ones, on exactly the dimension a user would
+  trust it for.
+- The disagreement queue exists because the failure is documented and consequential: example-driven
+  labelling called a fabricated-content detector "technical exposition". Suppressing that feature
+  cut the model's stated recognition of an artificial scenario from 28/50 to 10/50.
+- Weight-space readouts need **no activations and no corpus** — the cheapest high-value capability
+  in the family.
+- Annotations reference their lens artifact by identity and refuse to validate against a different
+  one; a recipe change produces a new artifact version rather than mutating one.
+
+### 3.26 J-Space Intervention Engine Extension (Planned)
+
+**Purpose:** make causal claims about the workspace substantiable rather than merely assertable.
+
+**Capabilities:** paired-run execution with clamping; additive steering along a lens direction;
+projective ablation; dynamic top-k workspace ablation with clean-pass exclusion; and lens-coordinate
+swap.
+
+**Normative behaviour:**
+
+- **Paired-run with clamping is the highest-priority capability here.** Without it the product can
+  execute interventions but cannot reproduce a single mediation analysis — which is where the
+  evidential weight sits, and therefore where credibility on causal claims sits.
+- Every run executes against a **size-matched random-direction control** at the same layers and
+  positions, reported alongside by default. A run without its control is invalid, because the
+  interpretation *is* the gap between the two.
+- Projective ablation is recorded as distinct from negative-strength additive steering.
+- Dynamic top-k ablation **excludes tokens present in the clean pass's top output candidates**, so
+  the intervention targets internal reasoning rather than the report of it.
+- Band presets are **scale-aware**: on smaller models coordinate swaps oversteer and need fewer
+  layers selected, so presets are not uniform across scales.
+
+### 3.27 J-Space Claims Discipline (Planned)
+
+**Purpose:** keep a tool that surfaces what a model is "thinking" from becoming a tool that
+overclaims.
+
+**Normative behaviour:**
+
+- J-space evidence takes rungs on the **existing** evidence ladder — readout (lowest, explicitly not
+  causal), probe-threshold crossing, decomposition membership, intervention-with-control, and
+  mediation (highest). No surface may present a lower rung in a higher rung's language.
+- Badge-not-gate throughout: low-rung evidence is surfaced *with its rung*, not suppressed.
+- **Absence of a signal is not evidence of absence.** Sufficiently automatic computation proceeds
+  without engaging the workspace, and a concept without a single-token name may not surface even
+  when represented. Every monitoring, auditing and screening surface states this.
+- Product copy, labels, documentation and export metadata **do not assert or imply** that a served
+  model has subjective experience. Framing is functional and mechanistic. This is a shipping
+  requirement with reviewer sign-off, not a disclaimer — mis-framing is the fastest route to having
+  serious researchers discount the tool.
+
+### 3.28 J-Space Contracts & Neuronpedia Conformance (Planned)
+
+**Purpose:** freeze a surface the runtime consumer can build against, and conform to upstream
+representations rather than paralleling them.
+
+**Capabilities:** additive interchange kinds for the lens artifact, the workspace annotation, the
+readout record and the watchlist, each with a projection to an existing kind; **Track A**, supplying
+a conformant artifact to a local Neuronpedia instance through a mounted directory; and **Track B**,
+exporting workspace annotations through the existing feature/explanation upload path.
+
+**Normative behaviour:**
+
+- Existing kinds are **not mutated**. Where a new kind carries content a shipped consumer could use,
+  a projection is provided so miLLM-as-shipped works unchanged, marked as a partial rendering.
+- **There is no J-lens upload path, and none will be built.** Upstream's entire J-lens database
+  footprint is two tables persisting shared analysis sessions; the lens is compute-on-demand from a
+  mounted artifact. Track A is a directory and one environment variable.
+- Track B placement is confirmed against the running instance's actual schema before building.
+- Where an upstream representation cannot carry something we need, the gap is **proposed upstream**
+  rather than worked around locally.
+
+### 3.29 J-Space Runtime Handoff & Full MCP Parity (Planned)
+
+**Purpose:** turn interpretability into runtime observability — per-token probes against named
+concepts, at the cost of an inner product — and make every J-space capability reachable by an agent,
+not just by a human at the panel.
+
+**Capabilities:** watchlist authoring, validation, versioning and export; a validated reference
+evaluation-awareness watchlist; **full MCP parity** across the J-space surface; and cost envelopes
+for every J-space operation class.
+
+**Full MCP parity means what it says.** Every capability a user can reach in the workbench is
+reachable by an agent: readout in all three modes, artifact listing and validation status, band
+reports, workspace annotations, weight-space component readouts, interventions with their mandatory
+matched control, and watchlists. Tools ship **alongside the feature that creates the capability**
+rather than batched here at the end — a readout tool is useful the moment a readout exists.
+
+Every tool is covered by the reachability harness (`tests/unit/test_reachability.py`), asserting
+presence in the **live registry and the built server**, with payload and call count asserted. This
+is not ceremony: this repo once shipped 16 fully-implemented, unit-tested, documented
+`millm_circuit_*` tools that were never registered, so the suite was green and the docs said ✅
+while no agent could call the feature.
+
+**Normative behaviour:**
+
+- A watchlist references its lens artifact and layer band **by identity** and refuses to validate
+  against a model or artifact it was not authored for.
+- The reference watchlist's thresholds are **rederived** for the target model, never inherited.
+- The MCP readout tool ships **normative interpretation guidance** as part of the deliverable, not
+  as documentation: treat the output as a bag of related ideas rather than prose, look for token
+  families rather than exact terms, discount single-layer noise in favour of content recurring
+  across layers, and cite a specific layer line verbatim so claims can be checked.
+- Operations that cannot fit the GPU envelope at the chosen scale **fail with a stated reason**
+  rather than degrading silently.
+
+**Cross-plane:** this increment owns authoring, validation and export only. Runtime evaluation and
+streaming are `BRD-MILLM-JSPACE-001`.
+
+
 ## 4. Technology Stack
 
 ### 4.1 Backend
@@ -979,6 +1204,7 @@ Feature detail modal notes section renders as markdown (react-markdown + remark-
 
 ## 11. Revision History
 
+| 3.12 | 2026-07-31 | Added Features 22–29 from BRD-MIS-JSPACE-001 v0.3 (Planned) — the JSPACE family: a training-free, MODEL-AGNOSTIC second dictionary substrate. Phase 0 fitting/validation/gate (§3.22); readout substrate, three modes and the upstream lens wire format (§3.23); the J-Lens readout viewer (§3.24); SAE workspace annotation and weight-space readouts (§3.25); intervention-engine extension with mandatory matched controls (§3.26); claims discipline on the existing evidence ladder (§3.27); additive contracts plus the two-track Neuronpedia conformance — artifact mount, not upload (§3.28); and the runtime watchlist handoff to BRD-MILLM-JSPACE-001 (§3.29). v0.3 of the BRD inverts BR-031 to CONSTRUCTION-first (pre-fitted lenses cover 36 models; the reference model is not among them), sets the reference model to LFM2.5-1.2B-Instruct, and adds BR-032 requiring architecture resolution through discover_transformer_structure rather than any whitelist. Hybrid architectures are first-class: the reference model interleaves 10 conv with 6 attention layers, so frozen-Q/K is undefined on 10 of 16 and attention-broadcast metrics are computable on 6 — recorded per layer, never averaged over the subset that qualified. |
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2025-10-05 | Initial project vision and feature breakdown |

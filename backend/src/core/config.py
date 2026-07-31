@@ -325,6 +325,17 @@ class Settings(BaseSettings):
         return self.data_dir / "checkpoints"
 
     @property
+    def jlens_artifacts_dir(self) -> Path:
+        """Root of the J-lens artifact registry (PADR IDL-46).
+
+        THE FILESYSTEM IS THE REGISTRY. This directory is what a consumer
+        mounts; there is no upload path and no database table that could
+        disagree with it. One subdirectory per model slug, each holding exactly
+        one `<slug>_jacobian_lens.pt` plus its `config.yaml`.
+        """
+        return self.data_dir / "jlens"
+
+    @property
     def run_dir(self) -> Path:
         """Get runtime directory for PID files and temporary logs.
 

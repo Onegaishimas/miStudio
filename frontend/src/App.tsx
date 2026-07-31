@@ -6,6 +6,7 @@ import { TrainingPanel } from './components/panels/TrainingPanel';
 import { ExtractionsPanel } from './components/panels/ExtractionsPanel';
 import { LabelingPanel } from './components/panels/LabelingPanel';
 import { CircuitsPanel } from './components/panels/CircuitsPanel';
+import { JLensPanel } from './components/panels/JLensPanel';
 import { SAEsPanel } from './components/panels/SAEsPanel';
 import { SteeringPanel } from './components/panels/SteeringPanel';
 import { FeatureGroupsPanel } from './components/panels/FeatureGroupsPanel';
@@ -17,8 +18,7 @@ import { WebSocketProvider, useWebSocketContext } from './contexts/WebSocketCont
 import { useGlobalDatasetProgress } from './hooks/useDatasetProgress';
 import { setDatasetSubscriptionCallback } from './stores/datasetsStore';
 import { useUIStore } from './stores/uiStore';
-
-type ActivePanel = 'datasets' | 'models' | 'training' | 'extractions' | 'labeling' | 'feature-groups' | 'circuits' | 'saes' | 'steering' | 'templates' | 'system' | 'settings';
+import { isActivePanel, type ActivePanel } from './config/panels';
 
 function AppContent() {
   const ws = useWebSocketContext();
@@ -26,9 +26,11 @@ function AppContent() {
 
   // Restore active panel from localStorage, default to 'datasets'
   const [activePanel, setActivePanel] = useState<ActivePanel>(() => {
+    // Validated against the panel registry, not a hand-kept copy of it. The
+    // copy is what silently dropped a panel on reload while it worked fine
+    // when clicked.
     const saved = localStorage.getItem('activePanel');
-    const validPanels = ['models', 'datasets', 'training', 'extractions', 'labeling', 'feature-groups', 'circuits', 'templates', 'saes', 'steering', 'system', 'settings'];
-    return validPanels.includes(saved || '') ? (saved as ActivePanel) : 'datasets';
+    return isActivePanel(saved) ? saved : 'datasets';
   });
 
   // Theme state management - default to dark mode
@@ -87,6 +89,7 @@ function AppContent() {
         {activePanel === 'feature-groups' && <FeatureGroupsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'templates' && <TemplatesPanel />}
         {activePanel === 'circuits' && <CircuitsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
+        {activePanel === 'jlens' && <JLensPanel />}
         {activePanel === 'saes' && <SAEsPanel onNavigateToSteering={() => setActivePanel('steering')} />}
         {activePanel === 'steering' && <SteeringPanel />}
         {activePanel === 'system' && <SystemMonitor />}

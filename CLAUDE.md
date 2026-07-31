@@ -2,7 +2,8 @@ yes
 # Project: MechInterp Studio (miStudio)
 
 ## Current Status
-- **Phase:** ✅ **FEATURE 21 — TRAINING FINALIZATION & CHECKPOINT LIFECYCLE (2026-07-26)** — files `020_*` / PPRD row 21 / PADR IDL-39. Stopping a training **forfeited its SAE**: cancel skipped the loop's finalize block, so `community_format/` — the only artifact downstream reads — was never written, and the UI offered only "Retry" (restart from step 0). Found on `train_969e90af` (granite-4.1-8b, JumpReLU L34/35/36) stopped at step 10,300 with **FVU 0.065 / zero dead neurons**: a good SAE, unusable. Separately checkpoints were never pruned (423 rows / 18 trainings / **78 GB**). Shipped: **Stop & Finalize** + **Finalize** (rebuild SAEs from a checkpoint, atomic staged export, reusing the success path's writer), honest `finalized_from_step` (status=COMPLETED unlocks import but progress stays truthful + amber "Finalized early @ N" badge), and **step-granular checkpoint retention** shipped **disabled + dry-run**. Also fixed a pre-existing bug: `DELETE /checkpoints/{id}` was called by the frontend and did not exist. **3 review rounds = 104 findings** (35 + 41 + 28), **24 mutation controls verified biting** — each previously left the suite green. Durable lessons: *Celery routes match the TASK NAME, so a short name silently uses the default queue*; *`hp['hidden_dim']` is corrected in memory and never persisted — read dims from checkpoint tensors*; *a boolean setting must fail to its DEFAULT, not to False (for `dry_run`, False means delete)*; *unlink before committing the row, or a failed unlink strands the file forever since planning is row-driven*. 141 backend + 105 frontend tests. PR #2, branch `feat/checkpoint-lifecycle`. **Hardware acceptance outstanding** — finalize `train_969e90af` on k8s after deploy.
+- **Phase:** ⏳ **J-SPACE ARC IN PROGRESS (2026-07-31)** — BRD-MIS-JSPACE-001 v0.3, files `021_`–`028_` = PPRD rows 22–29, PADR IDL-40..46. A **second interpretability substrate** alongside SAEs: a training-free dictionary (the Jacobian lens) that reads what a model is *poised to say* at every layer and token position. **Shipped so far: files `022_*` (readout substrate) and `023_*` (the J-Lens viewer)** — 3 review rounds each, 26 findings, 39 mutation controls, verified on two real architectures (LFM2 hybrid + gemma-2-2b dense). The load-bearing product rule is **BR-002**: the published sensory/workspace/motor band boundaries were measured on one specific model, so miStudio draws **no bands at all** unless a band report exists for the model in front of you — there is no default band constant anywhere, by construction. **Next: files `021_*`** (Phase-0 fitting, validation suite, replication and gate) — which is what binds `/jlens/readout` (currently 501) and lights up the Jacobian and Diff modes. Frontend suite **1007/1007, fully green**.
+- **Phase (prior):** ✅ **FEATURE 21 — TRAINING FINALIZATION & CHECKPOINT LIFECYCLE (2026-07-26)** — files `020_*` / PPRD row 21 / PADR IDL-39. Stopping a training **forfeited its SAE**: cancel skipped the loop's finalize block, so `community_format/` — the only artifact downstream reads — was never written, and the UI offered only "Retry" (restart from step 0). Found on `train_969e90af` (granite-4.1-8b, JumpReLU L34/35/36) stopped at step 10,300 with **FVU 0.065 / zero dead neurons**: a good SAE, unusable. Separately checkpoints were never pruned (423 rows / 18 trainings / **78 GB**). Shipped: **Stop & Finalize** + **Finalize** (rebuild SAEs from a checkpoint, atomic staged export, reusing the success path's writer), honest `finalized_from_step` (status=COMPLETED unlocks import but progress stays truthful + amber "Finalized early @ N" badge), and **step-granular checkpoint retention** shipped **disabled + dry-run**. Also fixed a pre-existing bug: `DELETE /checkpoints/{id}` was called by the frontend and did not exist. **3 review rounds = 104 findings** (35 + 41 + 28), **24 mutation controls verified biting** — each previously left the suite green. Durable lessons: *Celery routes match the TASK NAME, so a short name silently uses the default queue*; *`hp['hidden_dim']` is corrected in memory and never persisted — read dims from checkpoint tensors*; *a boolean setting must fail to its DEFAULT, not to False (for `dry_run`, False means delete)*; *unlink before committing the row, or a failed unlink strands the file forever since planning is row-driven*. 141 backend + 105 frontend tests. PR #2, branch `feat/checkpoint-lifecycle`. **Hardware acceptance outstanding** — finalize `train_969e90af` on k8s after deploy.
 - **Phase (prior):** ✅ **STEERED TRANSCRIPT RECORDER CLOSED (2026-07-22)** — BRD-MIS-RECORDER-001 / PADR IDL-38. Instrument-not-judge: records `(dial, prompt, unsteered, steered)` transcripts for a **circuit, cluster, OR ad-hoc feature set** over MCP (`record_steering_samples` / `get_steering_samples`), for a strong model (Opus) to read afterward — no weak in-loop judge. One unified GPU steering core (`steering_core.build_steer_generator`) + three per-type resolvers; calibration refactored onto it. New `steering_record_runs` marker table (migration `5cede2a1b3f7`) under the single-GPU guard; `steering_samples` manifest kind carries the generated TEXT; calibration manifests now carry a required `transcripts` field (back-compat: `validate_payload` runs only on write). **Full doc chain + 3 review rounds + hardware E2E across ALL THREE artifact types on k8s.** **The hardware round found FOUR bugs 4 static rounds + the unit suite all missed — every one a "fixtures agree by construction" trap:** (1) the unified core hooked the discovered `"residual"` module = a post-attn RMSNorm on LFM2, so the steering vector was **renormalized away — steered==unsteered at every dial**; fix = hook the WHOLE decoder-layer output `structure.layers_module[L]` (resid_post), the serve-matching point (91b5a6c). (2/3/4) the cluster path was broken for **all 35 existing profiles**: they store `sae_id` but `model_id=None`, and members carry no per-member `layer` — both must be derived from the `ExternalSAE` row (4b25b2c, 40ebc50); and the recorder had a **parallel `_artifact_model_id` copy** that a single-site fix missed → "Model None not found" (7b0fa56, + a consistency guard so the two resolution paths can't silently diverge again). E2E: circuit `vman_425ea6375805` (strong 0.4-humor/0.6-collapse dose-response), feature `vman_4f8f0d5c45df` (**byte-identical to the circuit path** — proves one-core+resolvers), cluster `vman_eb77e66b9405`/`vman_f9b13b2710e8` (real dose-dependent steer; subtle at 0.4 because "Verified & Trustworthy" is a weak 0.1–0.2 cluster, clear at 1.5–2.0). Calibration re-run **unregressed** (still `judge_unreliable` on the weak k8s judge). Every fix has a mutation-verified guard; CI green on all four (Backend Tests success). **Durable lessons** in memory `steering-hook-target-whole-layer.md` + `cluster-profile-persisted-shape.md`. Commits 91b5a6c→7b0fa56.
 - **Phase (prior):** ✅ **FEATURE 20 CIRCUIT STRENGTH CALIBRATION CLOSED (2026-07-22)** — files `019_*` (the arc's +1 file/row offset; PPRD row 20, IDL-37). Automated usable-band search: ONSET (output-drift, no judge) + CORRECTNESS CLIFF (LLM judge on generated NEUTRAL-topic falsifiable probes), bisection, clamps the served dial to [onset,cliff]; badge-not-gate. Full stack: schema `calibration` block (migration `ca11b7a7e020`) + probe generator + search + service/task/manifest/reproduce + endpoint + MCP (`calibrate_circuit_strength`, `reproduce_calibration`) + Calibration UI. **RAN END-TO-END ON k8s** (crc_124fd83d1f2a, k8s miLLM judge) — pipeline works, judge-sanity gate + greedy generation + badge-not-gate all verified on hardware. **Review: 3 rounds (15+8+6) + a hardware round (3) = 32 findings, all fixed.** The R2 round (framed "runs on real hardware") caught a FATAL `get_hookable_module` arg-order crash 3 static rounds missed; the hardware run then caught a weak-judge/noisy-floor interaction (→ judge-sanity gate + greedy generation). **Durable lessons** in memory `circuit-strength-calibration-feature20.md`: GPU bugs only hardware finds; a weak judge fails the UNSTEERED baseline (report `judge_unreliable`, never a false `no_band`); greedy generation for a stable floor + reproducibility. **Tracked follow-up (not a blocker):** the 1.2B model this k8s serves is too weak to judge itself — validating the band near ground-truth needs a stronger judge. Commits 33e5b07→ac86c6e.
 - **Phase (prior):** ✅ **miLLM CIRCUIT CONSOLIDATION CLOSED (2026-07-21)** — the cross-repo increment BRD-MILLM-CIRCUITS-002 (miLLM features 016–020) landed its MCP half HERE: the **16 `millm_circuit_*` tools** in `backend/src/mcp_server/tools/millm_circuits.py`, now REGISTERED (they were the increment's signature defect — fully implemented, unit-tested and documented while never registered with the server, so every test passed by importing the module directly). 293 findings across 5 features × 3 review rounds. **Durable deliverable: the reachability rule** — *a capability is not shipped until a test FAILS when its wiring is removed* — enforced by `backend/tests/unit/test_reachability.py` (registry / built-server / caller shapes, payload AND call-count asserted) and written into this file's Code Quality Checklist. Also hardened here: the causal-language copy audit (`SURFACES` was hand-maintained at 5 files while 16 circuit modules went unaudited — now discovered, 5→17), and `millm_client.py` failure paths (a 200 HTML page from a misrouted ingress used to reach the agent as an empty SUCCESS, so it would read 'nothing is steering' and activate into a contention; `test_millm_client_failure_paths.py` is new — the client had no test file at all). Review records live in the miLLM repo: `0xcc/reviews/review_feature020_R{1,2,3}_2026-07-21.md`.
@@ -384,6 +385,95 @@ pgrep -f celery  # Celery worker should be running
 - ✅ Manual: NEW `manual/docs/core-workflow/training-lifecycle.md` (registered in `sidebars.ts`); corrected `sae-training.md` (its "Stop … saves final checkpoint" line was **factually wrong** and is what cost a real run); extended `reference/api/trainings.md`, `reference/data-model.md`, `reference/websocket-channels.md`, `advanced/external-saes.md`
 - Impl: `training_finalize_service.py`, `checkpoint_retention.py`, `training_finalize_tasks.py`, `prune_checkpoints.py`, migration `b4d19f0c73ae`. Commits 8d44fa4→54197af.
 - **Tracked debt:** retention is row-driven so orphaned checkpoint dirs are never reclaimed; finalize/prune create no `task_queue` row so they don't show in Active Operations; prune results aren't polled by the UI; destructive routes are unauthenticated and the Storage tab isn't PIN-gated.
+
+### J-Space arc — BRD-MIS-JSPACE-001 + Features 022–029 (= files `021_`–`028_`) (2026-07-30/31)
+
+A second interpretability substrate alongside SAEs: a **training-free dictionary** (the Jacobian
+lens) reading what a model is *poised to say* at every layer and position. 32 business requirements.
+**Files `021_`–`028_` = PPRD rows 22–29** (the +1 offset). **Numbering ≠ build order:** built
+`022 → 023 → 021 → 026 → 024/025/027 → 028`.
+
+- ✅ BRD v0.3 · PPRD v3.12 (rows 22–29, §3.22–§3.29) · PADR v3.4 (IDL-40..46)
+- **BRD v0.3 amendments** driven by *"work with ANY model, LFM2 first"*: BR-031 **inverted**
+  (construction is the primary path, acquisition opportunistic — LFM2 has no pre-fitted lens and
+  neither does most of what this shop runs); BR-032 added (model-agnostic via
+  `discover_transformer_structure`, decoder-layer capture, **per-layer** applicability — the
+  reference model is hybrid, so frozen-Q/K is undefined on 10 of its 16 layers); BR-027 broadened to
+  **full MCP parity**.
+
+#### Feature 023 (= files `022_*`) — J-Space Readout Substrate (✅ Implemented 2026-07-30)
+- ✅ 022_FPRD/FTDD/FTID/FTASKS|JSpace_Readout_Substrate
+- Impl: `schemas/jlens.py`, `services/jlens_readout_service.py`, `api/v1/endpoints/jlens.py`,
+  `tests/unit/test_jlens_{readout,model_agnostic,reachable}.py`
+- 3 review rounds, **11 findings**, **24 mutation controls**. Verified on **two real architectures**
+  in the backend pod — LFM2.5-1.2B (hybrid, 6/16 attention layers) and gemma-2-2b-it (dense, 26/26);
+  `"The capital of France is"` → `' Paris'` at the final layer on both.
+- Durable lessons: *normalise with the model's OWN final norm, never L2*; *the product of per-field
+  bounds permitted 102M readouts / 8.4 GB residuals — bound the envelope, not just the fields*;
+  *a `mode="after"` validator that pydantic's type coercion pre-empts can never fire*.
+
+#### Feature 024 (= files `023_*`) — J-Lens Readout Viewer (✅ Implemented 2026-07-31)
+- ✅ 023_FPRD/FTDD/FTID/FTASKS|JLens_Readout_Viewer · Manual: NEW
+  `manual/docs/core-workflow/jlens.md` (registered in `sidebars.ts`)
+- Ports `0xcc/brds/JSpacePanel.jsx` (the BR-010 interaction spec) onto a **live logit-lens readout**.
+  Nav entry **"J-Lens" immediately before Steering**. Impl: `types/jlens.ts`, `api/jlens.ts`,
+  `stores/jlensStore.ts`, `components/jlens/*`, `panels/JLensPanel.tsx`, `config/panels.ts`,
+  `feature-jlens` chunk. Commits b201ce4→88b01cd.
+- **The three constants in the mock are gone and none has a replacement:** `LAYERS` (21 at 0,5,…,100)
+  → `meta.layers_by_type`; `BAND {40, 90}` → **nothing** (those are the source paper's Sonnet-4.5
+  figures; BR-002 requires porting be impossible by construction, so bands render only from a band
+  report); `TOP_N = 8` → `meta.top_n`. Fixture generator deleted, with a source-level guard.
+- Also folded the **triplicated panel-id list** (two `ActivePanel` unions + a hardcoded
+  `validPanels`) into one registry at `config/panels.ts` — the missed third copy produced a panel
+  that worked when clicked and vanished on reload, with no type error anywhere.
+- 3 review rounds, **15 findings**, **15 mutation controls**. **Two mutations initially survived**,
+  both because fixtures agreed by construction (one axis shared across lens types; an evenly spaced
+  axis where category and numeric positions coincide).
+- **Pre-existing, now fixed:** 4 tests pinned to single-theme Tailwind classes that went dual-mode,
+  and `DatasetsPanel.handleDownload` rejecting **unhandled** under a test named *"should handle
+  download errors gracefully"*. Frontend suite **1007/1007, 0 unhandled errors** — fully green.
+- **Tracked debt:** `/jlens/readout` returns **501** until feature 022 (files `021_*`) binds model
+  resolution; band rendering is unreachable from the panel until a band report exists; MCP parity is
+  owned by files `028_*`.
+
+#### Feature 022 (= files `021_*`) — J-Space Fitting, Validation & the Phase-0 Gate (⏳ In progress 2026-07-31)
+- ✅ 021_FPRD/FTDD/FTID/FTASKS|JSpace_Fitting_And_Gate
+- **Shipped:** `ml/jlens_fitter.py` (model-agnostic fit; freezing by patching the OPERATIONS, not the
+  modules), `services/jlens_validation.py` (the six BR-030 classes, fail-closed), `ml/jlens_metrics.py`
+  (seven band metrics + both null controls), `services/jlens_band_report.py` (boundaries + GO/NO-GO
+  gate). 52 tests; backend suite 2138 green. Commits 9ab2330→56c3c20.
+- **The fitter as first committed COULD NOT HAVE RUN** — one forward-mode pass per input dimension is
+  millions of passes on the reference model. Freezing makes the map **affine**, so `J[:,i] = fn(e_i) −
+  fn(0)` comes out of one batched call per chunk. The jvp version survives as `jacobian_by_jvp` and a
+  test asserts the two agree, so the fast path's assumption is *verified*, not asserted.
+- **`affine_residual` refuses a fit whose freeze leaked.** An incomplete freeze yields a matrix of the
+  right shape and size that passes STRUCTURAL/NAMING/ENVELOPE and reads out plausible nonsense; fit
+  time is the only point where it is detectable.
+- Durable lessons: *`_norm_modules` must be `endswith("norm")`, not `contains` — a substring match
+  captured a decoder block named `NormedBlock`, and freezing a decoder block replaces it with an
+  elementwise rescaling*; *replay the layer's recorded kwargs — a decoder layer called with hidden
+  states alone silently takes a default path and fits a lens for a model that was never run that way*;
+  *a mutation that "survives" may simply never have applied — check the edit landed before concluding*.
+- **Artifact lifecycle + MCP parity also shipped:** `services/jlens_artifact_service.py` (stage →
+  validate → commit → serve), the `/jlens/artifacts` list and `/jlens/artifacts/{slug}/validate`
+  endpoints, and the **`jlens` MCP category** (`list_jlens_artifacts`, `validate_jlens_artifact`)
+  registered and covered by a reachability harness **written before the tools**. Commits
+  7a2956a→HEAD.
+- **The filesystem is the registry, not a DB table** (PADR IDL-46). A J-lens artifact is consumed by
+  MOUNTING a conformant directory; there is no upload path, so a DB row as source of truth would
+  invent a second registry that can silently disagree with the one the consumer reads. This removed
+  Phase 1 (ORM/migration) from the critical path. Stage-then-commit: `<slug>.staging` is excluded
+  from discovery, because a half-written artifact in the mounted directory gets served.
+- Durable lessons: *the envelope check compares a FILE size to a TENSOR size — a flat overhead
+  allowance then exceeded a small model's entire materialised dictionary, so it must be bounded at
+  BOTH ends*; *artifacts load `weights_only=True` — an artifact is an untrusted file and the
+  unrestricted loader executes pickled code*.
+- **Outstanding:** Phase 4.2/4.3/4.5 (acquisition weight-identity check, Celery task, **readout
+  binding — `/jlens/readout` stays 501**), band-report/gate/fit endpoints + their MCP tools, Phase 7
+  (UI), Phase 8.1/8.6 (two-architecture and **hardware acceptance on the local 3080 Ti**), review
+  rounds 2–3. The cross-implementation and round-trip checks are written and tested but not yet
+  wired to a live consumer; `ValidationReport` fails closed on a class that never ran, so nothing can
+  publish on their absence.
 
 ### Feature Documents
 *[Add as features are identified and developed]*

@@ -1,0 +1,221 @@
+/**
+ * Position x layer readout grid.
+ *
+ * THE LAYER AXIS COMES FROM THE STREAM. `axis` is `meta.layers_by_type[type]`;
+ * this component has no idea how many layers a model has and must not acquire
+ * one. The reference implementation hardcodes 21 layers at 0,5,...,100, which
+ * renders a complete, plausible and entirely wrong grid on a 16- or 26-layer
+ * model.
+ *
+ * `axis[i]` is the ABSOLUTE layer number for display; `i` is the index into the
+ * slice rows. Those two are only interchangeable when the axis happens to be
+ * 0..n-1, so every lookup below uses `i` and every label uses `axis[i]`.
+ *
+ * BANDS ARE DATA. With no BandReport the grid draws no shading and says why —
+ * there is no default band object anywhere in this feature (BR-002).
+ */
+
+import { rankColor, displayToken, isDiffuse } from './utils';
+import { rankOf } from '../../stores/jlensStore';
+import type {
+  BandReport,
+  LensMode,
+  LensTokenMessage,
+  LensTypeSlice,
+} from '../../types/jlens';
+
+type BandName = 'sensory' | 'workspace' | 'motor';
+
+const BAND_LABEL: Record<BandName, string> = {
+  sensory: 'Sensory',
+  workspace: 'Workspace',
+  motor: 'Motor',
+};
+
+/** Band membership of an absolute layer, only ever from a report. */
+function bandOf(layer: number, report: BandReport | null): BandName | null {
+  if (!report) return null;
+  if (layer < report.workspace_start) return 'sensory';
+  if (layer < report.motor_start) return 'workspace';
+  return 'motor';
+}
+
+interface ReadoutGridProps {
+  axis: number[];
+  tokens: LensTokenMessage[];
+  topN: number;
+  mode: LensMode;
+  /** Slice lookup for one token, already bound to the mode's read type. */
+  sliceOf: (token: LensTokenMessage) => LensTypeSlice | undefined;
+  /** Logit slice, used only by DIFF to compare against the Jacobian. */
+  logitSliceOf: (token: LensTokenMessage) => LensTypeSlice | undefined;
+  pinned: string[];
+  selPos: number;
+  selLayerIdx: number;
+  bandReport: BandReport | null;
+  onSelect: (pos: number, layerIdx: number) => void;
+  onHover: (h: { pos: number; layerIdx: number } | null) => void;
+}
+
+export function ReadoutGrid({
+  axis,
+  tokens,
+  topN,
+  mode,
+  sliceOf,
+  logitSliceOf,
+  pinned,
+  selPos,
+  selLayerIdx,
+  bandReport,
+  onSelect,
+  onHover,
+}: ReadoutGridProps) {
+  if (axis.length === 0 || tokens.length === 0) {
+    return (
+      <p className="text-xs text-slate-500 dark:text-slate-500">
+        This readout carries no layers for the selected lens.
+      </p>
+    );
+  }
+
+  // Descending layer order: the output end of the stack reads at the top, which
+  // is how the trajectory is described everywhere else in the product.
+  const rows = axis.map((layer, i) => ({ layer, i })).reverse();
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          {pinned.length
+            ? 'Rank of pinned tokens · layer × position'
+            : 'Top readout · layer × position'}
+        </div>
+        <div className="flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-500">
+          {bandReport ? (
+            (['sensory', 'workspace', 'motor'] as BandName[]).map((b) => (
+              <span key={b} className="flex items-center gap-1">
+                <span
+                  className={`inline-block h-2 w-2 rounded-sm ${
+                    b === 'workspace'
+                      ? 'bg-emerald-500'
+                      : b === 'motor'
+                        ? 'bg-amber-500'
+                        : 'bg-slate-400 dark:bg-slate-600'
+                  }`}
+                />
+                {BAND_LABEL[b]}
+              </span>
+            ))
+          ) : (
+            <span data-testid="jlens-no-bands">
+              No band report for this model — bands are not shown. Boundaries
+              from another model do not transfer.
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0">
+          <tbody>
+            {rows.map(({ layer, i }) => {
+              const band = bandOf(layer, bandReport);
+              return (
+                <tr key={layer}>
+                  <td
+                    onClick={() => onSelect(selPos, i)}
+                    className={`sticky left-0 z-10 cursor-pointer border-r bg-white pr-2 text-right font-mono text-[10px] dark:bg-slate-800 ${
+                      selLayerIdx === i
+                        ? 'border-emerald-500 text-emerald-600 dark:text-emerald-300'
+                        : band === 'workspace'
+                          ? 'border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-400'
+                          : 'border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-600'
+                    }`}
+                  >
+                    L{layer}
+                  </td>
+                  {tokens.map((tk) => {
+                    const slice = sliceOf(tk);
+                    const row = slice?.top_tokens[i];
+                    const probs = slice?.top_probs[i];
+
+                    let cellTok = row?.[0] ?? '';
+                    let background = 'transparent';
+                    let dim = isDiffuse(probs?.[0]);
+
+                    if (pinned.length) {
+                      // Heatmap over the pinned tokens: best (lowest) rank wins
+                      // the cell, and an unpinned-but-present token is not shown
+                      // at all — the grid is answering "where are MY tokens".
+                      let best: number | null = null;
+                      let which: string | null = null;
+                      for (const p of pinned) {
+                        const r = rankOf(slice, i, p);
+                        if (r != null && (best == null || r < best)) {
+                          best = r;
+                          which = p;
+                        }
+                      }
+                      background = rankColor(best, topN);
+                      cellTok = which ?? '';
+                      dim = best == null;
+                    } else if (mode === 'DIFF') {
+                      const other = logitSliceOf(tk)?.top_tokens[i]?.[0];
+                      const agree = other !== undefined && other === row?.[0];
+                      background = agree
+                        ? 'rgba(100,116,139,.18)'
+                        : 'rgba(245,158,11,.28)';
+                    } else if (band === 'workspace') {
+                      background = 'rgba(52,211,153,.10)';
+                    } else {
+                      background = 'rgba(100,116,139,.10)';
+                    }
+
+                    const isSel = selPos === tk.position && selLayerIdx === i;
+                    return (
+                      <td
+                        key={tk.position}
+                        onMouseEnter={() => onHover({ pos: tk.position, layerIdx: i })}
+                        onMouseLeave={() => onHover(null)}
+                        onClick={() => onSelect(tk.position, i)}
+                        style={{ background }}
+                        title={`L${layer} · pos ${tk.position}${
+                          dim ? ' · diffuse readout' : ''
+                        }`}
+                        className={`cursor-pointer border-b border-r px-1 py-[3px] text-center font-mono text-[10px] leading-tight ${
+                          isSel
+                            ? 'border-emerald-400'
+                            : 'border-slate-100 dark:border-slate-800'
+                        } ${
+                          dim
+                            ? 'text-slate-400 dark:text-slate-700'
+                            : 'text-slate-800 dark:text-slate-200'
+                        }`}
+                      >
+                        <span className="block max-w-[64px] truncate">
+                          {displayToken(cellTok)}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+            <tr>
+              <td className="sticky left-0 bg-white dark:bg-slate-800" />
+              {tokens.map((tk) => (
+                <td
+                  key={tk.position}
+                  className="max-w-[64px] truncate px-1 pt-1 text-center font-mono text-[10px] text-slate-500 dark:text-slate-500"
+                >
+                  {displayToken(tk.token)}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

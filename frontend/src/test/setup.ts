@@ -22,6 +22,17 @@ vi.mock('socket.io-client', () => {
   return { io, default: io, Socket: class {} };
 });
 
+// jsdom has no ResizeObserver, which recharts' ResponsiveContainer constructs
+// unconditionally. Without this, any test that renders a chart dies with
+// "ResizeObserver is not defined" — an environment gap, not a component fault.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+
 // Cleanup after each test
 afterEach(() => {
   cleanup();

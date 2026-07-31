@@ -284,16 +284,16 @@ describe('ActivationExtractionConfig', () => {
 
       const layer10Button = screen.getByText('L10');
 
-      // Initially not selected
-      expect(layer10Button).toHaveClass('bg-slate-800');
+      // Selection is signalled by the emerald accent. The UNSELECTED classes
+      // are dual-mode ("bg-white dark:bg-slate-800"), so asserting a bare
+      // "bg-slate-800" pinned a single-theme spelling rather than the state.
+      expect(layer10Button).not.toHaveClass('bg-emerald-600');
 
-      // Click to select
       fireEvent.click(layer10Button);
       expect(layer10Button).toHaveClass('bg-emerald-600');
 
-      // Click to deselect
       fireEvent.click(layer10Button);
-      expect(layer10Button).toHaveClass('bg-slate-800');
+      expect(layer10Button).not.toHaveClass('bg-emerald-600');
     });
 
     it('should select all layers when Select All clicked', () => {
@@ -391,16 +391,15 @@ describe('ActivationExtractionConfig', () => {
 
       const mlpButton = screen.getByText('mlp');
 
-      // Initially not selected
-      expect(mlpButton).toHaveClass('bg-slate-800');
+      // As above: assert the state marker, not a single-theme spelling of the
+      // unselected background.
+      expect(mlpButton).not.toHaveClass('bg-purple-600');
 
-      // Click to select
       fireEvent.click(mlpButton);
       expect(mlpButton).toHaveClass('bg-purple-600');
 
-      // Click to deselect
       fireEvent.click(mlpButton);
-      expect(mlpButton).toHaveClass('bg-slate-800');
+      expect(mlpButton).not.toHaveClass('bg-purple-600');
     });
 
     it('should allow multiple hook types selected', () => {

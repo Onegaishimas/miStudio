@@ -149,7 +149,7 @@ services:
     environment:
       MISTUDIO_API_URL: http://backend:8000
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in .env to enable the MCP server}
-      MCP_TOOL_CATEGORIES: ${MCP_TOOL_CATEGORIES:-read,groups,steering,labeling,experiments,profiles,jobs}
+      MCP_TOOL_CATEGORIES: ${MCP_TOOL_CATEGORIES:-read,groups,steering,labeling,experiments,profiles,circuits,jlens,jobs}
       # Unified MCP (miLLM Feature 9): set to a reachable miLLM to enable the
       # millm_runtime/millm_clusters/millm_sensing categories (add them to
       # MCP_TOOL_CATEGORIES too); empty skips them at registration.

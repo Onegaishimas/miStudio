@@ -494,8 +494,13 @@ describe('DatasetCard', () => {
       });
       const { container } = render(<DatasetCard dataset={dataset} />);
 
-      const sourceElement = container.querySelector('p.text-sm.text-slate-400');
-      expect(sourceElement?.className).toContain('truncate');
+      // Located by its CONTENT rather than by a colour class that went
+      // dual-mode: the selector silently matched nothing, and `undefined`
+      // reached toContain, which is why this failed on an argument-type error
+      // rather than on the property it was meant to assert.
+      const sourceElement = container.querySelector('[title*="organization-with-very-long-name"]')
+        ?? screen.getByText(/organization-with-very-long-name/);
+      expect(sourceElement.className).toContain('truncate');
     });
 
     it('should handle all optional props being undefined', () => {

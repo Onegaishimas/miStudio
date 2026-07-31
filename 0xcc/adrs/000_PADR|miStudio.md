@@ -3288,12 +3288,186 @@ recorded as follow-up debt.
 
 ---
 
+### IDL-40: J-space as a second, training-free dictionary substrate alongside SAEs
+
+**Date:** 2026-07-31
+
+**Context:** miStudio's unit of meaning is a learned SAE latent — discovered by dictionary
+training, named by an LLM reading top-activating examples, validated by steering. That substrate
+has a blind spot: a large fraction of a model's representational content sits outside the small
+privileged subset of directions the model can report, modulate and reason with, and the workbench
+cannot tell them apart. The Jacobian lens supplies a second substrate that needs **no training** —
+a per-layer `d_model × d_model` map from which any vocabulary token's residual direction can be
+synthesised on demand. Opened by BRD-MIS-JSPACE-001 v0.3.
+
+**Decision:**
+
+1. **J-space is additive to the SAE substrate, never a replacement.** It arrives alongside and
+   *annotates* the existing dictionary; every SAE capability keeps working untouched.
+2. **The logit lens (`J = I`) ships first** as a complete capability requiring no artifact. The
+   viewer, analysis suite, decomposition routines and intervention primitives are all built and
+   validated against it, and the Jacobian substitutes at a **single call site** with no consumer
+   change. This is independently the pattern upstream arrived at.
+3. **Readout is never a causal claim.** J-space evidence enters the existing evidence ladder
+   (IDL-35) at defined rungs rather than getting its own vocabulary.
+
+**Consequences:** two substrates coexist and must not be conflated in the UI. A feature can be a
+strong SAE latent and outside the reportable workspace, or vice versa; that difference is the point
+of the capability, not an inconsistency to smooth over.
+
+### IDL-41: Model-agnostic lens construction through miStudio's own architecture discovery
+
+**Date:** 2026-07-31
+
+**Context:** The product owner requires the capability work with **any model the workbench can
+load**, with `LFM2.5-1.2B-Instruct` as the reference. Upstream fitters carry layout auto-detection
+for the families *they* know. miStudio already faced and settled this question once: the
+`SUPPORTED_ARCHITECTURES` whitelist was deleted and every hardcoded architecture branch replaced by
+`discover_transformer_structure()`.
+
+**Decision:**
+
+1. **Resolve structure through `ml/layer_discovery.discover_transformer_structure`**, never an
+   architecture whitelist, name match, or upstream auto-detection. J-space does not reintroduce the
+   whitelist this codebase already removed.
+2. **Capture the residual stream at the decoder-layer output** (`structure.layers_module[L]`),
+   never at a discovered normalisation module. On LFM2 the module a naive search identifies as
+   "residual" is a post-attention RMSNorm; a vector applied there is renormalised away. That failure
+   is silent — it produces plausible numbers and no signal — and it has already cost this project
+   once, in steering (IDL-38).
+3. **Layer kind is per-layer state, not a model property.** The reference model interleaves 10
+   convolutional with 6 attention layers. Frozen-Q/K is *undefined* on a conv layer and
+   attention-broadcast metrics are computable on 6 of 16. Both are recorded per layer as applicable
+   or inapplicable; **inapplicable is absent and labelled, never zero**, and never averaged over the
+   subset that qualified.
+4. **Construction is the primary path; acquisition is opportunistic.** Pre-fitted lenses cover 36
+   models upstream and the reference model is not among them. Acquisition is used only when a
+   conformant lens exists for the *exact* weights — the workbench holds `gemma-2-2b-it`, whose
+   weights differ from the `gemma-2-2b` base the upstream lens targets, so a naive download would
+   have supplied an invalid artifact silently.
+
+**Consequences:** fitting cost is on the critical path rather than optional, which the local RTX
+3080 Ti absorbs for models of reference scale. Any metric that assumes homogeneous layers must
+declare its coverage.
+
+### IDL-42: Artifact storage discipline — synthesise on demand, never materialise the dictionary
+
+**Date:** 2026-07-31
+
+**Context:** The token dictionary is the rows of `W_U J`. Precomputing it is tempting and wrong by
+one to two orders of magnitude.
+
+**Decision:**
+
+1. **Store one `d_model × d_model` matrix per analysed layer. Never persist `W_U J`.** Token
+   directions are synthesised on demand and cached by working set.
+2. **The CI envelope bound is derived from the model's own config** — `d_model`, `n_vocab`,
+   `n_layers` — and never from a constant. For the reference model that is ~134 MB required against
+   ~4.3 GB materialised, a ratio of ~32×; for a 256k-vocabulary model the same rule yields ~111×.
+   The rule is portable, the arithmetic is not.
+3. **Serialised artifacts are fp16**, matching upstream's serialised form; consumers cast on load.
+
+**Consequences:** no code path may allocate an `n_vocab × d_model` array derived from `J`. This is a
+hard constraint with a CI guard, not an optimisation — the same shape of guard as the logit-lens
+memory fix that removed a full-model load from the analysis path.
+
+### IDL-43: Paired-run execution with clamping as an intervention-engine capability
+
+**Date:** 2026-07-31
+
+**Context:** The existing intervention engine executes a single configured pass. Every mediation
+analysis in the source paper requires a clean reference pass whose per-position results parameterise
+a second intervened pass, with specified coordinates held at their clean values throughout.
+
+**Decision:**
+
+1. **Paired-run with clamping is a first-class engine capability**, not a script. It is the highest
+   priority change in the family: without it the product can intervene but cannot substantiate a
+   single mediation claim, which is where causal credibility sits.
+2. **Every intervention run executes against a size-matched random-direction control** at the same
+   layers and positions, reported alongside by default. A run without its control is **invalid** —
+   the interpretation is the gap between them, not the intervened number.
+3. **Dynamic top-k workspace ablation excludes clean-pass top output candidates**, so the
+   intervention targets internal reasoning rather than the report of it.
+
+**Consequences:** run cost roughly doubles, and the reporting surface must carry both arms. Presets
+are scale-aware: swaps oversteer on smaller models and need fewer layers.
+
+### IDL-44: J-space rungs as an extension of the existing evidence ladder
+
+**Date:** 2026-07-31
+
+**Context:** IDL-35 established the evidence ladder as the product-wide claims model. J-space
+produces evidence of several strengths, and the weakest of them — a token appearing in a readout —
+is the easiest to describe in causal language by accident.
+
+**Decision:**
+
+1. **Extend the existing ladder; do not create a parallel vocabulary.** Readout (lowest, explicitly
+   not causal) → probe-threshold crossing → decomposition membership → intervention-with-control →
+   mediation (highest).
+2. **Badge-not-gate**, consistent with the rest of the product: low-rung evidence is surfaced with
+   its rung, never suppressed.
+3. **Absence of signal is not evidence of absence**, stated on every monitoring, auditing and
+   screening surface. Automatic computation bypasses the workspace, and concepts without
+   single-token names may not surface at all.
+
+**Consequences:** the UI must carry a rung on every J-space assertion, and claims-discipline review
+becomes an acceptance gate on copy as well as code.
+
+### IDL-45: Adopt Neuronpedia's lens wire format rather than defining a parallel one
+
+**Date:** 2026-07-31
+
+**Context:** miStudio needs a transport for position × layer readouts. Neuronpedia already defines
+one for the same data, and the reference panel is already built against it.
+
+**Decision:**
+
+1. **Mirror the upstream wire format exactly** — a meta message carrying model identity, lens types,
+   per-type layer lists, top-N and prompt length; per-position token messages carrying one slice per
+   lens type with `top_tokens[layer][k]` and `top_probs[layer][k]` as **decoded strings**; terminal
+   done/error messages.
+2. **Interchange kinds are additive.** Existing kinds are not mutated, and where a new kind carries
+   content a shipped consumer could use, a projection to an existing kind is provided and marked as
+   a partial rendering.
+
+**Consequences:** a miStudio stream and a Neuronpedia stream are interchangeable at the client, so
+the viewer is driven by either without a translation layer, and part of the projection obligation is
+satisfied structurally rather than by adaptation code.
+
+### IDL-46: Artifact mount, not upload, as the Neuronpedia integration architecture
+
+**Date:** 2026-07-31
+
+**Context:** The natural assumption — that J-lens results are uploaded to Neuronpedia the way SAE
+features are — is wrong, and was corrected by a conformance assessment verified against upstream
+source. J-lens is compute-on-demand from a mounted artifact; upstream's entire J-lens database
+footprint is two tables persisting shared analysis sessions.
+
+**Decision:**
+
+1. **Track A is a mounted directory and one environment variable.** No API, no upload, no database
+   write. Wired as a volume in the existing deployment manifest rather than a push job.
+2. **Building a J-lens ingestion API is an explicit non-goal** — it would mean building a
+   Neuronpedia feature that does not exist.
+3. **Track B — SAE workspace annotation — uses the existing feature/explanation upload path**, with
+   placement confirmed against the running instance's schema before building.
+4. **miStudio validates before handover.** Upstream lens loading is best-effort: a malformed
+   artifact does not fail at deploy time, it fails at request time in the webapp. The round-trip
+   check is an actual request, never inferred from a clean startup log.
+
+**Consequences:** Track A is roughly a day of work rather than an export-pipeline project, and the
+six-class validation suite becomes the reusable asset — it guards every artifact regardless of
+whether it was fitted locally, acquired, or contributed.
+
+
 ## Document Control
 
-**Version:** 3.2
+**Version:** 3.4
 **Created By:** AI Dev Tasks Framework (XCC)
 **Created Date:** 2025-10-05
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-07-31
 **Status:** Active - Production Release v0.5.0
 
 **Review and Approval:**
@@ -3320,6 +3494,7 @@ recorded as follow-up debt.
 | 2.6 | 2026-07-12 | IDL-26: MCP Server architecture & cross-feature grouping (separate container, official `mcp` SDK, streamable HTTP, bearer-token auth, tool-category gating, grouping REST endpoints + 4 new tables, `mcp_agent` provenance, steering approval mode) — Planned, from BRD-MIS-MCP-001 |
 | 2.7 | 2026-07-15 | IDL-27: Steering UX — frequency-based auto-baseline strength (unit-norm-decoder rationale), Blended vs Compare toggle, 20-feature limit + palette — Planned |
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
+| 3.4 | 2026-07-31 | **J-Space family (BRD-MIS-JSPACE-001 v0.3).** IDL-40 J-space as a second, training-free substrate additive to SAEs, logit-lens-first with single-call-site substitution. IDL-41 model-agnostic construction through `discover_transformer_structure` — no whitelist, capture at the decoder-layer output not a normalisation module, per-layer applicability for hybrid models, construction-first over acquisition. IDL-42 synthesise-on-demand storage with a model-derived CI envelope bound. IDL-43 paired-run-with-clamping and mandatory matched controls. IDL-44 J-space rungs extending the existing ladder. IDL-45 adopt Neuronpedia's lens wire format. IDL-46 artifact mount (not upload) as the Neuronpedia integration architecture. **Also corrects a stale Document Control header:** it read 3.2 while the revision history already carried 3.3 for IDL-39 (2026-07-26) — the history was correct, the header had not been bumped with it. |
 | 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
 | 3.3 | 2026-07-26 | IDL-39 (finalize-from-checkpoint; step-granular retention; unlink-before-commit; fail-closed completeness) — Implemented, observed behaviour |

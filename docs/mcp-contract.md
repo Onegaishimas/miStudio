@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**97 tools across 13 categories.**
+**99 tools across 14 categories.**
 
 
 ## `admin` (2 tools)
@@ -79,6 +79,13 @@ require `MILLM_API_URL` and are never enabled by default.
 | `get_feature_group_members` | `GET /extractions/{…}/feature-groups/{…}` | Members of one group with current labels, stars, stats, and a context snippet each (labels are live — never stale). |
 | `get_feature_groups` | `GET /extractions/{…}/feature-groups` | List feature groups (features sharing a top activating token with similar context). |
 | `get_grouping_status` | `GET /extractions/{…}/feature-groups/status` | State of the grouping index: none \| pending \| computing \| completed \| failed, with progress, params, and counts. |
+
+## `jlens` (2 tools)
+
+| Tool | Endpoint | Summary |
+|---|---|---|
+| `list_jlens_artifacts` | `GET /jlens/artifacts` | List J-lens artifacts present in the mounted registry. |
+| `validate_jlens_artifact` | `POST /jlens/artifacts/{…}/validate` | Run the BR-030 validation suite against one artifact. |
 
 ## `jobs` (1 tools)
 

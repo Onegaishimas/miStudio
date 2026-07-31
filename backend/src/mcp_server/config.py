@@ -7,12 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 VALID_CATEGORIES = {
     "read", "groups", "steering", "labeling", "experiments", "profiles", "circuits",
-    "jobs", "admin",
+    "jlens", "jobs", "admin",
     # Unified MCP (miLLM Feature 9): opt-in, functional only with
     # MILLM_API_URL set — never in DEFAULT_CATEGORIES.
     "millm_runtime", "millm_clusters", "millm_sensing", "millm_circuits",
 }
-DEFAULT_CATEGORIES = "read,groups,steering,labeling,experiments,profiles,circuits,jobs"
+DEFAULT_CATEGORIES = "read,groups,steering,labeling,experiments,profiles,circuits,jlens,jobs"
 
 
 class MCPSettings(BaseSettings):
