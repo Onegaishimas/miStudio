@@ -315,6 +315,14 @@ class ReadoutResponse(BaseModel):
     tokens: List[LensTokenMessage]
 
 
+# Validation is cached per (slug, mtime, size). Without this, EVERY Jacobian
+# readout re-runs the suite — including the SEMANTIC check, which is itself a
+# full readout — so each request paid for two readouts plus a revalidation. The
+# key includes mtime and size so a replaced artifact is revalidated rather than
+# served on a stale verdict.
+_VALIDATION_CACHE: Dict[tuple, Any] = {}
+
+
 def _validated_report(loaded: Any, artifact_id: Optional[str]):
     """Locate and validate the artifact for THIS model, or refuse.
 
@@ -349,13 +357,21 @@ def _validated_report(loaded: Any, artifact_id: Optional[str]):
             "the Jacobian lens does — fit and validate one first."
         )
 
-    return service.validate(
+    stat = ref.lens_path.stat()
+    key = (ref.slug, stat.st_mtime_ns, stat.st_size, loaded.d_model, loaded.n_layers)
+    cached = _VALIDATION_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    report = service.validate(
         ref,
         d_model=loaded.d_model,
         expected_layers=range(loaded.n_layers),
         n_vocab=loaded.n_vocab,
         semantic_result=_semantic_check(loaded, ref),
     )
+    _VALIDATION_CACHE[key] = report
+    return report
 
 
 def _semantic_check(loaded: Any, ref: Any):
@@ -387,12 +403,21 @@ def _semantic_check(loaded: Any, ref: Any):
         unembedding=loaded.unembedding,
         model_name=loaded.name,
     )
+    # Built ONCE. JacobianTransport casts every matrix to the compute dtype in
+    # its constructor — deliberately, so `apply` does not copy a d_model^2
+    # matrix per call — and constructing it inside the closure moved that cost
+    # back to per-invocation, over the whole artifact.
+    transport = JacobianTransport(jacobians)
 
     def top_at(prompt: str, layer: int, top_k: int):
-        transport = JacobianTransport(jacobians)
+        last = None
         for message in readout.stream(prompt, [transport], layers=[layer], top_n=top_k):
             if isinstance(message, LensTokenMessage):
                 last = message
+        if last is None:
+            # An empty stream is a FAILED semantic check, not a NameError and
+            # not an empty pass — the distinction this feature exists for.
+            raise ValueError("readout produced no token messages")
         return last.results[0].top_tokens[0]
 
     # Mid-band by position in the stack, not by a band constant: no band report

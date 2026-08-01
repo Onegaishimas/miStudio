@@ -297,3 +297,71 @@ def test_the_endpoint_no_longer_returns_501_for_readout():
     source = inspect.getsource(jlens.readout)
     assert "501" not in source
     assert "NOT_IMPLEMENTED" not in source
+
+
+# ── review round 3 ─────────────────────────────────────────────────────────
+
+
+def test_validation_is_cached_per_artifact_identity():
+    """Without a cache, EVERY Jacobian readout re-runs the whole suite.
+
+    The SEMANTIC check is itself a full readout, so each request paid for two
+    readouts plus a revalidation — correct, and unusably slow.
+
+    The key includes mtime and size, so a REPLACED artifact is revalidated
+    rather than served on a stale verdict. That is the property that makes the
+    cache safe rather than merely fast.
+    """
+    import inspect
+
+    from src.api.v1.endpoints import jlens
+
+    source = inspect.getsource(jlens._validated_report)
+    assert "_VALIDATION_CACHE" in source
+
+    key_line = next(l for l in source.splitlines() if "key = (" in l)
+    for part in ("st_mtime_ns", "st_size"):
+        assert part in key_line, (
+            f"the cache key omits {part}: a replaced artifact would be served "
+            "on the previous artifact's verdict"
+        )
+
+
+def test_the_jacobian_transport_is_built_once_not_per_call():
+    """The constructor casts every matrix; building it in the closure undoes that.
+
+    JacobianTransport casts to the compute dtype ONCE on purpose, so `apply`
+    does not copy a d_model^2 matrix per call — 8 MB at the reference model,
+    thousands of times per readout. Constructing it inside the per-invocation
+    closure moved that cost back, over the whole artifact.
+    """
+    import inspect
+
+    from src.api.v1.endpoints import jlens
+
+    source = inspect.getsource(jlens._semantic_check)
+    build_line = next(
+        i for i, l in enumerate(source.splitlines()) if "JacobianTransport(" in l
+    )
+    closure_line = next(
+        i for i, l in enumerate(source.splitlines()) if "def top_at" in l
+    )
+    assert build_line < closure_line, (
+        "JacobianTransport is constructed inside top_at, so every probe recasts "
+        "the entire artifact"
+    )
+
+
+def test_an_empty_stream_fails_the_semantic_check_rather_than_raising_NameError():
+    """The distinction this whole feature exists for.
+
+    An empty readout must be a FAILED check with a reason, never an unbound
+    local — and never an empty pass.
+    """
+    import inspect
+
+    from src.api.v1.endpoints import jlens
+
+    source = inspect.getsource(jlens._semantic_check)
+    assert "last = None" in source
+    assert "no token messages" in source
