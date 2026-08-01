@@ -110,7 +110,10 @@ produces a fluent, wrong readout — so the check is on identity, not on name si
 ## Limits today
 
 - No band report exists yet, so no band shading appears anywhere.
-- The readout is request/response rather than streamed, so very long prompts are refused
-  rather than trickled in — readout cost grows with the number of positions.
+- **The first readout for a model takes about a minute.** A J-space readout needs the whole
+  model resident for a forward pass, so the first request loads it; the panel shows
+  "loading the model" while that happens. Subsequent readouts on the same model are fast.
 - One model stays resident at a time. Switching models evicts the previous one, because a
   readout needs the whole model loaded and this workbench shares a GPU with serving.
+- Readout cost grows with the number of positions, so very long prompts are refused rather
+  than trickled in.

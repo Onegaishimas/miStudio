@@ -13,8 +13,9 @@ import type {
   JLensFitAccepted,
   JLensFitRequest,
   JLensValidationResponse,
+  ReadoutAccepted,
   ReadoutRequest,
-  ReadoutResponse,
+  ReadoutResult,
 } from '../types/jlens';
 
 export const jlensApi = {
@@ -27,10 +28,14 @@ export const jlensApi = {
    * (BR-019).
    */
   readout: (request: ReadoutRequest) =>
-    fetchAPI<ReadoutResponse>('/jlens/readout', {
+    fetchAPI<ReadoutAccepted>('/jlens/readout', {
       method: 'POST',
       body: JSON.stringify(request),
     }),
+
+  /** Poll a queued readout. Null `readout` until `status` is SUCCESS. */
+  readoutResult: (taskId: string) =>
+    fetchAPI<ReadoutResult>(`/jlens/readout/${encodeURIComponent(taskId)}`),
 
   /** Artifacts present in the mounted registry. Presence, not validity. */
   listArtifacts: () => fetchAPI<JLensArtifactSummary[]>('/jlens/artifacts'),

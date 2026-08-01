@@ -21,6 +21,7 @@ import { devtools } from 'zustand/middleware';
 import { jlensApi } from '../api/jlens';
 import type {
   BandReport,
+  ReadoutResponse,
   JLensArtifactSummary,
   LensMetaMessage,
   LensMode,
@@ -69,6 +70,8 @@ interface JLensState {
   modelRepoId: string;
 
   isLoading: boolean;
+  /** What the queued readout is doing right now, e.g. 'loading_model'. */
+  stage: string | null;
   error: string | null;
 
   setModelId: (id: string, repoId?: string) => void;
@@ -99,6 +102,7 @@ const INITIAL = {
   pinned: [] as string[],
   hover: null,
   isLoading: false,
+  stage: null,
   error: null,
 };
 
@@ -172,7 +176,7 @@ export const useJLensStore = create<JLensState>()(
         // order rather than request order, and the grid can settle showing the
         // prompt the user already replaced.
         const seq = ++requestSeq;
-        set({ isLoading: true, error: null });
+        set({ isLoading: true, error: null, stage: 'queued' });
 
         try {
           // Ask for the Jacobian lens ONLY when this model has an artifact.
@@ -183,11 +187,19 @@ export const useJLensStore = create<JLensState>()(
             ? get().artifacts.find((a) => a.slug === slug)
             : undefined;
 
-          const response = await jlensApi.readout({
+          const accepted = await jlensApi.readout({
             model_id: modelId,
             prompt,
             types: artifact ? ['JACOBIAN_LENS', 'LOGIT_LENS'] : ['LOGIT_LENS'],
             ...(artifact ? { artifact_id: artifact.slug } : {}),
+          });
+
+          // POLL. The readout is queued because it needs the whole model
+          // resident, and a synchronous request 502'd at the ingress on a real
+          // model. `stage` is surfaced so a minute-long first load reads as
+          // "loading the model", not as a hung button.
+          const response = await pollReadout(accepted.task_id, (stage) => {
+            if (seq === requestSeq) set({ stage });
           });
 
           if (seq !== requestSeq) return;
@@ -200,9 +212,9 @@ export const useJLensStore = create<JLensState>()(
             const lensMode = modeAvailability(response.meta, state.lensMode).enabled
               ? state.lensMode
               : ('LOGIT_LENS' as const);
-            // Clamp against the axis the panel will actually READ, not against
-            // a fixed type: two lens types may carry different layer counts,
-            // and clamping to the wrong one leaves an out-of-range row index.
+            // Clamp against the axis the panel will actually READ: two lens
+            // types may carry different layer counts, and clamping to the
+            // wrong one leaves an out-of-range row index.
             const axis = axisFor(response.meta, readTypeFor(lensMode));
 
             return {
@@ -210,11 +222,10 @@ export const useJLensStore = create<JLensState>()(
               tokens: response.tokens,
               // Logit lens involves no artifact at all — say so rather than
               // leaving the provenance strip blank (BR-007).
-              provenance: { artifact_id: null },
+              provenance: { artifact_id: artifact ? artifact.slug : null },
               isLoading: false,
+              stage: null,
               error: null,
-              // Clamp both selections into the NEW readout's extents. A stale
-              // index survives a model change and indexes a shorter array.
               selPos: clampPosition(state.selPos, response.tokens),
               selLayerIdx: clamp(state.selLayerIdx, axis.length),
               lensMode,
@@ -225,6 +236,7 @@ export const useJLensStore = create<JLensState>()(
           if (seq !== requestSeq) return;
           set({
             isLoading: false,
+            stage: null,
             error: err instanceof Error ? err.message : 'Readout failed.',
           });
         }
@@ -257,6 +269,44 @@ export function artifactSlugFor(repoId: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Poll a queued readout until it succeeds or fails.
+ *
+ * A terminal FAILURE is raised with its reason rather than resolving to an
+ * empty readout — an empty readout is indistinguishable from a real one with
+ * no content, which is the failure this whole feature is built to avoid.
+ */
+export async function pollReadout(
+  taskId: string,
+  onStage: (stage: string | null) => void,
+  intervalMs = 1500,
+  timeoutMs = 600_000
+): Promise<ReadoutResponse> {
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const result = await jlensApi.readoutResult(taskId);
+
+    if (result.status === 'SUCCESS' && result.readout) {
+      return result.readout;
+    }
+    if (result.status === 'FAILURE') {
+      throw new Error(result.error || 'Readout failed.');
+    }
+    if (Date.now() > deadline) {
+      // Reported as a timeout on OUR side, naming the task, so the job is
+      // still findable rather than silently abandoned.
+      throw new Error(
+        `Readout ${taskId} did not finish within ${Math.round(timeoutMs / 1000)}s. ` +
+          'It may still be running — the first readout for a model loads the ' +
+          'whole model.'
+      );
+    }
+    onStage(result.stage ?? null);
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
 }
 
 /** Monotonic request counter backing the stale-response guard. */

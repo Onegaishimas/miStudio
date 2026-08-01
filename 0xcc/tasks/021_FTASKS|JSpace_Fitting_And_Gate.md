@@ -64,7 +64,13 @@ Should durable job history be wanted later, that is a `task_queue` row, not a se
 - [x] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
       uses the default queue.
 - [x] 4.4 Artifact list, validate, fit, band-report and gate endpoints — each with an MCP tool.
-- [x] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
+- [x] 4.5 Bind `POST /jlens/readout`; the 501 is gone. **Redesigned as queue-and-poll after a
+      HARDWARE FINDING:** bound synchronously it 502'd at the ingress TWICE on a real model
+      (64.9s and 54.0s against nginx's 60s ceiling), because the forward pass needs the whole
+      model resident. Raising the timeout would not bound it — cost is O(positions x layers x
+      top_n) ON TOP of the load — and only the worker process can hold the loaded model across
+      requests, so a cache in the API could never have helped. `POST` now returns a task id and
+      `GET /jlens/readout/{task_id}` polls, matching steering, extraction and calibration.
 
 ## Phase 5: Band report and gate
 

@@ -33,8 +33,31 @@ import type { LensType, ReadoutResponse } from '../../types/jlens';
 
 vi.mock('../../stores/modelsStore');
 vi.mock('../../api/jlens', () => ({
-  jlensApi: { readout: vi.fn() },
+  jlensApi: {
+    readout: vi.fn(),
+    readoutResult: vi.fn(),
+    listArtifacts: vi.fn().mockResolvedValue([]),
+  },
 }));
+
+/**
+ * The readout is a TWO-STEP contract now: POST returns a task id, and the
+ * result arrives by polling. Mocking it as a single call would test a shape
+ * the server no longer has — the readout was made asynchronous because a
+ * synchronous one 502'd at the ingress on a real model.
+ */
+function mockReadout(response: ReadoutResponse) {
+  (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue({
+    task_id: 't1',
+    model_id: 'm_lfm2',
+    status: 'queued',
+  });
+  (jlensApi.readoutResult as ReturnType<typeof vi.fn>).mockResolvedValue({
+    task_id: 't1',
+    status: 'SUCCESS',
+    readout: response,
+  });
+}
 
 // ResponsiveContainer measures its parent, and jsdom reports every element as
 // 0x0 — so recharts renders nothing at all and a chart assertion would pass
@@ -198,7 +221,7 @@ describe('positions are looked up by position, not by array index', () => {
     seed(makeReadout([0, 1, 2]));
     act(() => useJLensStore.setState({ selPos: 9 }));
 
-    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(slicedReadout());
+    mockReadout(slicedReadout());
     await act(async () => {
       await useJLensStore.getState().fetchReadout();
     });
@@ -409,9 +432,7 @@ describe('a refetch never blanks the readout', () => {
     seed(makeReadout(Array.from({ length: 26 }, (_, i) => i)));
     act(() => useJLensStore.setState({ selLayerIdx: 25, selPos: 4 }));
 
-    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeReadout(Array.from({ length: 16 }, (_, i) => i))
-    );
+    mockReadout(makeReadout(Array.from({ length: 16 }, (_, i) => i)));
 
     await act(async () => {
       await useJLensStore.getState().fetchReadout();
@@ -426,9 +447,7 @@ describe('a mode the new readout cannot serve is not left selected', () => {
     seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
     act(() => useJLensStore.setState({ lensMode: 'DIFF' }));
 
-    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeReadout([0, 1, 2], ['LOGIT_LENS'])
-    );
+    mockReadout(makeReadout([0, 1, 2], ['LOGIT_LENS']));
     await act(async () => {
       await useJLensStore.getState().fetchReadout();
     });
@@ -442,9 +461,7 @@ describe('a mode the new readout cannot serve is not left selected', () => {
     seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
     act(() => useJLensStore.setState({ lensMode: 'DIFF' }));
 
-    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS'])
-    );
+    mockReadout(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
     await act(async () => {
       await useJLensStore.getState().fetchReadout();
     });
@@ -461,9 +478,7 @@ describe('the panel sends the request it appears to send', () => {
    */
   it('submits the model and prompt exactly once, requesting the logit lens', async () => {
     const user = userEvent.setup();
-    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeReadout([0, 1, 2])
-    );
+    mockReadout(makeReadout([0, 1, 2]));
     render(<JLensPanel />);
 
     await user.selectOptions(screen.getByRole('combobox'), 'm_gemma');
@@ -547,7 +562,7 @@ describe('the layer clamp follows the lens the panel will actually read', () => 
     seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS']));
     act(() => useJLensStore.setState({ lensMode: 'JACOBIAN_LENS', selLayerIdx: 11 }));
 
-    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue(unevenAxes());
+    mockReadout(unevenAxes());
     await act(async () => {
       await useJLensStore.getState().fetchReadout();
     });
@@ -696,3 +711,65 @@ function walk(dir: string, visit: (file: string) => void) {
 function stripComments(code: string): string {
   return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 }
+
+
+describe('the readout is asynchronous because it measurably had to be', () => {
+  /**
+   * Bound synchronously, /jlens/readout 502'd at the ingress TWICE on a real
+   * model — 64.9s and 54.0s against nginx's 60s ceiling — because a J-space
+   * readout needs the whole model resident for its forward pass.
+   *
+   * Raising the proxy timeout would not bound it: readout cost is
+   * O(positions x layers x top_n) ON TOP of the load. So the contract is
+   * queue-and-poll, and these pin that contract rather than the timeout.
+   */
+  it('queues, polls, and only then applies the readout', async () => {
+    const response = makeReadout([0, 1, 2]);
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 't-async',
+      model_id: 'm_lfm2',
+      status: 'queued',
+    });
+    (jlensApi.readoutResult as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ task_id: 't-async', status: 'PROGRESS', stage: 'loading_model' })
+      .mockResolvedValueOnce({ task_id: 't-async', status: 'SUCCESS', readout: response });
+
+    act(() =>
+      useJLensStore.setState({ modelId: 'm_lfm2', prompt: 'hello', artifacts: [] })
+    );
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    expect(jlensApi.readout).toHaveBeenCalledTimes(1);
+    expect(jlensApi.readoutResult).toHaveBeenCalledWith('t-async');
+    expect(useJLensStore.getState().tokens.length).toBe(response.tokens.length);
+    expect(useJLensStore.getState().stage).toBeNull();
+  });
+
+  it('reports a FAILED task by its reason, never as an empty readout', async () => {
+    (jlensApi.readout as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 't-fail',
+      model_id: 'm_lfm2',
+      status: 'queued',
+    });
+    (jlensApi.readoutResult as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 't-fail',
+      status: 'FAILURE',
+      error: 'google/gemma-2-2b-it is not downloaded locally.',
+    });
+
+    act(() =>
+      useJLensStore.setState({ modelId: 'm_lfm2', prompt: 'hello', artifacts: [] })
+    );
+    await act(async () => {
+      await useJLensStore.getState().fetchReadout();
+    });
+
+    // An empty readout is indistinguishable from a real one with no content —
+    // the failure this whole feature is built to avoid.
+    expect(useJLensStore.getState().error).toMatch(/not downloaded/);
+    expect(useJLensStore.getState().meta).toBeNull();
+    expect(useJLensStore.getState().isLoading).toBe(false);
+  });
+})
