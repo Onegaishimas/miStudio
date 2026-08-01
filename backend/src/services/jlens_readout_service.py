@@ -85,6 +85,14 @@ def _module_dtype(module: Any) -> Optional[torch.dtype]:
         return None
 
 
+def _module_device(module: Any) -> Optional[torch.device]:
+    """The device a module's own parameters live on, if it has any."""
+    try:
+        return next(module.parameters()).device
+    except (StopIteration, AttributeError):
+        return None
+
+
 def _model_device(model: Any) -> Optional[str]:
     """Where the model's parameters actually are.
 
@@ -377,8 +385,21 @@ class ReadoutService:
                 # "expected scalar type BFloat16 but found Half". Mixed
                 # precision is ordinary on a real checkpoint and never appears
                 # in a single-dtype test stack.
+                #
+                # AND TO THE NORM'S OWN DEVICE, for the same class of reason.
+                # The norm is a live module belonging to the model, so it sits
+                # wherever the model sits — which is NOT where the readout runs.
+                # The readout deliberately works on READOUT_DEVICE while the
+                # model may be resident on an accelerator, and calling a CUDA
+                # module with a CPU tensor dies with "found at least two
+                # devices, cuda:0 and cpu". Borrow the module, then come
+                # straight back: the result must land on the readout's device,
+                # not the model's, or every downstream matvec inherits the
+                # mismatch instead.
                 norm_dtype = _module_dtype(self._final_norm) or x.dtype
-                return self._final_norm(x.to(norm_dtype)).to(x.dtype)
+                norm_device = _module_device(self._final_norm) or x.device
+                out = self._final_norm(x.to(device=norm_device, dtype=norm_dtype))
+                return out.to(device=x.device, dtype=x.dtype)
         # Documented fallback: RMS without learned weights.
         rms = x.pow(2).mean().sqrt().clamp_min(1e-6)
         return x / rms
