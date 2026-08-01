@@ -69,6 +69,8 @@ export function FitLensCard({ modelId, onFitted }: FitLensCardProps) {
   const [corpusName, setCorpusName] = useState('');
   const [layersRaw, setLayersRaw] = useState('');
   const [freezeQk, setFreezeQk] = useState(true);
+  const [probePrompt, setProbePrompt] = useState('');
+  const [probeExpected, setProbeExpected] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,12 +87,24 @@ export function FitLensCard({ modelId, onFitted }: FitLensCardProps) {
   const layers = parseLayers(layersRaw);
   const layersInvalid = layersRaw.trim() !== '' && layers === null;
   const running = phase.kind === 'queued';
+
+  // The fixture is REFUSED, not warned about, when the intermediate appears in
+  // the prompt: recovering a token that is already there proves nothing, so
+  // such a fixture would pass against a lens encoding nothing at all. Checked
+  // here as well as server-side so the user learns before waiting for a fit.
+  const probeSelfEvident =
+    probeExpected.trim() !== '' &&
+    probePrompt.toLowerCase().includes(probeExpected.trim().toLowerCase());
+  const probeComplete =
+    probePrompt.trim() !== '' && probeExpected.trim() !== '' && !probeSelfEvident;
+
   const canSubmit =
     !running &&
     !!modelId &&
     prompts.length >= MIN_FIT_PROMPTS &&
     corpusName.trim() !== '' &&
-    !layersInvalid;
+    !layersInvalid &&
+    probeComplete;
 
   const poll = (taskId: string) => {
     timer.current = setTimeout(async () => {
@@ -128,6 +142,14 @@ export function FitLensCard({ modelId, onFitted }: FitLensCardProps) {
         layers,
         freeze_qk: freezeQk,
         corpus_name: corpusName.trim(),
+        semantic_probe: {
+          prompt: probePrompt,
+          expected_intermediate: probeExpected,
+          // The check reads out THROUGH the fitted Jacobian, so it must name a
+          // layer that was fitted. Blank layers means all of them, in which
+          // case the server picks the last.
+          layer: layers ? layers[layers.length - 1] : null,
+        },
       });
       setPhase({ kind: 'queued', taskId: accepted.task_id, state: 'PENDING' });
       poll(accepted.task_id);
@@ -225,6 +247,58 @@ export function FitLensCard({ modelId, onFitted }: FitLensCardProps) {
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="rounded border border-slate-200 p-2 dark:border-slate-700">
+            <p className="mb-2 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Semantic check — required
+            </p>
+            <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-500">
+              The lens must recover a known intermediate the model never says
+              out loud. Without this the check cannot run and{' '}
+              <strong>nothing is published</strong> — the suite fails closed
+              rather than clearing an artifact on a check it skipped.
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="jlens-probe-prompt"
+                  className="mb-1 block text-xs text-slate-600 dark:text-slate-400"
+                >
+                  Probe prompt
+                </label>
+                <input
+                  id="jlens-probe-prompt"
+                  type="text"
+                  value={probePrompt}
+                  onChange={(e) => setProbePrompt(e.target.value)}
+                  placeholder="The capital of France is"
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="jlens-probe-expected"
+                  className="mb-1 block text-xs text-slate-600 dark:text-slate-400"
+                >
+                  Expected intermediate
+                </label>
+                <input
+                  id="jlens-probe-expected"
+                  type="text"
+                  value={probeExpected}
+                  onChange={(e) => setProbeExpected(e.target.value)}
+                  placeholder=" Paris"
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+            </div>
+            {probeSelfEvident && (
+              <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+                That intermediate already appears in the prompt, so recovering
+                it proves nothing — a lens encoding nothing at all would pass.
+              </p>
+            )}
           </div>
 
           <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">

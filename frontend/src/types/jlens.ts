@@ -160,12 +160,28 @@ export interface JLensValidationResponse {
   results: JLensCheckOutcome[];
 }
 
+/**
+ * Fixture for the SEMANTIC validation class.
+ *
+ * `expected_intermediate` must NOT appear in `prompt`: a token already present
+ * is recovered by an artifact that encodes nothing at all, so a fixture that
+ * breaks this passes against a broken lens. The server rejects it.
+ */
+export interface JLensSemanticProbe {
+  prompt: string;
+  expected_intermediate: string;
+  layer?: number | null;
+  top_k?: number;
+}
+
 export interface JLensFitRequest {
   model_id: string;
   prompts: string[];
   layers?: number[] | null;
   freeze_qk?: boolean;
   corpus_name?: string;
+  /** Without this NOTHING IS PUBLISHED — the suite fails closed on an unrun check. */
+  semantic_probe?: JLensSemanticProbe | null;
 }
 
 export interface JLensFitAccepted {
