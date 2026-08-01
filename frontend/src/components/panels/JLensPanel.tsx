@@ -23,6 +23,7 @@ import { ChevronRight, Layers, Pin, PinOff } from 'lucide-react';
 import { ArtifactsStrip } from '../jlens/ArtifactsStrip';
 import { ByLayerRail } from '../jlens/ByLayerRail';
 import { EvidenceRungCard } from '../jlens/EvidenceRungCard';
+import { FitLensCard } from '../jlens/FitLensCard';
 import { LensModeTabs } from '../jlens/LensModeTabs';
 import { ProvenanceStrip } from '../jlens/ProvenanceStrip';
 import { ReadoutGrid } from '../jlens/ReadoutGrid';
@@ -221,6 +222,17 @@ export function JLensPanel() {
           // sending placeholders would produce a bound derived from nothing —
           // a check that reports a verdict it never computed.
           dims={artifactDims}
+        />
+      </div>
+
+      <div className="mb-4">
+        <FitLensCard
+          modelId={modelId}
+          // Re-list the registry rather than optimistically inserting a row:
+          // the filesystem IS the registry (PADR IDL-46), and a row this client
+          // invented would be a second registry that can disagree with the one
+          // the readout path actually reads.
+          onFitted={() => void useJLensStore.getState().fetchArtifacts()}
         />
       </div>
 

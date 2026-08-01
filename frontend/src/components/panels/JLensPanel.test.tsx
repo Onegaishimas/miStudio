@@ -255,6 +255,29 @@ describe('before any readout', () => {
     const logit = screen.getByRole('button', { name: /Logit/ });
     expect(logit.parentElement?.textContent).not.toMatch(/No readout yet/i);
   });
+
+  it('offers a way to fit the lens it tells the user to fit', async () => {
+    // REACHABILITY, not existence. The panel said "fit one to enable it" while
+    // the only routes in were REST and MCP, so the remedy it named could not be
+    // performed from the product. Asserting the card renders HERE — inside the
+    // panel — is what makes deleting <FitLensCard/> turn this red; a test that
+    // rendered the card directly would pass against a card nobody can reach.
+    render(<JLensPanel />);
+
+    const open = screen.getByRole('button', { name: /fit a lens/i });
+    // Disabled until a model is chosen: a fit is per-model and there is nothing
+    // sensible to fit against.
+    expect(open).toBeDisabled();
+
+    act(() => useJLensStore.setState({ modelId: 'm_lfm2' }));
+    expect(screen.getByRole('button', { name: /fit a lens/i })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: /fit a lens/i }));
+    expect(screen.getByLabelText(/one prompt per line/i)).toBeInTheDocument();
+    // The corpus is the caller's choice and is recorded in the recipe (BR-007),
+    // so the form must ask for it rather than defaulting one server-side.
+    expect(screen.getByLabelText(/corpus name/i)).toBeInTheDocument();
+  });
 });
 
 describe('lens-mode disablement is derived from what the stream carries', () => {
