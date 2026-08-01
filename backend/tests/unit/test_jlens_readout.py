@@ -531,3 +531,111 @@ class TestReviewRound3Fixes:
         )
         assert "meta" in ReadoutResponse.model_fields
         assert "kind" not in ReadoutResponse.model_fields
+
+
+# ── mixed precision (found on the cluster, not in any fixture) ──────────────
+
+
+def test_a_readout_survives_a_MIXED_DTYPE_checkpoint():
+    """gemma-2-2b-it died here with "expected BFloat16 but found Half".
+
+    A real checkpoint is not one dtype: the final norm can be bfloat16 while
+    the residual and the unembedding are fp16, and torch RAISES rather than
+    promoting. Every fixture in this file used a single dtype, so nothing
+    caught it until the model ran on the cluster.
+    """
+    import torch
+
+    from src.services.jlens_readout_service import IdentityTransport, ReadoutService
+    from src.schemas.jlens import LensTokenMessage
+
+    d_model, n_vocab = 8, 32
+
+    class Block(torch.nn.Module):
+        def forward(self, hidden, **_):
+            return (hidden * 1.01,)
+
+    class BF16Norm(torch.nn.Module):
+        """A final norm stored in bfloat16, as gemma's is.
+
+        Uses a MATMUL rather than an elementwise multiply, because that is what
+        actually raises. Torch PROMOTES fp16 * bf16 silently, so a fixture built
+        on `*` reproduces the dtypes without reproducing the failure — which is
+        how the first version of this test passed against the broken code.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(
+                torch.eye(d_model, dtype=torch.bfloat16)
+            )
+
+        def forward(self, x):
+            return x @ self.weight
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = torch.nn.ModuleList([Block() for _ in range(2)])
+            # Residuals come out fp16 — a DIFFERENT family from the norm.
+            self.embed = torch.nn.Embedding(16, d_model, dtype=torch.float16)
+            self.norm = BF16Norm()
+            self.config = None
+
+        def forward(self, input_ids=None, **_):
+            hidden = self.embed(input_ids)
+            for b in self.blocks:
+                hidden = b(hidden)[0]
+            return hidden
+
+    class Structure:
+        def __init__(self, m):
+            self.layers_module = m.blocks
+            self.num_layers = 2
+            self.attention_module = None
+            self.residual_norm_module = None
+
+    class Tok:
+        def __call__(self, text, return_tensors=None):
+            return {"input_ids": torch.tensor([[1, 2, 3]])}
+
+        def convert_ids_to_tokens(self, ids):
+            return [f"t{i}" for i in ids] if isinstance(ids, list) else f"t{ids}"
+
+        def decode(self, ids, **_):
+            return "t"
+
+    model = Model()
+    service = ReadoutService(
+        model=model,
+        tokenizer=Tok(),
+        structure=Structure(model),
+        # fp16 unembedding against a bfloat16 norm: the exact cluster shape.
+        unembedding=torch.randn(n_vocab, d_model, dtype=torch.float16),
+        model_name="mixed",
+    )
+
+    messages = list(service.stream("abc", [IdentityTransport()], top_n=3))
+    tokens = [m for m in messages if isinstance(m, LensTokenMessage)]
+    assert tokens, "the readout produced nothing on a mixed-dtype model"
+    for t in tokens:
+        for row in t.results[0].top_tokens:
+            assert len(row) == 3
+
+    # SECOND FAMILY MISMATCH, at the matvec rather than the norm. After the
+    # norm is cast correctly the residual and a fp16 unembedding agree by
+    # accident, so this is the only shape that exercises the W_U cast: a
+    # bfloat16 unembedding against an fp16 residual.
+    bf16_service = ReadoutService(
+        model=model,
+        tokenizer=Tok(),
+        structure=Structure(model),
+        unembedding=torch.randn(n_vocab, d_model, dtype=torch.bfloat16),
+        model_name="mixed-unembedding",
+    )
+    bf16_tokens = [
+        m
+        for m in bf16_service.stream("abc", [IdentityTransport()], top_n=3)
+        if isinstance(m, LensTokenMessage)
+    ]
+    assert bf16_tokens, "the readout died on a bfloat16 unembedding"
