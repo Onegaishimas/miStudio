@@ -561,3 +561,285 @@ async def probe(request: ProbeRequest) -> List[ProbeScore]:
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="Probe backend is not bound yet; see /jlens/readout.",
     )
+
+
+# ── annotation, interventions, watchlists, replication ─────────────────────
+#
+# These four services were implemented, unit-tested and documented while NO
+# user or agent could call any of them — the same shape as the 16 MCP tools
+# this project once shipped registered with nothing. The reachability harness
+# does not catch it, because a harness asserts the surfaces that EXIST.
+
+
+class AnnotateRequest(BaseModel):
+    """Annotate one SAE feature's decoder direction (BR-012..015)."""
+
+    model_id: str
+    sae_id: str
+    feature_id: str
+    layer: int
+    direction: List[float]
+    label_tokens: List[str] = []
+    top_k: int = 8
+
+
+class AnnotationResponse(BaseModel):
+    feature_id: str
+    layer: int
+    lens_kurtosis: Optional[float]
+    #: UNKNOWN when no band report exists for this model. That is a real
+    #: answer, not a failure: without boundaries measured HERE there is no
+    #: principled middle of the stack to classify against.
+    workspace_class: str
+    top_tokens: List[str]
+    disagreement_score: Optional[float] = None
+    has_disagreement: bool = False
+    #: Rung 0. Carried so a caller cannot receive an annotation stripped of
+    #: what it is (BR-019).
+    evidence_rung: int = 0
+
+
+@router.post(
+    "/annotate",
+    response_model=AnnotationResponse,
+    summary="Annotate a weight-space direction through the lens",
+)
+async def annotate(
+    request: AnnotateRequest, db: AsyncSession = Depends(get_db)
+) -> AnnotationResponse:
+    """Project a feature's decoder direction and describe it in J-space.
+
+    TWO INDEPENDENT FIELDS (BR-012). The geometric field alone labels every
+    MOTOR feature a workspace feature, because a motor direction is sharp too —
+    so `workspace_class` is reported separately and is UNKNOWN without a band
+    report rather than guessed.
+    """
+    import torch
+
+    from ....models.model import Model
+    from ....services.jlens_annotation import annotate_direction, label_disagreement
+    from ....services.jlens_band_service import load_band_report
+    from ....services.jlens_readout_service import IdentityTransport
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"No model {request.model_id!r}")
+
+    try:
+        loaded = load_for_readout(record)
+    except ModelNotAvailable as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+    direction = torch.tensor(request.direction, dtype=torch.float32)
+    if direction.numel() != loaded.d_model:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"direction has {direction.numel()} entries but this model's "
+                f"d_model is {loaded.d_model}"
+            ),
+        )
+
+    ref = _service().find(loaded.name)
+    band_report = _band_report_object(ref.directory) if ref else None
+
+    annotation = annotate_direction(
+        direction,
+        IdentityTransport(),
+        loaded.unembedding,
+        layer=request.layer,
+        feature_id=request.feature_id,
+        decode=lambda ids: loaded.tokenizer.convert_ids_to_tokens(ids),
+        top_k=request.top_k,
+        band_report=band_report,
+    )
+
+    score = None
+    if request.label_tokens:
+        score = label_disagreement(request.label_tokens, annotation.top_tokens)
+
+    return AnnotationResponse(
+        feature_id=annotation.feature_id,
+        layer=annotation.layer,
+        lens_kurtosis=annotation.lens_kurtosis,
+        workspace_class=annotation.workspace_class.value,
+        top_tokens=annotation.top_tokens,
+        disagreement_score=score,
+        has_disagreement=bool(score is not None and score >= 0.8),
+    )
+
+
+def _band_report_object(directory):
+    """Adapt a stored band report to the shape `classify_behaviour` reads.
+
+    Returns None when there is none, so the behavioural field stays UNKNOWN
+    rather than being classified against boundaries that do not exist.
+    """
+    from ....services.jlens_band_service import load_band_report
+
+    stored = load_band_report(directory)
+    if stored is None or stored.get("boundaries") is None:
+        return None
+
+    class _Bands:
+        boundaries = stored["boundaries"]
+
+    return _Bands()
+
+
+class InterventionRequest(BaseModel):
+    """Run an intervention. The control is NOT optional (BR-018)."""
+
+    model_id: str
+    primitive: str
+    layers: List[int]
+    positions: List[int]
+    prompt: str
+    direction: Optional[List[float]] = None
+    strength: float = 1.0
+    control_seed: int = 0
+    control_k: int = 8
+
+
+class InterventionResponse(BaseModel):
+    primitive: str
+    parameters: Dict[str, Any]
+    intervened_outcome: float
+    control_outcome: float
+    #: THE finding. The raw intervened outcome is not one.
+    excess_over_control: float
+    control: Dict[str, Any]
+    layers: List[int]
+    positions: List[int]
+    #: Rung 2. Reaching it REQUIRES the size-matched control above; without one
+    #: there is no result here at all (BR-018).
+    evidence_rung: int = 2
+
+
+class WatchlistRequest(BaseModel):
+    name: str
+    artifact_ref: str
+    scoring_definition: str
+    concepts: List[Dict[str, Any]]
+    control_set: List[str] = []
+
+
+class WatchlistResponse(BaseModel):
+    name: str
+    artifact_ref: str
+    scoring_definition: str
+    concept_count: int
+
+
+@router.post(
+    "/watchlists",
+    response_model=WatchlistResponse,
+    summary="Author a watchlist for runtime handoff",
+)
+async def create_watchlist(request: WatchlistRequest) -> WatchlistResponse:
+    """Validate and echo a watchlist definition (BR-025).
+
+    A watchlist missing its scoring definition or its artifact reference is
+    REFUSED here rather than exported and discovered later: a threshold applied
+    to a differently computed score is a different detector, and the consumer
+    has no way to notice.
+    """
+    from ....services.jlens_watchlist import WatchedConcept, Watchlist
+
+    try:
+        watchlist = Watchlist(
+            name=request.name,
+            concepts=[
+                WatchedConcept(token=c["token"], threshold=float(c["threshold"]))
+                for c in request.concepts
+            ],
+            scoring_definition=request.scoring_definition,
+            artifact_ref=request.artifact_ref,
+            control_set=request.control_set,
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    return WatchlistResponse(
+        name=watchlist.name,
+        artifact_ref=watchlist.artifact_ref,
+        scoring_definition=watchlist.scoring_definition,
+        concept_count=len(watchlist.concepts),
+    )
+
+
+class CostEstimateResponse(BaseModel):
+    operation: str
+    order_of_magnitude_seconds: float
+    order_of_magnitude_peak_bytes: int
+    basis: str
+    is_estimate: bool = True
+
+
+@router.get(
+    "/cost-estimate",
+    response_model=CostEstimateResponse,
+    summary="Estimate an operation's cost BEFORE committing to it",
+)
+async def cost_estimate(
+    operation: str,
+    d_model: int,
+    n_layers: int,
+    n_positions: int = 1,
+    n_prompts: int = 1,
+    n_features: int = 1,
+) -> CostEstimateResponse:
+    """Order-of-magnitude cost for one J-space operation class (BR-028).
+
+    An unknown class is a 400 rather than a cheap default: a small number
+    invites exactly the run it should warn about, and a caller cannot tell
+    "cheap" from "unmeasured".
+    """
+    from ....services.jlens_watchlist import OperationClass, estimate_cost
+
+    try:
+        op = OperationClass(operation)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"unknown operation {operation!r}. Known: "
+                f"{[o.value for o in OperationClass]}"
+            ),
+        )
+
+    est = estimate_cost(
+        op,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_positions=n_positions,
+        n_prompts=n_prompts,
+        n_features=n_features,
+    )
+    return CostEstimateResponse(
+        operation=est.operation.value,
+        order_of_magnitude_seconds=est.order_of_magnitude_seconds,
+        order_of_magnitude_peak_bytes=est.order_of_magnitude_peak_bytes,
+        basis=est.basis,
+    )
+
+
+@router.get(
+    "/reports/replication",
+    response_model=Optional[Dict[str, Any]],
+    summary="The recorded replication report (BR-001)",
+)
+async def replication_report(slug: str) -> Optional[Dict[str, Any]]:
+    """Return the stored replication report, or null when none was recorded.
+
+    Published whether favourable or not — there is no filter here, which is the
+    structural half of BR-001.
+    """
+    from ....services.jlens_replication import load_replication_report
+
+    ref = next((a for a in _service().list_artifacts() if a.slug == slug), None)
+    if ref is None:
+        raise HTTPException(status_code=404, detail=f"No artifact {slug!r}")
+    return load_replication_report(ref.directory)
+

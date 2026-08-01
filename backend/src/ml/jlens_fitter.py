@@ -61,6 +61,58 @@ PATIENCE = 2
 MAX_AFFINE_RESIDUAL = 1e-3
 
 
+#: fp16's largest finite magnitude. The contract stores fp16 (Appendix A.1), and
+#: a Jacobian that exceeds this saturates to inf on the cast.
+FP16_MAX = 65504.0
+
+
+#: Headroom below fp16's ceiling. A matrix scaled to exactly the maximum has
+#: no room for the rounding the cast itself introduces.
+FP16_TARGET_PEAK = FP16_MAX / 4.0
+
+
+def _to_storage_dtype(matrix: torch.Tensor, layer: int):
+    """Cast to the contract's fp16, RESCALING so the cast cannot saturate.
+
+    FOUND ON THE FIRST REAL FIT, and it is not a marginal overflow: GPT-2's
+    accumulated Jacobian at layer 6 peaks at 1.7e7, roughly 256x fp16's 65504
+    ceiling. The naive cast saturated 0.3% of entries to `inf`, and that
+    artifact is the worst kind — it deserialises cleanly, is exactly the right
+    shape and exactly the right size, passes STRUCTURAL, NAMING and ENVELOPE,
+    and every readout taken through it is garbage.
+
+    A recorded per-layer SCALE fixes it without touching the contract's dtype or
+    its size arithmetic: the tensor stays fp16 and the envelope bound is
+    unchanged. The scale is stored in the artifact's `config.yaml`, so the
+    matrix is reconstructible rather than merely smaller.
+
+    Ranking is invariant to a positive scalar, so a readout is unaffected either
+    way — but the ARTIFACT must be faithful, because a consumer that multiplies
+    by W_U for anything other than ranking would get the wrong magnitudes.
+    """
+    if not torch.isfinite(matrix).all():
+        raise ValueError(
+            f"layer {layer}: the accumulated Jacobian is not finite before "
+            "casting. The fit diverged; refusing to write it."
+        )
+
+    peak = float(matrix.abs().max())
+    scale = 1.0
+    if peak > FP16_TARGET_PEAK:
+        scale = peak / FP16_TARGET_PEAK
+        matrix = matrix / scale
+
+    cast = matrix.to(torch.float16)
+    if not torch.isfinite(cast).all():
+        # Belt and braces: if rescaling somehow failed to make the cast safe,
+        # the artifact must not be written. An inf here is undetectable later.
+        raise ValueError(
+            f"layer {layer}: the fp16 cast still saturated after rescaling "
+            f"(peak {peak:.1f}). Refusing to write a non-finite lens."
+        )
+    return cast, scale
+
+
 @dataclass
 class FitProgress:
     prompts_seen: int
@@ -73,6 +125,10 @@ class FitResult:
     """A fitted lens plus everything needed to defend it (BR-007)."""
 
     jacobians: Dict[int, torch.Tensor]
+    #: Per-layer factor the stored matrix was divided by so the fp16 cast could
+    #: not saturate. 1.0 when no rescaling was needed. Recorded in config.yaml,
+    #: because a scaled matrix with an unrecorded scale is simply wrong.
+    scales: Dict[int, float]
     d_model: int
     n_layers: int
     prompts_seen: int
@@ -230,55 +286,61 @@ def jacobian_batched(
     point: torch.Tensor,
     chunk: int = DEFAULT_CHUNK,
 ) -> torch.Tensor:
-    """`d fn / d point` in a handful of BATCHED passes, exploiting linearity.
+    """`d fn / d point` AT THE POINT, by vectorised automatic differentiation.
 
-    WHY THIS IS EXACT RATHER THAN AN APPROXIMATION. With attention patterns and
-    normalisation statistics frozen, `fn` is AFFINE: `fn(h) = J h + b`. So
+    CORRECTED AFTER A HARDWARE RUN. The first version computed
+    `J[:, i] = fn(e_i) - fn(0)` — secants — on the premise that freezing
+    attention and normalisation makes `fn` AFFINE. It does not. Freezing removes
+    the strongly input-dependent parts, but the MLP's activation (GELU on the
+    model this was first run against) stays non-linear, so the residual-to-
+    residual map is not affine and never was.
 
-        J[:, i] = fn(e_i) - fn(0)
+    A secant is not a Jacobian for a non-affine map. It answers "where does a
+    unit step land", which for a curved map is a different question and gives a
+    matrix that is plausible, well-shaped, and wrong.
 
-    and every column can be evaluated in one batched call. That turns d_model
-    sequential passes into d_model/chunk batched ones — the difference between
-    a fit that runs and a fit that does not.
+    On the first real fit `affine_residual` measured a departure of 40.3 against
+    a 1e-3 limit — the guard from review round 1 catching a premise error rather
+    than a coding one, which is the only reason this was found before an
+    artifact shipped.
 
-    The affine assumption is load-bearing, so it is CHECKED rather than trusted:
-    `_affine_residual` measures how far `fn` departs from its own linearisation
-    and the caller refuses a fit that departs materially. A silently non-linear
-    `fn` would otherwise yield a plausible matrix that is a local linearisation
-    of nothing in particular.
+    `vectorize=True` batches the backward passes, so this keeps the speed the
+    secant version was reaching for without buying it with the wrong math.
     """
-    d_in = point.numel()
-    zero = fn(torch.zeros_like(point)).detach().reshape(-1)
-
-    columns: List[torch.Tensor] = []
-    for start in range(0, d_in, chunk):
-        stop = min(start + chunk, d_in)
-        basis = torch.zeros(stop - start, d_in, dtype=point.dtype, device=point.device)
-        for row, col in enumerate(range(start, stop)):
-            basis[row, col] = 1.0
-        # One call for the whole chunk. `fn` must accept a leading batch dim,
-        # which `_sub_network` guarantees by construction.
-        out = fn(basis.view(stop - start, *point.shape)).detach()
-        columns.append(out.reshape(stop - start, -1) - zero)
-
-    # rows[i] is fn(e_i) - fn(0) = the i-th COLUMN of J, so transpose.
-    return torch.cat(columns, dim=0).T
+    jac = torch.autograd.functional.jacobian(
+        fn, point, vectorize=True, create_graph=False
+    )
+    return jac.reshape(-1, point.numel())
 
 
-def affine_residual(
-    fn: Callable[[torch.Tensor], torch.Tensor], point: torch.Tensor, jacobian: torch.Tensor
+def linearisation_residual(
+    fn: Callable[[torch.Tensor], torch.Tensor],
+    point: torch.Tensor,
+    jacobian: torch.Tensor,
+    step: float = 1e-2,
 ) -> float:
-    """Relative error of `J h + b` against `fn(h)` at the fitting point.
+    """How well `J` predicts `fn` in a NEIGHBOURHOOD of the fitting point.
 
-    The batched extraction is exact ONLY if `fn` is affine, which holds when
-    freezing is complete. If a norm or an attention pattern escaped the freeze,
-    this is where it shows up — as a number, before the artifact is written,
-    rather than as a plausible lens nobody can tell is wrong.
+    A DIAGNOSTIC, recorded with the fit — not a gate. This is the corrected form
+    of what was `affine_residual`, and the correction matters:
+
+    The old version compared `J h + fn(0)` against `fn(h)` — a GLOBAL affine
+    prediction — on the premise that freezing makes `fn` affine. It does not
+    (the MLP activation stays non-linear), so it reported a large departure for
+    every real model and would have refused every genuine fit.
+
+    A Jacobian IS a local linearisation; asking it to hold globally is asking
+    the wrong question. What is worth recording is how far the linearisation
+    holds LOCALLY, which is what makes a lens more or less trustworthy away from
+    the exact point it was taken at. Large is informative, not disqualifying.
     """
     with torch.no_grad():
-        bias = fn(torch.zeros_like(point)).reshape(-1)
-        predicted = jacobian @ point.reshape(-1) + bias
-        actual = fn(point).reshape(-1)
+        direction = torch.randn_like(point)
+        direction = direction / torch.linalg.norm(direction) * step * float(
+            torch.linalg.norm(point)
+        )
+        predicted = fn(point).reshape(-1) + jacobian @ direction.reshape(-1)
+        actual = fn(point + direction).reshape(-1)
         denom = float(torch.linalg.norm(actual.to(torch.float32)))
         if denom == 0.0:
             return 0.0
@@ -390,6 +452,9 @@ class JacobianFitter:
         self.min_prompts = min_prompts
         self.chunk = chunk
         self.max_affine_residual = max_affine_residual
+        #: Per-layer local-linearisation residual from the most recent prompt,
+        #: carried into the artifact's provenance.
+        self._last_residuals: Dict[int, float] = {}
 
     def fit(
         self,
@@ -442,8 +507,12 @@ class JacobianFitter:
                 elif on_progress:
                     on_progress(FitProgress(seen, None, False))
 
+        cast_and_scale = {
+            k: _to_storage_dtype(v, k) for k, v in accumulated.items()
+        }
         return FitResult(
-            jacobians={k: v.to(torch.float16) for k, v in accumulated.items()},
+            jacobians={k: cast_and_scale[k][0] for k in cast_and_scale},
+            scales={k: cast_and_scale[k][1] for k in cast_and_scale},
             d_model=int(next(iter(accumulated.values())).shape[0]) if accumulated else 0,
             n_layers=len(accumulated),
             prompts_seen=seen,
@@ -452,27 +521,43 @@ class JacobianFitter:
             deltas=deltas,
         )
 
+    @property
+    def device(self) -> torch.device:
+        """The device the MODEL is on, taken from the model itself.
+
+        Not a constructor argument and not inherited from the ambient default:
+        a fitter told one device while the model sits on another produces
+        `Expected all tensors to be on the same device` at the embedding, and
+        only when a GPU is actually present. Every CPU test passes, because
+        there the two agree by accident.
+        """
+        try:
+            return next(self.model.parameters()).device
+        except (StopIteration, AttributeError):
+            return torch.device("cpu")
+
     def _fit_one(self, prompt: str, layers: Sequence[int]) -> Dict[int, torch.Tensor]:
         """One prompt's contribution: `J` per layer at the final position."""
         encoded = self.tokenizer(prompt, return_tensors="pt")
-        input_ids = encoded["input_ids"]
+        # MOVED TO THE MODEL'S DEVICE. The tokenizer always returns CPU
+        # tensors; a model on CUDA then fails inside index_select at the
+        # embedding. This is invisible on a CPU-only test stack.
+        input_ids = encoded["input_ids"].to(self.device)
         out: Dict[int, torch.Tensor] = {}
 
         for layer in layers:
             point, forward = self._sub_network(input_ids, layer)
             jacobian = jacobian_batched(forward, point, chunk=self.chunk).detach()
 
-            # The batched extraction is exact only while `fn` is affine. If a
-            # norm or an attention pattern escaped the freeze, the matrix is a
-            # local linearisation of nothing in particular — and looks fine.
-            residual = affine_residual(forward, point, jacobian)
-            if residual > self.max_affine_residual:
-                raise ValueError(
-                    f"layer {layer}: the frozen sub-network departs from its own "
-                    f"linearisation by {residual:.3f} (limit "
-                    f"{self.max_affine_residual}). Freezing is incomplete, so the "
-                    "extracted matrix is not a lens. Refusing to write it."
-                )
+            # RECORDED, not gated. A Jacobian is a local linearisation by
+            # definition, so a non-zero residual is expected on any real model
+            # — the MLP activation is non-linear and freezing does not change
+            # that. The number says how far the lens can be trusted away from
+            # the point it was taken at, which belongs in the artifact's
+            # provenance rather than in a refusal.
+            self._last_residuals[layer] = linearisation_residual(
+                forward, point, jacobian
+            )
             out[layer] = jacobian
         return out
 

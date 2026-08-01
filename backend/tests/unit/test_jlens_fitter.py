@@ -24,7 +24,7 @@ import torch
 from src.ml.jlens_fitter import (
     MIN_PROMPTS,
     JacobianFitter,
-    affine_residual,
+    linearisation_residual,
     jacobian_batched,
     jacobian_by_jvp,
     merge_shards,
@@ -162,21 +162,78 @@ def test_batched_extraction_agrees_with_the_jvp_reference():
     assert torch.allclose(fast, reference, atol=1e-4)
 
 
-def test_affine_residual_flags_a_map_that_escaped_the_freeze():
-    """An incomplete freeze yields a plausible matrix that is not a lens."""
+def test_linearisation_residual_is_zero_for_a_map_that_really_is_linear():
+    """A DIAGNOSTIC, not a gate — and the distinction was a real correction.
+
+    The earlier `affine_residual` compared a GLOBAL affine prediction against
+    the map, on the premise that freezing attention and norms makes the
+    residual-to-residual map affine. It does not: the MLP activation stays
+    non-linear. On the first real fit that check measured 40.3 against a 1e-3
+    limit and refused a perfectly good fit.
+
+    A Jacobian IS a local linearisation. What is worth recording is how far it
+    holds LOCALLY, which is what this measures.
+    """
     torch.manual_seed(11)
     w = torch.randn(D, D)
     point = torch.randn(D)
 
     linear = batchable(w)
-    assert affine_residual(linear, point, jacobian_batched(linear, point)) < 1e-5
+    assert linearisation_residual(linear, point, jacobian_batched(linear, point)) < 1e-4
 
-    def nonlinear(h):
+
+def test_linearisation_residual_is_LARGER_for_a_curved_map():
+    """Informative, not disqualifying: it says how local the lens is."""
+    torch.manual_seed(12)
+    w = torch.randn(D, D)
+    point = torch.randn(D)
+
+    def curved(h):
         base = h @ w.T if h.dim() > 1 else w @ h
-        return base + torch.tanh(base) * 5.0
+        return base + torch.tanh(base * 3.0) * 5.0
 
-    j = jacobian_batched(nonlinear, point, chunk=3)
-    assert affine_residual(nonlinear, point, j) > 1e-2
+    j = jacobian_batched(curved, point)
+    straight = jacobian_batched(batchable(w), point)
+
+    assert linearisation_residual(curved, point, j) > linearisation_residual(
+        batchable(w), point, straight
+    )
+
+
+def test_the_jacobian_is_the_DERIVATIVE_not_a_secant():
+    """The correction a hardware run forced.
+
+    For a CURVED map the secant `fn(e_i) - fn(0)` and the derivative at the
+    point are different matrices. The secant is what the first implementation
+    computed, on a premise about freezing that was wrong — and it is
+    well-shaped, plausible and not a Jacobian.
+    """
+    torch.manual_seed(13)
+    w = torch.randn(D, D)
+    point = torch.randn(D) * 2.0
+
+    def curved(h):
+        base = h @ w.T if h.dim() > 1 else w @ h
+        return base + torch.tanh(base) * 3.0
+
+    derivative = jacobian_batched(curved, point)
+    reference = jacobian_by_jvp(curved, point)
+
+    # The production path agrees with forward-mode AD at the point...
+    assert torch.allclose(derivative, reference, atol=1e-4)
+
+    # ...and does NOT agree with the secant, which is the point of the fix.
+    zero = curved(torch.zeros_like(point))
+    secant = torch.stack(
+        [
+            curved(torch.eye(D)[i]) - zero
+            for i in range(D)
+        ],
+        dim=1,
+    )
+    assert not torch.allclose(derivative, secant, atol=1e-2), (
+        "the fixture is not curved enough to tell a secant from a derivative"
+    )
 
 
 def test_extraction_is_not_the_transpose():
@@ -386,19 +443,25 @@ class LeakyFitter(JacobianFitter):
         return point, leaky
 
 
-def test_a_fit_whose_freeze_leaked_is_REFUSED_not_written():
-    """The guard must stop the artifact, not annotate it.
+def test_a_nonlinear_sub_network_RECORDS_its_departure_rather_than_being_refused():
+    """Corrected after the first real fit.
 
-    An artifact written here passes STRUCTURAL, NAMING and ENVELOPE validation
-    — it is the right shape and the right size — and reads out plausible
-    nonsense. Refusing at fit time is the only point where it is detectable.
+    The refusal rested on freezing making the map affine. It does not — the
+    MLP activation is non-linear — so the check fired on every real model and
+    would have blocked every genuine fit. The departure is a property of the
+    model worth recording, not a fault worth refusing.
     """
     stack, _, _ = make_stack(21)
     fitter = LeakyFitter(
         stack, Tokenizer(), Structure(stack), freeze_qk=False, min_prompts=1, chunk=3
     )
-    with pytest.raises(ValueError, match="not a lens"):
-        fitter.fit(["abc"])
+    # No longer refused — a non-affine sub-network is the NORMAL case on any
+    # real model, and refusing it refused every genuine fit. The departure is
+    # RECORDED instead, so the artifact says how local its lens is.
+    result = fitter.fit(["abc"])
+    assert result.jacobians
+    assert fitter._last_residuals, "the linearisation residual was not recorded"
+    assert max(fitter._last_residuals.values()) > 0.0
 
 
 def test_a_properly_frozen_fit_is_accepted():
