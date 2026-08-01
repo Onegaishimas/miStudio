@@ -393,6 +393,22 @@ def _validated_report(loaded: Any, artifact_id: Optional[str]):
     # matrix of the wrong shape, a non-square one, or a non-integer key still
     # fails, and reading out at a layer the artifact lacks is refused at read
     # time by the transport rather than papered over here.
+    # HONOUR THE VERDICT RECORDED AT PUBLISH TIME, when it describes this exact
+    # file. The fit validated the artifact with a fixture the caller chose for
+    # the layers they fitted, and that verdict was being thrown away: this path
+    # re-validated with its own hard-coded fixture, which targets mid-stack and
+    # therefore asks a question a top-of-stack partial fit was never fitted to
+    # answer. A published, semantically-valid artifact was refused for failing
+    # a different test than the one it passed.
+    #
+    # `stored_report` returns None if the lens file changed since — a swapped
+    # artifact is revalidated rather than served on a stale verdict.
+    stored = service.stored_report(ref)
+    if stored is not None:
+        report = _StoredReport(stored)
+        _VALIDATION_CACHE[key] = report
+        return report
+
     payload = service._load_payload(ref)  # noqa: SLF001 - same package concern
     present = sorted(int(k) for k in payload) if isinstance(payload, dict) else []
 
@@ -405,6 +421,35 @@ def _validated_report(loaded: Any, artifact_id: Optional[str]):
     )
     _VALIDATION_CACHE[key] = report
     return report
+
+
+class _StoredReport:
+    """A published verdict, presented with the same surface as a fresh one.
+
+    Only the fields consumers actually read are reconstructed. Rebuilding a real
+    ValidationReport would mean re-deriving `serviceable` from parsed enum
+    strings, which is a second implementation of the rule that decides whether
+    an artifact may be served — and two implementations of that rule is exactly
+    how one of them ends up wrong.
+    """
+
+    def __init__(self, stored: Dict[str, Any]) -> None:
+        self._stored = stored
+        self.passed = bool(stored.get("passed"))
+        self.serviceable = bool(stored.get("serviceable"))
+        self.results = stored.get("results", [])
+
+    def summary(self) -> str:
+        return self._stored.get("summary", "recorded at publish time")
+
+    def failing_detail(self) -> str:
+        """Which classes failed, and why — so a refusal is actionable."""
+        bad = [
+            f"{r.get('check')}: {r.get('detail')}"
+            for r in self.results
+            if r.get("status") == "fail"
+        ]
+        return "; ".join(bad) or self.summary()
 
 
 def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = None):
