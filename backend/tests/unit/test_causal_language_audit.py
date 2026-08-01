@@ -169,6 +169,12 @@ _VOCABULARY = (
 #:                                    containing the vocabulary.
 #:   * `circuit_intervention_*.py`  — IS the intervention that EARNS rung 2.
 #:   * `circuit_validation_math.py` — the statistics behind that promotion.
+#:   * `jlens_intervention.py`      — F26/F25: the J-space equivalent, and the
+#:                                    ONLY J-space module that produces a causal
+#:                                    claim. Its docstring says so, which is a
+#:                                    statement about the module rather than a
+#:                                    claim about a finding — the same
+#:                                    distinction the circuit entries rest on.
 #:
 #: Deliberately a short, named list with a reason each: an exemption without a
 #: reason is how an audit stops auditing. These files are still covered by the
@@ -179,6 +185,9 @@ RUNG_TWO_MACHINERY = {
     "circuit_intervention_service.py",
     "circuit_validation_math.py",
     "circuit_faithfulness_service.py",
+    # F25/F26: the J-space equivalent — the only J-space module that produces a
+    # causal claim, and whose docstring says so.
+    "jlens_intervention.py",
 }
 
 ALLOWED_CONTEXT = re.compile(
@@ -501,6 +510,12 @@ class TestJSpaceSurfacesAreDiscovered:
 @pytest.mark.parametrize("path", JSPACE_SURFACES, ids=lambda p: p.name)
 def test_jspace_surface_makes_no_unearned_causal_claim(path):
     """J-space evidence is rung 0 unless an intervention with a control says otherwise."""
+    if path.name in RUNG_TWO_MACHINERY:
+        pytest.skip(
+            f"{path.name} IS the rung-2 machinery — see RUNG_TWO_MACHINERY for "
+            "why. Skipped rather than silently passing, so the exemption stays "
+            "visible in the test output."
+        )
     violations = _offending_lines(path)
     assert not violations, (
         f"{path.name} states a causal claim in user-facing text. J-space "

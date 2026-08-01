@@ -98,6 +98,7 @@ def annotate_direction(
     unembedding: torch.Tensor,
     layer: int,
     feature_id: str,
+    decode,
     top_k: int = 8,
     band_report=None,
     depth_profile: Optional[Dict[int, float]] = None,
@@ -107,12 +108,20 @@ def annotate_direction(
     `transport` is the SAME `LensTransport` the readout uses. `band_report` and
     `depth_profile` are both required for the behavioural field; either being
     absent leaves the class UNKNOWN rather than guessed.
+
+    `decode` IS REQUIRED, not optional. `top_tokens` must be DECODED STRINGS:
+    the field feeds the disagreement queue, which compares them against an
+    existing label's words. Token ids there make every feature disagree
+    maximally — the queue fills with the whole dictionary and says nothing —
+    and they are unreadable to the reviewer who opens it. Same rule the wire
+    format enforces for readouts.
     """
     projected = transport.apply(direction.to(torch.float32), layer)
     logits = unembedding.to(torch.float32) @ projected
 
     kurtosis = excess_kurtosis(logits)
     top_ids = torch.topk(logits, k=min(top_k, logits.numel())).indices.tolist()
+    top_tokens = [str(t) for t in decode(top_ids)]
 
     workspace_class = classify_behaviour(
         layer=layer, band_report=band_report, depth_profile=depth_profile
@@ -123,7 +132,7 @@ def annotate_direction(
         layer=layer,
         lens_kurtosis=kurtosis,
         workspace_class=workspace_class,
-        top_tokens=[str(i) for i in top_ids],
+        top_tokens=top_tokens,
     )
 
 
@@ -218,11 +227,21 @@ def summarise_distribution(annotations: Sequence[FeatureAnnotation]) -> Dict[str
 IMPLAUSIBLE_ALIGNED_FRACTION = 0.5
 
 
-def distribution_is_plausible(summary: Dict[str, float]) -> bool:
+def distribution_is_plausible(summary: Dict[str, float]) -> Optional[bool]:
     """Whether a sweep's shape matches the published distribution.
 
-    Returns a verdict rather than raising: an implausible sweep is a RESULT the
-    user needs to see, and refusing to produce it would hide the evidence that
-    something is mis-scaled.
+    Three-valued, and the third value is the point. `None` means NOT
+    ASSESSABLE: a sweep run without a band report classifies nothing, so every
+    feature is UNKNOWN and the aligned fraction is trivially zero — which the
+    two-valued version reported as PLAUSIBLE. "We measured nothing" reading as
+    "the distribution looks right" is a false reassurance about the one check
+    meant to catch a mis-scaled threshold.
+
+    Otherwise a verdict rather than an exception: an implausible sweep is a
+    RESULT the user needs to see, and refusing to produce it would hide the
+    evidence that something is wrong.
     """
+    classified = summary["total"] - summary["unknown"]
+    if classified <= 0:
+        return None
     return summary["fraction_aligned_excluding_motor"] < IMPLAUSIBLE_ALIGNED_FRACTION

@@ -126,19 +126,21 @@ def test_annotation_uses_the_SAME_transport_as_the_readout():
     transport = IdentityTransport()
 
     ann = annotate_direction(
-        direction, transport, W_U, layer=3, feature_id="f", top_k=4
+        direction, transport, W_U, layer=3, feature_id="f",
+        decode=lambda ids: [f"tok{i}" for i in ids], top_k=4,
     )
 
     # The readout of the same direction, computed directly through the same
     # transport — identical by construction only if the service reuses it.
     expected = torch.topk(W_U @ transport.apply(direction, 3), k=4).indices.tolist()
-    assert ann.top_tokens == [str(i) for i in expected]
+    assert ann.top_tokens == [f"tok{i}" for i in expected]
 
 
 def test_annotation_records_the_geometric_field_as_a_number():
     torch.manual_seed(1)
     ann = annotate_direction(
-        torch.randn(8), IdentityTransport(), torch.randn(40, 8), 3, "f"
+        torch.randn(8), IdentityTransport(), torch.randn(40, 8), 3, "f",
+        decode=lambda ids: [f"tok{i}" for i in ids],
     )
     assert isinstance(ann.lens_kurtosis, float)
     # No band report was supplied, so the behavioural field stays absent.
@@ -240,3 +242,55 @@ def test_the_check_returns_a_verdict_rather_than_raising():
     """
     summary = summarise_distribution(_sweep(n_workspace=90, n_motor=5, n_outside=5))
     assert distribution_is_plausible(summary) is False
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────
+
+
+def test_top_tokens_are_DECODED_STRINGS_not_ids():
+    """Ids here make EVERY feature disagree maximally.
+
+    `top_tokens` feeds the disagreement queue, which compares them against an
+    existing label's WORDS. Against ids the overlap is always empty, so the
+    queue fills with the entire dictionary and tells a reviewer nothing — and
+    what it shows them is unreadable anyway.
+    """
+    torch.manual_seed(3)
+    ann = annotate_direction(
+        torch.randn(8), IdentityTransport(), torch.randn(40, 8), 3, "f",
+        decode=lambda ids: ["spider", "web", "legs", "eight"][: len(ids)],
+        top_k=4,
+    )
+    assert ann.top_tokens[0] == "spider"
+    assert not any(t.isdigit() for t in ann.top_tokens), "ids leaked into top_tokens"
+
+    # And the consequence, stated: a real label overlaps a decoded readout.
+    assert label_disagreement(["spider", "web"], ann.top_tokens) < 1.0
+
+
+def test_a_decoder_is_REQUIRED_not_optional():
+    """Optional means someone will omit it and get ids without noticing."""
+    import inspect
+
+    params = inspect.signature(annotate_direction).parameters
+    assert params["decode"].default is inspect.Parameter.empty
+
+
+def test_a_sweep_that_classified_NOTHING_is_NOT_ASSESSABLE():
+    """"We measured nothing" must not read as "the distribution looks right".
+
+    Without a band report every feature is UNKNOWN and the aligned fraction is
+    trivially zero — which the two-valued version reported as plausible, a
+    false reassurance about the one check meant to catch a mis-scaled
+    threshold.
+    """
+    summary = summarise_distribution(_sweep(n_workspace=0, n_motor=0, n_unknown=40))
+    assert distribution_is_plausible(summary) is None
+
+
+def test_a_partially_classified_sweep_is_still_assessed():
+    """Some UNKNOWN is normal; all UNKNOWN is the case that means nothing ran."""
+    summary = summarise_distribution(
+        _sweep(n_workspace=5, n_motor=10, n_outside=60, n_unknown=25)
+    )
+    assert distribution_is_plausible(summary) is True
