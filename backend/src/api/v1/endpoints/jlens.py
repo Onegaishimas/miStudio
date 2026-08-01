@@ -12,7 +12,7 @@ as logit data under a Jacobian label — that would breach rung discipline
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -132,8 +132,20 @@ async def validate_artifact(
             detail=f"No conformant J-lens artifact directory named {slug!r}",
         )
 
+    # Same correction as the readout path: the artifact declares which layers it
+    # holds. `range(n_layers)` failed every PARTIAL fit with "missing layers
+    # [0..23]" — a fit shape the API, the MCP tool and the UI all offer. The
+    # envelope bound is derived from the count actually present, so a partial
+    # artifact is measured against what it contains rather than a full stack it
+    # never claimed to be.
+    payload = service._load_payload(ref)  # noqa: SLF001 - same package concern
+    present = sorted(int(k) for k in payload) if isinstance(payload, dict) else []
+
     report = service.validate(
-        ref, d_model=d_model, expected_layers=range(n_layers), n_vocab=n_vocab
+        ref,
+        d_model=d_model,
+        expected_layers=present or range(n_layers),
+        n_vocab=n_vocab,
     )
     return ValidationResponse(
         slug=slug,
@@ -371,18 +383,31 @@ def _validated_report(loaded: Any, artifact_id: Optional[str]):
     if cached is not None:
         return cached
 
+    # THE ARTIFACT IS THE AUTHORITY ON WHICH LAYERS IT HAS, not the model's
+    # config. `range(loaded.n_layers)` demanded a full-stack fit, so every
+    # PARTIAL fit failed STRUCTURAL with "missing layers [0..23]" and could
+    # never be served — while the fit API, the MCP tool and the UI all accept a
+    # layer subset. The product offered something it then refused to honour.
+    #
+    # Deriving the expectation from the payload does not weaken the check: a
+    # matrix of the wrong shape, a non-square one, or a non-integer key still
+    # fails, and reading out at a layer the artifact lacks is refused at read
+    # time by the transport rather than papered over here.
+    payload = service._load_payload(ref)  # noqa: SLF001 - same package concern
+    present = sorted(int(k) for k in payload) if isinstance(payload, dict) else []
+
     report = service.validate(
         ref,
         d_model=loaded.d_model,
-        expected_layers=range(loaded.n_layers),
+        expected_layers=present or range(loaded.n_layers),
         n_vocab=loaded.n_vocab,
-        semantic_result=_semantic_check(loaded, ref),
+        semantic_result=_semantic_check(loaded, ref, present),
     )
     _VALIDATION_CACHE[key] = report
     return report
 
 
-def _semantic_check(loaded: Any, ref: Any):
+def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = None):
     """Does the artifact recover a known UNSPOKEN intermediate?
 
     Structure can be perfect while content is absent — a shuffled or
@@ -431,7 +456,16 @@ def _semantic_check(loaded: Any, ref: Any):
     # Mid-band by position in the stack, not by a band constant: no band report
     # is required to say "about two thirds of the way up", and BR-002 forbids a
     # boundary constant anywhere.
+    #
+    # PROBE A LAYER THE ARTIFACT ACTUALLY HAS. On a partial fit the mid-stack
+    # index is usually absent, and reading out there has no Jacobian to apply —
+    # the check would fail for a reason that says nothing about the lens. Fall
+    # back to the present layer nearest the target.
     mid = max(0, int(loaded.n_layers * 2 / 3) - 1)
+    layers = sorted(present) if present else []
+    if layers and mid not in layers:
+        mid = min(layers, key=lambda candidate: abs(candidate - mid))
+
     return check_semantic(
         top_at,
         prompt=SEMANTIC_FIXTURE_PROMPT,

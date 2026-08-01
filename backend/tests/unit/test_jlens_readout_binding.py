@@ -388,3 +388,128 @@ def test_the_model_is_loaded_in_ITS_OWN_dtype_not_a_forced_one():
     )
     # The forced-dtype path survives only as a FALLBACK, and says so.
     assert "falling back to the" in source
+
+
+# ---------------------------------------------------------------------------
+# A PARTIAL fit must be servable
+#
+# Found on the cluster with a published, semantically-valid artifact: the
+# Jacobian readout was refused with "no serviceable validation report". The fit
+# API, the MCP tool and the UI all accept a LAYER SUBSET, but both validation
+# paths passed `expected_layers=range(model.n_layers)` — so a two-layer artifact
+# failed STRUCTURAL with "missing layers [0..23]" and could never be served.
+# The product offered a shape it then refused to honour.
+#
+# The semantic probe had the same assumption: it targeted mid-stack regardless
+# of which layers the artifact contained, so on a partial fit it read out at a
+# layer with no Jacobian to apply.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * expected_layers back to range(n_layers)   -> "partial fit validates" fails
+#   * semantic layer back to a fixed mid        -> "probes a present layer" fails
+# ---------------------------------------------------------------------------
+
+
+def _committed_artifact(tmp_path, layers, d_model=8):
+    """A real artifact directory, laid out the way `find` expects."""
+    import torch
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    ref = service.write_staged(
+        "org/model",
+        {l: torch.randn(d_model, d_model) for l in layers},
+        "corpus: partial\n",
+    )
+    final = tmp_path / ref.slug
+    ref.directory.rename(final)
+    return service
+
+
+class _Loaded:
+    name = "org/model"
+    d_model = 8
+    n_layers = 26
+    n_vocab = 256
+    model = object()
+    tokenizer = object()
+    structure = object()
+    unembedding = None
+
+
+def test_a_partial_fit_validates_through_the_real_readout_binding(tmp_path, monkeypatch):
+    """Calls `_validated_report` ITSELF — the function the readout uses.
+
+    An earlier version of this test called `service.validate(...)` with the
+    layer list already computed, which tested a reimplementation of the fix
+    rather than the fix. Both mutation controls survived against it.
+    """
+    from src.api.v1.endpoints import jlens
+    from src.services.jlens_validation import CheckClass, CheckResult, CheckStatus
+
+    service = _committed_artifact(tmp_path, [24, 25])
+    monkeypatch.setattr(jlens, "_service", lambda: service)
+    jlens._VALIDATION_CACHE.clear()
+
+    seen = {}
+
+    def fake_semantic(loaded, ref, present=None):
+        seen["present"] = list(present or [])
+        return CheckResult(CheckClass.SEMANTIC, CheckStatus.PASS, "stubbed")
+
+    monkeypatch.setattr(jlens, "_semantic_check", fake_semantic)
+
+    report = jlens._validated_report(_Loaded(), None)
+
+    structural = next(r for r in report.results if r.check.value == "structural")
+    assert structural.status.value == "pass", (
+        f"a two-layer artifact failed STRUCTURAL through the readout binding: "
+        f"{structural.detail}. The fit API, the MCP tool and the UI all accept a "
+        "layer subset, so a partial fit must be servable"
+    )
+    assert report.serviceable, f"partial artifact not serviceable: {report.summary()}"
+    assert seen["present"] == [24, 25], (
+        "the semantic check was not told which layers the artifact holds, so it "
+        "cannot avoid probing one that is absent"
+    )
+
+
+def test_the_semantic_check_probes_a_layer_the_artifact_actually_holds(monkeypatch):
+    """Calls `_semantic_check` ITSELF and records the layer it targets."""
+    from src.api.v1.endpoints import jlens
+    from src.services import jlens_readout_service, jlens_validation
+
+    targeted = {}
+
+    def fake_check_semantic(readout, prompt, layer, expected_intermediate, top_k=8):
+        targeted["layer"] = layer
+        from src.services.jlens_validation import CheckClass, CheckResult, CheckStatus
+
+        return CheckResult(CheckClass.SEMANTIC, CheckStatus.PASS, "stubbed")
+
+    monkeypatch.setattr(jlens_validation, "check_semantic", fake_check_semantic)
+    monkeypatch.setattr(
+        jlens_readout_service, "ReadoutService", lambda **kw: object()
+    )
+    monkeypatch.setattr(
+        jlens_readout_service, "JacobianTransport", lambda j: object()
+    )
+
+    class _Svc:
+        def _load_payload(self, ref):
+            return {24: None, 25: None}
+
+    monkeypatch.setattr(jlens, "_service", lambda: _Svc())
+
+    # Mid-stack for a 26-layer model is 16, which this artifact does NOT hold.
+    jlens._semantic_check(_Loaded(), object(), [24, 25])
+    assert targeted["layer"] == 24, (
+        f"the probe targeted layer {targeted['layer']}, which the artifact does "
+        "not hold — the readout there has no Jacobian to apply and the check "
+        "would fail for a reason that says nothing about the lens"
+    )
+
+    # A full fit keeps the mid-stack target unchanged.
+    jlens._semantic_check(_Loaded(), object(), list(range(26)))
+    assert targeted["layer"] == 16
