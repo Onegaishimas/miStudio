@@ -8,7 +8,14 @@
  */
 
 import { fetchAPI } from './client';
-import type { ReadoutRequest, ReadoutResponse } from '../types/jlens';
+import type {
+  JLensArtifactSummary,
+  JLensFitAccepted,
+  JLensFitRequest,
+  JLensValidationResponse,
+  ReadoutRequest,
+  ReadoutResponse,
+} from '../types/jlens';
 
 export const jlensApi = {
   /**
@@ -21,6 +28,32 @@ export const jlensApi = {
    */
   readout: (request: ReadoutRequest) =>
     fetchAPI<ReadoutResponse>('/jlens/readout', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  /** Artifacts present in the mounted registry. Presence, not validity. */
+  listArtifacts: () => fetchAPI<JLensArtifactSummary[]>('/jlens/artifacts'),
+
+  /**
+   * Run the validation suite. The model's dimensions are required because the
+   * envelope bound must come from the model the artifact was fitted for — a
+   * bound derived from the wrong model passes while missing a real
+   * materialisation.
+   */
+  validateArtifact: (
+    slug: string,
+    dims: { d_model: number; n_layers: number; n_vocab: number }
+  ) =>
+    fetchAPI<JLensValidationResponse>(
+      `/jlens/artifacts/${encodeURIComponent(slug)}/validate` +
+        `?d_model=${dims.d_model}&n_layers=${dims.n_layers}&n_vocab=${dims.n_vocab}`,
+      { method: 'POST' }
+    ),
+
+  /** Queue a fit. GPU-bound and long-running; poll the task id. */
+  fit: (request: JLensFitRequest) =>
+    fetchAPI<JLensFitAccepted>('/jlens/fit', {
       method: 'POST',
       body: JSON.stringify(request),
     }),

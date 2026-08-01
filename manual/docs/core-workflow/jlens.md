@@ -82,10 +82,35 @@ When a Jacobian artifact is in use, the strip carries its identity and the full 
 recipe: target layer, attention-gradient treatment, position scope, aggregation, corpus,
 prompt count, sequence length and dtype.
 
+## Fitting a lens
+
+The Jacobian lens needs an artifact fitted for **the exact weights you are reading**. Most
+models have no pre-fitted lens, so fitting is the normal path rather than a fallback.
+
+The **J-lens artifact** strip above the readout shows whether one exists for the selected
+model, and lets you run the validation suite against it. Fitting itself is a GPU job —
+queue it from an agent with `fit_jlens_artifact`, or via `POST /api/v1/jlens/fit`. It
+refuses a corpus below **100 prompts**, because an under-fitted lens is indistinguishable
+from a good one by inspection.
+
+### Two verdicts, and they are not the same
+
+Validation reports six checks and two verdicts:
+
+- **Serviceable** — the four checks that bear on local correctness passed, so miStudio can
+  read out with this artifact.
+- **Cleared for handover** — all six passed, including the two that compare against a live
+  external consumer. Those two cannot run without that consumer, so a freshly fitted
+  artifact is normally *serviceable but not yet cleared*. That is not a fault.
+
+An artifact fitted for a different model is **refused**, not adapted. A base model and its
+instruction-tuned variant have different weights, and a lens from one applied to the other
+produces a fluent, wrong readout — so the check is on identity, not on name similarity.
+
 ## Limits today
 
-- Only the logit lens is available; Jacobian and Diff activate once a fitted artifact
-  exists for the model.
 - No band report exists yet, so no band shading appears anywhere.
 - The readout is request/response rather than streamed, so very long prompts are refused
   rather than trickled in — readout cost grows with the number of positions.
+- One model stays resident at a time. Switching models evicts the previous one, because a
+  readout needs the whole model loaded and this workbench shares a GPU with serving.

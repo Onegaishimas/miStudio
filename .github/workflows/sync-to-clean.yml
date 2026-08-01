@@ -31,11 +31,16 @@ jobs:
           rm -rf .claude/
           rm -f CLAUDE.md
           rm -rf backups/
-          # docs/ is dev-internal EXCEPT the vendored interchange contract:
-          # docs/schemas/cluster-definition-v1.json is the frozen public
-          # schema — the mirror's schema-sync test requires it, and
-          # consumers of the public repo need it, so preserve it.
-          find docs/ -mindepth 1 -maxdepth 1 ! -name schemas -exec rm -rf {} +
+          # docs/ is dev-internal EXCEPT the vendored public contracts:
+          #   docs/schemas/*.json    — frozen interchange schemas
+          #   docs/mcp-contract.md   — the generated MCP tool surface
+          # Both are required by mirror tests AND by consumers of the public
+          # repo. Stripping mcp-contract.md left the mirror's Backend Tests red
+          # on EVERY run from 2026-07-26 onward: the test asserts a file the
+          # sync deleted, so it could never pass there while the same suite
+          # stayed green in this repo.
+          find docs/ -mindepth 1 -maxdepth 1 \
+            ! -name schemas ! -name mcp-contract.md -exec rm -rf {} +
           rm -rf scripts/
           rm -rf .understand-anything/
           echo "Removed excluded files"

@@ -14,10 +14,13 @@ as logit data under a Jacobian label — that would breach rung discipline
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.config import settings
+from ....core.deps import get_db
 from ....schemas.jlens import (
     LensDoneMessage,
     LensMetaMessage,
@@ -26,7 +29,11 @@ from ....schemas.jlens import (
     ProbeScore,
     ReadoutRequest,
 )
-from ....services.jlens_artifact_service import JLensArtifactService
+from ....services.jlens_artifact_service import (
+    ArtifactNotValidated,
+    JLensArtifactService,
+)
+from ....services.jlens_model_registry import ModelNotAvailable, load_for_readout
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +151,153 @@ async def validate_artifact(
     )
 
 
+class FitRequest(BaseModel):
+    """Start a fit. Prompts are supplied rather than sampled server-side.
+
+    The corpus is part of the recipe (BR-007), so it is the caller's choice and
+    is recorded in `config.yaml`. A server-chosen default corpus would produce
+    artifacts whose provenance says nothing.
+    """
+
+    model_id: str
+    prompts: List[str]
+    layers: Optional[List[int]] = None
+    freeze_qk: bool = True
+    corpus_name: str = "unspecified"
+
+
+class FitAccepted(BaseModel):
+    task_id: str
+    model_id: str
+    queue: str
+
+
+@router.post(
+    "/fit",
+    response_model=FitAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Fit a J-lens artifact for a model",
+)
+async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAccepted:
+    """Queue a fit. GPU-bound and long-running, so it never runs inline.
+
+    The prompt floor (Appendix A.2) is enforced by the fitter itself and
+    REFUSED rather than warned about: an under-fitted lens is indistinguishable
+    from a fitted one by inspection.
+    """
+    from ....models.model import Model
+    from ....workers.jlens_fit_tasks import fit_jlens_artifact
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    task = fit_jlens_artifact.delay(
+        model_id=request.model_id,
+        prompts=request.prompts,
+        layers=request.layers,
+        freeze_qk=request.freeze_qk,
+        corpus_name=request.corpus_name,
+    )
+    return FitAccepted(task_id=task.id, model_id=request.model_id, queue="extraction")
+
+
+class BandReportResponse(BaseModel):
+    """A model's measured profile and the boundaries it does or does not support.
+
+    `boundaries` is nullable and a null is the HONEST answer, not a missing
+    value: bands are drawn only from a report computed for this model, and
+    there is no default anywhere in the product (BR-002). The client renders
+    nothing when this is null.
+    """
+
+    model_id: str
+    has_bands: bool
+    boundaries: Optional[Dict[str, int]]
+    derivation: str
+    control_seed: Optional[int]
+    profiles: List[Dict[str, Any]]
+
+
+class GateResponse(BaseModel):
+    model_id: str
+    decision: str
+    rationale: str
+    blocking: bool
+    has_bands: bool
+
+
+@router.get(
+    "/artifacts/{slug}/band-report",
+    response_model=Optional[BandReportResponse],
+    summary="This model's own sensory / workspace / motor boundaries",
+)
+async def band_report(slug: str) -> Optional[BandReportResponse]:
+    """Return the stored band report, or NULL when there is none.
+
+    A null body is the honest answer and the client draws no bands (BR-002).
+    It is not a 404: the artifact exists, it simply has no report yet, and
+    those are different facts. Boundaries measured on another model are never
+    substituted — there is no default anywhere in the product.
+    """
+    from ....services.jlens_band_service import load_band_report
+
+    ref = next((a for a in _service().list_artifacts() if a.slug == slug), None)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No conformant J-lens artifact directory named {slug!r}",
+        )
+
+    stored = load_band_report(ref.directory)
+    if stored is None:
+        return None
+
+    return BandReportResponse(
+        model_id=stored.get("model_id", slug),
+        has_bands=stored.get("boundaries") is not None,
+        boundaries=stored.get("boundaries"),
+        derivation=stored.get("derivation", ""),
+        control_seed=stored.get("control_seed"),
+        profiles=stored.get("profiles", []),
+    )
+
+
+@router.get(
+    "/artifacts/{slug}/gate",
+    response_model=Optional[GateResponse],
+    summary="The recorded Phase-0 GO / NO-GO decision",
+)
+async def gate(slug: str) -> Optional[GateResponse]:
+    """Return the recorded gate decision, or NULL when none has been made.
+
+    NO_GO reads back exactly like GO and is a complete, publishable outcome
+    (BR-003) — not an error state and not an absence.
+    """
+    from ....services.jlens_band_service import load_gate
+
+    ref = next((a for a in _service().list_artifacts() if a.slug == slug), None)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No conformant J-lens artifact directory named {slug!r}",
+        )
+
+    stored = load_gate(ref.directory)
+    if stored is None:
+        return None
+    return GateResponse(
+        model_id=stored.get("model_id", slug),
+        decision=stored["decision"],
+        rationale=stored.get("rationale", ""),
+        blocking=stored.get("blocking", True),
+        has_bands=stored.get("has_bands", False),
+    )
+
+
 class ReadoutResponse(BaseModel):
     """Non-streaming envelope: the meta message plus its token messages.
 
@@ -161,30 +315,224 @@ class ReadoutResponse(BaseModel):
     tokens: List[LensTokenMessage]
 
 
+# Validation is cached per (slug, mtime, size). Without this, EVERY Jacobian
+# readout re-runs the suite — including the SEMANTIC check, which is itself a
+# full readout — so each request paid for two readouts plus a revalidation. The
+# key includes mtime and size so a replaced artifact is revalidated rather than
+# served on a stale verdict.
+_VALIDATION_CACHE: Dict[tuple, Any] = {}
+
+
+def _validated_report(loaded: Any, artifact_id: Optional[str]):
+    """Locate and validate the artifact for THIS model, or refuse.
+
+    WEIGHT IDENTITY IS PART OF THE CHECK (BR-031, FPRD §3.4). The artifact slug
+    is derived from the repo id, so an artifact fitted for a base model has a
+    different slug from its instruction-tuned variant. Accepting an
+    `artifact_id` that does not match this model's own slug would serve a lens
+    fitted for DIFFERENT WEIGHTS — which produces a complete, plausible readout
+    and is undetectable downstream. Checking the model NAME alone is what makes
+    that mistake easy, so the comparison is on the slug the fit would produce.
+
+    The SEMANTIC check runs here because it needs the loaded model; the two
+    consumer-interop classes cannot run without a live external consumer and are
+    reported NOT_RUN, which is why serving is gated on `serviceable` rather than
+    `passed`.
+    """
+    from ....services.jlens_artifact_service import slug_for
+
+    service = _service()
+    expected = slug_for(loaded.name)
+    if artifact_id and artifact_id != expected:
+        raise ArtifactNotValidated(
+            f"artifact {artifact_id!r} was not fitted for {loaded.name} "
+            f"(expected slug {expected!r}). A lens fitted for different weights "
+            "produces a complete, plausible readout that is wrong."
+        )
+
+    ref = service.find(loaded.name)
+    if ref is None:
+        raise FileNotFoundError(
+            f"No J-lens artifact for {loaded.name}. The logit lens needs none; "
+            "the Jacobian lens does — fit and validate one first."
+        )
+
+    stat = ref.lens_path.stat()
+    key = (ref.slug, stat.st_mtime_ns, stat.st_size, loaded.d_model, loaded.n_layers)
+    cached = _VALIDATION_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    report = service.validate(
+        ref,
+        d_model=loaded.d_model,
+        expected_layers=range(loaded.n_layers),
+        n_vocab=loaded.n_vocab,
+        semantic_result=_semantic_check(loaded, ref),
+    )
+    _VALIDATION_CACHE[key] = report
+    return report
+
+
+def _semantic_check(loaded: Any, ref: Any):
+    """Does the artifact recover a known UNSPOKEN intermediate?
+
+    Structure can be perfect while content is absent — a shuffled or
+    zero-initialised J is the right shape and the right size and passes every
+    other local class. The fixture's answer deliberately appears in neither the
+    prompt nor the output, because a token present in the prompt is recoverable
+    by an artifact that encodes nothing.
+    """
+    from ....services.jlens_readout_service import JacobianTransport, ReadoutService
+    from ....services.jlens_validation import check_semantic
+
+    service = _service()
+    payload = service._load_payload(ref)  # noqa: SLF001 - same package concern
+    if payload is None:
+        from ....services.jlens_validation import CheckClass, CheckResult, CheckStatus
+
+        return CheckResult(
+            CheckClass.SEMANTIC, CheckStatus.FAIL, "artifact did not deserialize"
+        )
+
+    jacobians = {int(k): v for k, v in payload.items()}
+    readout = ReadoutService(
+        model=loaded.model,
+        tokenizer=loaded.tokenizer,
+        structure=loaded.structure,
+        unembedding=loaded.unembedding,
+        model_name=loaded.name,
+    )
+    # Built ONCE. JacobianTransport casts every matrix to the compute dtype in
+    # its constructor — deliberately, so `apply` does not copy a d_model^2
+    # matrix per call — and constructing it inside the closure moved that cost
+    # back to per-invocation, over the whole artifact.
+    transport = JacobianTransport(jacobians)
+
+    def top_at(prompt: str, layer: int, top_k: int):
+        last = None
+        for message in readout.stream(prompt, [transport], layers=[layer], top_n=top_k):
+            if isinstance(message, LensTokenMessage):
+                last = message
+        if last is None:
+            # An empty stream is a FAILED semantic check, not a NameError and
+            # not an empty pass — the distinction this feature exists for.
+            raise ValueError("readout produced no token messages")
+        return last.results[0].top_tokens[0]
+
+    # Mid-band by position in the stack, not by a band constant: no band report
+    # is required to say "about two thirds of the way up", and BR-002 forbids a
+    # boundary constant anywhere.
+    mid = max(0, int(loaded.n_layers * 2 / 3) - 1)
+    return check_semantic(
+        top_at,
+        prompt=SEMANTIC_FIXTURE_PROMPT,
+        layer=mid,
+        expected_intermediate=SEMANTIC_FIXTURE_ANSWER,
+    )
+
+
+# The intermediate appears in NEITHER the prompt nor the expected output, so
+# recovering it cannot be explained by the artifact encoding nothing.
+SEMANTIC_FIXTURE_PROMPT = "The number of legs on the animal that spins webs is"
+SEMANTIC_FIXTURE_ANSWER = "spider"
+
+
 @router.post(
     "/readout",
     response_model=ReadoutResponse,
     summary="Position x layer lens readout",
 )
-async def readout(request: ReadoutRequest) -> ReadoutResponse:
-    """Return a position x layer readout in the upstream wire format.
+async def readout(
+    request: ReadoutRequest, db: AsyncSession = Depends(get_db)
+) -> ReadoutResponse:
+    """Return a position x layer readout in the upstream wire format (BR-029).
 
-    NOTE the model-resolution and service-construction wiring lands with
-    feature 021 (artifact lifecycle), which owns model loading for J-space.
-    Until then this endpoint validates the request and reports that no readout
-    backend is bound, rather than returning a fabricated stream — a plausible
-    empty readout would be indistinguishable from a real one with no content.
+    LOGIT NEEDS NO ARTIFACT (BR-005) and is the default. A JACOBIAN_LENS
+    request requires a VALIDATED artifact: the schema already refuses one
+    without an `artifact_id`, and this handler additionally refuses an artifact
+    that has not passed the suite. Falling back to identity in either case
+    would serve logit data under a Jacobian label — a lower evidence rung in a
+    higher rung's clothing (BR-019).
     """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "Readout backend is not bound yet. The service and wire format are "
-            "implemented and tested (feature 022); model resolution and "
-            "artifact loading land with feature 021. Returning an empty "
-            "readout here would be indistinguishable from a real readout with "
-            "no content."
-        ),
+    from ....models.model import Model
+    from ....services.jlens_readout_service import (
+        IdentityTransport,
+        JacobianTransport,
+        LensTransport,
+        ReadoutService,
+        ReadoutTooLarge,
     )
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    model_record = result.scalar_one_or_none()
+    if model_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    try:
+        loaded = load_for_readout(model_record)
+    except ModelNotAvailable as exc:
+        # 409, not 500: the request is well-formed and the server is healthy —
+        # the model simply is not in a state that can serve a readout, and the
+        # user can act on that.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+    transports: List[LensTransport] = []
+    for lens_type in request.types:
+        if lens_type == "LOGIT_LENS":
+            transports.append(IdentityTransport())
+            continue
+        try:
+            jacobians = _service().load_for_readout(
+                loaded.name, report=_validated_report(loaded, request.artifact_id)
+            )
+        except (ArtifactNotValidated, FileNotFoundError) as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        transports.append(JacobianTransport(jacobians))
+
+    service = ReadoutService(
+        model=loaded.model,
+        tokenizer=loaded.tokenizer,
+        structure=loaded.structure,
+        unembedding=loaded.unembedding,
+        model_name=loaded.name,
+    )
+
+    meta = None
+    tokens: List[LensTokenMessage] = []
+    try:
+        for message in service.stream(
+            request.prompt,
+            transports=transports,
+            layers=request.layers,
+            top_n=request.top_n,
+        ):
+            if isinstance(message, LensMetaMessage):
+                meta = message
+            elif isinstance(message, LensTokenMessage):
+                tokens.append(message)
+    except ReadoutTooLarge as exc:
+        # 413, not 400: the request is valid and simply too expensive, and the
+        # message carries the numbers so the caller can shrink it.
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    if meta is None:
+        # Never returned as an empty success: an empty readout is
+        # indistinguishable from a real one with no content, which is the
+        # failure mode this whole feature is built to avoid.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Readout produced no meta message",
+        )
+
+    return ReadoutResponse(meta=meta, tokens=tokens)
 
 
 @router.post(

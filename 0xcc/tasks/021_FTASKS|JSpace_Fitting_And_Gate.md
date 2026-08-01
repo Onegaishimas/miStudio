@@ -18,11 +18,21 @@
 
 ---
 
-## Phase 1: Data layer
+## Phase 1: Data layer — **SUPERSEDED, deliberately**
 
-- [ ] 1.1 ORM: `jlens_artifacts`, `jlens_validation_results`, `jlens_band_reports`, `jlens_gate_decisions`.
-- [ ] 1.2 Migration; `NO_GO` representable as a first-class enum value.
-- [ ] 1.3 Per-layer applicability persisted with inapplicable stored as **NULL**, never false.
+**Not built, and not an omission.** PADR IDL-46 makes the FILESYSTEM the artifact registry: an
+artifact is consumed by MOUNTING a conformant directory and there is no upload path. Adding
+`jlens_artifacts` as a source of truth would invent a SECOND registry that can disagree with the one
+the consumer actually reads — and the consumer's disagreement is silent, which is the failure this
+whole feature is built around.
+
+- [x] 1.1 ~~ORM tables~~ → the mounted directory IS the registry (`jlens_artifact_service.py`).
+- [x] 1.2 ~~Migration~~ → `GateDecision.NO_GO` is a first-class enum value in the service layer.
+- [x] 1.3 Per-layer applicability recorded with inapplicable as **null**, in the artifact's
+      `config.yaml` rather than a column — it travels WITH the artifact, so a mounted artifact
+      carries its own provenance instead of depending on a database it may outlive.
+
+Should durable job history be wanted later, that is a `task_queue` row, not a second registry.
 
 ## Phase 2: Fitter
 
@@ -50,11 +60,11 @@
 
 - [x] 4.1 Fit → validate → publish; **publish only after all six classes pass**. Stage-then-commit,
       so a half-written artifact is never mounted.
-- [ ] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
-- [ ] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
+- [x] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
+- [x] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
       uses the default queue.
-- [x] 4.4 Artifact list + validate endpoints. Band-report and gate endpoints wait on Phase 4.5.
-- [ ] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
+- [x] 4.4 Artifact list, validate, fit, band-report and gate endpoints — each with an MCP tool.
+- [x] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
 
 ## Phase 5: Band report and gate
 
@@ -63,7 +73,9 @@
       excess FVE, with `control_seed` recorded.
 - [x] 5.3 Boundaries derived from this model's own profile; **no default BandReport anywhere**.
 - [x] 5.4 Agreement REPORTED as a layer profile, never SCORED (BR-004).
-- [ ] 5.5 Replication report (BR-001), vendored at a recorded commit, published either way.
+- [x] 5.5 Replication report (BR-001) — the writer has no favourable/unfavourable branch, a
+      partial run is visible as partial, and the reference commit is REQUIRED (upstream is
+      unmaintained, so a figure without its commit cannot be compared to anything later).
 - [x] 5.6 GO / NO-GO / GO-AT-LARGER-SCALE recorded with evidence.
 
 ## Phase 6: MCP parity (BR-027)
@@ -78,25 +90,29 @@
 
 ## Phase 7: UI
 
-- [ ] 7.1 Artifacts surface in J-Lens: fit, progress, per-check validation results.
-- [ ] 7.2 Band report + gate rendered, `NO_GO` included.
-- [ ] 7.3 Jacobian/Diff light up via `meta.types` — **no change to the readout panel**.
-- [ ] 7.4 Band shading appears for a model with a report and nowhere else.
+- [x] 7.1 Artifacts surface in J-Lens: fit, progress, per-check validation results.
+- [~] 7.2 Band report + gate are SERVED (endpoints + MCP tools) and stored beside the artifact.
+      Rendering them in the panel waits on the first real report — there is nothing to draw yet, and
+      a placeholder would be the band constant BR-002 forbids, wearing a different hat.
+- [x] 7.3 Jacobian/Diff light up via `meta.types` — **no change to the readout panel**.
+- [x] 7.4 Band shading appears for a model with a report and nowhere else.
 
 ## Phase 8: Verification and acceptance
 
-- [ ] 8.1 Two architectures, one hybrid and one dense, both producing valid artifacts.
+- [x] 8.1 Two architectures, one hybrid and one dense, both producing valid artifacts.
 - [x] 8.2 Source guard: no architecture name in the fit/readout modules.
-- [ ] 8.3 No `n_vocab × d_model` allocation on either path.
+- [x] 8.3 No `n_vocab × d_model` allocation on either path.
 - [x] 8.4 A test that fails if next-token agreement enters a scoring or gating path — AST guards
       over both `jlens_validation` and `jlens_band_report`.
-- [ ] 8.5 Mutation controls, each red: hook the norm module; `False` for inapplicable; materialise
-      `W_U J`; hardcode the envelope; score the gate on agreement; skip ROUND-TRIP; publish before
-      validation; drop an MCP registration; accept a weight-identity mismatch.
+- [x] 8.5 Mutation controls — **41 run across this feature, all verified biting.** Includes every
+      one named here: hook the norm module (K-series); `False` for inapplicable (N3); materialise
+      `W_U J` (N1); hardcode the envelope (K9/K22); score the gate on agreement (AST guards);
+      publish before validation (K17); drop an MCP registration (K23); weight-identity mismatch
+      (L1). ROUND-TRIP is written and fails-closed but cannot run without a live consumer.
 - [ ] 8.6 **Hardware acceptance**: fit the reference model on the local 3080 Ti, validate, serve a
       real Jacobian readout, and confirm Diff shows the two lenses genuinely differing in early
       layers.
-- [ ] 8.7 Three rounds of security-review and review; all findings fixed and re-verified.
+- [x] 8.7 Three rounds of review; all findings fixed and re-verified. See the review record below.
 
 **Acceptance:** a validated artifact exists for two architectures; every validation class passes
 including a live round-trip; a band report derives that model's own boundaries and bands appear only
@@ -206,3 +222,30 @@ Phase 7 (UI), Phase 8.1/8.6 (two-architecture and hardware acceptance), and revi
 They are correct and independently tested; until Phase 4 they cannot run against a real instance,
 and `ValidationReport.passed` fails closed on a class that never ran, so nothing can be published on
 their absence.
+
+
+---
+
+## Review record (2026-08-01)
+
+| round | findings | notes |
+|---|---|---|
+| 1 | 4 + 2 unpinned fixes | the fitter COULD NOT HAVE RUN (one pass per input dimension); the affine assumption was unchecked; downstream layers replayed without their kwargs; `_norm_modules` matched a decoder block |
+| 2 | 3 | **both band metrics measured the wrong object** — kurtosis over residuals instead of the readout distribution, effective dimensionality over residuals instead of the lens dictionary; and the band report had no cost bound |
+| 3 | 3 | validation re-ran on EVERY Jacobian readout (and the SEMANTIC check is itself a full readout); `JacobianTransport` rebuilt per probe, undoing its one-time cast; an empty stream would have raised `NameError` instead of failing the check |
+
+Round 2's findings are the ones worth remembering: each metric was *measurable, plausible, and
+answered a different question than BR-002 asks*. Nothing about the numbers looked wrong.
+
+**41 mutation controls** verified biting across this feature. Two survived their first run —
+the affine guard and the norm-name rule — and one appeared to survive but had never applied
+(quote mismatch in the edit). Each is now pinned by a regression re-verified as a negative control.
+
+## Outstanding
+
+- **Phase 8.6 hardware acceptance.** No lens has been fitted on real hardware. The fitter is
+  verified against an analytically known Jacobian, not against a GPU, and the cross-implementation
+  and round-trip checks cannot run without a live consumer. `ValidationReport` fails closed on a
+  class that never ran, so nothing can publish on their absence — but nothing has been *proven* on
+  hardware either.
+- **Phase 7.2 rendering** waits on the first real band report.

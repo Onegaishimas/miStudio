@@ -126,6 +126,14 @@ celery_app.conf.update(
         "src.workers.circuit_calibration_tasks.*": {
             "queue": "extraction",
         },
+        # J-lens fitting (feature 022): GPU — the whole model is resident and
+        # every layer takes a linearised pass. Same extraction queue as the
+        # other GPU jobs. The name here is FULLY QUALIFIED because task_routes
+        # globs match the TASK NAME, not the module path — a short name lands
+        # on the default queue silently.
+        "src.workers.jlens_fit_tasks.*": {
+            "queue": "extraction",
+        },
         # Steered-transcript recorder: GPU (loads the model to generate) — same
         # extraction queue + single-GPU guard as calibration.
         "src.workers.circuit_record_tasks.*": {
@@ -430,6 +438,7 @@ celery_app.autodiscover_tasks(
         "src.workers.cleanup_stuck_nlp",
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
+        "src.workers.jlens_fit_tasks",
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes

@@ -1,0 +1,193 @@
+"""
+Model resolution for J-space readouts (feature 022 Phase 4.5).
+
+WHY A CACHE AND NOT A LOAD PER REQUEST. Unlike the SAE logit lens — which reads
+`W_U` alone out of the safetensors shard and never instantiates the model — a
+J-space readout needs a FORWARD PASS to capture residuals, so the whole model
+has to be resident. Loading it per request would make every readout cost tens of
+seconds and would thrash memory under any real use.
+
+ONE MODEL AT A TIME, DELIBERATELY. The cache holds exactly one entry and evicts
+on a miss. A larger cache means two models resident at once, and this workbench
+shares a card with a serving process — the previous logit-lens implementation
+failed outright the moment miLLM occupied the GPU, which is why the readout
+itself is CPU-only (`jlens_readout_service.READOUT_DEVICE`). Capture is the one
+GPU-touching step and its device is chosen explicitly, never inherited.
+
+MODEL-AGNOSTIC (BR-032). Structure comes from `discover_transformer_structure`;
+there is no architecture name in this module.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from dataclasses import dataclass
+from typing import Any, Optional, Tuple
+
+import torch
+
+from ..core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class ModelNotAvailable(RuntimeError):
+    """The model cannot be loaded for a readout, with the reason stated.
+
+    Distinct from a generic failure because the caller turns it into a 4xx with
+    an actionable message rather than a 500 — "this model is not downloaded" is
+    a different thing to tell a user than "the readout crashed".
+    """
+
+
+@dataclass
+class LoadedModel:
+    key: str
+    model: Any
+    tokenizer: Any
+    structure: Any
+    unembedding: torch.Tensor
+    name: str
+    d_model: int
+    n_layers: int
+    n_vocab: int
+
+
+class _SingleEntryCache:
+    """Holds at most one loaded model.
+
+    Guarded by a lock: FastAPI serves requests concurrently and two readouts for
+    different models arriving together would otherwise both load, putting two
+    full models in memory — the exact failure this cache exists to prevent.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._entry: Optional[LoadedModel] = None
+
+    def get_or_load(self, key: str, loader) -> LoadedModel:
+        with self._lock:
+            if self._entry is not None and self._entry.key == key:
+                return self._entry
+            if self._entry is not None:
+                logger.info("Evicting J-lens model %s to load %s", self._entry.key, key)
+                self._entry = None
+                _release_memory()
+            self._entry = loader()
+            return self._entry
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entry = None
+            _release_memory()
+
+    @property
+    def loaded_key(self) -> Optional[str]:
+        entry = self._entry
+        return entry.key if entry else None
+
+
+def _release_memory() -> None:
+    import gc
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+_CACHE = _SingleEntryCache()
+
+
+def clear_cache() -> None:
+    """Drop the resident model. Called by tests and by an explicit unload."""
+    _CACHE.clear()
+
+
+def loaded_model_key() -> Optional[str]:
+    return _CACHE.loaded_key
+
+
+def load_for_readout(model_record: Any, capture_device: str = "cpu") -> LoadedModel:
+    """Resolve a Model row to everything `ReadoutService` needs.
+
+    `capture_device` defaults to CPU rather than "auto". A readout is an
+    analysis operation that must never contend with serving for VRAM, and
+    "auto" silently takes the GPU the moment one exists.
+    """
+    from ..ml.layer_discovery import discover_transformer_structure
+    from ..ml.model_loader import load_model_from_hf
+    from ..models.model import QuantizationFormat
+    from .analysis_service import load_unembedding_matrix, resolve_snapshot_dir
+
+    repo_id = getattr(model_record, "repo_id", None)
+    if not repo_id:
+        raise ModelNotAvailable(
+            f"Model {getattr(model_record, 'id', '?')} has no repo_id, so its "
+            "weights cannot be located for a readout."
+        )
+
+    key = str(getattr(model_record, "id", repo_id))
+
+    def _load() -> LoadedModel:
+        raw_path = getattr(model_record, "file_path", None)
+        resolved = settings.resolve_data_path(raw_path) if raw_path else None
+        downloaded = bool(resolved and resolved.exists())
+        if not downloaded:
+            raise ModelNotAvailable(
+                f"{repo_id} is not downloaded locally. A J-space readout runs a "
+                "forward pass, so the weights must be present — download the "
+                "model first."
+            )
+
+        logger.info("Loading %s for J-space readout on %s", repo_id, capture_device)
+        quant = getattr(model_record, "quantization", None)
+        model, tokenizer, config, _meta = load_model_from_hf(
+            repo_id=repo_id,
+            quant_format=QuantizationFormat(quant) if quant else QuantizationFormat.FP16,
+            cache_dir=resolved,
+            device_map=capture_device,
+            local_files_only=True,
+        )
+        model.eval()
+
+        structure = discover_transformer_structure(model)
+
+        # W_U read from the shard rather than off the model, so the readout
+        # holds one CPU copy regardless of where the model itself landed.
+        snapshot = resolve_snapshot_dir(resolved, repo_id)
+        unembedding = None
+        if snapshot is not None:
+            try:
+                unembedding = load_unembedding_matrix(snapshot, device="cpu")
+            except Exception as exc:  # noqa: BLE001 - falls back, reports why
+                logger.warning("Could not read W_U from %s: %s", snapshot, exc)
+
+        if unembedding is None:
+            # The model is already resident, so taking its output embedding is
+            # not a second copy — this is a fallback, not the primary path.
+            head = getattr(model, "lm_head", None)
+            weight = getattr(head, "weight", None)
+            if weight is None:
+                embed = model.get_input_embeddings()
+                weight = getattr(embed, "weight", None)  # tied embeddings
+            if weight is None:
+                raise ModelNotAvailable(
+                    f"Could not locate an unembedding matrix for {repo_id}."
+                )
+            unembedding = weight.detach().to("cpu")
+
+        n_vocab, d_model = int(unembedding.shape[0]), int(unembedding.shape[1])
+        return LoadedModel(
+            key=key,
+            model=model,
+            tokenizer=tokenizer,
+            structure=structure,
+            unembedding=unembedding,
+            name=repo_id,
+            d_model=d_model,
+            n_layers=int(structure.num_layers),
+            n_vocab=n_vocab,
+        )
+
+    return _CACHE.get_or_load(key, _load)

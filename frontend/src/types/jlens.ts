@@ -126,3 +126,50 @@ export interface ReadoutProvenance {
   seq_len?: number;
   dtype?: string;
 }
+
+/** One artifact as it exists on disk. PRESENCE, not validity. */
+export interface JLensArtifactSummary {
+  slug: string;
+  directory: string;
+  lens_file: string;
+  size_bytes: number;
+  has_config: boolean;
+}
+
+export interface JLensCheckOutcome {
+  check: string;
+  /** 'pass' | 'fail' | 'not_run'. NOT_RUN is not a pass — see ValidationResponse. */
+  status: string;
+  detail: string;
+  evidence?: Record<string, unknown>;
+}
+
+/**
+ * The validation verdict, every class reported individually.
+ *
+ * `passed` is fail-closed and covers all six classes — the gate for handing an
+ * artifact to an EXTERNAL consumer. Two of those classes need a live consumer
+ * to run at all, so a validation performed from the workbench reports them
+ * NOT_RUN and `passed` is false. That is the honest answer, not a defect, and
+ * the UI says so rather than showing a red cross.
+ */
+export interface JLensValidationResponse {
+  slug: string;
+  passed: boolean;
+  summary: string;
+  results: JLensCheckOutcome[];
+}
+
+export interface JLensFitRequest {
+  model_id: string;
+  prompts: string[];
+  layers?: number[] | null;
+  freeze_qk?: boolean;
+  corpus_name?: string;
+}
+
+export interface JLensFitAccepted {
+  task_id: string;
+  model_id: string;
+  queue: string;
+}

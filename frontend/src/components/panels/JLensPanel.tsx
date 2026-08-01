@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, Layers, Pin, PinOff } from 'lucide-react';
+import { ArtifactsStrip } from '../jlens/ArtifactsStrip';
 import { ByLayerRail } from '../jlens/ByLayerRail';
 import { EvidenceRungCard } from '../jlens/EvidenceRungCard';
 import { LensModeTabs } from '../jlens/LensModeTabs';
@@ -29,6 +30,7 @@ import { TrajectoryChart } from '../jlens/TrajectoryChart';
 import { PIN_COLORS, displayToken } from '../jlens/utils';
 import {
   MAX_PROMPT_CHARS,
+  artifactSlugFor,
   axisFor,
   readTypeFor,
   sliceFor,
@@ -52,6 +54,8 @@ export function JLensPanel() {
     hover,
     isLoading,
     error,
+    artifacts,
+    modelRepoId,
     setModelId,
     setPrompt,
     setLensMode,
@@ -66,17 +70,39 @@ export function JLensPanel() {
   // and subscribing to the whole store re-rendered the entire readout grid on
   // each tick even though only the dropdown depends on it.
   const models = useModelsStore((s) => s.models);
-  const fetchModels = useModelsStore((s) => s.fetchModels);
   const [promptDraft, setPromptDraft] = useState(prompt);
 
+  // MOUNT ONCE, and deliberately not keyed on the action identities. Zustand
+  // actions are stable in production, so `[fetchModels, fetchArtifacts]` looks
+  // equivalent — but it makes a one-shot fetch depend on a reference staying
+  // stable, and the moment one does not, the effect re-runs, sets state,
+  // re-renders and re-runs. Reading the actions off the store here removes the
+  // dependency instead of assuming it holds.
   useEffect(() => {
-    fetchModels();
-  }, [fetchModels]);
+    useModelsStore.getState().fetchModels();
+    void useJLensStore.getState().fetchArtifacts();
+  }, []);
 
   const readyModels = useMemo(
     () => models.filter((m) => m.status === 'ready'),
     [models]
   );
+
+  // Real dimensions or nothing. The envelope check derives its bound from
+  // these; a guessed value passes on one model while missing a real
+  // materialisation on another, which is why the API requires them.
+  const artifactDims = useMemo(() => {
+    const chosen = readyModels.find((m) => m.id === modelId);
+    const cfg = chosen?.architecture_config;
+    if (!cfg?.hidden_size || !cfg?.num_hidden_layers || !cfg?.vocab_size) {
+      return null;
+    }
+    return {
+      d_model: cfg.hidden_size,
+      n_layers: cfg.num_hidden_layers,
+      n_vocab: cfg.vocab_size,
+    };
+  }, [readyModels, modelId]);
 
   const readType = readTypeFor(lensMode);
   const axis = useMemo(() => axisFor(meta, readType), [meta, readType]);
@@ -133,7 +159,13 @@ export function JLensPanel() {
             </span>
             <select
               value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
+              onChange={(e) => {
+                // The repo id travels with the selection: the artifact slug is
+                // derived from it, and that derivation is how a lens fitted for
+                // a base model is kept off its instruction-tuned variant.
+                const chosen = readyModels.find((m) => m.id === e.target.value);
+                setModelId(e.target.value, chosen?.repo_id ?? '');
+              }}
               className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="">Select a model…</option>
@@ -179,6 +211,18 @@ export function JLensPanel() {
           </p>
         )}
       </section>
+
+      <div className="mb-4">
+        <ArtifactsStrip
+          artifacts={artifacts}
+          expectedSlug={artifactSlugFor(modelRepoId)}
+          // NULL when the model's real dimensions are unknown, which disables
+          // the Validate button. The envelope bound is derived from these, so
+          // sending placeholders would produce a bound derived from nothing —
+          // a check that reports a verdict it never computed.
+          dims={artifactDims}
+        />
+      </div>
 
       {!meta ? (
         <section className="rounded-lg border border-slate-200 bg-white p-6 text-center dark:border-slate-700 dark:bg-slate-800">

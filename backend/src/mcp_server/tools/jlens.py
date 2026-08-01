@@ -7,12 +7,11 @@ shipped 16 tools that were fully implemented, unit-tested and documented in the
 contract while registered nowhere, and every test passed by importing the module
 directly. `tests/unit/test_reachability.py` is the harness that now guards it.
 
-Scope here is what exists: the artifact registry and its validation suite.
-Readout, band-report and gate tools land as their endpoints do — a tool calling
-a route that does not exist is the same defect in a new place.
+Scope here is what EXISTS as a route. A tool calling a route that does not
+exist is the same defect in a new place, so tools land as their endpoints do.
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, List, Optional
 
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
@@ -61,3 +60,99 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             n_layers=n_layers,
             n_vocab=n_vocab,
         )
+
+    @mcp.tool()
+    async def get_jlens_band_report(
+        slug: Annotated[str, Field(description="Artifact slug from list_jlens_artifacts")],
+    ) -> Any:
+        """This model's OWN sensory / workspace / motor boundaries, or null.
+
+        A null result means no band report has been computed for this model,
+        and NOTHING should be inferred about where its bands lie. The published
+        boundaries in the literature were measured on one specific model and do
+        not transfer — miStudio has no default and will not supply one.
+
+        The report also carries the per-layer profile, including next-token
+        agreement. That figure is DESCRIPTIVE. Do not rank or gate on it: the
+        J-lens is deliberately worse than the logit lens on agreement through
+        most of the network (BR-004).
+        """
+        return await client.get(f"/jlens/artifacts/{slug}/band-report")
+
+    @mcp.tool()
+    async def get_jlens_gate(
+        slug: Annotated[str, Field(description="Artifact slug from list_jlens_artifacts")],
+    ) -> Any:
+        """The recorded Phase-0 GO / NO-GO / GO-AT-LARGER-SCALE decision, or null.
+
+        NO_GO is a complete, publishable outcome rather than a failure — it
+        means the full workspace claim set did not replicate at this scale, and
+        it BLOCKS product surface beyond the readout viewer (BR-003).
+
+        Null means no decision has been recorded yet, which is not the same as
+        GO and must not be read as one.
+        """
+        return await client.get(f"/jlens/artifacts/{slug}/gate")
+
+    @mcp.tool()
+    async def jlens_readout(
+        model_id: Annotated[str, Field(description="miStudio model id (m_xxxxxxxx)")],
+        prompt: Annotated[str, Field(description="Text to read out, max 8000 characters")],
+        types: Annotated[Optional[List[str]], Field(description="LOGIT_LENS and/or JACOBIAN_LENS. Defaults to LOGIT_LENS, which needs no artifact")] = None,
+        layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit for every layer")] = None,
+        top_n: Annotated[int, Field(description="Readout depth per cell")] = 8,
+        artifact_id: Annotated[Optional[str], Field(description="Required for JACOBIAN_LENS; must be the artifact fitted for THIS model's weights")] = None,
+    ) -> Any:
+        """Read out what a model is poised to say at every layer and position.
+
+        RUNG 0. A concept appearing in a readout is NOT a causal claim — it says
+        the direction was present, not that the model used it. Raising the rung
+        takes a coordinate swap with a matched control.
+
+        Three limits worth stating before interpreting a result: readouts only
+        surface concepts with SINGLE-TOKEN names; a readout that resists
+        interpretation is not a null result; and absence of a signal is not
+        evidence that the computation did not occur.
+
+        The logit lens needs no artifact and works on any downloaded model.
+        JACOBIAN_LENS requires a validated artifact fitted for these exact
+        weights and is REFUSED without one — it is never silently answered with
+        logit data under a Jacobian label.
+        """
+        body: dict[str, Any] = {"model_id": model_id, "prompt": prompt, "top_n": top_n}
+        if types:
+            body["types"] = types
+        if layers:
+            body["layers"] = layers
+        if artifact_id:
+            body["artifact_id"] = artifact_id
+        return await client.post("/jlens/readout", json_body=body)
+
+    @mcp.tool()
+    async def fit_jlens_artifact(
+        model_id: Annotated[str, Field(description="miStudio model id to fit a lens for")],
+        prompts: Annotated[List[str], Field(description="Fitting corpus. The fitter REFUSES fewer than 100 — an under-fitted lens is indistinguishable from a fitted one by inspection")],
+        layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit for every layer")] = None,
+        freeze_qk: Annotated[bool, Field(description="Freeze Q/K as well as norms. INAPPLICABLE on layers that do not attend, and recorded per layer rather than claimed wholesale")] = True,
+        corpus_name: Annotated[str, Field(description="Recorded in the artifact's recipe (BR-007) — name the corpus, do not leave it unspecified")] = "unspecified",
+    ) -> Any:
+        """Queue a J-lens fit. GPU-bound and long-running; poll get_task_status.
+
+        Fitting is the PRIMARY path, not a fallback: pre-fitted lenses exist
+        for a limited model set and most models this workbench runs are not in
+        it.
+
+        The result carries a per-check validation report. An artifact that is
+        `serviceable` can be read out locally; `passed` additionally requires
+        the two consumer-interop checks, which need a live external consumer
+        and are deferred until handover.
+        """
+        body: dict[str, Any] = {
+            "model_id": model_id,
+            "prompts": prompts,
+            "freeze_qk": freeze_qk,
+            "corpus_name": corpus_name,
+        }
+        if layers:
+            body["layers"] = layers
+        return await client.post("/jlens/fit", json_body=body)

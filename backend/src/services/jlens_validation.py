@@ -89,6 +89,41 @@ class ValidationReport:
         return all(r.passed for r in self.results)
 
     @property
+    def serviceable(self) -> bool:
+        """Safe to serve from MISTUDIO'S OWN readout path.
+
+        A NARROWER GATE THAN `passed`, and the distinction is deliberate rather
+        than a relaxation.
+
+        `passed` gates HANDOVER TO AN EXTERNAL CONSUMER, which is what BR-030
+        is about: that consumer's lens loading fails at request time without
+        raising, so an artifact reaching it unvalidated becomes a feature that
+        quietly returns nothing. CROSS_IMPLEMENTATION and ROUND_TRIP exist to
+        catch exactly that, and both require a live consumer to run at all.
+
+        miStudio's own readout is a different risk profile: the code is ours and
+        it RAISES — `JacobianTransport` refuses a missing layer rather than
+        falling back to identity. So local serving is gated on the four classes
+        that bear on local correctness, and the two consumer-interop classes are
+        required before handover and not before serving.
+
+        Collapsing the two would either make the Jacobian path permanently
+        unreachable (no external consumer, no serving) or, far worse, let an
+        unvalidated artifact reach Neuronpedia because one gate had to be loose
+        enough for both jobs.
+        """
+        local = {
+            CheckClass.STRUCTURAL,
+            CheckClass.NAMING,
+            CheckClass.ENVELOPE,
+            CheckClass.SEMANTIC,
+        }
+        seen = {r.check for r in self.results if r.check in local}
+        if seen != local:
+            return False
+        return all(r.passed for r in self.results if r.check in local)
+
+    @property
     def missing(self) -> List[CheckClass]:
         return sorted(set(CheckClass) - {r.check for r in self.results}, key=lambda c: c.value)
 

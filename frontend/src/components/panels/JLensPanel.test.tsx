@@ -135,10 +135,15 @@ beforeEach(() => {
   // Selector-aware: the panel subscribes with selectors so a models-store tick
   // does not re-render the readout grid.
   const modelsState = { models: MODELS, fetchModels: vi.fn() };
-  (useModelsStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+  const hook = useModelsStore as unknown as ReturnType<typeof vi.fn>;
+  hook.mockImplementation(
     (selector?: (s: typeof modelsState) => unknown) =>
       selector ? selector(modelsState) : modelsState
   );
+  // The panel reads the actions off the store STATICALLY for its mount-once
+  // fetch, so the mock needs getState too — keying that effect on the hook's
+  // return identity is what makes a one-shot fetch loop.
+  hook.getState = () => modelsState;
 });
 
 describe('layer axis is model-derived', () => {
