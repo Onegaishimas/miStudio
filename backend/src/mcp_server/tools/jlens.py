@@ -258,12 +258,20 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit for every layer")] = None,
         freeze_qk: Annotated[bool, Field(description="Freeze Q/K as well as norms. INAPPLICABLE on layers that do not attend, and recorded per layer rather than claimed wholesale")] = True,
         corpus_name: Annotated[str, Field(description="Recorded in the artifact's recipe (BR-007) — name the corpus, do not leave it unspecified")] = "unspecified",
+        semantic_probe: Annotated[Optional[Dict[str, Any]], Field(description="Fixture for the SEMANTIC check: {prompt, expected_intermediate, layer?, top_k?}. WITHOUT IT NOTHING IS PUBLISHED — the check cannot run and the suite fails closed. The intermediate must NOT appear in the prompt, or a lens encoding nothing would pass")] = None,
     ) -> Any:
         """Queue a J-lens fit. GPU-bound and long-running; poll get_task_status.
 
         Fitting is the PRIMARY path, not a fallback: pre-fitted lenses exist
         for a limited model set and most models this workbench runs are not in
         it.
+
+        SUPPLY `semantic_probe` OR NOTHING IS PUBLISHED. The SEMANTIC class
+        needs a loaded model and a fixture, and an artifact validated without
+        it can never be published — by design, since publishing on an unrun
+        check is the failure the suite exists to prevent. A fit without it
+        succeeds, validates partially, and is discarded; the result says so in
+        `unpublished_reason`.
 
         The result carries a per-check validation report. An artifact that is
         `serviceable` can be read out locally; `passed` additionally requires
@@ -278,4 +286,6 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         }
         if layers:
             body["layers"] = layers
+        if semantic_probe:
+            body["semantic_probe"] = semantic_probe
         return await client.post("/jlens/fit", json_body=body)

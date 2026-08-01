@@ -82,6 +82,12 @@ class _SingleEntryCache:
             self._entry = None
             _release_memory()
 
+    def peek(self) -> Optional[LoadedModel]:
+        """The resident entry, whatever it is. For callers that accept any
+        device rather than requiring a specific one."""
+        with self._lock:
+            return self._entry
+
     @property
     def loaded_key(self) -> Optional[str]:
         entry = self._entry
@@ -114,6 +120,15 @@ def load_for_readout(model_record: Any, capture_device: str = "cpu") -> LoadedMo
     `capture_device` defaults to CPU rather than "auto". A readout is an
     analysis operation that must never contend with serving for VRAM, and
     "auto" silently takes the GPU the moment one exists.
+
+    THE CACHE KEY CARRIES THE DEVICE. It used to be the model id alone, so a
+    caller asking for CPU received whatever device the last caller happened to
+    load on. That is not a preference being overridden — it is a different
+    object than the one requested, and it produced a device-mismatch crash in
+    the readout after a fit had loaded the same model onto CUDA. Consumers that
+    are happy with any resident copy should say so by passing None, which is a
+    request this function can honour honestly rather than a silent substitution
+    it performs behind the caller's back.
     """
     from ..ml.layer_discovery import discover_transformer_structure
     from ..ml.model_loader import load_model_from_hf
@@ -127,7 +142,21 @@ def load_for_readout(model_record: Any, capture_device: str = "cpu") -> LoadedMo
             "weights cannot be located for a readout."
         )
 
-    key = str(getattr(model_record, "id", repo_id))
+    model_key = str(getattr(model_record, "id", repo_id))
+
+    # None = "any resident copy of this model will do". Used by the readout,
+    # which can capture on whatever device the model already occupies and does
+    # its own maths on READOUT_DEVICE regardless — so evicting a GPU-resident
+    # model just to reload it on CPU would cost a minute and free nothing.
+    if capture_device is None:
+        resident = _CACHE.loaded_key
+        if resident is not None and resident.rsplit("@", 1)[0] == model_key:
+            entry = _CACHE.peek()
+            if entry is not None:
+                return entry
+        capture_device = "cpu"
+
+    key = f"{model_key}@{capture_device}"
 
     def _load() -> LoadedModel:
         raw_path = getattr(model_record, "file_path", None)

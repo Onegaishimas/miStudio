@@ -639,3 +639,84 @@ def test_a_readout_survives_a_MIXED_DTYPE_checkpoint():
         if isinstance(m, LensTokenMessage)
     ]
     assert bf16_tokens, "the readout died on a bfloat16 unembedding"
+
+
+# ---------------------------------------------------------------------------
+# Device agreement between the model and its inputs
+#
+# Reported from the cluster UI as "Expected all tensors to be on the same
+# device, but got index is on cpu, different from other tensors on cuda:0".
+# Raised inside the embedding lookup, before any readout maths ran.
+#
+# CAUSE: the worker's model cache was keyed by MODEL ID ALONE. A fit loads the
+# model with capture_device="cuda"; the next readout asked for "cpu", hit the
+# same key, and received the CUDA-resident model while still placing input_ids
+# on CPU. Two independent claims about one model's device, silently disagreeing.
+#
+# No existing test caught it because every fixture builds its model on CPU and
+# asks for CPU — the two agreed by construction, so the mismatch could not arise.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * capture_device defaults back to "cpu"        -> "follows the model" fails
+#   * cache key drops the "@device" suffix         -> "device is part of identity" fails
+# ---------------------------------------------------------------------------
+
+
+class _DeviceStampedParam:
+    """Minimal stand-in for a parameter that reports a device."""
+
+    def __init__(self, device: str):
+        self.device = device
+
+
+class _ModelOnDevice:
+    def __init__(self, device: str):
+        self._device = device
+
+    def parameters(self):
+        yield _DeviceStampedParam(self._device)
+
+
+def test_the_readout_follows_the_model_rather_than_assuming_cpu():
+    """capture_device must be READ OFF the model, not defaulted alongside it."""
+    from src.services.jlens_readout_service import _model_device
+
+    assert _model_device(_ModelOnDevice("cuda:0")) == "cuda:0"
+    assert _model_device(_ModelOnDevice("cpu")) == "cpu"
+    # A model with no parameters at all yields None, and the caller falls back —
+    # it must not raise, or a malformed model turns a readout into a 500.
+    assert _model_device(object()) is None
+
+
+def test_the_device_is_part_of_a_cached_models_identity():
+    """A caller asking for CPU must not be handed a CUDA model.
+
+    That is not a preference being overridden; it is a different object than
+    the one requested, and it crashed the readout after a fit.
+    """
+    from src.services import jlens_model_registry as reg
+
+    keys = []
+
+    class _Rec:
+        id = "m_x"
+        repo_id = "org/model"
+        file_path = None
+
+    original = reg._CACHE.get_or_load
+    reg._CACHE.get_or_load = lambda key, loader: (keys.append(key), None)[1]
+    try:
+        for device in ("cpu", "cuda"):
+            try:
+                reg.load_for_readout(_Rec(), capture_device=device)
+            except Exception:
+                pass
+    finally:
+        reg._CACHE.get_or_load = original
+
+    assert len(keys) == 2, "load_for_readout did not reach the cache"
+    assert keys[0] != keys[1], (
+        f"cpu and cuda produced the SAME cache key {keys[0]!r}; a caller asking "
+        "for one device would be handed the other"
+    )
+    assert keys[0].endswith("@cpu") and keys[1].endswith("@cuda")

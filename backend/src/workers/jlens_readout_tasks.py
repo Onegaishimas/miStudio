@@ -74,7 +74,10 @@ def compute_readout(
 
         self.update_state(state="PROGRESS", meta={"stage": "loading_model"})
         try:
-            loaded = load_for_readout(record)
+            # None = any resident copy. A fit may have left this model on the GPU;
+            # capturing there is free, and the readout maths runs on
+            # READOUT_DEVICE either way.
+            loaded = load_for_readout(record, capture_device=None)
         except ModelNotAvailable as exc:
             # Surfaced as the task's failure message rather than a retry: the
             # model is not in a state a readout can use and waiting will not
