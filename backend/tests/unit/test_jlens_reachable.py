@@ -163,3 +163,136 @@ class TestBoundBackendStillFailsLoudly:
         assert result.mode == "probe"
         assert result.lens_type == "LOGIT_LENS"
         assert result.scores and result.scores[0].token == " Paris"
+
+
+# ---------------------------------------------------------------------------
+# Band-report computation must be REACHABLE
+#
+# `compute_band_report`, `save_band_report`, `decide_gate` and `save_gate` were
+# fully implemented and unit-tested with ZERO production callers — verified by
+# grep before this was written. The suite was green while no user or agent could
+# produce a band report at all, so the panel's band rendering was permanently
+# unreachable and `classify_behaviour` returned UNKNOWN forever. Same shape as
+# the 16 MCP tools this repo once shipped registered with nothing.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * delete the POST /jlens/band-report route      -> "compute route" fails
+#   * delete the POST /jlens/gate route             -> "gate route" fails
+#   * drop jlens_band_tasks from celery `include`   -> "task is registered" fails
+#   * make the endpoint stop calling .delay         -> "endpoint queues" fails
+# ---------------------------------------------------------------------------
+
+
+BAND_PATHS = {"/jlens/band-report", "/jlens/gate"}
+
+
+class TestBandReportIsReachable:
+    def test_the_compute_and_gate_routes_are_registered(self):
+        missing = BAND_PATHS - _reachable_paths()
+        assert not missing, (
+            f"unreachable band paths: {sorted(missing)}. The band service was "
+            "implemented and tested with no caller at all — a route is what "
+            "makes it exist for anyone"
+        )
+
+    @pytest.mark.parametrize("path", sorted(BAND_PATHS))
+    def test_band_paths_accept_post(self, path):
+        for route in jlens.router.routes:
+            if getattr(route, "path", None) == path:
+                assert "POST" in route.methods
+                return
+        pytest.fail(f"{path} not defined on the jlens router")
+
+    def test_the_band_tasks_are_registered_with_celery(self):
+        """A task the worker never imports is a task nothing can run.
+
+        Asserts the TASK NAME in the live registry, not that the module
+        imports: `task_routes` globs match the task name, so a short or
+        unregistered name lands on the default queue silently.
+        """
+        from src.core.celery_app import celery_app
+
+        for name in (
+            "src.workers.jlens_band_tasks.compute_band_report",
+            "src.workers.jlens_band_tasks.record_gate",
+        ):
+            assert name in celery_app.tasks, (
+                f"{name} is not in the live Celery registry; the endpoint would "
+                "queue a task no worker can execute"
+            )
+
+    def test_the_band_tasks_route_to_a_worker_that_exists(self):
+        """Routed to `extraction`, where the GPU worker actually listens."""
+        from src.core.celery_app import celery_app
+
+        routes = celery_app.conf.task_routes
+        assert routes.get("src.workers.jlens_band_tasks.*", {}).get("queue") == (
+            "extraction"
+        ), "band tasks are not routed to the extraction queue"
+
+    @pytest.mark.asyncio
+    async def test_the_compute_endpoint_queues_with_the_arguments_it_was_given(self):
+        """Payload AND call count — "was called" passes against wrong arguments."""
+        from unittest.mock import MagicMock, patch
+
+        from src.api.v1.endpoints.jlens import BandReportRequest
+
+        db = MagicMock()
+        db.execute = _async_returning(_scalar(object()))
+
+        with patch(
+            "src.workers.jlens_band_tasks.compute_band_report_task"
+        ) as task:
+            task.delay.return_value = MagicMock(id="t-band")
+            accepted = await jlens.compute_band_report(
+                BandReportRequest(
+                    model_id="m_1",
+                    prompts=["a", "b"],
+                    control_seed=1234,
+                    layers=[3, 4],
+                    use_artifact=True,
+                ),
+                db=db,
+            )
+
+        assert task.delay.call_count == 1
+        sent = task.delay.call_args.kwargs
+        assert sent["model_id"] == "m_1"
+        assert sent["prompts"] == ["a", "b"]
+        # The seed must survive the trip: the autocorrelation null is drawn from
+        # it, and a report whose control cannot be reproduced is not evidence.
+        assert sent["control_seed"] == 1234
+        assert sent["layers"] == [3, 4]
+        assert accepted.task_id == "t-band"
+
+    def test_no_band_boundary_can_be_SUPPLIED_through_the_api(self):
+        """BR-002 by construction, not by discipline.
+
+        Bands come from the model's own kurtosis profile or they do not exist
+        for it. A request field that accepted boundaries would make porting the
+        published Sonnet-4.5 numbers a one-line change.
+        """
+        from src.api.v1.endpoints.jlens import BandReportRequest
+
+        fields = set(BandReportRequest.model_fields)
+        for forbidden in ("boundaries", "workspace_start", "motor_start", "bands"):
+            assert forbidden not in fields, (
+                f"BandReportRequest accepts {forbidden!r}; boundaries measured "
+                "on another model must be impossible to supply, not merely "
+                "discouraged (BR-002)"
+            )
+
+
+def _scalar(value):
+    from unittest.mock import MagicMock
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
+    return result
+
+
+def _async_returning(value):
+    async def _call(*_args, **_kwargs):
+        return value
+
+    return _call

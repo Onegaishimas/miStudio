@@ -252,6 +252,69 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get(f"/jlens/reports/replication?slug={slug}")
 
     @mcp.tool()
+    async def compute_jlens_band_report(
+        model_id: Annotated[str, Field(description="miStudio model id to profile")],
+        prompts: Annotated[List[str], Field(description="Corpus to measure the per-layer profile over")],
+        control_seed: Annotated[int, Field(description="REQUIRED. The autocorrelation null is drawn from it; a report whose control cannot be reproduced is not evidence")],
+        layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit to use the artifact's layers, or every layer when no artifact is used")] = None,
+        use_artifact: Annotated[bool, Field(description="Use the fitted lens dictionary. Effective dimensionality is a property of that dictionary; for the logit lens it is the identity and is recorded ABSENT rather than as a number")] = True,
+    ) -> Any:
+        """Measure this model's band profile and derive ITS OWN boundaries.
+
+        THE ONLY THING THAT CAN MAKE BANDS APPEAR. Until this runs for a model,
+        every band surface renders nothing and `annotate_jlens_feature` returns
+        workspace_class UNKNOWN — the honest answer, because the published
+        sensory/workspace/motor boundaries were measured on ONE specific model
+        and do not transfer to another.
+
+        There is no way to supply boundaries and there never will be. The result
+        carries `has_bands: false` and `boundaries: null` when this model's
+        kurtosis profile does not support a three-way split, and that null is a
+        finding, not a missing value (BR-002).
+
+        Long-running and model-bound; poll get_task_status.
+        """
+        body: dict[str, Any] = {
+            "model_id": model_id,
+            "prompts": prompts,
+            "control_seed": control_seed,
+            "use_artifact": use_artifact,
+        }
+        if layers:
+            body["layers"] = layers
+        return await client.post("/jlens/band-report", json_body=body)
+
+    @mcp.tool()
+    async def record_jlens_gate(
+        model_id: Annotated[str, Field(description="miStudio model id the gate decision is about")],
+        claim_set_replicated: Annotated[bool, Field(description="Whether the FULL workspace claim set replicated. This is the question BR-003 asks — a finding you supply, not a score computed here")],
+        rationale: Annotated[str, Field(description="MANDATORY. A recorded decision without its reasoning is not a record")],
+        larger_scale_indicated: Annotated[bool, Field(description="Whether the evidence suggests retrying at a larger scale. Produces GO_AT_LARGER_SCALE, which still BLOCKS at this scale")] = False,
+        replication_report_id: Annotated[Optional[str], Field(description="Replication report this decision rests on")] = None,
+    ) -> Any:
+        """Record the Phase-0 GO / NO-GO decision (BR-003).
+
+        REFUSES without a band report to weigh — a gate decision with no
+        evidence behind it is what this gate exists to prevent.
+
+        There is deliberately NO numeric criterion. A threshold on any single
+        metric would become the definition of the gate, and the metric most
+        likely to be reached for is next-token agreement, which BR-004 forbids
+        being scored on at all. NO_GO is a complete, publishable outcome and
+        persists exactly like GO.
+        """
+        return await client.post(
+            "/jlens/gate",
+            json_body={
+                "model_id": model_id,
+                "claim_set_replicated": claim_set_replicated,
+                "larger_scale_indicated": larger_scale_indicated,
+                "rationale": rationale,
+                "replication_report_id": replication_report_id,
+            },
+        )
+
+    @mcp.tool()
     async def fit_jlens_artifact(
         model_id: Annotated[str, Field(description="miStudio model id to fit a lens for")],
         prompts: Annotated[List[str], Field(description="Fitting corpus. The fitter REFUSES fewer than 100 — an under-fitted lens is indistinguishable from a fitted one by inspection")],

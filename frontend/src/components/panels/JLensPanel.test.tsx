@@ -804,21 +804,24 @@ describe('the readout is asynchronous because it measurably had to be', () => {
   });
 })
 
-describe('the disabled reason names the step that is actually missing', () => {
-  it('says "fit one" only when no artifact is mounted', () => {
+describe('a mounted artifact is enough to select the Jacobian lens', () => {
+  it('says "fit one" and disables the lens when nothing is mounted', () => {
     render(<JLensPanel />);
     act(() => useJLensStore.setState({ modelId: 'm_lfm2', artifacts: [] }));
 
     expect(screen.getByText(/Fit one to enable it/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Jacobian/ })).toBeDisabled();
   });
 
-  it('says "read out" once an artifact IS mounted', () => {
-    // Observed on the cluster: a published, validated artifact sat in the strip
-    // directly below a message telling the user to fit one. It told them to do
-    // what they had already done, and named the wrong blocker — the tabs derive
-    // from what the STREAM carries, so the remaining step is a readout.
+  it('enables Jacobian and Diff from the artifact alone, before any readout', () => {
+    // The tab used to be disabled until a readout carried JACOBIAN_LENS — but
+    // `fetchReadout` requests both lens types whenever the model has an
+    // artifact, so the tab was gated on the absence of a stream that the click
+    // itself produces. Observed on the cluster: a published, validated 21 MB
+    // artifact sat in the strip directly below a tab telling the user to fit one.
     //
-    // MUTATION CONTROL: drop `hasArtifact` from the LensModeTabs call and this
+    // MUTATION CONTROL: drop the `hasArtifact` early return in
+    // `modeAvailability`, or drop the prop from the LensModeTabs call, and this
     // fails.
     render(<JLensPanel />);
     act(() =>
@@ -837,7 +840,34 @@ describe('the disabled reason names the step that is actually missing', () => {
       })
     );
 
-    expect(screen.getByText(/Read out to load it/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Jacobian/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Diff/ })).toBeEnabled();
     expect(screen.queryByText(/Fit one to enable it/i)).not.toBeInTheDocument();
+  });
+
+  it('still disables the lens a completed readout did NOT carry', () => {
+    // Enabling on artifact presence promises the REQUEST, not the result. Once
+    // a stream exists it is the authority again — otherwise a readout that came
+    // back logit-only would leave a Jacobian tab selectable and rendering logit
+    // data under a Jacobian label (BR-019).
+    render(<JLensPanel />);
+    act(() =>
+      useJLensStore.setState({
+        modelId: 'm_lfm2',
+        modelRepoId: 'google/gemma-2-2b-it',
+        artifacts: [
+          {
+            slug: 'gemma-2-2b-it',
+            directory: '/data/jlens/gemma-2-2b-it',
+            lens_file: 'gemma-2-2b-it_jacobian_lens.pt',
+            size_bytes: 21_235_717,
+            has_config: true,
+          },
+        ],
+      })
+    );
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS']));
+
+    expect(screen.getByRole('button', { name: /Jacobian/ })).toBeDisabled();
   });
 });
