@@ -141,14 +141,49 @@ def load_for_readout(model_record: Any, capture_device: str = "cpu") -> LoadedMo
             )
 
         logger.info("Loading %s for J-space readout on %s", repo_id, capture_device)
-        quant = getattr(model_record, "quantization", None)
-        model, tokenizer, config, _meta = load_model_from_hf(
-            repo_id=repo_id,
-            quant_format=QuantizationFormat(quant) if quant else QuantizationFormat.FP16,
-            cache_dir=resolved,
-            device_map=capture_device,
-            local_files_only=True,
-        )
+
+        # LOAD IN THE CHECKPOINT'S OWN DTYPE, not a forced one.
+        #
+        # Forcing fp16 onto a checkpoint whose weights are bfloat16 leaves the
+        # model internally MIXED, and the forward pass then dies with
+        # "expected scalar type BFloat16 but found Half" before any readout
+        # arithmetic happens. That is what gemma-2-2b-it did on the cluster.
+        #
+        # A readout does not need a particular dtype — it needs the model to
+        # RUN — so the right precision is whatever the checkpoint was saved in.
+        # The readout's own matvec casts to fp32 separately, which is about
+        # ranking stability rather than about making the model work.
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                repo_id,
+                cache_dir=resolved,
+                local_files_only=True,
+                dtype="auto",
+                device_map=capture_device,
+            )
+            tokenizer = AutoTokenizer.from_pretrained(
+                repo_id, cache_dir=resolved, local_files_only=True
+            )
+        except Exception as exc:  # noqa: BLE001 - fall back, reporting why
+            logger.warning(
+                "Native-dtype load of %s failed (%s); falling back to the "
+                "shared loader, which may force a dtype the checkpoint does "
+                "not use",
+                repo_id,
+                exc,
+            )
+            quant = getattr(model_record, "quantization", None)
+            model, tokenizer, _config, _meta = load_model_from_hf(
+                repo_id=repo_id,
+                quant_format=(
+                    QuantizationFormat(quant) if quant else QuantizationFormat.FP16
+                ),
+                cache_dir=resolved,
+                device_map=capture_device,
+                local_files_only=True,
+            )
         model.eval()
 
         structure = discover_transformer_structure(model)
