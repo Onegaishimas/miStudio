@@ -23,6 +23,8 @@ served: the loader is best-effort and says nothing about what it found.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import shutil
@@ -45,6 +47,11 @@ from .jlens_validation import (
 logger = logging.getLogger(__name__)
 
 STAGING_SUFFIX = ".staging"
+
+#: Verdict recorded beside the artifact at publish time. Named so it cannot be
+#: mistaken for part of the conformance layout — a consumer reading the upstream
+#: format ignores it, and `_ref_for` does not require it.
+VALIDATION_FILE = "validation.json"
 
 
 def slug_for(repo_id: str) -> str:
@@ -256,8 +263,80 @@ class JLensArtifactService:
         ref = self._ref_for(final)
         if ref is None:
             raise RuntimeError(f"published {final} is not a conformant artifact directory")
+
+        # RECORD THE VERDICT WITH THE ARTIFACT. The filesystem is the registry
+        # (PADR IDL-46), so the report belongs beside the file it describes and
+        # not in a database that could disagree with it.
+        #
+        # Without this the fit's validation was DISCARDED and the readout
+        # re-validated from scratch with its own hard-coded fixture — one that
+        # assumes a mid-stack fit, so a legitimately validated PARTIAL artifact
+        # was refused at read time. The caller chose a fixture appropriate to
+        # the layers they fitted; substituting a different one and overruling
+        # them is not a stricter check, it is a different question.
+        self._write_report(ref, report)
         logger.info("Published J-lens artifact %s", final)
         return ref
+
+    @staticmethod
+    def _lens_digest(path: Path) -> str:
+        """Content hash of the lens file.
+
+        SIZE AND MTIME ARE NOT AN IDENTITY. A replacement with the same layer
+        shapes has the same size, and mtime granularity is coarse enough that a
+        file rewritten immediately keeps its timestamp — verified by the test
+        below, which failed against the size+mtime version of this check. The
+        thing being guarded is "are these the weights that were validated", so
+        the guard has to look at the weights.
+        """
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _write_report(self, ref: ArtifactRef, report: ValidationReport) -> None:
+        stat = ref.lens_path.stat()
+        payload = {
+            "lens_file": ref.lens_path.name,
+            "size_bytes": stat.st_size,
+            "sha256": self._lens_digest(ref.lens_path),
+            "summary": report.summary(),
+            "passed": report.passed,
+            "serviceable": report.serviceable,
+            "results": [
+                {"check": r.check.value, "status": r.status.value, "detail": r.detail}
+                for r in report.results
+            ],
+        }
+        (ref.directory / VALIDATION_FILE).write_text(json.dumps(payload, indent=2))
+
+    def stored_report(self, ref: ArtifactRef) -> Optional[Dict[str, Any]]:
+        """The verdict recorded when THIS EXACT FILE was published, if any.
+
+        Returns None when the lens file has changed since — size and mtime are
+        compared, so an artifact swapped on disk is revalidated rather than
+        served on a verdict that described different weights. Serving a lens
+        fitted for other weights is the failure this gate exists to prevent, so
+        it must not be possible to smuggle one past by leaving a stale JSON
+        file beside it.
+        """
+        path = ref.directory / VALIDATION_FILE
+        if not path.is_file():
+            return None
+        try:
+            stored = json.loads(path.read_text())
+        except (ValueError, OSError) as exc:
+            logger.warning("Unreadable validation report at %s: %s", path, exc)
+            return None
+
+        if stored.get("sha256") != self._lens_digest(ref.lens_path):
+            logger.info(
+                "Validation report for %s describes different weights; revalidating",
+                ref.slug,
+            )
+            return None
+        return stored
 
     def discard_staged(self, repo_id: str) -> None:
         staging = self.staging_dir(repo_id)
@@ -281,10 +360,20 @@ class JLensArtifactService:
         the full `passed` before anything is published for handover.
         """
         if report is None or not report.serviceable:
+            # NAME THE FAILING CLASS. "No serviceable validation report" is true
+            # and useless: it does not distinguish a missing report from a
+            # failed check, and it took a log dive plus two wrong diagnoses to
+            # learn which one had happened. A refusal the user cannot act on is
+            # only half a guard.
+            why = ""
+            if report is not None:
+                detail = getattr(report, "failing_detail", None)
+                why = f" Failing: {detail() if callable(detail) else report.summary()}."
             raise ArtifactNotValidated(
                 f"{repo_id} has no serviceable validation report; refusing to "
-                "serve it. Run the validation suite first — an unvalidated "
-                "artifact reads out plausible nonsense rather than failing."
+                f"serve it.{why} Run the validation suite first — an "
+                "unvalidated artifact reads out plausible nonsense rather "
+                "than failing."
             )
         ref = self.find(repo_id)
         if ref is None:

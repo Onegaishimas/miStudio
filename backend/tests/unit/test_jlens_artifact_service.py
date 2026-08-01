@@ -246,3 +246,121 @@ def test_a_directory_with_two_lens_files_is_not_an_artifact(tmp_path: Path):
     (published.directory / "other_jacobian_lens.pt").write_bytes(b"x")
     assert svc.find("org/model") is None
     assert svc.list_artifacts() == []
+
+
+# ---------------------------------------------------------------------------
+# The verdict is recorded with the artifact, and identity-checked
+#
+# A published, semantically-valid partial artifact was refused at read time.
+# The fit had validated it with a fixture the caller chose for the layers they
+# fitted; that verdict was discarded and the readout re-validated with its own
+# hard-coded fixture, which targets mid-stack — a question a top-of-stack fit
+# was never fitted to answer. It failed a different test than the one it passed.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * commit stops writing validation.json      -> "records the verdict" fails
+#   * stored_report skips the identity check     -> "a swapped file" fails
+#   * the refusal drops the failing detail       -> "names the failing class" fails
+# ---------------------------------------------------------------------------
+
+
+def _passing_report():
+    from src.services.jlens_validation import (
+        CheckClass,
+        CheckResult,
+        CheckStatus,
+        ValidationReport,
+    )
+
+    return ValidationReport(
+        [
+            CheckResult(c, CheckStatus.PASS, f"{c.value} ok")
+            for c in CheckClass
+        ]
+    )
+
+
+def _staged(tmp_path, service, layers=(24, 25)):
+    import torch
+
+    return service.write_staged(
+        "org/model",
+        {l: torch.randn(4, 4) for l in layers},
+        "corpus: test\n",
+    )
+
+
+def test_commit_records_the_verdict_beside_the_artifact(tmp_path):
+    from src.services.jlens_artifact_service import (
+        VALIDATION_FILE,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    _staged(tmp_path, service)
+    ref = service.commit("org/model", _passing_report())
+
+    assert (ref.directory / VALIDATION_FILE).is_file(), (
+        "commit published without recording the verdict, so the readout must "
+        "re-derive it — and re-derives it with a different fixture"
+    )
+    stored = service.stored_report(ref)
+    assert stored is not None and stored["serviceable"] is True
+
+
+def test_a_swapped_lens_file_invalidates_the_recorded_verdict(tmp_path):
+    """Serving a lens fitted for other weights is what this gate prevents."""
+    import torch
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _staged(tmp_path, service)
+    ref = service.commit("org/model", _passing_report())
+    assert service.stored_report(ref) is not None
+
+    # Replace the weights, leaving the verdict beside them untouched.
+    torch.save({24: torch.randn(4, 4), 25: torch.randn(4, 4)}, ref.lens_path)
+
+    assert service.stored_report(ref) is None, (
+        "a replaced lens file was still served on the OLD verdict; that verdict "
+        "describes different weights, which produces a complete, plausible "
+        "readout that is wrong"
+    )
+
+
+def test_the_refusal_names_the_failing_class(tmp_path):
+    """A refusal the user cannot act on is only half a guard."""
+    import pytest
+
+    from src.api.v1.endpoints.jlens import _StoredReport
+    from src.services.jlens_artifact_service import (
+        ArtifactNotValidated,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    failed = _StoredReport(
+        {
+            "passed": False,
+            "serviceable": False,
+            "summary": "semantic=fail",
+            "results": [
+                {
+                    "check": "semantic",
+                    "status": "fail",
+                    "detail": "'spider' absent from the top-8 at layer 24",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ArtifactNotValidated) as excinfo:
+        service.load_for_readout("org/model", report=failed)
+
+    message = str(excinfo.value)
+    assert "semantic" in message, f"the refusal names no failing class: {message}"
+    assert "spider" in message, (
+        f"the refusal drops the check's own detail: {message}. Without it the "
+        "user cannot tell a missing report from a failed check"
+    )
