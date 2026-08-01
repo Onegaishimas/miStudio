@@ -53,6 +53,25 @@ MILLM_TOOL_MODULES = sorted(
     (BACKEND / "mcp_server" / "tools").glob("millm_*.py")
 )
 
+# Feature 026 (BR-019): J-space surfaces, DISCOVERED for the same reason.
+#
+# J-space evidence is overwhelmingly rung 0 — a readout is an observation, not
+# a cause — so these are the modules most likely to reach for intervention
+# language and least entitled to it. Globbed, never listed: `jlens_watchlist.py`
+# added next week is audited the moment it exists, which is precisely what the
+# hand-maintained version of this list failed to do for 16 circuit modules.
+JSPACE_SURFACES = sorted(
+    set(
+        list((BACKEND / "services").glob("jlens_*.py"))
+        + list((BACKEND / "ml").glob("jlens_*.py"))
+        + list((BACKEND / "api" / "v1" / "endpoints").glob("jlens*.py"))
+        + list((BACKEND / "schemas").glob("jlens*.py"))
+        + list((BACKEND / "schemas").glob("jspace_*.py"))
+        + list((BACKEND / "workers").glob("jlens_*.py"))
+        + list((BACKEND / "mcp_server" / "tools").glob("jlens*.py"))
+    )
+)
+
 # F20 R1-09/10: NEGATION-anchored, not topic-anchored.
 #
 # The previous `ALLOWED_CONTEXT` whitelisted TOPIC WORDS — `causal\s+evidence`,
@@ -150,6 +169,12 @@ _VOCABULARY = (
 #:                                    containing the vocabulary.
 #:   * `circuit_intervention_*.py`  — IS the intervention that EARNS rung 2.
 #:   * `circuit_validation_math.py` — the statistics behind that promotion.
+#:   * `jlens_intervention.py`      — F26/F25: the J-space equivalent, and the
+#:                                    ONLY J-space module that produces a causal
+#:                                    claim. Its docstring says so, which is a
+#:                                    statement about the module rather than a
+#:                                    claim about a finding — the same
+#:                                    distinction the circuit entries rest on.
 #:
 #: Deliberately a short, named list with a reason each: an exemption without a
 #: reason is how an audit stops auditing. These files are still covered by the
@@ -160,6 +185,9 @@ RUNG_TWO_MACHINERY = {
     "circuit_intervention_service.py",
     "circuit_validation_math.py",
     "circuit_faithfulness_service.py",
+    # F25/F26: the J-space equivalent — the only J-space module that produces a
+    # causal claim, and whose docstring says so.
+    "jlens_intervention.py",
 }
 
 ALLOWED_CONTEXT = re.compile(
@@ -226,10 +254,31 @@ def _prose_units(text: str):
                     continue
                 chunks.append((getattr(node, "lineno", 1), node.value))
         # Standalone comments: prose a reviewer reads.
-        for i, raw in enumerate(text.splitlines(), 1):
+        #
+        # F26: CONSECUTIVE comment lines are joined into one unit, exactly as
+        # wrapped docstring lines already are. Scanned line-by-line, a comment
+        # whose negation sits on the previous line reads as a bare claim —
+        #
+        #     # A threshold crossing is a readout. The number does
+        #     # not make it causal.
+        #
+        # was flagged, while the same sentence in a docstring passed. The
+        # asymmetry cuts both ways and the dangerous direction is the other
+        # one: an overclaim SPLIT across two comment lines evaded the sentence
+        # matcher entirely, which is the wrapped-line bypass R1-11 fixed for
+        # docstrings and left open here.
+        run_start = None
+        run_lines = []
+        for i, raw in enumerate(text.splitlines() + [""], 1):
             stripped = raw.strip()
             if stripped.startswith("#"):
-                chunks.append((i, stripped.lstrip("# ")))
+                if run_start is None:
+                    run_start = i
+                run_lines.append(stripped.lstrip("# "))
+                continue
+            if run_lines:
+                chunks.append((run_start, " ".join(run_lines)))
+                run_start, run_lines = None, []
 
     for line_no, chunk in chunks:
         # Split into sentences, with wrapped lines rejoined first.
@@ -422,3 +471,133 @@ class TestTheAuditCanActuallyFail:
             "a claim split across two lines is invisible to the audit — "
             "wrapping is now a bypass"
         )
+
+
+# ── Feature 026: J-space claims discipline (BR-019, BR-020, BR-024) ─────────
+
+
+class TestJSpaceSurfacesAreDiscovered:
+    """The corpus must come from the FILESYSTEM, not from a list.
+
+    This is the finding that produced the whole approach: `SURFACES` was
+    hand-maintained at 5 files while 16 circuit modules shipped unaudited, and
+    the suite was green throughout. A list is only as good as the last person
+    who remembered it.
+    """
+
+    def test_the_jspace_corpus_is_not_empty(self):
+        assert JSPACE_SURFACES, "J-space discovery matched nothing at all"
+
+    def test_it_contains_the_modules_that_exist_today(self):
+        names = {p.name for p in JSPACE_SURFACES}
+        for expected in (
+            "jlens_readout_service.py",
+            "jlens_validation.py",
+            "jlens_band_report.py",
+            "jlens_fitter.py",
+            "jlens.py",
+            "jspace_claims.py",
+        ):
+            assert expected in names, f"{expected} is not audited"
+
+    def test_discovery_spans_every_layer_a_claim_can_reach(self):
+        """A claim can ship from a service, an endpoint, a worker or a tool."""
+        parents = {p.parent.name for p in JSPACE_SURFACES}
+        for layer in ("services", "ml", "endpoints", "schemas", "workers", "tools"):
+            assert layer in parents, f"no J-space {layer} module is audited"
+
+
+@pytest.mark.parametrize("path", JSPACE_SURFACES, ids=lambda p: p.name)
+def test_jspace_surface_makes_no_unearned_causal_claim(path):
+    """J-space evidence is rung 0 unless an intervention with a control says otherwise."""
+    if path.name in RUNG_TWO_MACHINERY:
+        pytest.skip(
+            f"{path.name} IS the rung-2 machinery — see RUNG_TWO_MACHINERY for "
+            "why. Skipped rather than silently passing, so the exemption stays "
+            "visible in the test output."
+        )
+    violations = _offending_lines(path)
+    assert not violations, (
+        f"{path.name} states a causal claim in user-facing text. J-space "
+        "readouts are rung 0 — present is not used (BR-019).\n"
+        + "\n".join(f"  line {ln}: {text}" for ln, text in violations)
+    )
+
+
+class TestTheAuditWouldCatchAPlantedClaim:
+    """Negative control. An audit nobody has seen fail is not evidence."""
+
+    def test_a_causal_string_is_detected(self, tmp_path):
+        planted = tmp_path / "jlens_planted.py"
+        planted.write_text(
+            "MESSAGE = 'This readout shows the feature causally drives the output.'\n"
+        )
+        assert _offending_lines(planted), "the audit does not see a planted claim"
+
+    def test_a_NEGATED_statement_is_permitted(self, tmp_path):
+        """The audit is negation-anchored, and that is what J-space needs most.
+
+        Nearly every honest J-space sentence is a DENIAL of a causal claim —
+        "a readout is not a causal claim", "absence is not evidence of
+        absence". A topic-anchored audit would flag exactly the sentences the
+        product is required to say.
+        """
+        planted = tmp_path / "jlens_negated.py"
+        planted.write_text(
+            "MESSAGE = 'A concept in a readout is not a causal claim.'\n"
+        )
+        assert not _offending_lines(planted)
+
+    def test_a_DENIAL_SPLIT_ACROSS_COMMENT_LINES_is_still_a_denial(self, tmp_path):
+        """Consecutive comment lines are one prose unit, as wrapped docstrings are.
+
+        Scanned line-by-line, the second line of
+
+            # A concept in a readout is not
+            # a causal claim.
+
+        reads as the bare phrase "a causal claim" and is flagged — while the
+        identical sentence in a docstring passes, because docstrings already
+        rejoin wrapped lines. The asymmetry cost real precision: it pushes
+        authors to reword the very caveats BR-019 requires until the audit
+        stops objecting.
+        """
+        planted = tmp_path / "jlens_split_denial.py"
+        planted.write_text(
+            "# A concept appearing in a readout is not\n"
+            "# a causal claim.\n"
+            "VALUE = 1\n"
+        )
+        assert not _offending_lines(planted), (
+            "a denial split across two comment lines was read as a claim"
+        )
+
+    def test_an_OVERCLAIM_SPLIT_ACROSS_COMMENT_LINES_is_still_caught(self, tmp_path):
+        """And the joining must not open the bypass it closes.
+
+        The dangerous direction: an overclaim split so neither line contains a
+        whole claim. Joining is what makes the sentence visible at all.
+        """
+        planted = tmp_path / "jlens_split_claim.py"
+        planted.write_text(
+            "# This readout shows the feature\n"
+            "# causally drives the output.\n"
+            "VALUE = 1\n"
+        )
+        assert _offending_lines(planted), (
+            "an overclaim split across two comment lines evaded the audit"
+        )
+
+    def test_the_shipped_caveats_survive_their_own_audit(self):
+        """The strings BR-019/BR-020 REQUIRE must not be what the audit rejects.
+
+        A rule that forbids its own remedy is unimplementable, and the way that
+        surfaces is a caveat quietly reworded until it passes — losing the
+        precision that made it worth saying.
+        """
+        from src.schemas import jspace_claims
+
+        path = BACKEND / "schemas" / "jspace_claims.py"
+        assert not _offending_lines(path)
+        assert "not a causal claim" in jspace_claims.READOUT_NOT_CAUSAL
+        assert "not evidence" in jspace_claims.ABSENCE_CAVEAT
