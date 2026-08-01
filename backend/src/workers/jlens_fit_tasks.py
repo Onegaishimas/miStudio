@@ -40,6 +40,7 @@ def fit_jlens_artifact(
     layers: Optional[List[int]] = None,
     freeze_qk: bool = True,
     corpus_name: str = "unspecified",
+    semantic_probe: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Fit, validate and publish a J-lens artifact for one model.
 
@@ -98,11 +99,30 @@ def fit_jlens_artifact(
     ref = service.write_staged(repo_id, result.jacobians, config_yaml)
 
     self.update_state(state="PROGRESS", meta={"stage": "validating"})
+    # SEMANTIC runs HERE or nowhere. The check needs a loaded model, and this
+    # task is the one place in the system that has one alongside a freshly
+    # written artifact — so leaving it NOT_RUN made `serviceable` false on every
+    # successful fit, and the artifact was discarded seconds after being built.
+    # It still needs a FIXTURE, which cannot be invented: the intermediate must
+    # be one this model would plausibly reach and must not appear in the prompt.
+    # So it is the caller's to supply, and its absence fails closed with a
+    # stated reason rather than publishing on an unrun check.
+    semantic_result = None
+    if semantic_probe:
+        semantic_result = _run_semantic_check(
+            service=service,
+            ref=ref,
+            loaded=loaded,
+            probe=semantic_probe,
+            fitted_layers=sorted(result.jacobians),
+        )
+
     report = service.validate(
         ref,
         d_model=loaded.d_model,
         expected_layers=sorted(result.jacobians),
         n_vocab=loaded.n_vocab,
+        semantic_result=semantic_result,
     )
 
     published = False
@@ -120,6 +140,24 @@ def fit_jlens_artifact(
     else:
         service.discard_staged(repo_id)
 
+    # Say WHY nothing was published when the cause is a missing fixture rather
+    # than a bad lens. Without this the result reads "semantic=not_run" and the
+    # user is left to infer that the fit failed, when in fact it succeeded and
+    # was discarded for want of one prompt.
+    unpublished_reason = None
+    if not published:
+        if semantic_result is None:
+            unpublished_reason = (
+                "No semantic_probe was supplied, so the SEMANTIC check could not "
+                "run and the artifact was not published. Supply "
+                "{prompt, expected_intermediate, layer} — an intermediate the "
+                "model should reach that does NOT appear in the prompt."
+            )
+        elif not report.serviceable:
+            unpublished_reason = (
+                "The artifact failed a local validation class; see `validation`."
+            )
+
     return {
         "model_id": model_id,
         "repo_id": repo_id,
@@ -129,6 +167,7 @@ def fit_jlens_artifact(
         "layers": sorted(result.jacobians),
         "size_bytes": result.size_bytes(),
         "published": published,
+        "unpublished_reason": unpublished_reason,
         "validation": {
             "serviceable": report.serviceable,
             "passed": report.passed,
@@ -139,6 +178,76 @@ def fit_jlens_artifact(
             ],
         },
     }
+
+
+def _run_semantic_check(service, ref, loaded, probe: Dict[str, Any], fitted_layers):
+    """Read out the STAGED artifact and check for a known unspoken intermediate.
+
+    Deliberately reads the file that was just written rather than the tensors
+    still in memory. The in-memory ones are known good — they came straight out
+    of the fitter — so checking them would confirm the fit and prove nothing
+    about the artifact anyone else will load. A truncated or mis-keyed write is
+    only visible on the way back in.
+
+    A layer outside the fitted set is a fixture error, not a lens failure, and
+    is reported as such: reading out at an unfitted layer has no Jacobian to
+    apply and would fail for a reason that has nothing to do with the artifact.
+    """
+    from ..services.jlens_readout_service import JacobianTransport, ReadoutService
+    from ..services.jlens_validation import (
+        CheckClass,
+        CheckResult,
+        CheckStatus,
+        check_semantic,
+    )
+    from ..schemas.jlens import LensTokenMessage
+
+    prompt = str(probe.get("prompt", ""))
+    expected = str(probe.get("expected_intermediate", ""))
+    top_k = int(probe.get("top_k", 8))
+    layer = probe.get("layer")
+    layer = int(layer) if layer is not None else fitted_layers[-1]
+
+    if layer not in fitted_layers:
+        return CheckResult(
+            CheckClass.SEMANTIC,
+            CheckStatus.FAIL,
+            (
+                f"probe layer {layer} was not fitted (fitted: {fitted_layers}); "
+                "there is no Jacobian to read out through"
+            ),
+        )
+
+    payload = service._load_payload(ref)
+    if payload is None:
+        return CheckResult(
+            CheckClass.SEMANTIC,
+            CheckStatus.FAIL,
+            "the staged artifact did not deserialize, so it cannot be read out",
+        )
+
+    transport = JacobianTransport({int(k): v for k, v in payload.items()})
+    readout_service = ReadoutService(
+        model=loaded.model,
+        tokenizer=loaded.tokenizer,
+        structure=loaded.structure,
+        unembedding=loaded.unembedding,
+        model_name=loaded.name,
+    )
+
+    def readout(text: str, at_layer: int, k: int):
+        """Top-k at the LAST position — where the next token is being formed."""
+        last = None
+        for message in readout_service.stream(
+            text, [transport], layers=[at_layer], top_n=k
+        ):
+            if isinstance(message, LensTokenMessage):
+                last = message
+        if last is None:
+            raise ValueError("readout produced no tokens")
+        return last.results[0].top_tokens[0]
+
+    return check_semantic(readout, prompt, layer, expected, top_k=top_k)
 
 
 def _local_pass(report):

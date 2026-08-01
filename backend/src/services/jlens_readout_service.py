@@ -85,6 +85,20 @@ def _module_dtype(module: Any) -> Optional[torch.dtype]:
         return None
 
 
+def _model_device(model: Any) -> Optional[str]:
+    """Where the model's parameters actually are.
+
+    Read off a parameter rather than from `model.device` or a remembered
+    argument: a device-mapped model has no single `.device`, and a remembered
+    argument is a second claim that can disagree with the truth — which is
+    exactly how a CUDA-resident model came to be fed CPU input ids.
+    """
+    try:
+        return str(next(model.parameters()).device)
+    except (StopIteration, AttributeError):
+        return None
+
+
 class LensTransport(ABC):
     """Maps a residual-stream activation into readout space.
 
@@ -232,13 +246,26 @@ class ReadoutService:
                 a second copy of the model — see
                 analysis_service.load_unembedding_matrix.
             capture_device: device for the forward pass only. The readout itself
-                always runs on CPU (READOUT_DEVICE).
+                always runs on CPU (READOUT_DEVICE). Defaults to WHERE THE MODEL
+                ACTUALLY IS, not to CPU — see below.
         """
         self.model = model
         self.tokenizer = tokenizer
         self.structure = structure
         self.model_name = model_name
-        self.capture_device = capture_device or "cpu"
+        # ASK THE MODEL WHERE IT LIVES. Defaulting to "cpu" is a second,
+        # independent claim about the model's device, and the two silently
+        # disagreed: the worker's model cache is keyed by model id alone, so a
+        # fit that loaded gemma onto CUDA left a CUDA-resident model that the
+        # next readout received while still placing input_ids on CPU —
+        # "index is on cpu, different from other tensors on cuda:0", raised
+        # inside the embedding lookup before any readout math ran.
+        #
+        # This does NOT put readouts on the GPU: nothing here loads a model onto
+        # an accelerator, it only follows one already resident. The readout math
+        # stays on READOUT_DEVICE regardless, which is what keeps it off the
+        # serving card.
+        self.capture_device = capture_device or _model_device(model) or "cpu"
 
         # W_U stays on CPU with the readout. [n_vocab, d_model].
         #

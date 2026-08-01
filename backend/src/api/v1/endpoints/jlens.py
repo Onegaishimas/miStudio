@@ -164,6 +164,13 @@ class FitRequest(BaseModel):
     layers: Optional[List[int]] = None
     freeze_qk: bool = True
     corpus_name: str = "unspecified"
+    #: Fixture for the SEMANTIC validation class: {prompt, expected_intermediate,
+    #: layer?, top_k?}. Optional, and its absence FAILS CLOSED — the artifact is
+    #: fitted and then discarded unpublished, because publishing on a check that
+    #: never ran is the failure this suite exists to prevent. The intermediate
+    #: must not appear in the prompt: a token already present is recovered by an
+    #: artifact encoding nothing at all.
+    semantic_probe: Optional[Dict[str, Any]] = None
 
 
 class FitAccepted(BaseModel):
@@ -201,6 +208,7 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         layers=request.layers,
         freeze_qk=request.freeze_qk,
         corpus_name=request.corpus_name,
+        semantic_probe=request.semantic_probe,
     )
     return FitAccepted(task_id=task.id, model_id=request.model_id, queue="extraction")
 
@@ -545,22 +553,101 @@ async def readout_result(task_id: str) -> ReadoutResult:
     )
 
 
+class ProbeAccepted(BaseModel):
+    """Queued probe. Same two-step contract as the readout, for the same reason."""
+
+    task_id: str
+    model_id: str
+    status: str = "queued"
+
+
+class ProbeResult(BaseModel):
+    """A polled probe. `scores` is null until `status` is SUCCESS."""
+
+    task_id: str
+    status: str
+    stage: Optional[str] = None
+    scores: Optional[List[ProbeScore]] = None
+    #: Which mode produced these numbers. Probe and full-ranking scores can
+    #: disagree, so an analysis that does not say which it used cannot be
+    #: compared against one that does (BR-008).
+    mode: Optional[str] = None
+    lens_type: Optional[str] = None
+    error: Optional[str] = None
+
+
 @router.post(
     "/probe",
-    response_model=List[ProbeScore],
+    response_model=ProbeAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
     summary="Score named directions without ranking the vocabulary",
 )
-async def probe(request: ProbeRequest) -> List[ProbeScore]:
+async def probe(
+    request: ProbeRequest, db: AsyncSession = Depends(get_db)
+) -> ProbeAccepted:
     """Probe mode (BR-008).
 
     Distinct from the full ranked readout: the two can disagree because ranking
     applies a data-dependent normalisation this does not, so which mode is
-    canonical must be recorded per analysis.
+    canonical is RECORDED on the result rather than left to the caller.
+
+    Queued rather than inline for the readout's measured reason — a real model
+    takes about a minute to load, and nginx gives up at 60s.
     """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Probe backend is not bound yet; see /jlens/readout.",
+    from ....models.model import Model
+    from ....workers.jlens_probe_tasks import compute_probe
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    task = compute_probe.delay(
+        model_id=request.model_id,
+        prompt=request.prompt,
+        tokens=request.tokens,
+        layers=request.layers,
+        artifact_id=request.artifact_id,
     )
+    return ProbeAccepted(task_id=task.id, model_id=request.model_id)
+
+
+@router.get(
+    "/probe/{task_id}",
+    response_model=ProbeResult,
+    summary="Poll a queued probe",
+)
+async def probe_result(task_id: str) -> ProbeResult:
+    """Poll a probe. A FAILURE carries its REASON, never an empty score list.
+
+    An empty `scores` on a failed task is indistinguishable from a real probe
+    that found nothing — the confusion this whole feature exists to prevent.
+    """
+    from celery.result import AsyncResult
+
+    from ....core.celery_app import celery_app
+
+    async_result = AsyncResult(task_id, app=celery_app)
+    state = async_result.state
+
+    if state == "SUCCESS":
+        payload = async_result.result or {}
+        return ProbeResult(
+            task_id=task_id,
+            status="SUCCESS",
+            scores=[ProbeScore(**row) for row in payload.get("scores", [])],
+            mode=payload.get("mode"),
+            lens_type=payload.get("lens_type"),
+        )
+    if state == "FAILURE":
+        return ProbeResult(
+            task_id=task_id, status="FAILURE", error=str(async_result.info)
+        )
+
+    info = async_result.info if isinstance(async_result.info, dict) else {}
+    return ProbeResult(task_id=task_id, status=state, stage=info.get("stage"))
 
 
 # ── annotation, interventions, watchlists, replication ─────────────────────

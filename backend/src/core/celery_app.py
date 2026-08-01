@@ -142,6 +142,12 @@ celery_app.conf.update(
         "src.workers.jlens_readout_tasks.*": {
             "queue": "extraction",
         },
+        # J-lens probe: same model-bound forward pass as the readout, so the
+        # same queue — sharing it also shares the worker's single-entry model
+        # cache, which is the whole reason the readout moved here.
+        "src.workers.jlens_probe_tasks.*": {
+            "queue": "extraction",
+        },
         # Steered-transcript recorder: GPU (loads the model to generate) — same
         # extraction queue + single-GPU guard as calibration.
         "src.workers.circuit_record_tasks.*": {
@@ -448,6 +454,7 @@ celery_app.autodiscover_tasks(
         "src.workers.cleanup_stuck_activations",
         "src.workers.jlens_fit_tasks",
         "src.workers.jlens_readout_tasks",
+        "src.workers.jlens_probe_tasks",
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes
