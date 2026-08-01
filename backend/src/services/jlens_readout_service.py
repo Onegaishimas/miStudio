@@ -241,7 +241,14 @@ class ReadoutService:
         self.capture_device = capture_device or "cpu"
 
         # W_U stays on CPU with the readout. [n_vocab, d_model].
-        self.W_U = unembedding.to(READOUT_DEVICE)
+        #
+        # CAST ONCE, here. A real checkpoint mixes dtypes and the matvec needs
+        # one family, but casting inside the per-cell hot path allocates a whole
+        # new [n_vocab, d_model] tensor EVERY (layer, position) — 2.4 GB per
+        # call at a 256k vocabulary. Caught by the envelope guard, which exists
+        # for exactly this shape. Same lesson as JacobianTransport casting J
+        # once in its constructor.
+        self.W_U = unembedding.to(READOUT_DEVICE).to(torch.float32)
         self.n_vocab, self.d_model = self.W_U.shape
 
         # The model's own final norm, resolved once. Looked up by attribute
@@ -364,7 +371,7 @@ class ReadoutService:
         # checkpoint mixes families and torch raises rather than promoting.
         # fp32 also keeps ranking stable — the logit gaps that decide order are
         # small relative to fp16 precision near the top of the distribution.
-        logits = self.W_U.to(torch.float32) @ normed.to(torch.float32)  # [n_vocab]
+        logits = self.W_U @ normed.to(self.W_U.dtype)  # [n_vocab]
         probs = torch.softmax(logits, dim=-1)
 
         k = min(top_n, probs.numel())
