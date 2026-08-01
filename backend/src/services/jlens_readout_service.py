@@ -72,6 +72,19 @@ _FINAL_NORM_NAMES = (
 )
 
 
+def _module_dtype(module: Any) -> Optional[torch.dtype]:
+    """The dtype a module's own parameters are stored in, if it has any.
+
+    Needed because a real checkpoint is NOT one dtype: a model can carry a
+    bfloat16 norm alongside fp16 activations, and feeding one to the other
+    raises rather than promoting.
+    """
+    try:
+        return next(module.parameters()).dtype
+    except (StopIteration, AttributeError):
+        return None
+
+
 class LensTransport(ABC):
     """Maps a residual-stream activation into readout space.
 
@@ -322,7 +335,16 @@ class ReadoutService:
         """
         if self._final_norm is not None:
             with torch.no_grad():
-                return self._final_norm(x)
+                # CAST TO THE NORM'S OWN DTYPE FIRST.
+                #
+                # Found on the cluster, not in any fixture: gemma-2-2b-it loads
+                # with a bfloat16 final norm while the captured residual and the
+                # unembedding arrive as fp16, and the call died with
+                # "expected scalar type BFloat16 but found Half". Mixed
+                # precision is ordinary on a real checkpoint and never appears
+                # in a single-dtype test stack.
+                norm_dtype = _module_dtype(self._final_norm) or x.dtype
+                return self._final_norm(x.to(norm_dtype)).to(x.dtype)
         # Documented fallback: RMS without learned weights.
         rms = x.pow(2).mean().sqrt().clamp_min(1e-6)
         return x / rms
@@ -338,8 +360,12 @@ class ReadoutService:
         transported = transport.apply(h.to(READOUT_DEVICE), layer)
         normed = self._normalize(transported)
 
-        logits = self.W_U @ normed            # [n_vocab]
-        probs = torch.softmax(logits.float(), dim=-1)
+        # ONE COMPUTE DTYPE for the matvec, for the same reason: a real
+        # checkpoint mixes families and torch raises rather than promoting.
+        # fp32 also keeps ranking stable — the logit gaps that decide order are
+        # small relative to fp16 precision near the top of the distribution.
+        logits = self.W_U.to(torch.float32) @ normed.to(torch.float32)  # [n_vocab]
+        probs = torch.softmax(logits, dim=-1)
 
         k = min(top_n, probs.numel())
         top = torch.topk(probs, k)
