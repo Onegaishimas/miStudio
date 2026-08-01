@@ -19,16 +19,24 @@ const MODES: { id: LensMode; label: string; Icon: typeof Eye }[] = [
 ];
 
 interface LensModeTabsProps {
+  /** Whether a J-lens artifact is mounted for this model — changes WHICH
+   * step the disabled reason names. */
+  hasArtifact?: boolean;
   meta: LensMetaMessage | null;
   mode: LensMode;
   onChange: (mode: LensMode) => void;
 }
 
-export function LensModeTabs({ meta, mode, onChange }: LensModeTabsProps) {
+export function LensModeTabs({
+  meta,
+  mode,
+  onChange,
+  hasArtifact = false,
+}: LensModeTabsProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {MODES.map(({ id, label, Icon }) => {
-        const { enabled, reason } = modeAvailability(meta, id);
+        const { enabled, reason } = modeAvailability(meta, id, hasArtifact);
         const active = mode === id;
         return (
           <div key={id} className="flex flex-col items-start">

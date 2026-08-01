@@ -385,7 +385,8 @@ export interface ModeAvailability {
  */
 export function modeAvailability(
   meta: LensMetaMessage | null,
-  mode: LensMode
+  mode: LensMode,
+  hasArtifact = false
 ): ModeAvailability {
   if (!meta) {
     // BEFORE the first readout we know one thing for certain: the logit lens
@@ -394,6 +395,20 @@ export function modeAvailability(
     // user nothing works, when the default path always does.
     if (mode === 'LOGIT_LENS') {
       return { enabled: true, reason: null };
+    }
+    // SAY WHICH THING IS MISSING. With an artifact mounted, "fit one to enable
+    // it" tells the user to do what they have already done — and it is not
+    // even the blocker: the tabs derive from what the STREAM carries, so the
+    // remaining step is a readout. Observed on the cluster with a published,
+    // validated artifact sitting in the strip directly below the message.
+    if (hasArtifact) {
+      return {
+        enabled: false,
+        reason:
+          mode === 'JACOBIAN_LENS'
+            ? 'An artifact is mounted for this model. Read out to load it.'
+            : 'Diff compares two lenses. Read out to load both.',
+      };
     }
     return {
       enabled: false,

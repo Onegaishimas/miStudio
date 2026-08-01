@@ -803,3 +803,41 @@ describe('the readout is asynchronous because it measurably had to be', () => {
     expect(useJLensStore.getState().isLoading).toBe(false);
   });
 })
+
+describe('the disabled reason names the step that is actually missing', () => {
+  it('says "fit one" only when no artifact is mounted', () => {
+    render(<JLensPanel />);
+    act(() => useJLensStore.setState({ modelId: 'm_lfm2', artifacts: [] }));
+
+    expect(screen.getByText(/Fit one to enable it/i)).toBeInTheDocument();
+  });
+
+  it('says "read out" once an artifact IS mounted', () => {
+    // Observed on the cluster: a published, validated artifact sat in the strip
+    // directly below a message telling the user to fit one. It told them to do
+    // what they had already done, and named the wrong blocker — the tabs derive
+    // from what the STREAM carries, so the remaining step is a readout.
+    //
+    // MUTATION CONTROL: drop `hasArtifact` from the LensModeTabs call and this
+    // fails.
+    render(<JLensPanel />);
+    act(() =>
+      useJLensStore.setState({
+        modelId: 'm_lfm2',
+        modelRepoId: 'google/gemma-2-2b-it',
+        artifacts: [
+          {
+            slug: 'gemma-2-2b-it',
+            directory: '/data/jlens/gemma-2-2b-it',
+            lens_file: 'gemma-2-2b-it_jacobian_lens.pt',
+            size_bytes: 21_235_717,
+            has_config: true,
+          },
+        ],
+      })
+    );
+
+    expect(screen.getByText(/Read out to load it/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Fit one to enable it/i)).not.toBeInTheDocument();
+  });
+});

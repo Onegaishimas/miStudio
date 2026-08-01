@@ -147,7 +147,17 @@ export function JLensPanel() {
           </span>
         )}
         <div className="ml-auto">
-          <LensModeTabs meta={meta} mode={lensMode} onChange={setLensMode} />
+          <LensModeTabs
+            meta={meta}
+            mode={lensMode}
+            onChange={setLensMode}
+            // Derived from the SAME registry the readout resolves against, so
+            // the tab's reason cannot claim an artifact the readout will not
+            // find (or deny one it will).
+            hasArtifact={artifacts.some(
+              (a) => a.slug === artifactSlugFor(modelRepoId)
+            )}
+          />
         </div>
       </header>
 
