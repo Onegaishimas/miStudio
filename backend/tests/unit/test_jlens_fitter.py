@@ -471,3 +471,98 @@ def test_a_properly_frozen_fit_is_accepted():
         stack, Tokenizer(), Structure(stack), freeze_qk=False, min_prompts=1, chunk=3
     )
     assert fitter.fit(["abc"]).jacobians
+
+
+# ---------------------------------------------------------------------------
+# Grouped-query attention under the freeze
+#
+# The first real fit against a GQA model died in `weights @ value` with an 8-vs-4
+# head mismatch. Every test above it was green: the analytic stack has no
+# attention at all, and the hardware acceptance run used GPT-2, which is plain
+# multi-head attention where n_kv_heads == n_heads. The GQA branch had never
+# once executed, so the fixtures agreed by construction.
+#
+# The shape error is the GOOD failure. The dangerous one is silent: expanding V
+# with `repeat` instead of `repeat_interleave` produces a correctly shaped
+# result that pairs each query head with the WRONG KV head, and nothing raises.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * delete the n_rep expansion entirely  -> "gqa is handled" fails (RuntimeError)
+#   * repeat_interleave -> repeat          -> "kv head pairing" fails
+#   * n_rep > 1 -> n_rep > 0 (or >= 1)     -> "mha is untouched" fails
+# ---------------------------------------------------------------------------
+
+
+def _reference_kv_repeat(t: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """transformers' `repeat_kv`, written out independently of the code under test."""
+    b, h, s, d = t.shape
+    return t[:, :, None].expand(b, h, n_rep, s, d).reshape(b, h * n_rep, s, d)
+
+
+@pytest.mark.parametrize(
+    "n_heads,n_kv_heads,label",
+    [(8, 4, "gqa"), (8, 1, "mqa"), (4, 4, "mha")],
+)
+def test_frozen_sdpa_handles_every_kv_head_arity(n_heads, n_kv_heads, label):
+    """The freeze must survive GQA, MQA and MHA, and match a reference by VALUE.
+
+    Head counts come off the tensors, never off a config or an architecture
+    name — a model this repo has never seen must work (BR-032).
+    """
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    torch.manual_seed(0)
+    b, s, d = 1, 5, 6
+    n_rep = n_heads // n_kv_heads
+    q = torch.randn(b, n_heads, s, d, dtype=torch.float64)
+    k = torch.randn(b, n_kv_heads, s, d, dtype=torch.float64)
+    v = torch.randn(b, n_kv_heads, s, d, dtype=torch.float64)
+
+    real_sdpa = torch.nn.functional.scaled_dot_product_attention
+
+    # What the unfrozen model computes, with V repeated the way transformers does.
+    expected = real_sdpa(q, _reference_kv_repeat(k, n_rep), _reference_kv_repeat(v, n_rep))
+
+    with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+        # "gqa is handled" / "mha is untouched": this raised RuntimeError
+        # ("size of tensor a (8) must match ... b (4)") before the fix.
+        got = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, enable_gqa=(n_rep > 1)
+        )
+
+    assert got.shape == (b, n_heads, s, d), f"{label}: wrong output shape"
+    # "kv head pairing": `repeat` instead of `repeat_interleave` has the right
+    # shape here and fails only on these values.
+    assert torch.allclose(got, expected, atol=1e-9), f"{label}: wrong attention output"
+
+
+def test_the_freeze_stops_gradient_at_qk_but_not_at_v_under_gqa():
+    """The POINT of the patch, asserted on the arity that broke it.
+
+    A patch that merely stops crashing could equally have stopped freezing.
+    """
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    torch.manual_seed(1)
+    b, n_heads, n_kv, s, d = 1, 8, 4, 4, 6
+    q = torch.randn(b, n_heads, s, d, dtype=torch.float64, requires_grad=True)
+    k = torch.randn(b, n_kv, s, d, dtype=torch.float64, requires_grad=True)
+    v = torch.randn(b, n_kv, s, d, dtype=torch.float64, requires_grad=True)
+
+    with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+    out.sum().backward()
+
+    assert v.grad is not None and v.grad.abs().sum() > 0, "V must carry gradient"
+    assert q.grad is None or q.grad.abs().sum() == 0, "Q must be frozen"
+    assert k.grad is None or k.grad.abs().sum() == 0, "K must be frozen"
+
+
+def test_the_sdpa_patch_is_removed_on_exit():
+    """A leaked global patch would silently freeze attention for every later caller."""
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    before = torch.nn.functional.scaled_dot_product_attention
+    with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+        assert torch.nn.functional.scaled_dot_product_attention is not before
+    assert torch.nn.functional.scaled_dot_product_attention is before

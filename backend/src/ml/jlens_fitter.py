@@ -182,6 +182,22 @@ def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[N
                     *args,
                     **kwargs,
                 )
+            # GROUPED-QUERY ATTENTION. Under GQA there are fewer KV heads than
+            # query heads, and callers may hand SDPA the un-repeated K/V with
+            # `enable_gqa=True` and let it broadcast internally. The recovered
+            # pattern then has one row group per QUERY head while `value` still
+            # has only the KV heads, and the matmul is a shape error — which is
+            # the good case. The head counts are read off the tensors rather
+            # than off a config, so this covers MHA (n_rep == 1, a no-op), GQA
+            # and MQA without naming an architecture (BR-032).
+            n_rep = weights.shape[-3] // value.shape[-3]
+            if n_rep > 1:
+                # repeat_interleave, not repeat: transformers' repeat_kv expands
+                # then reshapes, which places each KV head next to its own query
+                # group. `repeat` would tile the whole block and silently pair
+                # every query head with the WRONG KV head — same shape, wrong
+                # attention output, no error anywhere.
+                value = value.repeat_interleave(n_rep, dim=-3)
             return weights @ value
 
         torch.nn.functional.scaled_dot_product_attention = frozen_sdpa
