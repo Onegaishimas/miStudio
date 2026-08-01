@@ -162,18 +162,28 @@ export async function cancelModelDownload(id: string): Promise<{
 /**
  * Get Celery task status by task ID
  */
-export async function getTaskStatus(taskId: string): Promise<{
+/**
+ * Celery task state by id.
+ *
+ * The field is `state`, not `status`. This type said `status` and had no
+ * caller, so nothing ever noticed: a consumer reading `.status` gets
+ * `undefined`, which is not SUCCESS and not FAILURE, so a poll loop written
+ * against it waits forever on a task that already finished. Pinned by
+ * `models.test.ts`.
+ */
+export async function getTaskStatus(taskId: string): Promise<TaskStatus> {
+  return fetchAPI<TaskStatus>(`/models/tasks/${taskId}`);
+}
+
+export interface TaskStatus {
   task_id: string;
-  status: string;
+  state: string;
+  ready: boolean;
+  successful: boolean | null;
+  failed: boolean | null;
   result?: any;
   error?: string;
-}> {
-  return fetchAPI<{
-    task_id: string;
-    status: string;
-    result?: any;
-    error?: string;
-  }>(`/models/tasks/${taskId}`);
+  info?: Record<string, any>;
 }
 
 /**
