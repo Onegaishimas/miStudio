@@ -338,7 +338,20 @@ export function modeAvailability(
   mode: LensMode
 ): ModeAvailability {
   if (!meta) {
-    return { enabled: false, reason: 'No readout yet.' };
+    // BEFORE the first readout we know one thing for certain: the logit lens
+    // needs no artifact and works on any loaded model (BR-005). Reporting it
+    // as unavailable alongside the two that genuinely require one told the
+    // user nothing works, when the default path always does.
+    if (mode === 'LOGIT_LENS') {
+      return { enabled: true, reason: null };
+    }
+    return {
+      enabled: false,
+      reason:
+        mode === 'JACOBIAN_LENS'
+          ? 'Needs a validated J-lens artifact for this model. Fit one to enable it.'
+          : 'Diff compares two lenses; it needs a fitted J-lens artifact.',
+    };
   }
   const available = new Set<string>(meta.types);
 

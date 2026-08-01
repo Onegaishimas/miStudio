@@ -208,6 +208,26 @@ describe('positions are looked up by position, not by array index', () => {
   });
 });
 
+describe('before any readout', () => {
+  it('offers the logit lens and names what the other two need', () => {
+    // The logit lens needs no artifact and works on any loaded model, so
+    // reporting all three as unavailable said "nothing works" when the
+    // default path always does.
+    render(<JLensPanel />);
+
+    expect(screen.getByRole('button', { name: /Logit/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Jacobian/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Diff/ })).toBeDisabled();
+    expect(screen.getByText(/Needs a validated J-lens artifact/i)).toBeInTheDocument();
+
+    // Scoped to the tab group: the provenance strip legitimately says "no
+    // readout yet" — that is a statement about provenance, not about whether
+    // a lens is usable, and an unscoped query conflates the two.
+    const logit = screen.getByRole('button', { name: /Logit/ });
+    expect(logit.parentElement?.textContent).not.toMatch(/No readout yet/i);
+  });
+});
+
 describe('lens-mode disablement is derived from what the stream carries', () => {
   it('disables Jacobian and Diff with a stated reason on a logit-only readout', () => {
     render(<JLensPanel />);
