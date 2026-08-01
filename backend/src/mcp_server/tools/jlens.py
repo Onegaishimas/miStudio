@@ -11,7 +11,7 @@ Scope here is what EXISTS as a route. A tool calling a route that does not
 exist is the same defect in a new place, so tools land as their endpoints do.
 """
 
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
@@ -145,6 +145,111 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         confusion this feature exists to prevent. A FAILURE reports its reason.
         """
         return await client.get(f"/jlens/readout/{task_id}")
+
+    @mcp.tool()
+    async def annotate_jlens_feature(
+        model_id: Annotated[str, Field(description="miStudio model id")],
+        sae_id: Annotated[str, Field(description="SAE the feature belongs to")],
+        feature_id: Annotated[str, Field(description="Feature id being annotated")],
+        layer: Annotated[int, Field(description="Layer the feature lives at")],
+        direction: Annotated[List[float], Field(description="The feature's decoder direction, d_model long")],
+        label_tokens: Annotated[Optional[List[str]], Field(description="The feature's existing label, to compare the readout against. Omit and no disagreement is computed")] = None,
+        top_k: Annotated[int, Field(description="How many readout tokens to return")] = 8,
+    ) -> Any:
+        """Describe an SAE feature in J-space: what it pushes TOWARD.
+
+        TWO INDEPENDENT FIELDS, and the second one matters. `lens_kurtosis` is
+        geometric; `workspace_class` is behavioural. High kurtosis ALONE is not
+        workspace alignment — a MOTOR feature is sharp too, so classifying on
+        kurtosis would call every motor feature a workspace feature.
+
+        `workspace_class` is UNKNOWN unless a band report exists for this
+        model. That is a real answer, not a failure: without boundaries
+        measured here there is no principled middle of the stack.
+
+        RUNG 0. An annotation is an observation about a direction, not a claim
+        that the feature causes anything.
+        """
+        body: dict[str, Any] = {
+            "model_id": model_id,
+            "sae_id": sae_id,
+            "feature_id": feature_id,
+            "layer": layer,
+            "direction": direction,
+            "top_k": top_k,
+        }
+        if label_tokens:
+            body["label_tokens"] = label_tokens
+        return await client.post("/jlens/annotate", json_body=body)
+
+    @mcp.tool()
+    async def create_jlens_watchlist(
+        name: Annotated[str, Field(description="Watchlist name")],
+        artifact_ref: Annotated[str, Field(description="The artifact its directions live in. Lens coordinates are artifact-specific and mean nothing elsewhere")],
+        scoring_definition: Annotated[str, Field(description="HOW the score is computed. REQUIRED: a threshold applied to a differently computed score is a different detector, and the consumer cannot notice")],
+        concepts: Annotated[List[Dict[str, Any]], Field(description="[{token, threshold}] pairs")],
+        control_set: Annotated[Optional[List[str]], Field(description="Unrelated concrete nouns the score is measured against")] = None,
+    ) -> Any:
+        """Author a watchlist for miLLM to evaluate per token at inference.
+
+        miStudio EMITS; runtime evaluation is miLLM's plane.
+
+        A watchlist is a detector definition, not a list of words: directions,
+        thresholds and the scoring definition travel together or none of them
+        mean anything. Missing either the scoring definition or the artifact
+        reference is refused rather than exported and discovered later.
+        """
+        body: dict[str, Any] = {
+            "name": name,
+            "artifact_ref": artifact_ref,
+            "scoring_definition": scoring_definition,
+            "concepts": concepts,
+        }
+        if control_set:
+            body["control_set"] = control_set
+        return await client.post("/jlens/watchlists", json_body=body)
+
+    @mcp.tool()
+    async def jlens_cost_estimate(
+        operation: Annotated[str, Field(description="artifact_construction | readout | decomposition | annotation_sweep | intervention_run | template_lens_build")],
+        d_model: Annotated[int, Field(description="Model hidden size")],
+        n_layers: Annotated[int, Field(description="Layer count")],
+        n_positions: Annotated[int, Field(description="Prompt length in tokens")] = 1,
+        n_prompts: Annotated[int, Field(description="Corpus size, for a fit")] = 1,
+        n_features: Annotated[int, Field(description="Dictionary size, for a sweep")] = 1,
+    ) -> Any:
+        """Estimate an operation's cost BEFORE committing to it.
+
+        CALL THIS FIRST for anything larger than a single readout. An
+        annotation sweep over a 32k-feature dictionary and one readout differ by
+        orders of magnitude, and there is no way to tell them apart from the
+        request alone.
+
+        Estimates are ORDER-OF-MAGNITUDE and carry their basis. An unknown
+        operation is an error rather than a cheap default — a small number would
+        invite exactly the run it should warn about.
+        """
+        return await client.get(
+            "/jlens/cost-estimate",
+            operation=operation,
+            d_model=d_model,
+            n_layers=n_layers,
+            n_positions=n_positions,
+            n_prompts=n_prompts,
+            n_features=n_features,
+        )
+
+    @mcp.tool()
+    async def get_jlens_replication_report(
+        slug: Annotated[str, Field(description="Artifact slug")],
+    ) -> Any:
+        """The recorded replication report, or null (BR-001).
+
+        Published whether favourable or not. A partial run reports as partial —
+        `complete: false` with the missing evaluation sets named — rather than
+        as a clean table over whatever happened to finish.
+        """
+        return await client.get(f"/jlens/reports/replication?slug={slug}")
 
     @mcp.tool()
     async def fit_jlens_artifact(

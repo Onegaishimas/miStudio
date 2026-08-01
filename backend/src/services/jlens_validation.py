@@ -249,6 +249,22 @@ def check_structural(payload: Any, d_model: int, expected_layers: Sequence[int])
                 CheckStatus.FAIL,
                 f"layer {layer} has side {shape[0]}, model d_model is {d_model}",
             )
+        # NON-FINITE ENTRIES. An artifact whose fp16 cast overflowed contains
+        # inf, deserialises cleanly, is exactly the right shape and size, and
+        # reads out garbage. Found on the first real fit, where 0.3% of GPT-2's
+        # entries saturated at fp16's ceiling — every other structural check
+        # passed.
+        finite = getattr(matrix, "isfinite", None)
+        if finite is not None and not bool(finite().all()):
+            import torch as _t
+
+            bad = int((~matrix.isfinite()).sum())
+            return CheckResult(
+                CheckClass.STRUCTURAL,
+                CheckStatus.FAIL,
+                f"layer {layer} has {bad} non-finite entries — the fp16 cast "
+                "overflowed. The artifact loads and reads out garbage.",
+            )
 
     return CheckResult(
         CheckClass.STRUCTURAL,

@@ -314,3 +314,25 @@ def test_no_check_scores_next_token_agreement():
                 f"{label!r} in the executable path: next-token agreement must "
                 "never be a validation criterion (BR-004)"
             )
+
+
+def test_structural_rejects_a_NON_FINITE_artifact():
+    """An overflowed fp16 cast is the worst kind of bad artifact.
+
+    Found on the first real fit: GPT-2's accumulated Jacobians exceed fp16's
+    65504 ceiling, so 0.3% of entries saturated to inf. That artifact
+    deserialises cleanly, is exactly the right shape and exactly the right
+    size, passes NAMING and ENVELOPE, and every readout through it is garbage.
+    """
+    payload = {0: torch.full((8, 8), float("inf"), dtype=torch.float16)}
+    result = check_structural(payload, d_model=8, expected_layers=[0])
+    assert not result.passed
+    assert "non-finite" in result.detail
+
+
+def test_structural_rejects_a_PARTIALLY_saturated_artifact():
+    """0.3% of entries is what a real overflow looked like — not all of them."""
+    matrix = torch.zeros(8, 8, dtype=torch.float16)
+    matrix[0, 0] = float("inf")
+    result = check_structural({0: matrix}, d_model=8, expected_layers=[0])
+    assert not result.passed

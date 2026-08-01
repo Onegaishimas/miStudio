@@ -41,6 +41,10 @@ EXPECTED_TOOLS = {
     "get_jlens_band_report",
     "get_jlens_gate",
     "get_jlens_readout",
+    "annotate_jlens_feature",
+    "create_jlens_watchlist",
+    "jlens_cost_estimate",
+    "get_jlens_replication_report",
 }
 
 
@@ -225,6 +229,70 @@ class TestCaller:
         assert client.get.await_count == 1
         assert client.get.await_args.args[0] == "/jlens/readout/t-1"
 
+    def test_annotation_sends_the_direction_and_the_label_it_is_compared_to(self):
+        """Both, or the disagreement score is silently absent.
+
+        The label is what the readout is compared AGAINST — dropping it still
+        annotates, and still returns, with no disagreement computed and nothing
+        saying why.
+        """
+        mcp, client, names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "annotate_jlens_feature",
+                {
+                    "model_id": "m_a",
+                    "sae_id": "sae_1",
+                    "feature_id": "f7",
+                    "layer": 6,
+                    "direction": [0.1, 0.2],
+                    "label_tokens": ["spider"],
+                },
+            )
+        )
+        assert client.post.await_count == 1
+        assert client.post.await_args.args[0] == "/jlens/annotate"
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["direction"] == [0.1, 0.2]
+        assert body["label_tokens"] == ["spider"]
+
+    def test_the_watchlist_tool_sends_its_scoring_definition(self):
+        """Without it the server refuses — and it should, so the tool must send it."""
+        mcp, client, names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "create_jlens_watchlist",
+                {
+                    "name": "w",
+                    "artifact_ref": "gpt2",
+                    "scoring_definition": "eval mean minus control mean",
+                    "concepts": [{"token": "evaluation", "threshold": 0.5}],
+                },
+            )
+        )
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["scoring_definition"]
+        assert body["artifact_ref"] == "gpt2"
+
+    def test_the_cost_estimate_tool_sends_the_dimensions_it_scales_on(self):
+        """An estimate computed from defaults is not about the caller's run."""
+        mcp, client, names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "jlens_cost_estimate",
+                {
+                    "operation": "annotation_sweep",
+                    "d_model": 2048,
+                    "n_layers": 16,
+                    "n_features": 32768,
+                },
+            )
+        )
+        assert client.get.await_args.args[0] == "/jlens/cost-estimate"
+        params = client.get.await_args.kwargs
+        assert params["d_model"] == 2048
+        assert params["n_features"] == 32768
+
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""
         _mcp, _client, names = self._tools()
@@ -265,5 +333,9 @@ class TestRoutesExist:
             "/jlens/artifacts/{slug}/band-report",
             "/jlens/artifacts/{slug}/gate",
             "/jlens/readout/{task_id}",
+            "/jlens/annotate",
+            "/jlens/watchlists",
+            "/jlens/cost-estimate",
+            "/jlens/reports/replication",
         ):
             assert any(expected in p for p in paths), f"{expected} is not routed"
