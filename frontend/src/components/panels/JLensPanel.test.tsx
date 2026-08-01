@@ -30,6 +30,12 @@ import { JLensPanel } from './JLensPanel';
 import { useJLensStore } from '../../stores/jlensStore';
 import { rankColor } from '../jlens/utils';
 import type { LensType, ReadoutResponse } from '../../types/jlens';
+import { ABSENCE_CAVEAT, READOUT_LIMITS } from '../../config/jspaceClaims';
+
+/** Match a required caveat verbatim rather than by a paraphrase of it. */
+function escapeRe(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 vi.mock('../../stores/modelsStore');
 vi.mock('../../api/jlens', () => ({
@@ -351,7 +357,7 @@ describe('interpretability framing', () => {
   });
 
   it('states the single-token limitation', () => {
-    expect(screen.getByText(/single-token names/i)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(escapeRe(READOUT_LIMITS)))).toBeInTheDocument();
   });
 
   it('states that an uninterpretable readout is not a null result', () => {
@@ -359,9 +365,10 @@ describe('interpretability framing', () => {
   });
 
   it('states that absence of a signal is not evidence of absence', () => {
-    expect(
-      screen.getByText(/not evidence that the underlying computation did not occur/i)
-    ).toBeInTheDocument();
+    // Asserted against the SHARED constant, not a retyped sentence. A test
+    // holding its own copy drifts alongside the component and then passes
+    // against weakened copy.
+    expect(screen.getByText(new RegExp(escapeRe(ABSENCE_CAVEAT)))).toBeInTheDocument();
   });
 
   it('says explicitly that the logit lens involves no artifact', () => {

@@ -11,6 +11,7 @@
  */
 
 import { Database, Info } from 'lucide-react';
+import { ABSENCE_CAVEAT, READOUT_LIMITS } from '../../config/jspaceClaims';
 import type { ReadoutProvenance } from '../../types/jlens';
 
 interface ProvenanceStripProps {
@@ -56,11 +57,11 @@ export function ProvenanceStrip({ provenance, bandsAvailable }: ProvenanceStripP
       <div className="mt-1 flex items-start gap-1.5 text-[10px] leading-snug text-slate-500 dark:text-slate-600">
         <Info className="mt-px h-3 w-3 shrink-0" />
         <span>
-          Readouts are limited to concepts with single-token names. A readout
-          that resists interpretation is not a null result — it may be averaging
-          noise, a multi-token concept, or genuine content we cannot yet name.
-          Absence of a signal is not evidence that the underlying computation did
-          not occur.
+          {/* Imported, never restated. A hardcoded sentence here is a copy the
+              backend's sync test cannot see, and a drifted caveat is worse
+              than a missing one: the surface still looks like it is warning
+              the user while saying something weaker than the requirement. */}
+          {READOUT_LIMITS} {ABSENCE_CAVEAT}
         </span>
       </div>
     </footer>
