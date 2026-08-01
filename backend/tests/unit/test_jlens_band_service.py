@@ -17,6 +17,7 @@ MUTATION CONTROLS (each must turn this file red):
 from __future__ import annotations
 
 import json
+import torch
 from pathlib import Path
 
 import pytest
@@ -175,3 +176,119 @@ def test_an_unrecognised_decision_raises_rather_than_rendering(tmp_path: Path):
     (tmp_path / "gate.json").write_text(json.dumps({"decision": "probably_fine"}))
     with pytest.raises(ValueError):
         load_gate(tmp_path)
+
+
+# ── metrics measure the right OBJECT (review round 2) ──────────────────────
+
+
+class _Svc:
+    """Minimal readout-service stand-in exposing the two private hooks used."""
+
+    def __init__(self, n_positions=4, d_model=6, n_vocab=40, n_layers=3):
+        self.d_model = d_model
+        self.W_U = torch.randn(n_vocab, d_model)
+        self._n_positions = n_positions
+        self._n_layers = n_layers
+
+        class Tok:
+            def __call__(_s, text, return_tensors=None):
+                return {"input_ids": torch.ones(1, n_positions, dtype=torch.long)}
+
+        self.tokenizer = Tok()
+
+    def _capture_residuals(self, input_ids, layers):
+        class Cap:
+            pass
+
+        cap = Cap()
+        cap.by_layer = {
+            l: torch.randn(self._n_positions, self.d_model) for l in layers
+        }
+        return cap
+
+    def _normalize(self, x):
+        return x
+
+
+def test_kurtosis_is_measured_on_the_READOUT_not_the_residual():
+    """BR-002 asks for the readout distribution's kurtosis.
+
+    The residual's kurtosis describes the activation vector's shape; the
+    readout's describes how sharply the layer points at particular tokens.
+    Only the second is what "the distribution sharpens where reportable
+    content appears" means, and only the second is what the boundary
+    derivation keys on.
+
+    A residual-based figure is measurable, plausible and answers a different
+    question — so this pins the object, using a fixture whose residuals are
+    near-normal (excess kurtosis ~0) while its readout is deliberately sharp.
+    """
+    from src.services.jlens_band_service import compute_band_report
+
+    svc = _Svc()
+    # A near-one-hot unembedding makes the readout distribution extremely
+    # peaked while the residuals stay normal.
+    svc.W_U = torch.zeros(40, 6)
+    svc.W_U[0] = torch.ones(6) * 50.0
+
+    report = compute_band_report(
+        svc, ["abcd"], layers=[0, 1, 2], control_seed=5, model_id="m"
+    )
+    for p in report.profiles:
+        assert p.kurtosis is not None
+        # A normal sample sits near 0; this readout is far from it.
+        assert p.kurtosis > 3.0, (
+            "kurtosis looks like it was measured on the residuals, which are "
+            "normal here, rather than on the peaked readout distribution"
+        )
+
+
+def test_effective_dimensionality_is_ABSENT_for_the_logit_lens():
+    """The identity's effective dimensionality is d_model — a constant.
+
+    Reporting it would put a number in the profile that varies with nothing and
+    reads as a measurement.
+    """
+    from src.services.jlens_band_service import compute_band_report
+
+    report = compute_band_report(
+        _Svc(), ["abcd"], layers=[0, 1], control_seed=5, model_id="m"
+    )
+    assert all(p.effective_dimensionality is None for p in report.profiles)
+
+
+def test_effective_dimensionality_comes_from_the_LENS_DICTIONARY():
+    """With a Jacobian supplied, the figure describes J — not the residuals."""
+    from src.services.jlens_band_service import compute_band_report
+
+    # Layer 0's J is rank-deficient by construction; layer 1's is full rank.
+    concentrated = torch.zeros(6, 6)
+    concentrated[0, 0] = 1.0
+    jacobians = {0: concentrated, 1: torch.eye(6)}
+
+    report = compute_band_report(
+        _Svc(), ["abcd"], layers=[0, 1], control_seed=5, model_id="m",
+        jacobians=jacobians,
+    )
+    by_layer = {p.layer: p.effective_dimensionality for p in report.profiles}
+    assert by_layer[0] == pytest.approx(1.0, abs=0.01)
+    assert by_layer[1] == pytest.approx(6.0, abs=0.01)
+
+
+def test_the_band_report_bounds_its_own_cost_as_a_product():
+    """Prompts, positions and layers are each modest; their product is not."""
+    from src.services.jlens_band_service import (
+        MAX_BAND_REPORT_CELLS,
+        compute_band_report,
+    )
+
+    svc = _Svc(n_positions=4096)
+    with pytest.raises(ValueError, match="product of prompts"):
+        compute_band_report(
+            svc,
+            ["x"] * 200,
+            layers=list(range(26)),
+            control_seed=1,
+            model_id="m",
+        )
+    assert MAX_BAND_REPORT_CELLS > 0

@@ -47,21 +47,32 @@ BAND_REPORT_FILENAME = "band-report.json"
 GATE_FILENAME = "gate.json"
 
 
+# A band report reads every layer at every position of every prompt, so its
+# cost is the PRODUCT of three inputs that each look modest alone. Bounded as a
+# product for the same reason the readout is: per-field limits do not bound it.
+MAX_BAND_REPORT_CELLS = 2_000_000
+
+
 def compute_band_report(
     readout_service: Any,
     prompts: Sequence[str],
     layers: Sequence[int],
     control_seed: int,
     model_id: str,
+    jacobians: Optional[Dict[int, torch.Tensor]] = None,
 ) -> BandReport:
     """Measure this model's per-layer profile and derive its own boundaries.
 
     `control_seed` is a required parameter, not a default: the autocorrelation
     null is drawn from it and a report whose control cannot be reproduced is
     not evidence.
-    """
-    from .jlens_readout_service import IdentityTransport
 
+    `jacobians` supplies the LENS DICTIONARY when one exists. Effective
+    dimensionality is a property of that dictionary, not of the residual
+    stream; for the logit lens the dictionary is the identity, whose effective
+    dimensionality is d_model at every layer and says nothing, so it is
+    recorded as ABSENT rather than as a number that looks like a measurement.
+    """
     if not prompts:
         raise ValueError("a band report needs at least one prompt")
 
@@ -69,17 +80,35 @@ def compute_band_report(
     per_layer_top1: Dict[int, List[int]] = {layer: [] for layer in layers}
     per_layer_residuals: Dict[int, List[torch.Tensor]] = {layer: [] for layer in layers}
 
+    # Kurtosis is measured on the READOUT DISTRIBUTION (BR-002), not on the
+    # residual activations. Those are different quantities: the residual's
+    # kurtosis describes the activation vector's shape, while the readout's
+    # describes how SHARPLY the layer is pointing at particular tokens — which
+    # is what "the distribution sharpens where reportable content appears"
+    # means and what the boundary derivation keys on.
+    per_layer_readout_kurtosis: Dict[int, List[float]] = {l: [] for l in layers}
+
+    total_cells = 0
     for prompt in prompts:
-        captured = readout_service._capture_residuals(  # noqa: SLF001 - same concern
-            readout_service.tokenizer(prompt, return_tensors="pt")["input_ids"],
-            layers,
-        )
+        input_ids = readout_service.tokenizer(prompt, return_tensors="pt")["input_ids"]
+        total_cells += int(input_ids.shape[-1]) * len(layers)
+        if total_cells > MAX_BAND_REPORT_CELLS:
+            raise ValueError(
+                f"band report would read {total_cells} (position, layer) cells, "
+                f"over the {MAX_BAND_REPORT_CELLS} bound. Shorten the corpus or "
+                "select fewer layers — the cost is the product of prompts, "
+                "positions and layers, and none of them is large alone."
+            )
+
+        captured = readout_service._capture_residuals(input_ids, layers)  # noqa: SLF001
         for layer in layers:
             residual = captured.by_layer[layer]
             per_layer_residuals[layer].append(residual)
             normed = readout_service._normalize(residual)  # noqa: SLF001
             logits = normed @ readout_service.W_U.T
             per_layer_top1[layer].extend(int(i) for i in logits.argmax(dim=-1))
+            for row in logits:
+                per_layer_readout_kurtosis[layer].append(excess_kurtosis(row))
 
     profiles: List[LayerProfile] = []
     representations: Dict[int, torch.Tensor] = {}
@@ -95,13 +124,25 @@ def compute_band_report(
             else None
         )
 
+        readout_kurtosis = per_layer_readout_kurtosis[layer]
         profiles.append(
             LayerProfile(
                 layer=layer,
-                kurtosis=excess_kurtosis(stacked.flatten()),
+                kurtosis=(
+                    sum(readout_kurtosis) / len(readout_kurtosis)
+                    if readout_kurtosis
+                    else None
+                ),
                 autocorrelation=autocorr,
                 autocorrelation_null=null,
-                effective_dimensionality=effective_dimensionality(stacked),
+                # ABSENT for the logit lens: the identity's effective
+                # dimensionality is d_model at every layer, which is a constant
+                # dressed as a measurement.
+                effective_dimensionality=(
+                    effective_dimensionality(jacobians[layer])
+                    if jacobians and layer in jacobians
+                    else None
+                ),
             )
         )
 

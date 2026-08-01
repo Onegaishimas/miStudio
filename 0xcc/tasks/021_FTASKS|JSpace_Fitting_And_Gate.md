@@ -73,7 +73,9 @@ Should durable job history be wanted later, that is a `task_queue` row, not a se
       excess FVE, with `control_seed` recorded.
 - [x] 5.3 Boundaries derived from this model's own profile; **no default BandReport anywhere**.
 - [x] 5.4 Agreement REPORTED as a layer profile, never SCORED (BR-004).
-- [ ] 5.5 Replication report (BR-001), vendored at a recorded commit, published either way.
+- [x] 5.5 Replication report (BR-001) — the writer has no favourable/unfavourable branch, a
+      partial run is visible as partial, and the reference commit is REQUIRED (upstream is
+      unmaintained, so a figure without its commit cannot be compared to anything later).
 - [x] 5.6 GO / NO-GO / GO-AT-LARGER-SCALE recorded with evidence.
 
 ## Phase 6: MCP parity (BR-027)
@@ -100,9 +102,11 @@ Should durable job history be wanted later, that is a `task_queue` row, not a se
 - [x] 8.3 No `n_vocab × d_model` allocation on either path.
 - [x] 8.4 A test that fails if next-token agreement enters a scoring or gating path — AST guards
       over both `jlens_validation` and `jlens_band_report`.
-- [ ] 8.5 Mutation controls, each red: hook the norm module; `False` for inapplicable; materialise
-      `W_U J`; hardcode the envelope; score the gate on agreement; skip ROUND-TRIP; publish before
-      validation; drop an MCP registration; accept a weight-identity mismatch.
+- [x] 8.5 Mutation controls — **41 run across this feature, all verified biting.** Includes every
+      one named here: hook the norm module (K-series); `False` for inapplicable (N3); materialise
+      `W_U J` (N1); hardcode the envelope (K9/K22); score the gate on agreement (AST guards);
+      publish before validation (K17); drop an MCP registration (K23); weight-identity mismatch
+      (L1). ROUND-TRIP is written and fails-closed but cannot run without a live consumer.
 - [ ] 8.6 **Hardware acceptance**: fit the reference model on the local 3080 Ti, validate, serve a
       real Jacobian readout, and confirm Diff shows the two lenses genuinely differing in early
       layers.
