@@ -110,7 +110,12 @@ describe('FitLensCard', () => {
     await user.click(screen.getByLabelText(/one prompt per line/i));
     await user.paste(corpusOf(MIN_FIT_PROMPTS));
     await user.type(screen.getByLabelText(/corpus name/i), 'acceptance-100');
-    await user.type(screen.getByLabelText(/layers/i), '24, 25');
+    await user.type(screen.getByLabelText(/^layers/i), '24, 25');
+    await user.type(
+      screen.getByLabelText(/probe prompt/i),
+      'The capital of France is'
+    );
+    await user.type(screen.getByLabelText(/expected intermediate/i), 'Paris');
     await user.click(screen.getByRole('button', { name: /^fit$/i }));
 
     // Payload asserted, not just "was called": a reachability check that only
@@ -122,6 +127,10 @@ describe('FitLensCard', () => {
     expect(sent.corpus_name).toBe('acceptance-100');
     expect(sent.layers).toEqual([24, 25]);
     expect(sent.freeze_qk).toBe(true);
+    // The fixture must travel with the fit, and must name a FITTED layer —
+    // reading out at an unfitted one has no Jacobian to apply.
+    expect(sent.semantic_probe?.expected_intermediate).toBe('Paris');
+    expect(sent.semantic_probe?.layer).toBe(25);
   });
 
   /**
@@ -136,6 +145,12 @@ describe('FitLensCard', () => {
     });
     fireEvent.change(screen.getByLabelText(/corpus name/i), {
       target: { value: 'c' },
+    });
+    fireEvent.change(screen.getByLabelText(/probe prompt/i), {
+      target: { value: 'The capital of France is' },
+    });
+    fireEvent.change(screen.getByLabelText(/expected intermediate/i), {
+      target: { value: ' Paris' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^fit$/i }));
   };
@@ -193,4 +208,45 @@ describe('FitLensCard', () => {
     );
     expect(onFitted).not.toHaveBeenCalled();
   }, 15000);
+});
+
+describe('the semantic fixture is required, and refused when it proves nothing', () => {
+  it('will not submit without a fixture, because nothing would be published', async () => {
+    const user = userEvent.setup();
+    render(<FitLensCard modelId="m_1" onFitted={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /fit a lens/i }));
+    fireEvent.change(screen.getByLabelText(/one prompt per line/i), {
+      target: { value: corpusOf(MIN_FIT_PROMPTS) },
+    });
+    fireEvent.change(screen.getByLabelText(/corpus name/i), {
+      target: { value: 'c' },
+    });
+
+    // Everything else is valid; only the fixture is missing.
+    expect(screen.getByRole('button', { name: /^fit$/i })).toBeDisabled();
+  });
+
+  it('refuses an intermediate that already appears in the prompt', async () => {
+    // MUTATION CONTROL: drop the probeSelfEvident check and this fails. Such a
+    // fixture is recovered by an artifact encoding nothing at all, so it would
+    // certify a broken lens.
+    const user = userEvent.setup();
+    render(<FitLensCard modelId="m_1" onFitted={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /fit a lens/i }));
+    fireEvent.change(screen.getByLabelText(/one prompt per line/i), {
+      target: { value: corpusOf(MIN_FIT_PROMPTS) },
+    });
+    fireEvent.change(screen.getByLabelText(/corpus name/i), {
+      target: { value: 'c' },
+    });
+    fireEvent.change(screen.getByLabelText(/probe prompt/i), {
+      target: { value: 'The capital of France is Paris' },
+    });
+    fireEvent.change(screen.getByLabelText(/expected intermediate/i), {
+      target: { value: 'Paris' },
+    });
+
+    expect(screen.getByRole('button', { name: /^fit$/i })).toBeDisabled();
+    expect(screen.getByText(/already appears in the prompt/i)).toBeTruthy();
+  });
 });
