@@ -210,7 +210,17 @@ class JLensArtifactService:
         staging.mkdir(parents=True)
 
         lens_path = staging / f"{slug}_jacobian_lens.pt"
-        torch.save({int(k): v for k, v in jacobians.items()}, lens_path)
+        # SAVE ON CPU, ALWAYS. `torch.save` records each tensor's device, and a
+        # fit runs on the GPU — so an artifact written straight from a fit is
+        # tagged cuda:0 and raises "Attempting to deserialize object on a CUDA
+        # device" for any consumer without one. A J-lens artifact is a PORTABLE
+        # DOCUMENT whose whole purpose is to be mounted and read elsewhere; a
+        # file that only loads on the machine that produced it is not one.
+        #
+        # Our own loader passes map_location="cpu" and would never have noticed.
+        torch.save(
+            {int(k): v.detach().to("cpu") for k, v in jacobians.items()}, lens_path
+        )
         (staging / "config.yaml").write_text(config_yaml)
 
         return ArtifactRef(

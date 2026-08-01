@@ -720,3 +720,175 @@ def test_the_device_is_part_of_a_cached_models_identity():
         "for one device would be handed the other"
     )
     assert keys[0].endswith("@cpu") and keys[1].endswith("@cuda")
+
+
+# ---------------------------------------------------------------------------
+# The final norm belongs to the MODEL, so it lives where the model lives
+#
+# Second face of the same fault, found by the fit's own SEMANTIC check on the
+# cluster: "found at least two devices, cuda:0 and cpu". The readout runs on
+# READOUT_DEVICE by design while the model may be resident on an accelerator,
+# and `_normalize` calls a live module belonging to that model. Fixing the
+# input_ids placement moved the collision here rather than removing it.
+#
+# MUTATION CONTROLS:
+#   * drop the .to(device=norm_device)  -> "borrows the norm" fails
+#   * return without .to(x.device)      -> "comes straight back" fails
+# ---------------------------------------------------------------------------
+
+
+class _NormClaimingDevice(torch.nn.Module):
+    """A norm whose parameters report a device, without needing that device.
+
+    Only `parameters()` is faked — the module still computes normally — so the
+    test can assert WHERE `_normalize` decided to send the tensor without
+    requiring the hardware. The genuine cross-device execution is covered by
+    the CUDA-gated test below.
+    """
+
+    def __init__(self, d_model: int, claimed: str):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(d_model))
+        self._claimed = torch.device(claimed)
+
+    def parameters(self, recurse: bool = True):
+        param = torch.nn.Parameter(self.weight.detach())
+        param._claimed_device = self._claimed
+        yield _DeviceLyingParam(self._claimed)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * 2.0
+
+
+class _DeviceLyingParam:
+    """Reports a device. `_module_device` reads only `.device`."""
+
+    def __init__(self, device):
+        self.device = device
+
+
+def _service_with_norm(norm):
+    from src.services.jlens_readout_service import ReadoutService
+
+    svc = ReadoutService.__new__(ReadoutService)
+    svc._final_norm = norm
+    return svc
+
+
+def test_normalize_sends_the_tensor_to_the_norms_device_and_brings_it_back():
+    """Portable form: assert the DEVICE DECISION, not the hardware.
+
+    Records every `.to(...)` `_normalize` performs. Two things must be true and
+    each is a separate mutation: it must move the input to where the norm
+    actually is, and it must return on the READOUT's device — a result left on
+    the model's device just relocates the collision to the unembedding matvec.
+    """
+    from src.services.jlens_readout_service import ReadoutService
+
+    d = 8
+    norm = _NormClaimingDevice(d, "cuda:0")
+    svc = _service_with_norm(norm)
+
+    moves = []
+    original_to = torch.Tensor.to
+
+    def recording_to(self, *args, **kwargs):
+        if "device" in kwargs:
+            moves.append(str(kwargs["device"]))
+        elif args and isinstance(args[0], (str, torch.device)):
+            moves.append(str(args[0]))
+        # Drop the device so the call succeeds on a machine without one; the
+        # DECISION is what is under test.
+        kwargs.pop("device", None)
+        if args and isinstance(args[0], (str, torch.device)):
+            args = args[1:]
+        return original_to(self, *args, **kwargs)
+
+    torch.Tensor.to = recording_to
+    try:
+        out = ReadoutService._normalize(svc, torch.randn(d))
+    finally:
+        torch.Tensor.to = original_to
+
+    assert "cuda:0" in moves, (
+        f"_normalize never moved the tensor to the norm's device; moves={moves}. "
+        "Calling a module on another device raises 'found at least two devices'"
+    )
+    assert "cpu" in moves, (
+        f"_normalize never brought the result back to the readout's device; "
+        f"moves={moves}. The collision moves to the unembedding matvec instead"
+    )
+    assert out.dtype == torch.float32
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="needs a real second device"
+)
+def test_normalize_survives_a_genuinely_gpu_resident_norm():
+    """The unfaked version, where the hardware exists."""
+    from src.services.jlens_readout_service import ReadoutService
+
+    d = 8
+    norm = torch.nn.LayerNorm(d).to("cuda:0")
+    svc = _service_with_norm(norm)
+
+    x = torch.randn(d)  # cpu
+    out = ReadoutService._normalize(svc, x)
+    assert out.device == x.device
+
+
+# ---------------------------------------------------------------------------
+# Artifacts are portable documents
+#
+# `torch.save` records each tensor's device. A fit runs on the GPU, so an
+# artifact written straight from one is tagged cuda:0 and raises "Attempting to
+# deserialize object on a CUDA device" for any consumer without one. Our own
+# loader passes map_location="cpu" and would never have noticed — the failure
+# belongs entirely to somebody else's machine.
+#
+# MUTATION CONTROL: drop the .to("cpu") in write_staged -> this fails.
+# ---------------------------------------------------------------------------
+
+
+def test_a_written_artifact_is_moved_to_cpu_before_it_is_saved(tmp_path):
+    """Assert the MOVE, not the resulting tag.
+
+    Checking the saved tensor's device is vacuous on a CPU-only machine — the
+    tensors are already there, so deleting the `.to("cpu")` changes nothing
+    locally and the mutation survives. Verified: that exact test passed against
+    the unfixed code. What must hold everywhere is that write_staged ASKS for
+    cpu, which is observable without a GPU.
+    """
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    requested = []
+    original_to = torch.Tensor.to
+
+    def recording_to(self, *args, **kwargs):
+        target = kwargs.get("device") or (args[0] if args else None)
+        if isinstance(target, (str, torch.device)):
+            requested.append(str(target))
+        return original_to(self, *args, **kwargs)
+
+    torch.Tensor.to = recording_to
+    try:
+        ref = service.write_staged(
+            "org/model",
+            {24: torch.randn(4, 4), 25: torch.randn(4, 4)},
+            "corpus: test\n",
+        )
+    finally:
+        torch.Tensor.to = original_to
+
+    assert requested.count("cpu") >= 2, (
+        f"write_staged moved {requested.count('cpu')} of 2 tensors to cpu "
+        f"(calls: {requested}). torch.save records each tensor's device, so a "
+        "GPU-fitted artifact is tagged cuda:0 and raises 'Attempting to "
+        "deserialize object on a CUDA device' for any consumer without one"
+    )
+
+    # And the file must still load the way an EXTERNAL consumer would: with no
+    # map_location, because they have no reason to pass one.
+    payload = torch.load(ref.lens_path, weights_only=True)
+    assert set(payload) == {24, 25}
