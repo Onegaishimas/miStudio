@@ -365,3 +365,26 @@ def test_an_empty_stream_fails_the_semantic_check_rather_than_raising_NameError(
     source = inspect.getsource(jlens._semantic_check)
     assert "last = None" in source
     assert "no token messages" in source
+
+
+def test_the_model_is_loaded_in_ITS_OWN_dtype_not_a_forced_one():
+    """Forcing fp16 onto a bfloat16 checkpoint leaves the model MIXED.
+
+    The forward pass then dies with "expected scalar type BFloat16 but found
+    Half" BEFORE any readout arithmetic runs — so the two casts in the readout
+    path cannot save it. That is what gemma-2-2b-it did on the cluster.
+
+    A readout does not need a particular precision, it needs the model to RUN,
+    so the right dtype is whatever the checkpoint was saved in.
+    """
+    import inspect
+
+    from src.services import jlens_model_registry
+
+    source = inspect.getsource(jlens_model_registry.load_for_readout)
+    assert 'dtype="auto"' in source, (
+        "the readout loader forces a dtype; a checkpoint saved in another "
+        "family will be internally mixed and its forward pass will raise"
+    )
+    # The forced-dtype path survives only as a FALLBACK, and says so.
+    assert "falling back to the" in source
