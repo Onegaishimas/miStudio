@@ -40,6 +40,7 @@ EXPECTED_TOOLS = {
     "fit_jlens_artifact",
     "get_jlens_band_report",
     "get_jlens_gate",
+    "get_jlens_readout",
 }
 
 
@@ -217,6 +218,13 @@ class TestCaller:
         assert client.get.await_args.args[0] == "/jlens/artifacts/m/gate"
         assert client.get.await_count == 2
 
+    def test_polling_the_readout_hits_the_task_path(self):
+        """The readout is queue-and-poll; a tool that only POSTs never sees a result."""
+        mcp, client, names = self._tools()
+        asyncio.run(mcp.call_tool("get_jlens_readout", {"task_id": "t-1"}))
+        assert client.get.await_count == 1
+        assert client.get.await_args.args[0] == "/jlens/readout/t-1"
+
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""
         _mcp, _client, names = self._tools()
@@ -256,5 +264,6 @@ class TestRoutesExist:
             "/jlens/fit",
             "/jlens/artifacts/{slug}/band-report",
             "/jlens/artifacts/{slug}/gate",
+            "/jlens/readout/{task_id}",
         ):
             assert any(expected in p for p in paths), f"{expected} is not routed"

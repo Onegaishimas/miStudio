@@ -173,3 +173,25 @@ export interface JLensFitAccepted {
   model_id: string;
   queue: string;
 }
+
+/** A queued readout. The result arrives via the task, not this response. */
+export interface ReadoutAccepted {
+  task_id: string;
+  model_id: string;
+  status: string;
+}
+
+/**
+ * A readout task's state.
+ *
+ * `readout` is null until `status` is SUCCESS. Treating a pending task as an
+ * empty readout reproduces exactly the confusion this feature exists to
+ * prevent, so `status` is always authoritative.
+ */
+export interface ReadoutResult {
+  task_id: string;
+  status: string;
+  stage?: string | null;
+  readout?: ReadoutResponse | null;
+  error?: string | null;
+}
