@@ -62,6 +62,39 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         )
 
     @mcp.tool()
+    async def get_jlens_band_report(
+        slug: Annotated[str, Field(description="Artifact slug from list_jlens_artifacts")],
+    ) -> Any:
+        """This model's OWN sensory / workspace / motor boundaries, or null.
+
+        A null result means no band report has been computed for this model,
+        and NOTHING should be inferred about where its bands lie. The published
+        boundaries in the literature were measured on one specific model and do
+        not transfer — miStudio has no default and will not supply one.
+
+        The report also carries the per-layer profile, including next-token
+        agreement. That figure is DESCRIPTIVE. Do not rank or gate on it: the
+        J-lens is deliberately worse than the logit lens on agreement through
+        most of the network (BR-004).
+        """
+        return await client.get(f"/jlens/artifacts/{slug}/band-report")
+
+    @mcp.tool()
+    async def get_jlens_gate(
+        slug: Annotated[str, Field(description="Artifact slug from list_jlens_artifacts")],
+    ) -> Any:
+        """The recorded Phase-0 GO / NO-GO / GO-AT-LARGER-SCALE decision, or null.
+
+        NO_GO is a complete, publishable outcome rather than a failure — it
+        means the full workspace claim set did not replicate at this scale, and
+        it BLOCKS product surface beyond the readout viewer (BR-003).
+
+        Null means no decision has been recorded yet, which is not the same as
+        GO and must not be read as one.
+        """
+        return await client.get(f"/jlens/artifacts/{slug}/gate")
+
+    @mcp.tool()
     async def jlens_readout(
         model_id: Annotated[str, Field(description="miStudio model id (m_xxxxxxxx)")],
         prompt: Annotated[str, Field(description="Text to read out, max 8000 characters")],

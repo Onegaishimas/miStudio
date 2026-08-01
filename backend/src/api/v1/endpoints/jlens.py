@@ -230,6 +230,74 @@ class GateResponse(BaseModel):
     has_bands: bool
 
 
+@router.get(
+    "/artifacts/{slug}/band-report",
+    response_model=Optional[BandReportResponse],
+    summary="This model's own sensory / workspace / motor boundaries",
+)
+async def band_report(slug: str) -> Optional[BandReportResponse]:
+    """Return the stored band report, or NULL when there is none.
+
+    A null body is the honest answer and the client draws no bands (BR-002).
+    It is not a 404: the artifact exists, it simply has no report yet, and
+    those are different facts. Boundaries measured on another model are never
+    substituted — there is no default anywhere in the product.
+    """
+    from ....services.jlens_band_service import load_band_report
+
+    ref = next((a for a in _service().list_artifacts() if a.slug == slug), None)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No conformant J-lens artifact directory named {slug!r}",
+        )
+
+    stored = load_band_report(ref.directory)
+    if stored is None:
+        return None
+
+    return BandReportResponse(
+        model_id=stored.get("model_id", slug),
+        has_bands=stored.get("boundaries") is not None,
+        boundaries=stored.get("boundaries"),
+        derivation=stored.get("derivation", ""),
+        control_seed=stored.get("control_seed"),
+        profiles=stored.get("profiles", []),
+    )
+
+
+@router.get(
+    "/artifacts/{slug}/gate",
+    response_model=Optional[GateResponse],
+    summary="The recorded Phase-0 GO / NO-GO decision",
+)
+async def gate(slug: str) -> Optional[GateResponse]:
+    """Return the recorded gate decision, or NULL when none has been made.
+
+    NO_GO reads back exactly like GO and is a complete, publishable outcome
+    (BR-003) — not an error state and not an absence.
+    """
+    from ....services.jlens_band_service import load_gate
+
+    ref = next((a for a in _service().list_artifacts() if a.slug == slug), None)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No conformant J-lens artifact directory named {slug!r}",
+        )
+
+    stored = load_gate(ref.directory)
+    if stored is None:
+        return None
+    return GateResponse(
+        model_id=stored.get("model_id", slug),
+        decision=stored["decision"],
+        rationale=stored.get("rationale", ""),
+        blocking=stored.get("blocking", True),
+        has_bands=stored.get("has_bands", False),
+    )
+
+
 class ReadoutResponse(BaseModel):
     """Non-streaming envelope: the meta message plus its token messages.
 

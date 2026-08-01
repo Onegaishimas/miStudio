@@ -38,6 +38,8 @@ EXPECTED_TOOLS = {
     "validate_jlens_artifact",
     "jlens_readout",
     "fit_jlens_artifact",
+    "get_jlens_band_report",
+    "get_jlens_gate",
 }
 
 
@@ -204,6 +206,17 @@ class TestCaller:
         assert body["corpus_name"] == "wikitext-103"
         assert body["prompts"] == ["a", "b"]
 
+    def test_band_report_and_gate_issue_GETs_to_their_own_paths(self):
+        """Two tools, two paths. A shared path would return one for the other."""
+        mcp, client, names = self._tools()
+
+        asyncio.run(mcp.call_tool("get_jlens_band_report", {"slug": "m"}))
+        assert client.get.await_args.args[0] == "/jlens/artifacts/m/band-report"
+
+        asyncio.run(mcp.call_tool("get_jlens_gate", {"slug": "m"}))
+        assert client.get.await_args.args[0] == "/jlens/artifacts/m/gate"
+        assert client.get.await_count == 2
+
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""
         _mcp, _client, names = self._tools()
@@ -241,5 +254,7 @@ class TestRoutesExist:
             "/jlens/artifacts/{slug}/validate",
             "/jlens/readout",
             "/jlens/fit",
+            "/jlens/artifacts/{slug}/band-report",
+            "/jlens/artifacts/{slug}/gate",
         ):
             assert any(expected in p for p in paths), f"{expected} is not routed"

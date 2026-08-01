@@ -63,7 +63,7 @@ Should durable job history be wanted later, that is a `task_queue` row, not a se
 - [x] 4.2 Acquisition path: adopt a conformant lens only when **weight identity** matches.
 - [x] 4.3 Celery task on the correct queue — routes match the TASK NAME, so a short name silently
       uses the default queue.
-- [x] 4.4 Artifact list + validate endpoints. Band-report and gate endpoints wait on Phase 4.5.
+- [x] 4.4 Artifact list, validate, fit, band-report and gate endpoints — each with an MCP tool.
 - [x] 4.5 Bind `POST /jlens/readout` for `JACOBIAN_LENS`; the 501 goes away.
 
 ## Phase 5: Band report and gate
@@ -95,9 +95,9 @@ Should durable job history be wanted later, that is a `task_queue` row, not a se
 
 ## Phase 8: Verification and acceptance
 
-- [ ] 8.1 Two architectures, one hybrid and one dense, both producing valid artifacts.
+- [x] 8.1 Two architectures, one hybrid and one dense, both producing valid artifacts.
 - [x] 8.2 Source guard: no architecture name in the fit/readout modules.
-- [ ] 8.3 No `n_vocab × d_model` allocation on either path.
+- [x] 8.3 No `n_vocab × d_model` allocation on either path.
 - [x] 8.4 A test that fails if next-token agreement enters a scoring or gating path — AST guards
       over both `jlens_validation` and `jlens_band_report`.
 - [ ] 8.5 Mutation controls, each red: hook the norm module; `False` for inapplicable; materialise
