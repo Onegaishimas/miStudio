@@ -438,101 +438,111 @@ SEMANTIC_FIXTURE_PROMPT = "The number of legs on the animal that spins webs is"
 SEMANTIC_FIXTURE_ANSWER = "spider"
 
 
+class ReadoutAccepted(BaseModel):
+    """A queued readout. The result arrives via the task, not this response.
+
+    202, not 200: the readout has been ACCEPTED and not performed. Returning a
+    body that looked like a readout would be the same lie the 501 refused to
+    tell.
+    """
+
+    task_id: str
+    model_id: str
+    status: str = "queued"
+
+
 @router.post(
     "/readout",
-    response_model=ReadoutResponse,
-    summary="Position x layer lens readout",
+    response_model=ReadoutAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue a position x layer lens readout",
 )
 async def readout(
     request: ReadoutRequest, db: AsyncSession = Depends(get_db)
-) -> ReadoutResponse:
-    """Return a position x layer readout in the upstream wire format (BR-029).
+) -> ReadoutAccepted:
+    """Queue a readout and return its task id. Poll `/jlens/readout/{task_id}`.
 
-    LOGIT NEEDS NO ARTIFACT (BR-005) and is the default. A JACOBIAN_LENS
-    request requires a VALIDATED artifact: the schema already refuses one
-    without an `artifact_id`, and this handler additionally refuses an artifact
-    that has not passed the suite. Falling back to identity in either case
-    would serve logit data under a Jacobian label — a lower evidence rung in a
-    higher rung's clothing (BR-019).
+    ASYNCHRONOUS BECAUSE IT MEASURABLY HAD TO BE. Bound synchronously, this
+    endpoint 502'd at the ingress twice on a real model — 64.9s and 54.0s
+    against nginx's 60s ceiling — because a J-space readout needs the whole
+    model resident for its forward pass and loading it takes about a minute on
+    CPU. Raising the proxy timeout would not bound it: readout cost is
+    O(positions x layers x top_n) ON TOP of the load.
+
+    Queueing also puts the readout in the process that can CACHE the loaded
+    model across requests. A cache in the API process cannot help the worker
+    and vice versa, so this is what makes the first-load cost payable once.
+
+    Every other model-bound operation here already works this way.
     """
     from ....models.model import Model
-    from ....services.jlens_readout_service import (
-        IdentityTransport,
-        JacobianTransport,
-        LensTransport,
-        ReadoutService,
-        ReadoutTooLarge,
-    )
+    from ....workers.jlens_readout_tasks import compute_readout
 
     result = await db.execute(select(Model).where(Model.id == request.model_id))
-    model_record = result.scalar_one_or_none()
-    if model_record is None:
+    if result.scalar_one_or_none() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No model with id {request.model_id!r}",
         )
 
-    try:
-        loaded = load_for_readout(model_record)
-    except ModelNotAvailable as exc:
-        # 409, not 500: the request is well-formed and the server is healthy —
-        # the model simply is not in a state that can serve a readout, and the
-        # user can act on that.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-
-    transports: List[LensTransport] = []
-    for lens_type in request.types:
-        if lens_type == "LOGIT_LENS":
-            transports.append(IdentityTransport())
-            continue
-        try:
-            jacobians = _service().load_for_readout(
-                loaded.name, report=_validated_report(loaded, request.artifact_id)
-            )
-        except (ArtifactNotValidated, FileNotFoundError) as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-        transports.append(JacobianTransport(jacobians))
-
-    service = ReadoutService(
-        model=loaded.model,
-        tokenizer=loaded.tokenizer,
-        structure=loaded.structure,
-        unembedding=loaded.unembedding,
-        model_name=loaded.name,
+    task = compute_readout.delay(
+        model_id=request.model_id,
+        prompt=request.prompt,
+        types=list(request.types),
+        layers=request.layers,
+        top_n=request.top_n,
+        artifact_id=request.artifact_id,
     )
+    return ReadoutAccepted(task_id=task.id, model_id=request.model_id)
 
-    meta = None
-    tokens: List[LensTokenMessage] = []
-    try:
-        for message in service.stream(
-            request.prompt,
-            transports=transports,
-            layers=request.layers,
-            top_n=request.top_n,
-        ):
-            if isinstance(message, LensMetaMessage):
-                meta = message
-            elif isinstance(message, LensTokenMessage):
-                tokens.append(message)
-    except ReadoutTooLarge as exc:
-        # 413, not 400: the request is valid and simply too expensive, and the
-        # message carries the numbers so the caller can shrink it.
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+
+class ReadoutResult(BaseModel):
+    """A readout task's state, and its payload once ready.
+
+    `readout` is null until the task succeeds. A caller that treats a pending
+    task as an empty readout reproduces exactly the confusion this feature
+    exists to prevent, so `status` is always present and always authoritative.
+    """
+
+    task_id: str
+    status: str
+    stage: Optional[str] = None
+    readout: Optional[ReadoutResponse] = None
+    error: Optional[str] = None
+
+
+@router.get(
+    "/readout/{task_id}",
+    response_model=ReadoutResult,
+    summary="Poll a queued readout",
+)
+async def readout_result(task_id: str) -> ReadoutResult:
+    """Report a readout task's state.
+
+    A FAILED task reports its reason rather than an empty readout — the
+    distinction the 501 was protecting and that survives here.
+    """
+    import asyncio
+
+    from ....core.celery_app import celery_app
+
+    def _read():
+        async_result = celery_app.AsyncResult(task_id)
+        return async_result.state, async_result.info
+
+    state, info = await asyncio.to_thread(_read)
+
+    if state == "SUCCESS":
+        return ReadoutResult(
+            task_id=task_id, status=state, readout=ReadoutResponse(**info)
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    if meta is None:
-        # Never returned as an empty success: an empty readout is
-        # indistinguishable from a real one with no content, which is the
-        # failure mode this whole feature is built to avoid.
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Readout produced no meta message",
-        )
-
-    return ReadoutResponse(meta=meta, tokens=tokens)
+    if state == "FAILURE":
+        return ReadoutResult(task_id=task_id, status=state, error=str(info))
+    return ReadoutResult(
+        task_id=task_id,
+        status=state,
+        stage=(info or {}).get("stage") if isinstance(info, dict) else None,
+    )
 
 
 @router.post(

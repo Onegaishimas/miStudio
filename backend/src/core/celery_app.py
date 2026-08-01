@@ -134,6 +134,14 @@ celery_app.conf.update(
         "src.workers.jlens_fit_tasks.*": {
             "queue": "extraction",
         },
+        # J-lens readout (feature 022 Phase 4.5): the whole model must be
+        # resident for the forward pass, so this is model-bound like the rest
+        # of the extraction queue. It lives in the WORKER rather than the API
+        # because a synchronous handler 502'd at the 60s ingress timeout, and
+        # because only the worker can hold the loaded model across requests.
+        "src.workers.jlens_readout_tasks.*": {
+            "queue": "extraction",
+        },
         # Steered-transcript recorder: GPU (loads the model to generate) — same
         # extraction queue + single-GPU guard as calibration.
         "src.workers.circuit_record_tasks.*": {
@@ -439,6 +447,7 @@ celery_app.autodiscover_tasks(
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
         "src.workers.jlens_fit_tasks",
+        "src.workers.jlens_readout_tasks",
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes

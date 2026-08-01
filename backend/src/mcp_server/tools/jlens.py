@@ -103,7 +103,13 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         top_n: Annotated[int, Field(description="Readout depth per cell")] = 8,
         artifact_id: Annotated[Optional[str], Field(description="Required for JACOBIAN_LENS; must be the artifact fitted for THIS model's weights")] = None,
     ) -> Any:
-        """Read out what a model is poised to say at every layer and position.
+        """QUEUE a readout of what a model is poised to say per layer and position.
+
+        Returns a TASK ID, not a readout. Poll `get_jlens_readout(task_id)`.
+        The readout is asynchronous because it needs the whole model resident
+        for a forward pass — bound synchronously it exceeded the ingress
+        timeout on a real model — so the first readout for a model takes about
+        a minute and subsequent ones are fast.
 
         RUNG 0. A concept appearing in a readout is NOT a causal claim — it says
         the direction was present, not that the model used it. Raising the rung
@@ -127,6 +133,18 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         if artifact_id:
             body["artifact_id"] = artifact_id
         return await client.post("/jlens/readout", json_body=body)
+
+    @mcp.tool()
+    async def get_jlens_readout(
+        task_id: Annotated[str, Field(description="Task id returned by jlens_readout")],
+    ) -> Any:
+        """Poll a queued readout.
+
+        `readout` is null until `status` is SUCCESS — a PENDING or PROGRESS
+        task is NOT an empty readout, and reading it as one is exactly the
+        confusion this feature exists to prevent. A FAILURE reports its reason.
+        """
+        return await client.get(f"/jlens/readout/{task_id}")
 
     @mcp.tool()
     async def fit_jlens_artifact(
