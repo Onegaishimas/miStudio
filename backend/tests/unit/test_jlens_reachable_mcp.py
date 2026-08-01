@@ -45,6 +45,8 @@ EXPECTED_TOOLS = {
     "create_jlens_watchlist",
     "jlens_cost_estimate",
     "get_jlens_replication_report",
+    "compute_jlens_band_report",
+    "record_jlens_gate",
 }
 
 
@@ -292,6 +294,67 @@ class TestCaller:
         params = client.get.await_args.kwargs
         assert params["d_model"] == 2048
         assert params["n_features"] == 32768
+
+    def test_the_band_report_tool_sends_the_seed_it_was_given(self):
+        """The control seed must survive the trip.
+
+        The autocorrelation null is drawn from it, so a report whose control
+        cannot be reproduced is not evidence — and a tool that quietly
+        substituted its own default would produce exactly that.
+        """
+        mcp, client, _names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "compute_jlens_band_report",
+                {
+                    "model_id": "m_1",
+                    "prompts": ["a", "b"],
+                    "control_seed": 4242,
+                    "layers": [3, 4],
+                },
+            )
+        )
+        assert client.post.await_args.args[0] == "/jlens/band-report"
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["control_seed"] == 4242
+        assert body["prompts"] == ["a", "b"]
+        assert body["layers"] == [3, 4]
+
+    def test_the_band_report_tool_cannot_supply_boundaries(self):
+        """BR-002 at the agent surface too.
+
+        An agent that could pass boundaries could port the published Sonnet-4.5
+        numbers onto any model in one call. There must be no such parameter.
+        """
+        mcp, _client, _names = self._tools()
+        tool = asyncio.run(mcp.list_tools())
+        spec = next(t for t in tool if t.name == "compute_jlens_band_report")
+        params = set(spec.inputSchema.get("properties", {}))
+        for forbidden in ("boundaries", "workspace_start", "motor_start", "bands"):
+            assert forbidden not in params, (
+                f"compute_jlens_band_report accepts {forbidden!r}; porting "
+                "another model's bands must be impossible, not discouraged"
+            )
+
+    def test_the_gate_tool_carries_the_finding_and_its_rationale(self):
+        """The inputs are FINDINGS, not scores, and a rationale is mandatory."""
+        mcp, client, _names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "record_jlens_gate",
+                {
+                    "model_id": "m_1",
+                    "claim_set_replicated": False,
+                    "rationale": "workspace claims did not replicate at 2B",
+                },
+            )
+        )
+        assert client.post.await_args.args[0] == "/jlens/gate"
+        body = client.post.await_args.kwargs["json_body"]
+        # NO_GO must transmit exactly like GO — a gate whose negative outcome
+        # cannot be recorded is not a gate.
+        assert body["claim_set_replicated"] is False
+        assert "did not replicate" in body["rationale"]
 
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""

@@ -396,19 +396,17 @@ export function modeAvailability(
     if (mode === 'LOGIT_LENS') {
       return { enabled: true, reason: null };
     }
-    // SAY WHICH THING IS MISSING. With an artifact mounted, "fit one to enable
-    // it" tells the user to do what they have already done — and it is not
-    // even the blocker: the tabs derive from what the STREAM carries, so the
-    // remaining step is a readout. Observed on the cluster with a published,
-    // validated artifact sitting in the strip directly below the message.
+    // AN ARTIFACT IS ENOUGH TO SELECT THE LENS. `fetchReadout` requests BOTH
+    // lens types whenever this model has an artifact, so a Jacobian selection
+    // made before the first readout is honoured by the very next one — the tab
+    // was disabled on the absence of a stream that the click itself produces.
+    //
+    // This is not a claim that the lens WORKED: if the readout comes back
+    // without JACOBIAN_LENS the branch below disables the tab again and
+    // `fetchReadout` falls the selection back to logit. Enabling here promises
+    // the request, not the result.
     if (hasArtifact) {
-      return {
-        enabled: false,
-        reason:
-          mode === 'JACOBIAN_LENS'
-            ? 'An artifact is mounted for this model. Read out to load it.'
-            : 'Diff compares two lenses. Read out to load both.',
-      };
+      return { enabled: true, reason: null };
     }
     return {
       enabled: false,

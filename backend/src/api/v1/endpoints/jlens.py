@@ -15,7 +15,7 @@ import logging
 from typing import Any, Dict, List, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -248,6 +248,120 @@ class GateResponse(BaseModel):
     rationale: str
     blocking: bool
     has_bands: bool
+
+
+class BandReportRequest(BaseModel):
+    """Compute a band report for one model, from ITS OWN measured profile.
+
+    `control_seed` is REQUIRED and not defaulted, all the way from here down:
+    the autocorrelation null is drawn from it, and a report whose control cannot
+    be reproduced is not evidence.
+
+    There is no `boundaries` field to supply and never will be. Bands come from
+    the model's own kurtosis profile or they do not exist for it — BR-002
+    requires that porting another model's boundaries be impossible by
+    construction, not merely discouraged.
+    """
+
+    model_id: str
+    prompts: List[str] = Field(..., min_length=1)
+    control_seed: int
+    layers: Optional[List[int]] = None
+    #: Use the fitted lens dictionary when one exists. Effective dimensionality
+    #: is a property of that dictionary; for the logit lens it is the identity,
+    #: whose effective dimensionality says nothing and is recorded ABSENT.
+    use_artifact: bool = True
+
+
+class BandTaskAccepted(BaseModel):
+    task_id: str
+    model_id: str
+    queue: str = "extraction"
+
+
+@router.post(
+    "/band-report",
+    response_model=BandTaskAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Compute this model's band report (BR-002)",
+)
+async def compute_band_report(
+    request: BandReportRequest, db: AsyncSession = Depends(get_db)
+) -> BandTaskAccepted:
+    """Queue a band-report computation.
+
+    THE ONLY THING IN THE PRODUCT THAT CAN MAKE BANDS APPEAR. Until this runs
+    for a given model, every band surface renders nothing and
+    `classify_behaviour` returns UNKNOWN — which is the honest answer, not a
+    defect, because the published boundaries were measured on one specific
+    model and do not transfer.
+    """
+    from ....models.model import Model
+    from ....workers.jlens_band_tasks import compute_band_report_task
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    task = compute_band_report_task.delay(
+        model_id=request.model_id,
+        prompts=request.prompts,
+        control_seed=request.control_seed,
+        layers=request.layers,
+        use_artifact=request.use_artifact,
+    )
+    return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
+
+
+class GateRequest(BaseModel):
+    """Record the Phase-0 decision (BR-003).
+
+    THE INPUTS ARE FINDINGS, NOT SCORES. `claim_set_replicated` is the question
+    BR-003 actually asks and is supplied by the analysis; there is deliberately
+    no numeric criterion anywhere on this path. A threshold on any single metric
+    would become the definition of the gate, and the one most likely to be
+    reached for is next-token agreement, which BR-004 forbids scoring on.
+    """
+
+    model_id: str
+    claim_set_replicated: bool
+    larger_scale_indicated: bool = False
+    #: Mandatory. A recorded decision without its reasoning is not a record.
+    rationale: str = Field(..., min_length=1)
+    replication_report_id: Optional[str] = None
+
+
+@router.post(
+    "/gate",
+    response_model=BandTaskAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Record the Phase-0 GO / NO-GO decision (BR-003)",
+)
+async def record_gate(
+    request: GateRequest, db: AsyncSession = Depends(get_db)
+) -> BandTaskAccepted:
+    """Queue a gate record. REFUSES without a band report to weigh."""
+    from ....models.model import Model
+    from ....workers.jlens_band_tasks import record_gate_task
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    task = record_gate_task.delay(
+        model_id=request.model_id,
+        claim_set_replicated=request.claim_set_replicated,
+        larger_scale_indicated=request.larger_scale_indicated,
+        rationale=request.rationale,
+        replication_report_id=request.replication_report_id,
+    )
+    return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
 
 
 @router.get(
