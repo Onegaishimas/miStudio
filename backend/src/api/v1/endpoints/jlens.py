@@ -218,6 +218,14 @@ class FitRequest(BaseModel):
     #: not. Off by default: a refit is not automatically an upgrade, and a
     #: 16-layer lens was destroyed by a 9-layer one with no warning at all.
     allow_coverage_loss: bool = False
+    #: Run the sub-network at the REAL sequence length.
+    #:
+    #: COSTS S TIMES THE COMPUTE and is the only setting under which downstream
+    #: attention weights are the ones the model actually used. Off by default
+    #: because a 400-prompt fit that took nine minutes would take hours — but a
+    #: lens fitted without it overstates the self-attention path, and the
+    #: artifact records which was used so the two are never confused.
+    full_sequence: bool = False
 
 
 class FitAccepted(BaseModel):
@@ -257,6 +265,7 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         corpus_name=request.corpus_name,
         semantic_probe=request.semantic_probe,
         allow_coverage_loss=request.allow_coverage_loss,
+        full_sequence=request.full_sequence,
     )
     return FitAccepted(task_id=task.id, model_id=request.model_id, queue="extraction")
 
