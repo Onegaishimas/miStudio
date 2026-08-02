@@ -41,6 +41,7 @@ def fit_jlens_artifact(
     freeze_qk: bool = True,
     corpus_name: str = "unspecified",
     semantic_probe: Optional[Dict[str, Any]] = None,
+    allow_coverage_loss: bool = False,
 ) -> Dict[str, Any]:
     """Fit, validate and publish a J-lens artifact for one model.
 
@@ -55,7 +56,10 @@ def fit_jlens_artifact(
     """
     from ..ml.jlens_fitter import JacobianFitter
     from ..models.model import Model
-    from ..services.jlens_artifact_service import JLensArtifactService
+    from ..services.jlens_artifact_service import (
+        ArtifactCoverageLoss,
+        JLensArtifactService,
+    )
     from ..services.jlens_model_registry import load_for_readout
     from ..core.database import get_sync_db
 
@@ -126,6 +130,7 @@ def fit_jlens_artifact(
     )
 
     published = False
+    coverage_refusal = None
     if report.serviceable:
         # `commit` requires the FULL pass, which needs a live external consumer.
         # Serviceable-but-not-passed still publishes locally, because the two
@@ -133,11 +138,22 @@ def fit_jlens_artifact(
         # make every fit unusable. The report travels with the result so the
         # distinction is visible rather than implied.
         try:
-            service.commit(repo_id, _local_pass(report))
+            service.commit(
+                repo_id, _local_pass(report), allow_coverage_loss=allow_coverage_loss
+            )
             published = True
+        except ArtifactCoverageLoss as exc:
+            # NOT an error the user should have to read in a log. Publishing was
+            # refused to protect layers they already paid GPU time for, and the
+            # staged fit is kept so they can publish it deliberately.
+            logger.warning("Refused to publish %s: %s", repo_id, exc)
+            coverage_refusal = str(exc)
         except Exception as exc:  # noqa: BLE001 - reported, not swallowed
             logger.error("Publishing %s failed: %s", repo_id, exc)
     else:
+        # A coverage refusal never reaches here — it happens inside the
+        # serviceable branch, so the staged fit survives for a deliberate
+        # re-publish without needing a condition to protect it.
         service.discard_staged(repo_id)
 
     # Say WHY nothing was published when the cause is a missing fixture rather
@@ -146,7 +162,9 @@ def fit_jlens_artifact(
     # was discarded for want of one prompt.
     unpublished_reason = None
     if not published:
-        if semantic_result is None:
+        if coverage_refusal is not None:
+            unpublished_reason = coverage_refusal
+        elif semantic_result is None:
             unpublished_reason = (
                 "No semantic_probe was supplied, so the SEMANTIC check could not "
                 "run and the artifact was not published. Supply "

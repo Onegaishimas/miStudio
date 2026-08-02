@@ -48,6 +48,11 @@ logger = logging.getLogger(__name__)
 
 STAGING_SUFFIX = ".staging"
 
+#: Where the artifact a commit REPLACED is kept. One slot, overwritten each
+#: time: enough to undo the last mistake without letting 276 MB artifacts
+#: accumulate silently. Excluded from discovery like staging is.
+SUPERSEDED_SUFFIX = ".superseded"
+
 #: Verdict recorded beside the artifact at publish time. Named so it cannot be
 #: mistaken for part of the conformance layout — a consumer reading the upstream
 #: format ignores it, and `_ref_for` does not require it.
@@ -85,6 +90,10 @@ class ArtifactNotValidated(RuntimeError):
     """Raised rather than serving an artifact that has not passed the suite."""
 
 
+class ArtifactCoverageLoss(RuntimeError):
+    """Raised rather than destroying layers the replacement does not cover."""
+
+
 class JLensArtifactService:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
@@ -102,7 +111,7 @@ class JLensArtifactService:
             return []
         found: List[ArtifactRef] = []
         for directory in sorted(p for p in self.root.iterdir() if p.is_dir()):
-            if directory.name.endswith(STAGING_SUFFIX):
+            if directory.name.endswith((STAGING_SUFFIX, SUPERSEDED_SUFFIX)):
                 continue
             ref = self._ref_for(directory)
             if ref is not None:
@@ -237,7 +246,12 @@ class JLensArtifactService:
             config_path=staging / "config.yaml",
         )
 
-    def commit(self, repo_id: str, report: ValidationReport) -> ArtifactRef:
+    def commit(
+        self,
+        repo_id: str,
+        report: ValidationReport,
+        allow_coverage_loss: bool = False,
+    ) -> ArtifactRef:
         """Move a staged artifact into the mounted directory.
 
         REFUSES on anything short of a full pass. The mounted directory is read
@@ -255,9 +269,33 @@ class JLensArtifactService:
         if not staging.is_dir():
             raise FileNotFoundError(f"nothing staged for {repo_id} at {staging}")
 
+        # REFUSE A SILENT LOSS OF COVERAGE. A refit is not automatically an
+        # upgrade: the artifact this destroyed covered 16 layers on 120 prompts
+        # and the replacement covered 9 on 400 — neither dominates, and nothing
+        # told the user they were about to lose seven layers. Losing coverage
+        # must be a DECISION, so it is refused unless asked for by name.
+        lost = self._coverage_lost(repo_id, staging)
+        if lost and not allow_coverage_loss:
+            raise ArtifactCoverageLoss(
+                f"refusing to publish {repo_id}: the existing artifact covers "
+                f"layers {lost} that this fit does not. Publishing would "
+                "destroy them. Re-run with allow_coverage_loss=true if that is "
+                "what you want, or fit the missing layers as well."
+            )
+
         final = self.root / slug_for(repo_id)
         if final.exists():
-            shutil.rmtree(final)
+            # ARCHIVE, DO NOT DELETE. This used to be `shutil.rmtree(final)`,
+            # and it destroyed a full 16-layer LFM2 lens when a later 9-layer
+            # fit published over it — nine minutes of GPU and the reference
+            # model's only full-stack artifact, gone with no warning and no way
+            # back. One slot, overwritten each time: enough to undo the last
+            # mistake without letting 276 MB artifacts pile up unnoticed.
+            archive = self.root / f"{slug_for(repo_id)}{SUPERSEDED_SUFFIX}"
+            if archive.exists():
+                shutil.rmtree(archive)
+            final.rename(archive)
+            logger.info("Archived the previous %s artifact to %s", repo_id, archive)
         staging.rename(final)
 
         ref = self._ref_for(final)
@@ -294,6 +332,29 @@ class JLensArtifactService:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    def _coverage_lost(self, repo_id: str, staging: Path) -> List[int]:
+        """Layers the CURRENT artifact has that the staged one does not.
+
+        Empty when there is no current artifact, when either side is
+        unreadable, or when the new fit is a superset. Unreadable is treated as
+        "nothing to lose" deliberately: a guard that blocks publishing because
+        it could not parse the old file turns a corrupt artifact into a
+        permanent obstruction.
+        """
+        current = self.find(repo_id)
+        if current is None:
+            return []
+        staged = self._ref_for(staging)
+        if staged is None:
+            return []
+        old = self._load_payload(current)
+        new = self._load_payload(staged)
+        if not isinstance(old, dict) or not isinstance(new, dict):
+            return []
+        old_layers = {int(k) for k in old}
+        new_layers = {int(k) for k in new}
+        return sorted(old_layers - new_layers)
 
     def _write_report(self, ref: ArtifactRef, report: ValidationReport) -> None:
         stat = ref.lens_path.stat()

@@ -153,6 +153,11 @@ celery_app.conf.update(
         "src.workers.jlens_band_tasks.*": {
             "queue": "extraction",
         },
+        # J-space interventions: a forward pass plus its matched control, so
+        # model-bound like the rest.
+        "src.workers.jlens_intervention_tasks.*": {
+            "queue": "extraction",
+        },
         # Steered-transcript recorder: GPU (loads the model to generate) — same
         # extraction queue + single-GPU guard as calibration.
         "src.workers.circuit_record_tasks.*": {
@@ -461,6 +466,7 @@ celery_app.autodiscover_tasks(
         "src.workers.jlens_readout_tasks",
         "src.workers.jlens_probe_tasks",
         "src.workers.jlens_band_tasks",
+        "src.workers.jlens_intervention_tasks",
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes

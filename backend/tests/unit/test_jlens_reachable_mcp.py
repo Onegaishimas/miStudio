@@ -47,6 +47,7 @@ EXPECTED_TOOLS = {
     "get_jlens_replication_report",
     "compute_jlens_band_report",
     "record_jlens_gate",
+    "run_jlens_intervention",
 }
 
 
@@ -355,6 +356,33 @@ class TestCaller:
         # cannot be recorded is not a gate.
         assert body["claim_set_replicated"] is False
         assert "did not replicate" in body["rationale"]
+
+    def test_the_intervention_tool_always_carries_a_control(self):
+        """BR-018 at the agent surface.
+
+        An intervention without a matched control is not a weaker finding, it
+        is not a finding — so the tool must transmit the control parameters on
+        every call, not only when asked.
+        """
+        mcp, client, _names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "run_jlens_intervention",
+                {
+                    "model_id": "m_1",
+                    "prompt": "hello",
+                    "primitive": "additive",
+                    "layers": [5],
+                    "control_seed": 77,
+                    "k": 4,
+                },
+            )
+        )
+        assert client.post.await_args.args[0] == "/jlens/interventions"
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["control_seed"] == 77
+        assert body["k"] == 4, "the control size was dropped; it must be size-matched"
+        assert body["primitive"] == "additive"
 
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""
