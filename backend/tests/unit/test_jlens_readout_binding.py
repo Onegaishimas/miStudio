@@ -493,12 +493,17 @@ def test_the_semantic_check_probes_a_layer_the_artifact_actually_holds(monkeypat
         jlens_readout_service, "ReadoutService", lambda **kw: object()
     )
     monkeypatch.setattr(
-        jlens_readout_service, "JacobianTransport", lambda j: object()
+        jlens_readout_service, "JacobianTransport", lambda j, **kw: object()
     )
 
     class _Svc:
         def _load_payload(self, ref):
             return {24: None, 25: None}
+
+        def layer_scales(self, ref):
+            # No rescale recorded — the common case, and the one where an
+            # artifact fitted before scales were written must still read.
+            return {}
 
     monkeypatch.setattr(jlens, "_service", lambda: _Svc())
 

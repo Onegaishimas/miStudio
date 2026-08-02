@@ -163,8 +163,26 @@ class JacobianTransport(LensTransport):
     lens_type = "JACOBIAN_LENS"
 
     def __init__(
-        self, jacobians: Dict[int, torch.Tensor], compute_dtype: torch.dtype = torch.float32
+        self,
+        jacobians: Dict[int, torch.Tensor],
+        compute_dtype: torch.dtype = torch.float32,
+        scales: Optional[Dict[int, float]] = None,
     ):
+        """`scales` undoes the fp16 storage rescale (see `_to_storage_dtype`).
+
+        UNSCALING IS NOT COSMETIC. The fitter divides each matrix down so the
+        fp16 cast cannot saturate, and the stored matrix is therefore J/alpha.
+        Ranked readouts are blind to this — the model's final norm divides a
+        positive scalar straight back out — but everything that does not
+        normalise is not: probe scores and intervention magnitudes came out
+        scaled by an unrecorded per-layer alpha, which made them incomparable
+        across layers.
+
+        Absent or 1.0 means no rescale was applied. A missing entry is treated
+        as 1.0 rather than refused, because artifacts fitted before the scale
+        was recorded are still readable — they simply had no rescale to undo in
+        the common case, and a hard refusal would strand them.
+        """
         if not jacobians:
             raise ValueError("JacobianTransport requires at least one layer matrix")
         for layer, j in jacobians.items():
@@ -177,7 +195,18 @@ class JacobianTransport(LensTransport):
         # fp16 and the readout computes in fp32; casting inside apply() would
         # copy a d_model^2 matrix on every (layer, position) — 8 MB per call at
         # d_model 2048, thousands of times per readout.
-        self._j = {layer: j.to(compute_dtype) for layer, j in jacobians.items()}
+        # Unscale ONCE here, with the same reasoning as the dtype cast: doing
+        # it inside apply() would multiply a d_model^2 matrix on every
+        # (layer, position).
+        factors = scales or {}
+        self._j = {}
+        for layer, j in jacobians.items():
+            matrix = j.to(compute_dtype)
+            alpha = float(factors.get(layer, 1.0) or 1.0)
+            if alpha != 1.0:
+                matrix = matrix * alpha
+            self._j[layer] = matrix
+        self._scales = {l: float(factors.get(l, 1.0) or 1.0) for l in jacobians}
         self._compute_dtype = compute_dtype
 
     def apply(self, h: torch.Tensor, layer: int) -> torch.Tensor:

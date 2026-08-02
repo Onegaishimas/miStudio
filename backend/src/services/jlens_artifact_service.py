@@ -443,3 +443,44 @@ class JLensArtifactService:
         if payload is None:
             raise ArtifactNotValidated(f"{ref.lens_path} did not deserialize")
         return {int(k): v for k, v in payload.items()}
+
+    def layer_scales(self, ref: ArtifactRef) -> Dict[int, float]:
+        """Per-layer factors the stored matrices were divided by, from config.yaml.
+
+        Empty when the artifact predates the scale being recorded, or declares
+        none. Empty means "no rescale to undo", which is the correct reading:
+        `_to_storage_dtype` leaves the scale at 1.0 whenever the matrix fits
+        fp16 without help, and that is the common case.
+
+        Parsed with a narrow reader rather than a YAML dependency — the file is
+        written by `_config_yaml` as flat `  <layer>: <float>` under a
+        `layer_scales:` key, and pulling in a parser to read two lines would be
+        a larger surface than the thing it reads.
+        """
+        if ref.config_path is None or not ref.config_path.is_file():
+            return {}
+        scales: Dict[int, float] = {}
+        in_block = False
+        try:
+            for raw in ref.config_path.read_text().splitlines():
+                if raw.strip() == "layer_scales:":
+                    in_block = True
+                    continue
+                if in_block:
+                    if raw[:1] not in (" ", "\t") or not raw.strip():
+                        break
+                    key, _, value = raw.strip().partition(":")
+                    try:
+                        scales[int(key)] = float(value)
+                    except ValueError:
+                        # A malformed entry is skipped, not guessed at: a wrong
+                        # scale is worse than none, because it silently changes
+                        # every magnitude read through this layer.
+                        logger.warning(
+                            "Unreadable layer scale %r in %s", raw.strip(),
+                            ref.config_path,
+                        )
+        except OSError as exc:  # noqa: BLE001 - reported, not swallowed
+            logger.warning("Could not read %s: %s", ref.config_path, exc)
+            return {}
+        return scales

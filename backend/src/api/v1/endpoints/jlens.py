@@ -44,6 +44,24 @@ def _service() -> JLensArtifactService:
     return JLensArtifactService(settings.jlens_artifacts_dir)
 
 
+def _jacobian_transport(loaded: Any, artifact_id: Optional[str] = None):
+    """Build a JacobianTransport for `loaded`, WITH its recorded scales.
+
+    One helper rather than five construction sites. The scale has to travel
+    with the matrices — an unscaled transport reads out ranked results that
+    look perfect and probe/intervention magnitudes that are silently wrong by a
+    per-layer factor — and five call sites is five chances to forget it.
+    """
+    from ....services.jlens_readout_service import JacobianTransport
+
+    service = _service()
+    report = _validated_report(loaded, artifact_id)
+    jacobians = service.load_for_readout(loaded.name, report=report)
+    ref = service.find(loaded.name)
+    scales = service.layer_scales(ref) if ref is not None else {}
+    return JacobianTransport(jacobians, scales=scales)
+
+
 class ArtifactSummary(BaseModel):
     """One artifact as it exists ON DISK — presence, not validity.
 
@@ -604,7 +622,11 @@ def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = No
     # its constructor — deliberately, so `apply` does not copy a d_model^2
     # matrix per call — and constructing it inside the closure moved that cost
     # back to per-invocation, over the whole artifact.
-    transport = JacobianTransport(jacobians)
+    # Scales travel here too: the SEMANTIC check reads out through this
+    # transport, and a check run against an unscaled lens is not checking the
+    # artifact anyone else will load.
+    scales = service.layer_scales(ref)
+    transport = JacobianTransport(jacobians, scales=scales)
 
     def top_at(prompt: str, layer: int, top_k: int):
         last = None

@@ -244,7 +244,11 @@ def _run_semantic_check(service, ref, loaded, probe: Dict[str, Any], fitted_laye
             "the staged artifact did not deserialize, so it cannot be read out",
         )
 
-    transport = JacobianTransport({int(k): v for k, v in payload.items()})
+    # The STAGED artifact's scales, read from the config written beside it.
+    transport = JacobianTransport(
+        {int(k): v for k, v in payload.items()},
+        scales=service.layer_scales(ref),
+    )
     readout_service = ReadoutService(
         model=loaded.model,
         tokenizer=loaded.tokenizer,
@@ -322,6 +326,20 @@ def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
         f"n_prompts: {result.prompts_seen}",
         f"converged: {str(result.converged).lower()}",
         f"convergence_delta: {result.convergence_delta}",
+        # THE SCALE, WITHOUT WHICH THE ARTIFACT IS WRONG. `_to_storage_dtype`
+        # divides each matrix down so the fp16 cast cannot saturate, and its
+        # docstring has always said the factor is recorded here — it was not.
+        # Ranked readouts never noticed, because the model's final norm divides
+        # a positive scalar straight back out. Everything that does NOT
+        # normalise did: probe scores and intervention magnitudes were off by
+        # an unrecorded per-layer factor, so they were not comparable across
+        # layers, and an external consumer multiplying by W_U got the wrong
+        # magnitudes — the exact case that docstring names.
+        "layer_scales:",
+    ]
+    for layer in sorted(result.scales):
+        lines.append(f"  {layer}: {result.scales[layer]!r}")
+    lines += [
         "per_layer_applicability:",
     ]
     for entry in applicability:
