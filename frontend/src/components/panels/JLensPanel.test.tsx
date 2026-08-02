@@ -873,25 +873,64 @@ describe('a mounted artifact is enough to select the Jacobian lens', () => {
 });
 
 describe('the setup survives a refresh, and Clear forgets it', () => {
-  it('persists the model, prompt, lens mode and pins — but NOT the readout', () => {
-    // Results are deliberately excluded. A readout restored from a previous
-    // session describes a prompt the user may have edited since, and a grid
-    // full of stale content is indistinguishable from one describing what is
-    // currently on screen — the confusion the fixture ban exists to prevent.
+  it('persists the readout as well as the setup', () => {
+    // Losing a readout on refresh is the wrong trade: it costs a model load
+    // and up to a minute of GPU, and re-running it to see what you were
+    // already looking at is worse than the risk of a stale grid. That risk is
+    // handled by `readoutPrompt`, not avoided by throwing the results away.
     //
-    // MUTATION CONTROL: add `meta`/`tokens` to partialize and this fails.
+    // MUTATION CONTROL: drop meta/tokens from partialize and this fails.
     const persisted = (
       useJLensStore as unknown as {
         persist: { getOptions: () => { partialize: (s: unknown) => object } };
       }
-    ).persist.getOptions().partialize(useJLensStore.getState());
+    ).persist.getOptions().partialize(useJLensStore.getState()) as Record<string, unknown>;
 
-    expect(Object.keys(persisted).sort()).toEqual(
-      ['lensMode', 'modelId', 'modelRepoId', 'pinned', 'prompt'].sort()
-    );
-    for (const result of ['meta', 'tokens', 'provenance', 'artifacts', 'bandReport']) {
-      expect(persisted).not.toHaveProperty(result);
+    for (const key of ['modelId', 'prompt', 'lensMode', 'pinned', 'meta', 'tokens']) {
+      expect(persisted).toHaveProperty(key);
     }
+    // The prompt that PRODUCED the grid travels with it, or a restored readout
+    // cannot say whether it still describes what is in the prompt box.
+    expect(persisted).toHaveProperty('readoutPrompt');
+  });
+
+  it('drops an oversized readout rather than losing the whole entry', () => {
+    // localStorage throws on overflow and zustand's persist middleware loses
+    // the ENTIRE entry when it does — so an 8000-character prompt over 26
+    // layers would take the model and prompt down with it.
+    //
+    // MUTATION CONTROL: remove the size guard and this fails.
+    const huge = Array.from({ length: 400 }, (_, p) => ({
+      kind: 'token' as const,
+      position: p,
+      token: 't',
+      id: p,
+      is_generated: false,
+      results: [
+        {
+          type: 'LOGIT_LENS' as LensType,
+          top_tokens: Array.from({ length: 26 }, () =>
+            Array.from({ length: 8 }, () => 'x'.repeat(40))
+          ),
+          top_probs: Array.from({ length: 26 }, () =>
+            Array.from({ length: 8 }, () => 0.1)
+          ),
+        },
+      ],
+    }));
+    act(() =>
+      useJLensStore.setState({ modelId: 'm_lfm2', prompt: 'p', tokens: huge })
+    );
+
+    const persisted = (
+      useJLensStore as unknown as {
+        persist: { getOptions: () => { partialize: (s: unknown) => object } };
+      }
+    ).persist.getOptions().partialize(useJLensStore.getState()) as Record<string, unknown>;
+
+    expect(persisted).not.toHaveProperty('tokens');
+    // The setup still survives, which is the point of dropping only the grid.
+    expect(persisted.modelId).toBe('m_lfm2');
   });
 
   it('shows a restored prompt in the input, not an empty box', () => {
@@ -1012,5 +1051,46 @@ describe('the Diff view shows where the lenses part company', () => {
     );
 
     expect(screen.queryByText(/lenses first diverge/)).toBeNull();
+  });
+});
+
+describe('a restored readout says which prompt it describes', () => {
+  it('warns when the grid no longer matches the prompt box', async () => {
+    // The cost of keeping results across a refresh is that editing the prompt
+    // afterwards leaves a grid that LOOKS current. Say so rather than clearing
+    // it or letting it pass as fresh.
+    //
+    // MUTATION CONTROL: drop the readoutPrompt !== promptDraft check -> fails.
+    // SEED THE STORE BEFORE MOUNTING, which is the order a refresh produces:
+    // persist rehydrates, then the panel mounts and seeds its prompt draft from
+    // the restored prompt. Setting state after render leaves the draft empty
+    // and tests a state the app never reaches.
+    const response = makeReadout([0, 1, 2]);
+    act(() =>
+      useJLensStore.setState({
+        modelId: 'm_lfm2',
+        prompt: 'The capital of France is',
+        readoutPrompt: 'The capital of France is',
+        meta: response.meta,
+        tokens: response.tokens,
+        restored: true,
+        isLoading: false,
+        error: null,
+      })
+    );
+    render(<JLensPanel />);
+
+    // Same prompt: it is a restoration, not a mismatch.
+    expect(screen.getByText(/restored from your last session/i)).toBeInTheDocument();
+    expect(screen.queryByText(/read out again to update/i)).toBeNull();
+
+    // Now edit the prompt — the grid describes something else.
+    await userEvent.type(
+      screen.getByDisplayValue('The capital of France is'),
+      ' not'
+    );
+
+    expect(screen.getByText(/read out again to update/i)).toBeInTheDocument();
+    expect(screen.queryByText(/restored from your last session/i)).toBeNull();
   });
 });

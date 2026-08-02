@@ -61,6 +61,8 @@ export function JLensPanel() {
     error,
     artifacts,
     modelRepoId,
+    readoutPrompt,
+    restored,
     setModelId,
     setPrompt,
     setLensMode,
@@ -176,6 +178,25 @@ export function JLensPanel() {
         {meta && (
           <span className="rounded border border-slate-300 bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
             {meta.model}
+          </span>
+        )}
+        {/* A RESTORED GRID THAT NO LONGER MATCHES THE PROMPT BOX.
+            Keeping the readout across a refresh is worth a model load and a
+            minute of GPU; the cost is that editing the prompt afterwards
+            leaves a grid that looks current and is not. Say which prompt it
+            describes rather than clearing it or letting it pass as fresh. */}
+        {meta && readoutPrompt && readoutPrompt !== promptDraft && (
+          <span
+            className="rounded border border-amber-400 px-2 py-0.5 text-[11px] text-amber-700 dark:border-amber-600 dark:text-amber-400"
+            title={readoutPrompt}
+          >
+            showing the readout for “{readoutPrompt.slice(0, 40)}
+            {readoutPrompt.length > 40 ? '…' : ''}” — read out again to update
+          </span>
+        )}
+        {meta && restored && readoutPrompt === promptDraft && (
+          <span className="text-[11px] text-slate-500 dark:text-slate-500">
+            restored from your last session
           </span>
         )}
         <div className="ml-auto">

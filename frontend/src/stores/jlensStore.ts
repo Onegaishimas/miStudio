@@ -54,6 +54,16 @@ export const MAX_PINNED = 10;
  */
 export const MAX_PROMPT_CHARS = 8000;
 
+/**
+ * Above this, a readout is not persisted at all.
+ *
+ * localStorage is a few megabytes and zustand's persist middleware loses the
+ * ENTIRE entry when a write overflows — so an oversized readout would take the
+ * model, prompt and pins down with it. Two megabytes leaves room for the other
+ * stores sharing the same origin.
+ */
+export const MAX_PERSISTED_READOUT_CHARS = 2_000_000;
+
 interface JLensState {
   modelId: string;
   prompt: string;
@@ -74,6 +84,17 @@ interface JLensState {
   selLayerIdx: number;
   pinned: string[];
   hover: { pos: number; layerIdx: number } | null;
+
+  /**
+   * The prompt the CURRENT readout was computed from.
+   *
+   * Persisted with the readout so a restored grid can say whether it still
+   * describes what is in the prompt box. Without it, editing the prompt after
+   * a refresh leaves a grid that looks current and is not.
+   */
+  readoutPrompt: string;
+  /** True when the readout on screen came from localStorage, not this session. */
+  restored: boolean;
 
   /** Artifacts present in the mounted registry. Presence, NOT validity. */
   artifacts: JLensArtifactSummary[];
@@ -111,6 +132,8 @@ const INITIAL = {
   modelRepoId: '',
   artifacts: [] as JLensArtifactSummary[],
   prompt: '',
+  readoutPrompt: '',
+  restored: false,
   meta: null,
   tokens: [],
   bandReport: null,
@@ -240,6 +263,9 @@ export const useJLensStore = create<JLensState>()(
             return {
               meta: response.meta,
               tokens: response.tokens,
+              // This readout is fresh, and it describes THIS prompt.
+              readoutPrompt: prompt,
+              restored: false,
               // Logit lens involves no artifact at all — say so rather than
               // leaving the provenance strip blank (BR-007).
               provenance: { artifact_id: artifact ? artifact.slug : null },
@@ -293,13 +319,49 @@ export const useJLensStore = create<JLensState>()(
          * would decide which lenses to offer from a list that may no longer be
          * true.
          */
-        partialize: (state) => ({
-          modelId: state.modelId,
-          modelRepoId: state.modelRepoId,
-          prompt: state.prompt,
-          lensMode: state.lensMode,
-          pinned: state.pinned,
-        }),
+        /**
+         * SETUP AND RESULTS BOTH PERSIST.
+         *
+         * Results are kept because losing a readout on refresh is the wrong
+         * trade: a readout costs a model load and up to a minute of GPU, and
+         * re-running it to see what you were already looking at is worse than
+         * the risk of showing a stale one. That risk is handled rather than
+         * avoided — `readoutPrompt` travels with the grid and the panel says
+         * so when it no longer matches the prompt box.
+         *
+         * A LARGE READOUT IS DROPPED, NOT PERSISTED. localStorage throws
+         * QuotaExceededError on overflow, and zustand's persist middleware
+         * loses the WHOLE entry when it does — so an 8000-character prompt
+         * over 26 layers would silently take the model and prompt down with
+         * it. Better to restore the setup alone than nothing at all.
+         */
+        partialize: (state) => {
+          const setup = {
+            modelId: state.modelId,
+            modelRepoId: state.modelRepoId,
+            prompt: state.prompt,
+            lensMode: state.lensMode,
+            pinned: state.pinned,
+            selPos: state.selPos,
+            selLayerIdx: state.selLayerIdx,
+          };
+          const results = {
+            meta: state.meta,
+            tokens: state.tokens,
+            provenance: state.provenance,
+            bandReport: state.bandReport,
+            readoutPrompt: state.readoutPrompt,
+            restored: true,
+          };
+          try {
+            if (JSON.stringify(results).length > MAX_PERSISTED_READOUT_CHARS) {
+              return setup;
+            }
+          } catch {
+            return setup;
+          }
+          return { ...setup, ...results };
+        },
       }
     ),
     { name: 'jlens-store' }
