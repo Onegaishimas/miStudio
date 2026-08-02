@@ -493,6 +493,27 @@ def _batch_kwargs(kwargs: Dict[str, Any], batch: int) -> Dict[str, Any]:
     return out
 
 
+def _expand_kwargs(kwargs: Dict[str, Any], batch: int) -> Dict[str, Any]:
+    """Expand recorded kwargs to `batch` WITHOUT touching the sequence axis.
+
+    The counterpart to `_batch_kwargs`, which truncates to one position. Here
+    the whole sequence is replayed, so masks, position ids and rotary tables
+    must arrive at their ORIGINAL length — truncating them is exactly what
+    makes the cheap path unfaithful.
+    """
+    out: Dict[str, Any] = {}
+    for key, value in kwargs.items():
+        if isinstance(value, torch.Tensor) and value.dim() >= 2 and value.shape[0] == 1:
+            out[key] = value.expand(batch, *value.shape[1:])
+        elif isinstance(value, tuple) and value and all(
+            isinstance(v, torch.Tensor) for v in value
+        ):
+            out[key] = tuple(_expand_kwargs({"v": v}, batch)["v"] for v in value)
+        else:
+            out[key] = value
+    return out
+
+
 class JacobianFitter:
     """Fits `J` per layer over a corpus, with convergence-based stopping."""
 
@@ -503,6 +524,7 @@ class JacobianFitter:
         structure: Any,
         *,
         freeze_qk: bool = True,
+        full_sequence: bool = False,
         convergence_delta: float = DEFAULT_CONVERGENCE_DELTA,
         min_prompts: int = MIN_PROMPTS,
         chunk: int = DEFAULT_CHUNK,
@@ -512,6 +534,10 @@ class JacobianFitter:
         self.tokenizer = tokenizer
         self.structure = structure
         self.freeze_qk = freeze_qk
+        #: Run the sub-network at the REAL sequence length. S times the compute,
+        #: and the only setting under which downstream attention weights are
+        #: the ones the model actually used.
+        self.full_sequence = full_sequence
         self.convergence_delta = convergence_delta
         self.min_prompts = min_prompts
         self.chunk = chunk
@@ -671,6 +697,10 @@ class JacobianFitter:
         def capture_output(_module, _inputs, output):
             hidden = output[0] if isinstance(output, tuple) else output
             captured["h"] = hidden[0, -1].detach().clone()
+            # The whole sequence, for the faithful path. Keeping it costs one
+            # [S, d_model] tensor and is what lets the sub-network run at the
+            # real length instead of at length 1.
+            captured["seq"] = hidden[0].detach().clone()
 
         def make_kwarg_recorder(idx: int):
             def recorder(_module, _args, kwargs):
@@ -698,13 +728,15 @@ class JacobianFitter:
 
         point = captured["h"]
 
-        def forward(h: torch.Tensor) -> torch.Tensor:
-            """Run the remaining blocks from `layer` onward, on one position.
+        def forward_isolated(h: torch.Tensor) -> torch.Tensor:
+            """The remaining blocks on a LENGTH-1 sequence.
 
-            With attention and norms frozen this composition is AFFINE in `h`,
-            which is what makes the extracted matrix a lens rather than a local
-            approximation — and what lets `jacobian_batched` take the whole
-            chunk in one call.
+            Cheap, and deliberately labelled `self_only_isolated` in the recipe
+            rather than `self_only`, because it is not the same computation: a
+            softmax over a single key is 1.0, so the downstream attention gives
+            the perturbed position its FULL attention weight where the real
+            forward pass might give it 0.05. The value path is scaled up
+            accordingly. Fast, and faithful only where attention is negligible.
             """
             batched = h.dim() > 1
             hidden = h.reshape(-1, 1, h.shape[-1]) if batched else h.view(1, 1, -1)
@@ -714,4 +746,34 @@ class JacobianFitter:
                 hidden = result[0] if isinstance(result, tuple) else result
             return hidden.reshape(hidden.shape[0], -1) if batched else hidden.view(-1)
 
+        def forward_full(h: torch.Tensor) -> torch.Tensor:
+            """The remaining blocks on the REAL sequence, perturbing one position.
+
+            The faithful path. The prefix is held at its captured values and
+            only the target position varies, so downstream attention sees the
+            real distribution over real keys and the derivative is the true
+            d(final at p) / d(h_layer at p).
+
+            Costs a forward over S positions instead of 1 per basis chunk — S
+            times the compute — which is why it is opt-in rather than default.
+            """
+            base = captured["seq"]  # [S, d_model]
+            batched = h.dim() > 1
+            rows = h.reshape(-1, h.shape[-1]) if batched else h.view(1, -1)
+            n = rows.shape[0]
+
+            hidden = base.unsqueeze(0).repeat(n, 1, 1)
+            # Only the target position moves; everything before it is context
+            # and contributes a constant, not a derivative.
+            hidden[:, -1, :] = rows.to(hidden.dtype)
+
+            for idx in range(layer + 1, self.structure.num_layers):
+                kwargs = _expand_kwargs(recorded_kwargs.get(idx, {}), n)
+                result = self.structure.layers_module[idx](hidden, **kwargs)
+                hidden = result[0] if isinstance(result, tuple) else result
+
+            out = hidden[:, -1, :]
+            return out if batched else out.view(-1)
+
+        forward = forward_full if self.full_sequence else forward_isolated
         return point, forward

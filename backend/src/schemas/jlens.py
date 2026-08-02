@@ -309,9 +309,9 @@ class JLensArtifactRecipe(BaseModel):
     # contract that reads as a description.
     target_layer: Literal["final", "penultimate"] = "final"
     attention_gradients: Literal["full", "frozen_qk"] = "full"
-    target_position_scope: Literal["self_only", "future_only", "all_subsequent"] = (
-        "self_only"
-    )
+    target_position_scope: Literal[
+        "self_only", "self_only_isolated", "future_only", "all_subsequent"
+    ] = "self_only_isolated"
     aggregation: Literal["mean", "median"] = "mean"
     corpus: str
     n_prompts: int = Field(..., ge=100, description="Floor of 100 (Appendix A.2)")

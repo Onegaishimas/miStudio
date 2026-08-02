@@ -642,9 +642,11 @@ def test_the_declared_scope_agrees_with_what_the_fitter_does():
     from src.schemas.jlens import JLensArtifactRecipe
 
     fields = JLensArtifactRecipe.model_fields
-    assert fields["target_position_scope"].default == "self_only", (
-        "the schema defaults to a position scope the fitter does not implement: "
-        "`_batch_kwargs` slices the mask to ONE position, which is self-only"
+    assert fields["target_position_scope"].default == "self_only_isolated", (
+        "the schema must default to what the CHEAP path actually does. It runs "
+        "the sub-network at length 1, where a softmax over one key is 1.0 — the "
+        "perturbed position gets full attention weight instead of its real "
+        "share. That is not plain `self_only`, and naming it so overstates it."
     )
     assert fields["target_layer"].default == "final", (
         "the schema defaults to 'penultimate'; `_sub_network` runs the remaining "
@@ -652,7 +654,8 @@ def test_the_declared_scope_agrees_with_what_the_fitter_does():
     )
 
     text = _written_config()
-    assert "target_position_scope: self_only" in text
+    assert "target_position_scope: self_only_isolated" in text
+    assert "sub_network_sequence: single_position" in text
     assert "target_layer: final" in text
 
 
@@ -785,3 +788,159 @@ def test_the_fit_records_which_layers_are_degenerate():
         f"layer {last} is the final block, so its sub-network is the identity "
         f"and J = I — degenerate_layers was {result.degenerate_layers}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The sub-network's SEQUENCE LENGTH changes the answer (F4, properly)
+#
+# The cheap path runs the remaining blocks on a LENGTH-1 sequence. A softmax
+# over a single key is 1.0, so downstream attention hands the perturbed
+# position its entire attention weight — where the real forward pass might give
+# it 0.05. The value path comes out scaled up by that ratio.
+#
+# That is not a scope choice, it is a different computation, which is why the
+# recipe now records `self_only_isolated` for it rather than `self_only`.
+#
+# MUTATION CONTROLS:
+#   * full_sequence path truncates kwargs like the cheap one -> "real length" fails
+#   * forward_full perturbs every position, not just the last -> "one position" fails
+# ---------------------------------------------------------------------------
+
+
+class _AttendingBlock(torch.nn.Module):
+    """A block that MIXES POSITIONS, so sequence length is observable.
+
+    Every fixture above is position-independent, which is precisely why a
+    length-1 sub-network looked equivalent for so long: with no cross-position
+    mixing the two paths agree by construction.
+    """
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.eye(d_model) * 0.5)
+
+    def forward(self, hidden, position_bias=None, **_kwargs):
+        """Mixes positions AND consumes a per-position kwarg.
+
+        `position_bias` is what makes kwarg TRUNCATION observable: a block that
+        ignores its kwargs cannot tell a full-length mask from a mask sliced to
+        one position, which is why an earlier version of this fixture let the
+        truncation mutation survive.
+        """
+        if position_bias is not None:
+            if position_bias.shape[1] != hidden.shape[1]:
+                raise AssertionError(
+                    f"position_bias has length {position_bias.shape[1]} for a "
+                    f"sequence of {hidden.shape[1]} — the kwargs were sliced to "
+                    "a different length than the hidden states"
+                )
+            hidden = hidden + position_bias.unsqueeze(-1)
+        # Uniform attention over the (causal) prefix, then a linear map. With S
+        # positions the last row averages S values; with S = 1 it sees only
+        # itself, and its own contribution is S times heavier.
+        pooled = hidden.cumsum(dim=1) / torch.arange(
+            1, hidden.shape[1] + 1, device=hidden.device, dtype=hidden.dtype
+        ).view(1, -1, 1)
+        return (pooled @ self.w,)
+
+
+def _attending_structure(n_layers: int, d_model: int):
+    blocks = torch.nn.ModuleList([_AttendingBlock(d_model) for _ in range(n_layers)])
+
+    class _S:
+        layers_module = blocks
+        num_layers = n_layers
+        attention_module = None
+
+    return _S()
+
+
+def test_the_two_sub_network_paths_disagree_where_positions_mix():
+    """If these agreed, the cheap path would be free and the flag pointless."""
+    from src.ml.jlens_fitter import JacobianFitter
+
+    d_model, n_layers, seq = 4, 3, 5
+
+    class _Tok:
+        def __call__(self, text, return_tensors=None):
+            return {"input_ids": torch.zeros(1, seq, dtype=torch.long)}
+
+    structure = _attending_structure(n_layers, d_model)
+    embed = torch.nn.Embedding(2, d_model)
+
+    class _Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = structure.layers_module
+            self.embed = embed
+
+        def forward(self, input_ids=None, **_kw):
+            h = self.embed(input_ids)
+            bias = torch.arange(
+                h.shape[1], dtype=h.dtype, device=h.device
+            ).view(1, -1) * 0.01
+            for b in self.blocks:
+                h = b(h, position_bias=bias)[0]
+            return h
+
+    model = _Model()
+    cheap = JacobianFitter(
+        model, _Tok(), structure, freeze_qk=False, full_sequence=False,
+        min_prompts=1, chunk=4,
+    )
+    faithful = JacobianFitter(
+        model, _Tok(), structure, freeze_qk=False, full_sequence=True,
+        min_prompts=1, chunk=4,
+    )
+
+    j_cheap = cheap.fit(["x"], layers=[0]).jacobians[0].float()
+    j_full = faithful.fit(["x"], layers=[0]).jacobians[0].float()
+
+    # "real length": a length-1 sub-network gives the perturbed position full
+    # attention weight; at S=5 the last row averages five values, so its own
+    # share is much smaller and the Jacobian is correspondingly smaller.
+    assert not torch.allclose(j_cheap, j_full, atol=1e-3), (
+        "the two paths produced the same Jacobian on a position-mixing block, "
+        "so the fixture does not actually mix positions and this test proves "
+        "nothing"
+    )
+    assert float(j_cheap.abs().sum()) > float(j_full.abs().sum()), (
+        "the isolated path should OVERSTATE the self path, not understate it"
+    )
+
+
+def test_the_faithful_path_perturbs_only_the_target_position():
+    """Perturbing the prefix too would fold context into the derivative."""
+    from src.ml.jlens_fitter import JacobianFitter
+
+    d_model, seq = 4, 5
+    structure = _attending_structure(2, d_model)
+    embed = torch.nn.Embedding(2, d_model)
+
+    class _Tok:
+        def __call__(self, text, return_tensors=None):
+            return {"input_ids": torch.zeros(1, seq, dtype=torch.long)}
+
+    class _Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = structure.layers_module
+            self.embed = embed
+
+        def forward(self, input_ids=None, **_kw):
+            h = self.embed(input_ids)
+            for b in self.blocks:
+                h = b(h)[0]
+            return h
+
+    fitter = JacobianFitter(
+        _Model(), _Tok(), structure, freeze_qk=False, full_sequence=True,
+        min_prompts=1, chunk=4,
+    )
+    point, forward = fitter._sub_network(torch.zeros(1, seq, dtype=torch.long), 0)
+
+    # Moving the target position must move the output; the derivative is
+    # non-zero precisely because that one position varies.
+    a = forward(point)
+    b = forward(point + 1.0)
+    assert not torch.allclose(a, b), "the target position had no effect at all"

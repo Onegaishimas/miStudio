@@ -42,6 +42,7 @@ def fit_jlens_artifact(
     corpus_name: str = "unspecified",
     semantic_probe: Optional[Dict[str, Any]] = None,
     allow_coverage_loss: bool = False,
+    full_sequence: bool = False,
 ) -> Dict[str, Any]:
     """Fit, validate and publish a J-lens artifact for one model.
 
@@ -81,6 +82,7 @@ def fit_jlens_artifact(
         loaded.tokenizer,
         loaded.structure,
         freeze_qk=freeze_qk,
+        full_sequence=full_sequence,
     )
 
     self.update_state(state="PROGRESS", meta={"stage": "fitting", "prompts_seen": 0})
@@ -99,7 +101,9 @@ def fit_jlens_artifact(
     result = fitter.fit(prompts, layers=layers, on_progress=on_progress)
 
     service = JLensArtifactService(settings.jlens_artifacts_dir)
-    config_yaml = _config_yaml(loaded, result, freeze_qk, corpus_name)
+    config_yaml = _config_yaml(
+        loaded, result, freeze_qk, corpus_name, full_sequence=full_sequence
+    )
     ref = service.write_staged(repo_id, result.jacobians, config_yaml)
 
     self.update_state(state="PROGRESS", meta={"stage": "validating"})
@@ -301,7 +305,9 @@ def _local_pass(report):
     return ValidationReport(results)
 
 
-def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
+def _config_yaml(
+    loaded, result, freeze_qk: bool, corpus_name: str, full_sequence: bool = False
+) -> str:
     """The construction recipe, sufficient to rebuild the artifact (BR-007).
 
     Per-layer applicability is recorded because a recipe choice can be
@@ -336,7 +342,13 @@ def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
         #                         one position with the mask sliced to it
         #                         (`_batch_kwargs`), which is SELF_ONLY.
         "target_layer: final",
-        "target_position_scope: self_only",
+        # NAMED FOR WHAT IT IS. The cheap path runs the sub-network on a
+        # LENGTH-1 sequence, where a softmax over one key is 1.0 — so the
+        # perturbed position receives its full attention weight instead of the
+        # share it actually had. That is a different computation, not a scope
+        # choice, and calling it plain "self_only" overstated it.
+        f"target_position_scope: {'self_only' if full_sequence else 'self_only_isolated'}",
+        f"sub_network_sequence: {'full' if full_sequence else 'single_position'}",
         "aggregation: mean",
         f"seq_len: {getattr(result, 'seq_len', 1)}",
         # PER-LAYER, NOT WHOLESALE. Describing a hybrid model's lens as
