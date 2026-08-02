@@ -31,6 +31,7 @@ optimises for it is optimising for the wrong thing.
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
@@ -53,6 +54,9 @@ DEFAULT_CHUNK = 128
 # sustained for PATIENCE consecutive shards, stops the fit.
 DEFAULT_CONVERGENCE_DELTA = 1e-3
 PATIENCE = 2
+
+#: Serialises the process-wide SDPA patch — see `frozen_attention_and_norms`.
+_FREEZE_LOCK = threading.Lock()
 
 # How far the frozen sub-network may depart from its own linearisation before
 # the fit is refused. Non-zero only to absorb floating-point error: freezing is
@@ -135,6 +139,11 @@ class FitResult:
     converged: bool
     convergence_delta: float
     deltas: List[float] = field(default_factory=list)
+    #: Per-layer mean and worst local-linearisation residual over the CORPUS.
+    #: The mean says how local the lens usually is; the max says how bad it
+    #: gets, and that is the number a reader should judge it on.
+    residual_mean: Dict[int, float] = field(default_factory=dict)
+    residual_max: Dict[int, float] = field(default_factory=dict)
 
     def size_bytes(self, dtype_bytes: int = 2) -> int:
         return self.d_model * self.d_model * dtype_bytes * len(self.jacobians)
@@ -165,6 +174,20 @@ def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[N
     does not attend, which is not the same as unused.
     """
     patched: List[Callable[[], None]] = []
+
+    # PROCESS-WIDE MUTATION, SERIALISED. Patching
+    # `torch.nn.functional.scaled_dot_product_attention` reaches every model in
+    # this process, not only the one being fitted. That reach is the point — it
+    # is what makes the freeze architecture-agnostic — but it means two
+    # concurrent fits would nest their patches and restore each other's
+    # originals in the wrong order, leaving attention permanently frozen for
+    # everything afterwards, with no error and no way to notice.
+    #
+    # The task queue serialises fits today, so this guards the invariant rather
+    # than a symptom already seen. It is worth closing anyway: the failure is
+    # silent, permanent, and would present as "readouts went strange".
+    _FREEZE_LOCK.acquire()
+    patched.append(_FREEZE_LOCK.release)
 
     if freeze_qk:
         original_sdpa = torch.nn.functional.scaled_dot_product_attention
@@ -212,7 +235,9 @@ def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[N
     try:
         yield
     finally:
-        for undo in patched:
+        # Reverse order: the lock was acquired first and must be released
+        # last, after every patch it protects has been undone.
+        for undo in reversed(patched):
             undo()
         for handle in handles:
             handle()
@@ -468,9 +493,18 @@ class JacobianFitter:
         self.min_prompts = min_prompts
         self.chunk = chunk
         self.max_affine_residual = max_affine_residual
-        #: Per-layer local-linearisation residual from the most recent prompt,
-        #: carried into the artifact's provenance.
+        #: Per-layer local-linearisation residual, ACCUMULATED over the corpus.
+        #:
+        #: This used to hold the most recent prompt's value only — overwritten
+        #: on every prompt — while being written into the artifact as though it
+        #: described the fit. A hundred-prompt corpus reported the hundredth
+        #: prompt's number. Mean and max are both kept: the mean says how local
+        #: the lens is typically, the max says how bad it gets, and a lens is
+        #: trusted or not on the second.
         self._last_residuals: Dict[int, float] = {}
+        self._residual_sums: Dict[int, float] = {}
+        self._residual_max: Dict[int, float] = {}
+        self._residual_counts: Dict[int, int] = {}
 
     def fit(
         self,
@@ -535,6 +569,11 @@ class JacobianFitter:
             converged=stable >= PATIENCE,
             convergence_delta=self.convergence_delta,
             deltas=deltas,
+            residual_mean={
+                l: self._residual_sums[l] / max(self._residual_counts[l], 1)
+                for l in self._residual_sums
+            },
+            residual_max=dict(self._residual_max),
         )
 
     @property
@@ -571,9 +610,13 @@ class JacobianFitter:
             # that. The number says how far the lens can be trusted away from
             # the point it was taken at, which belongs in the artifact's
             # provenance rather than in a refusal.
-            self._last_residuals[layer] = linearisation_residual(
-                forward, point, jacobian
+            residual = linearisation_residual(forward, point, jacobian)
+            self._last_residuals[layer] = residual
+            self._residual_sums[layer] = self._residual_sums.get(layer, 0.0) + residual
+            self._residual_max[layer] = max(
+                self._residual_max.get(layer, 0.0), residual
             )
+            self._residual_counts[layer] = self._residual_counts.get(layer, 0) + 1
             out[layer] = jacobian
         return out
 

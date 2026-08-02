@@ -301,10 +301,16 @@ class JLensArtifactRecipe(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    target_layer: Literal["final", "penultimate"] = "penultimate"
+    # DEFAULTS MATCH THE FITTER, not the paper's menu. These declared
+    # "penultimate" and "all_subsequent" while `jlens_fitter` runs the
+    # sub-network to the FINAL block and extracts at ONE position with the
+    # attention mask sliced to it — self-only. A schema whose defaults
+    # contradict the only implementation is worse than no schema: it is a
+    # contract that reads as a description.
+    target_layer: Literal["final", "penultimate"] = "final"
     attention_gradients: Literal["full", "frozen_qk"] = "full"
     target_position_scope: Literal["self_only", "future_only", "all_subsequent"] = (
-        "all_subsequent"
+        "self_only"
     )
     aggregation: Literal["mean", "median"] = "mean"
     corpus: str

@@ -566,3 +566,176 @@ def test_the_sdpa_patch_is_removed_on_exit():
     with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
         assert torch.nn.functional.scaled_dot_product_attention is not before
     assert torch.nn.functional.scaled_dot_product_attention is before
+
+
+# ---------------------------------------------------------------------------
+# The recipe contract and the written config must AGREE (F3-F7)
+#
+# `JLensArtifactRecipe` declared target_layer, target_position_scope,
+# aggregation, seq_len and library_versions. `_config_yaml` wrote none of those
+# names, and two of the schema's defaults actively contradicted the fitter:
+#
+#   target_layer          "penultimate"      -> the fit runs to the FINAL block
+#   target_position_scope "all_subsequent"   -> the extraction is SELF_ONLY
+#
+# So the schema read as a description of the artifact and described something
+# else, while the provenance BR-007 requires said nothing about how the lens
+# was built.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * drop target_position_scope from the config   -> "vocabulary" fails
+#   * schema default back to "all_subsequent"      -> "agrees with the fitter" fails
+#   * config claims frozen_qk wholesale            -> "per layer" fails
+#   * residuals back to the last prompt only       -> "over the corpus" fails
+# ---------------------------------------------------------------------------
+
+
+class _RecipeLoaded:
+    name = "org/model"
+    d_model = 4
+    n_layers = 6
+    n_vocab = 32
+    model = None
+    structure = type("S", (), {"num_layers": 6, "attention_module": None})()
+
+
+class _RecipeResult:
+    scales = {0: 1.0, 1: 2.5}
+    prompts_seen = 120
+    converged = True
+    convergence_delta = 1e-3
+    residual_mean = {0: 0.011, 1: 0.022}
+    residual_max = {0: 0.031, 1: 0.044}
+
+
+def _written_config(freeze_qk=True):
+    from src.workers.jlens_fit_tasks import _config_yaml
+
+    return _config_yaml(
+        _RecipeLoaded(), _RecipeResult(), freeze_qk=freeze_qk, corpus_name="c"
+    )
+
+
+def test_the_config_uses_the_recipe_schema_vocabulary():
+    """Every recipe field the fitter can know must appear in the artifact."""
+    text = _written_config()
+    for key in (
+        "target_layer:",
+        "target_position_scope:",
+        "aggregation:",
+        "seq_len:",
+        "corpus:",
+        "n_prompts:",
+        "dtype:",
+    ):
+        assert key in text, (
+            f"{key!r} is declared by JLensArtifactRecipe and absent from the "
+            "written config — the schema is a contract nothing honours"
+        )
+
+
+def test_the_declared_scope_agrees_with_what_the_fitter_does():
+    """The schema must not describe a recipe the code does not implement."""
+    from src.schemas.jlens import JLensArtifactRecipe
+
+    fields = JLensArtifactRecipe.model_fields
+    assert fields["target_position_scope"].default == "self_only", (
+        "the schema defaults to a position scope the fitter does not implement: "
+        "`_batch_kwargs` slices the mask to ONE position, which is self-only"
+    )
+    assert fields["target_layer"].default == "final", (
+        "the schema defaults to 'penultimate'; `_sub_network` runs the remaining "
+        "blocks to the FINAL layer"
+    )
+
+    text = _written_config()
+    assert "target_position_scope: self_only" in text
+    assert "target_layer: final" in text
+
+
+def test_the_freeze_is_recorded_per_layer_not_wholesale():
+    """A hybrid model's lens is not 'frozen_qk' when 6 of 16 layers attend."""
+    text = _written_config(freeze_qk=True)
+    assert "attention_gradients_requested: frozen_qk" in text
+    assert "attention_gradients_applied_to_layers:" in text
+    # The bare wholesale claim must be gone.
+    assert "\nattention_gradients: frozen_qk" not in text, (
+        "the config still describes the artifact as frozen_qk wholesale, which "
+        "overstates the treatment on any model where some layers do not attend"
+    )
+
+
+def test_the_linearisation_residual_describes_the_CORPUS():
+    """It used to be whichever prompt happened to be last."""
+    text = _written_config()
+    assert "linearisation_residual_mean:" in text
+    assert "linearisation_residual_max:" in text
+    # Both figures, because the mean says what is typical and the max says how
+    # bad it gets — a lens is judged on the second.
+    assert "0.031" in text and "0.011" in text
+
+
+def test_the_fitter_accumulates_residuals_over_every_prompt():
+    """Not the last one. Exercised through a real fit."""
+    stack, _, _ = make_stack(31)
+    fitter = JacobianFitter(
+        stack, Tokenizer(), Structure(stack), freeze_qk=False, min_prompts=3, chunk=3
+    )
+    result = fitter.fit(["abc", "abcd", "abcde"])
+
+    assert result.residual_mean, "no corpus residual was recorded"
+    for layer, worst in result.residual_max.items():
+        assert worst >= result.residual_mean[layer] - 1e-9, (
+            f"layer {layer}: max {worst} is below the mean "
+            f"{result.residual_mean[layer]} — the accumulation is wrong"
+        )
+
+
+def test_the_sdpa_patch_is_serialised_and_always_restored():
+    """F11: the patch is process-wide, so overlapping freezes must not nest.
+
+    Two concurrent fits would otherwise restore each other's originals in the
+    wrong order and leave attention frozen for every model in the process
+    afterwards — silently, permanently, presenting only as "readouts went
+    strange".
+
+    THE SLEEP IS LOad-BEARING. Without it the threads enter and leave the
+    window faster than they can interleave, and removing the lock entirely
+    still passes — verified: that mutation survived the first version of this
+    test. Holding the window open forces the race the lock exists to prevent.
+
+    MUTATION CONTROL: delete the _FREEZE_LOCK acquire/release -> this fails.
+    """
+    import threading
+    import time
+
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    pristine = torch.nn.functional.scaled_dot_product_attention
+    order = []
+    lock = threading.Lock()
+
+    def worker(tag):
+        with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+            with lock:
+                order.append(f"{tag}-in")
+            assert torch.nn.functional.scaled_dot_product_attention is not pristine
+            time.sleep(0.03)
+            with lock:
+                order.append(f"{tag}-out")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert torch.nn.functional.scaled_dot_product_attention is pristine, (
+        "the SDPA patch leaked: every later model in this process is now "
+        "running with frozen attention"
+    )
+    for i in range(0, len(order), 2):
+        assert order[i].split("-")[0] == order[i + 1].split("-")[0], (
+            f"freeze windows interleaved, so two fits shared one patched "
+            f"global and restored it out of order: {order}"
+        )

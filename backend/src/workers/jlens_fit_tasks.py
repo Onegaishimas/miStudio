@@ -315,13 +315,36 @@ def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
     applicability = build_layer_applicability(
         loaded.structure, getattr(loaded.model, "config", None)
     )
+    attended = [e.layer for e in applicability if e.has_attention]
+    treatment = "frozen_qk" if freeze_qk else "full"
+
     lines = [
         f"model: {loaded.name}",
         f"d_model: {loaded.d_model}",
         f"n_layers: {loaded.n_layers}",
         f"n_vocab: {loaded.n_vocab}",
         "dtype: fp16",
-        f"attention_gradients: {'frozen_qk' if freeze_qk else 'full'}",
+        # THE RECIPE'S OWN VOCABULARY (BR-007). `JLensArtifactRecipe` declares
+        # these four fields and this writer emitted none of them, so the schema
+        # was a contract nothing honoured and the provenance said nothing about
+        # how the lens was built. They are written from what the fitter ACTUALLY
+        # does, not from the schema's defaults — which disagreed with it:
+        #
+        #   target_layer          declared "penultimate"; the fit runs the
+        #                         sub-network to the FINAL block.
+        #   target_position_scope declared "all_subsequent"; the extraction runs
+        #                         one position with the mask sliced to it
+        #                         (`_batch_kwargs`), which is SELF_ONLY.
+        "target_layer: final",
+        "target_position_scope: self_only",
+        "aggregation: mean",
+        f"seq_len: {getattr(result, 'seq_len', 1)}",
+        # PER-LAYER, NOT WHOLESALE. Describing a hybrid model's lens as
+        # "frozen_qk" when the treatment reached 6 of 16 layers is the exact
+        # overstatement this file's own docstring warns about. The requested
+        # treatment and where it actually applied are separate facts.
+        f"attention_gradients_requested: {treatment}",
+        f"attention_gradients_applied_to_layers: {attended}",
         f"corpus: {corpus_name}",
         f"n_prompts: {result.prompts_seen}",
         f"converged: {str(result.converged).lower()}",
@@ -339,6 +362,20 @@ def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
     ]
     for layer in sorted(result.scales):
         lines.append(f"  {layer}: {result.scales[layer]!r}")
+
+    # HOW LOCAL THE LENS IS, over the whole corpus. Both figures, because the
+    # mean says what is typical and the max says how bad it gets — and a lens
+    # is judged on the second. This used to be a single number taken from
+    # whichever prompt happened to be last.
+    if result.residual_mean:
+        lines.append("linearisation_residual_mean:")
+        for layer in sorted(result.residual_mean):
+            lines.append(f"  {layer}: {result.residual_mean[layer]:.6g}")
+    if result.residual_max:
+        lines.append("linearisation_residual_max:")
+        for layer in sorted(result.residual_max):
+            lines.append(f"  {layer}: {result.residual_max[layer]:.6g}")
+
     lines += [
         "per_layer_applicability:",
     ]
