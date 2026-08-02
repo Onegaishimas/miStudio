@@ -871,3 +871,67 @@ describe('a mounted artifact is enough to select the Jacobian lens', () => {
     expect(screen.getByRole('button', { name: /Jacobian/ })).toBeDisabled();
   });
 });
+
+describe('the setup survives a refresh, and Clear forgets it', () => {
+  it('persists the model, prompt, lens mode and pins — but NOT the readout', () => {
+    // Results are deliberately excluded. A readout restored from a previous
+    // session describes a prompt the user may have edited since, and a grid
+    // full of stale content is indistinguishable from one describing what is
+    // currently on screen — the confusion the fixture ban exists to prevent.
+    //
+    // MUTATION CONTROL: add `meta`/`tokens` to partialize and this fails.
+    const persisted = (
+      useJLensStore as unknown as {
+        persist: { getOptions: () => { partialize: (s: unknown) => object } };
+      }
+    ).persist.getOptions().partialize(useJLensStore.getState());
+
+    expect(Object.keys(persisted).sort()).toEqual(
+      ['lensMode', 'modelId', 'modelRepoId', 'pinned', 'prompt'].sort()
+    );
+    for (const result of ['meta', 'tokens', 'provenance', 'artifacts', 'bandReport']) {
+      expect(persisted).not.toHaveProperty(result);
+    }
+  });
+
+  it('shows a restored prompt in the input, not an empty box', () => {
+    // The input is component state seeded from the store, so persistence alone
+    // is not enough — a restored prompt that does not appear in the field is
+    // invisible to the user and unre-submittable.
+    act(() =>
+      useJLensStore.setState({ modelId: 'm_lfm2', prompt: 'The smell of a rose is' })
+    );
+    render(<JLensPanel />);
+
+    expect(screen.getByDisplayValue('The smell of a rose is')).toBeInTheDocument();
+  });
+
+  it('Clear empties the store AND the visible input', async () => {
+    act(() =>
+      useJLensStore.setState({
+        modelId: 'm_lfm2',
+        modelRepoId: 'org/m',
+        prompt: 'The capital of France is',
+        pinned: [' Paris'],
+        lensMode: 'LOGIT_LENS',
+      })
+    );
+    render(<JLensPanel />);
+    expect(screen.getByDisplayValue('The capital of France is')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /clear/i }));
+
+    expect(useJLensStore.getState().modelId).toBe('');
+    expect(useJLensStore.getState().prompt).toBe('');
+    expect(useJLensStore.getState().pinned).toEqual([]);
+    // MUTATION CONTROL: drop the setPromptDraft('') and this fails — the old
+    // text stays in the box, contradicting the cleared state and one click
+    // from being re-submitted.
+    expect(screen.queryByDisplayValue('The capital of France is')).toBeNull();
+  });
+
+  it('Clear is disabled when there is nothing to forget', () => {
+    render(<JLensPanel />);
+    expect(screen.getByRole('button', { name: /clear/i })).toBeDisabled();
+  });
+});

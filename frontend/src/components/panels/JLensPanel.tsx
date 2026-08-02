@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Layers, Pin, PinOff } from 'lucide-react';
+import { ChevronRight, Eraser, Layers, Pin, PinOff } from 'lucide-react';
 import { ArtifactsStrip } from '../jlens/ArtifactsStrip';
 import { ByLayerRail } from '../jlens/ByLayerRail';
 import { EvidenceRungCard } from '../jlens/EvidenceRungCard';
@@ -65,6 +65,7 @@ export function JLensPanel() {
     setHover,
     togglePin,
     fetchReadout,
+    clearConfig,
   } = useJLensStore();
 
   // Selector-scoped: the models store ticks on every download-progress frame,
@@ -207,6 +208,22 @@ export function JLensPanel() {
             className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
           >
             {isLoading ? 'Reading…' : 'Read out'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              clearConfig();
+              // The draft is component state, so clearing the store alone
+              // leaves the old text sitting in the box — visibly contradicting
+              // the "cleared" state and re-submittable with one click.
+              setPromptDraft('');
+            }}
+            disabled={isLoading || (!modelId && !promptDraft && !prompt)}
+            title="Forget the saved model, prompt, lens mode and pins"
+            className="flex items-center gap-1 rounded border border-slate-300 px-2.5 py-1.5 text-sm text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+          >
+            <Eraser className="h-3.5 w-3.5" />
+            Clear
           </button>
         </div>
         {promptDraft.length > MAX_PROMPT_CHARS * 0.9 && (

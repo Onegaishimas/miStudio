@@ -17,7 +17,7 @@
  */
 
 import { create } from 'zustand';
-import { devtools } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import { jlensApi } from '../api/jlens';
 import type {
   BandReport,
@@ -85,6 +85,14 @@ interface JLensState {
   clearPins: () => void;
   fetchReadout: () => Promise<void>;
   reset: () => void;
+  /**
+   * Forget the persisted setup: model, prompt, lens mode and pins.
+   *
+   * Distinct from `reset`, which also drops the readout. This is the control
+   * for "stop restoring my last session", and the readout goes with it because
+   * a readout kept beside a cleared prompt describes text no longer on screen.
+   */
+  clearConfig: () => void;
 }
 
 const INITIAL = {
@@ -108,7 +116,8 @@ const INITIAL = {
 
 export const useJLensStore = create<JLensState>()(
   devtools(
-    (set, get) => ({
+    persist(
+      (set, get) => ({
       ...INITIAL,
 
       setModelId: (modelId, repoId) =>
@@ -248,7 +257,40 @@ export const useJLensStore = create<JLensState>()(
         requestSeq += 1;
         set({ ...INITIAL });
       },
-    }),
+
+      // Same bump as `reset`, for the same reason: an in-flight readout that
+      // lands after a clear would repopulate the store the user just emptied,
+      // and the prompt it describes is gone from the screen.
+      clearConfig: () => {
+        requestSeq += 1;
+        set({ ...INITIAL });
+      },
+      }),
+      {
+        name: 'miStudio-jlens',
+        /**
+         * SETUP PERSISTS; RESULTS DO NOT.
+         *
+         * `meta`, `tokens` and `provenance` are deliberately absent. A readout
+         * restored from a previous session describes a prompt the user may
+         * have edited since, and a grid full of stale content is
+         * indistinguishable from one describing what is currently on screen —
+         * the same confusion the fixture ban exists to prevent.
+         *
+         * `artifacts` is absent for a different reason: it is the mounted
+         * registry's contents, which change on the server. A restored copy
+         * would decide which lenses to offer from a list that may no longer be
+         * true.
+         */
+        partialize: (state) => ({
+          modelId: state.modelId,
+          modelRepoId: state.modelRepoId,
+          prompt: state.prompt,
+          lensMode: state.lensMode,
+          pinned: state.pinned,
+        }),
+      }
+    ),
     { name: 'jlens-store' }
   )
 );
