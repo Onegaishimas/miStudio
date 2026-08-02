@@ -15,7 +15,8 @@
  * there is no default band object anywhere in this feature (BR-002).
  */
 
-import { rankColor, displayToken, isDiffuse } from './utils';
+import { useMemo } from 'react';
+import { rankColor, diffColor, displayToken, isDiffuse } from './utils';
 import { rankOf } from '../../stores/jlensStore';
 import type {
   BandReport,
@@ -49,6 +50,15 @@ interface ReadoutGridProps {
   sliceOf: (token: LensTokenMessage) => LensTypeSlice | undefined;
   /** Logit slice, used only by DIFF to compare against the Jacobian. */
   logitSliceOf: (token: LensTokenMessage) => LensTypeSlice | undefined;
+  /**
+   * The LOGIT lens's own layer axis.
+   *
+   * Required because the two lenses no longer share one: a Jacobian artifact
+   * covers the layers it was fitted for, and `layers_by_type` is per type
+   * precisely so they can differ. Comparing row i of one against row i of the
+   * other silently compares different layers the moment they do.
+   */
+  logitAxis: number[];
   pinned: string[];
   selPos: number;
   selLayerIdx: number;
@@ -64,6 +74,7 @@ export function ReadoutGrid({
   mode,
   sliceOf,
   logitSliceOf,
+  logitAxis,
   pinned,
   selPos,
   selLayerIdx,
@@ -83,14 +94,52 @@ export function ReadoutGrid({
   // is how the trajectory is described everywhere else in the product.
   const rows = axis.map((layer, i) => ({ layer, i })).reverse();
 
+  // ABSOLUTE LAYER -> the logit lens's own row index. The two lenses have
+  // independent axes, so a Jacobian row number is not a logit row number.
+  const logitRowOf = useMemo(() => {
+    const map = new Map<number, number>();
+    logitAxis.forEach((layer, i) => map.set(layer, i));
+    return map;
+  }, [logitAxis]);
+
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-medium text-slate-600 dark:text-slate-400">
           {pinned.length
             ? 'Rank of pinned tokens · layer × position'
-            : 'Top readout · layer × position'}
+            : mode === 'DIFF'
+              ? 'Jacobian top token, shaded by its rank in the logit lens'
+              : 'Top readout · layer × position'}
         </div>
+        {mode === 'DIFF' && !pinned.length && (
+          // The ramp is meaningless without saying what it measures, and
+          // "disagrees" was never the interesting quantity — HOW FAR the two
+          // lenses disagree is.
+          <div className="flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-500">
+            <span className="flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 rounded-sm"
+                style={{ background: diffColor(0, topN) }}
+              />
+              same top token
+            </span>
+            <span className="flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 rounded-sm"
+                style={{ background: diffColor(Math.max(topN - 1, 1), topN) }}
+              />
+              ranked lower by the logit lens
+            </span>
+            <span className="flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 rounded-sm"
+                style={{ background: diffColor(null, topN) }}
+              />
+              not in the logit lens's top {topN}
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-500">
           {bandReport ? (
             (['sensory', 'workspace', 'motor'] as BandName[]).map((b) => (
@@ -143,6 +192,7 @@ export function ReadoutGrid({
                     let cellTok = row?.[0] ?? '';
                     let background = 'transparent';
                     let dim = isDiffuse(probs?.[0]);
+                    let diffNote = '';
 
                     if (pinned.length) {
                       // Heatmap over the pinned tokens: best (lowest) rank wins
@@ -161,11 +211,37 @@ export function ReadoutGrid({
                       cellTok = which ?? '';
                       dim = best == null;
                     } else if (mode === 'DIFF') {
-                      const other = logitSliceOf(tk)?.top_tokens[i]?.[0];
-                      const agree = other !== undefined && other === row?.[0];
-                      background = agree
-                        ? 'rgba(100,116,139,.18)'
-                        : 'rgba(245,158,11,.28)';
+                      // BY ABSOLUTE LAYER, not row index — the axes differ.
+                      // A layer the logit lens does not carry is left blank
+                      // rather than compared against row i of something else.
+                      const logitRow = logitRowOf.get(layer);
+                      const logitSlice =
+                        logitRow === undefined ? undefined : logitSliceOf(tk);
+                      const mine = row?.[0];
+                      if (
+                        logitRow === undefined ||
+                        logitSlice === undefined ||
+                        mine === undefined
+                      ) {
+                        background = 'transparent';
+                      } else {
+                        // RANK DISPLACEMENT, not bare agreement. "Disagrees" is
+                        // one bit: a cell where the logit lens ranks this token
+                        // second and one where it does not rank it at all looked
+                        // identical, and the second is the interesting one.
+                        const r = rankOf(logitSlice, logitRow, mine);
+                        background = diffColor(r, topN);
+                        // WHICH LENS PRODUCED THE TEXT. The cell shows the
+                        // JACOBIAN's top token in Diff mode, and nothing said
+                        // so — a reader had no way to know which of the two
+                        // lenses they were looking at.
+                        diffNote =
+                          r === null
+                            ? ` · Jacobian: ${mine} — outside the logit lens's top ${topN}`
+                            : r === 0
+                              ? ` · both lenses lead with ${mine}`
+                              : ` · Jacobian: ${mine} — logit ranks it #${r + 1}`;
+                      }
                     } else if (band === 'workspace') {
                       background = 'rgba(52,211,153,.10)';
                     } else {
@@ -182,7 +258,7 @@ export function ReadoutGrid({
                         style={{ background }}
                         title={`L${layer} · pos ${tk.position}${
                           dim ? ' · diffuse readout' : ''
-                        }`}
+                        }${diffNote}`}
                         className={`cursor-pointer border-b border-r px-1 py-[3px] text-center font-mono text-[10px] leading-tight ${
                           isSel
                             ? 'border-emerald-400'
