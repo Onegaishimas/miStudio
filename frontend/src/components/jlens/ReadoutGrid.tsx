@@ -59,6 +59,8 @@ interface ReadoutGridProps {
    * other silently compares different layers the moment they do.
    */
   logitAxis: number[];
+  /** Layers where J is the identity, so Diff is empty BY CONSTRUCTION. */
+  degenerateLayers?: number[];
   pinned: string[];
   selPos: number;
   selLayerIdx: number;
@@ -75,6 +77,7 @@ export function ReadoutGrid({
   sliceOf,
   logitSliceOf,
   logitAxis,
+  degenerateLayers = [],
   pinned,
   selPos,
   selLayerIdx,
@@ -250,6 +253,7 @@ export function ReadoutGrid({
                     let background = 'transparent';
                     let dim = isDiffuse(probs?.[0]);
                     let diffNote = '';
+                    const degenerate = degenerateLayers.includes(layer);
 
                     if (pinned.length) {
                       // Heatmap over the pinned tokens: best (lowest) rank wins
@@ -287,13 +291,17 @@ export function ReadoutGrid({
                         // second and one where it does not rank it at all looked
                         // identical, and the second is the interesting one.
                         const r = rankOf(logitSlice, logitRow, mine);
-                        background = diffColor(r, topN);
+                        background = degenerate
+                          ? // Hatch-free neutral: agreement here is not evidence.
+                            'rgba(148,163,184,.10)'
+                          : diffColor(r, topN);
                         // WHICH LENS PRODUCED THE TEXT. The cell shows the
                         // JACOBIAN's top token in Diff mode, and nothing said
                         // so — a reader had no way to know which of the two
                         // lenses they were looking at.
-                        diffNote =
-                          r === null
+                        diffNote = degenerate
+                          ? ' · J = I at this layer — the two lenses are the same lens here, so agreement is not a finding'
+                          : r === null
                             ? ` · Jacobian: ${mine} — outside the logit lens's top ${topN}`
                             : r === 0
                               ? ` · both lenses lead with ${mine}`

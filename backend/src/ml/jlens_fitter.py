@@ -64,6 +64,25 @@ _FREEZE_LOCK = threading.Lock()
 # an attention pattern escaped the freeze and the extracted matrix is not a lens.
 MAX_AFFINE_RESIDUAL = 1e-3
 
+#: Relative Frobenius distance from the identity below which a fitted layer is
+#: DEGENERATE — the lens there is the logit lens, exactly.
+#:
+#: The last decoder layer has no blocks after it, so its sub-network is the
+#: identity map and `J = I` by construction. That is correct, and it means the
+#: Jacobian lens adds nothing at the top of the stack: a Diff there is empty
+#: because the two lenses ARE the same lens, not because they happen to agree.
+#: Read without knowing that, an empty top row looks like a finding.
+IDENTITY_TOLERANCE = 1e-4
+
+
+def identity_distance(matrix: torch.Tensor) -> float:
+    """Relative Frobenius distance from the identity. 0.0 means J == I exactly."""
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        return float("inf")
+    eye = torch.eye(matrix.shape[0], device=matrix.device, dtype=matrix.dtype)
+    denom = float(torch.linalg.norm(eye))
+    return float(torch.linalg.norm(matrix.float() - eye) / max(denom, 1e-12))
+
 
 #: fp16's largest finite magnitude. The contract stores fp16 (Appendix A.1), and
 #: a Jacobian that exceeds this saturates to inf on the cast.
@@ -144,6 +163,10 @@ class FitResult:
     #: gets, and that is the number a reader should judge it on.
     residual_mean: Dict[int, float] = field(default_factory=dict)
     residual_max: Dict[int, float] = field(default_factory=dict)
+    #: Layers whose fitted J is the identity to within IDENTITY_TOLERANCE — the
+    #: lens there IS the logit lens. Recorded rather than dropped silently, so a
+    #: consumer can say WHY the two agree instead of reporting an empty Diff.
+    degenerate_layers: List[int] = field(default_factory=list)
 
     def size_bytes(self, dtype_bytes: int = 2) -> int:
         return self.d_model * self.d_model * dtype_bytes * len(self.jacobians)
@@ -574,6 +597,10 @@ class JacobianFitter:
                 for l in self._residual_sums
             },
             residual_max=dict(self._residual_max),
+            degenerate_layers=sorted(
+                l for l, m in accumulated.items()
+                if identity_distance(m) <= IDENTITY_TOLERANCE
+            ),
         )
 
     @property

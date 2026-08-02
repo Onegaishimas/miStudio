@@ -422,6 +422,13 @@ export function JLensPanel() {
                 // and the two axes are independent now that a partial artifact
                 // reports only the layers it was fitted for.
                 logitAxis={axisFor(meta, 'LOGIT_LENS')}
+                // Where J is the identity, Diff is empty by construction. The
+                // grid says so rather than letting an empty top row read as a
+                // measurement.
+                degenerateLayers={
+                  artifacts.find((a) => a.slug === artifactSlugFor(modelRepoId))
+                    ?.degenerate_layers ?? []
+                }
                 pinned={pinned}
                 selPos={selPos}
                 selLayerIdx={selLayerIdx}

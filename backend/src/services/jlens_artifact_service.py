@@ -468,6 +468,28 @@ class JLensArtifactService:
             return []
         return sorted(self.layer_scales(ref))
 
+    def degenerate_layers(self, ref: ArtifactRef) -> List[int]:
+        """Layers where the fitted J is the identity — the logit lens, exactly.
+
+        Empty means "none recorded", which for an artifact written before this
+        was tracked is genuinely unknown rather than a claim that none exist.
+        Consumers must not read empty as "every layer is informative".
+        """
+        if ref.config_path is None or not ref.config_path.is_file():
+            return []
+        try:
+            for raw in ref.config_path.read_text().splitlines():
+                key, _, value = raw.partition(":")
+                if key.strip() != "degenerate_layers":
+                    continue
+                inner = value.strip().strip("[]")
+                if not inner:
+                    return []
+                return sorted(int(p) for p in inner.split(",") if p.strip())
+        except (OSError, ValueError) as exc:  # noqa: BLE001 - reported
+            logger.warning("Unreadable degenerate_layers in %s: %s", ref.config_path, exc)
+        return []
+
     def layer_scales(self, ref: ArtifactRef) -> Dict[int, float]:
         """Per-layer factors the stored matrices were divided by, from config.yaml.
 

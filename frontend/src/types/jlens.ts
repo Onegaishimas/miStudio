@@ -142,6 +142,15 @@ export interface JLensArtifactSummary {
    * would assert something the listing never checked.
    */
   layers?: number[];
+  /**
+   * Layers where J is the identity — the lens there IS the logit lens.
+   *
+   * The last decoder layer has no blocks after it, so its sub-network is the
+   * identity by construction. A Diff at such a layer is empty because the two
+   * lenses are the same lens, not because they happen to agree, and an empty
+   * top row read without that context looks like a finding.
+   */
+  degenerate_layers?: number[];
 }
 
 export interface JLensCheckOutcome {
