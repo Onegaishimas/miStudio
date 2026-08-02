@@ -252,6 +252,52 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.get(f"/jlens/reports/replication?slug={slug}")
 
     @mcp.tool()
+    async def run_jlens_intervention(
+        model_id: Annotated[str, Field(description="miStudio model id")],
+        prompt: Annotated[str, Field(description="Text to intervene on")],
+        primitive: Annotated[str, Field(description="additive | projective_ablation | dynamic_topk_ablation | coordinate_swap")],
+        layers: Annotated[List[int], Field(description="Absolute layer indices to act at")],
+        control_seed: Annotated[int, Field(description="REQUIRED in practice. 'A random direction' is not a control; 'k random directions from seed s' is, and a control nobody can reconstruct is not one")],
+        direction: Annotated[Optional[List[float]], Field(description="d_model vector to act along. Required for additive and projective_ablation")] = None,
+        strength: Annotated[float, Field(description="Additive scale")] = 1.0,
+        k: Annotated[int, Field(description="Control size, matched to the intervention")] = 1,
+        positions: Annotated[Optional[List[int]], Field(description="Token positions; defaults to the last")] = None,
+        artifact_id: Annotated[Optional[str], Field(description="Act in JACOBIAN lens space instead of the residual stream")] = None,
+    ) -> Any:
+        """Run an intervention AND its size-matched control in one pass.
+
+        THE FINDING IS `excess_over_control`, NOT `intervened_outcome`. An
+        intervention that moves the output says nothing until compared with what
+        a random direction of the same size does — so this tool will not run one
+        without the other, and the result reports both figures alongside their
+        difference so you can see the control actually ran (BR-018).
+
+        RUNG 1, not 2. This measures displacement in lens space. That is
+        evidence about the coordinate and is not causal proof the model used
+        it. Raising the rung requires a causal intervention at the behavioural
+        level — a coordinate swap with a matched control — which this tool does
+        not perform.
+
+        Long-running and model-bound; poll get_task_status.
+        """
+        body: dict[str, Any] = {
+            "model_id": model_id,
+            "prompt": prompt,
+            "primitive": primitive,
+            "layers": layers,
+            "control_seed": control_seed,
+            "strength": strength,
+            "k": k,
+        }
+        if direction:
+            body["direction"] = direction
+        if positions:
+            body["positions"] = positions
+        if artifact_id:
+            body["artifact_id"] = artifact_id
+        return await client.post("/jlens/interventions", json_body=body)
+
+    @mcp.tool()
     async def compute_jlens_band_report(
         model_id: Annotated[str, Field(description="miStudio model id to profile")],
         prompts: Annotated[List[str], Field(description="Corpus to measure the per-layer profile over")],
@@ -321,6 +367,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit for every layer")] = None,
         freeze_qk: Annotated[bool, Field(description="Freeze Q/K as well as norms. INAPPLICABLE on layers that do not attend, and recorded per layer rather than claimed wholesale")] = True,
         corpus_name: Annotated[str, Field(description="Recorded in the artifact's recipe (BR-007) — name the corpus, do not leave it unspecified")] = "unspecified",
+        allow_coverage_loss: Annotated[bool, Field(description="Publish even though the EXISTING artifact covers layers this fit does not. Off by default and refused otherwise — a 16-layer lens was once destroyed by a 9-layer refit with no warning. Losing coverage must be a decision")] = False,
         semantic_probe: Annotated[Optional[Dict[str, Any]], Field(description="Fixture for the SEMANTIC check: {prompt, expected_intermediate, layer?, top_k?}. WITHOUT IT NOTHING IS PUBLISHED — the check cannot run and the suite fails closed. The intermediate must NOT appear in the prompt, or a lens encoding nothing would pass")] = None,
     ) -> Any:
         """Queue a J-lens fit. GPU-bound and long-running; poll get_task_status.
@@ -346,6 +393,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "prompts": prompts,
             "freeze_qk": freeze_qk,
             "corpus_name": corpus_name,
+            "allow_coverage_loss": allow_coverage_loss,
         }
         if layers:
             body["layers"] = layers

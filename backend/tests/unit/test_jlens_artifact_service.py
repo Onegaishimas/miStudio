@@ -364,3 +364,126 @@ def test_the_refusal_names_the_failing_class(tmp_path):
         f"the refusal drops the check's own detail: {message}. Without it the "
         "user cannot tell a missing report from a failed check"
     )
+
+
+# ---------------------------------------------------------------------------
+# A refit must not silently destroy coverage
+#
+# FROM THE CLUSTER LOGS, not from review:
+#   2026-08-01 12:06:41  published lfm2.5-1.2b-instruct, layers 0..15, 134 MB
+#   2026-08-02 12:57:52  published lfm2.5-1.2b-instruct, layers [1,2,3,10..15]
+#
+# The second `shutil.rmtree`'d the first. Nine minutes of GPU and the reference
+# model's only FULL-STACK lens, gone with no warning, no backup and no way back
+# — and the replacement does not dominate it (16 layers/120 prompts vs
+# 9 layers/400 prompts, neither strictly better).
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * commit rmtree's the old dir instead of archiving  -> "archives" fails
+#   * the coverage guard is removed                      -> "refuses" fails
+#   * .superseded is not excluded from discovery         -> "hidden" fails
+#   * allow_coverage_loss is ignored                     -> "override" fails
+# ---------------------------------------------------------------------------
+
+
+def _commit_layers(tmp_path, layers, allow_loss=False):
+    """Stage and commit an artifact covering exactly `layers`."""
+    import torch
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    service.write_staged(
+        "org/model", {l: torch.randn(4, 4) for l in layers}, "corpus: t\n"
+    )
+    return service, service.commit(
+        "org/model", _passing_report(), allow_coverage_loss=allow_loss
+    )
+
+
+def test_a_refit_that_loses_layers_is_REFUSED(tmp_path):
+    from src.services.jlens_artifact_service import ArtifactCoverageLoss
+
+    service, _ = _commit_layers(tmp_path, range(16))
+
+    import torch
+
+    service.write_staged(
+        "org/model",
+        {l: torch.randn(4, 4) for l in [1, 2, 3, 10, 11, 12, 13, 14, 15]},
+        "corpus: t\n",
+    )
+
+    with pytest.raises(ArtifactCoverageLoss) as excinfo:
+        service.commit("org/model", _passing_report())
+
+    message = str(excinfo.value)
+    # The refusal must NAME the layers at risk — "coverage would be reduced"
+    # sends the user back to the logs to work out what they nearly lost.
+    for layer in (0, 4, 5, 6, 7, 8, 9):
+        assert str(layer) in message, f"layer {layer} not named in: {message}"
+
+    # And the existing artifact must be untouched by a refused commit.
+    payload = service._load_payload(service.find("org/model"))
+    assert sorted(int(k) for k in payload) == list(range(16))
+
+
+def test_the_refusal_can_be_overridden_deliberately(tmp_path):
+    """Losing coverage is allowed — it just has to be a DECISION."""
+    import torch
+
+    service, _ = _commit_layers(tmp_path, range(16))
+    service.write_staged("org/model", {l: torch.randn(4, 4) for l in [1, 2]}, "c: t\n")
+
+    ref = service.commit("org/model", _passing_report(), allow_coverage_loss=True)
+    payload = service._load_payload(ref)
+    assert sorted(int(k) for k in payload) == [1, 2]
+
+
+def test_a_superseded_artifact_is_ARCHIVED_not_deleted(tmp_path):
+    """The replaced artifact survives one generation, so a mistake is undoable."""
+    import torch
+
+    from src.services.jlens_artifact_service import SUPERSEDED_SUFFIX
+
+    service, _ = _commit_layers(tmp_path, range(16))
+    service.write_staged("org/model", {l: torch.randn(4, 4) for l in [1, 2]}, "c: t\n")
+    service.commit("org/model", _passing_report(), allow_coverage_loss=True)
+
+    archive = tmp_path / f"model{SUPERSEDED_SUFFIX}"
+    assert archive.is_dir(), (
+        "the replaced artifact was deleted outright; nine minutes of GPU and a "
+        "full-stack lens went with it the first time this happened"
+    )
+    recovered = torch.load(
+        next(archive.glob("*_jacobian_lens.pt")), weights_only=True
+    )
+    assert sorted(int(k) for k in recovered) == list(range(16))
+
+
+def test_the_archive_is_hidden_from_discovery(tmp_path):
+    """Two directories for one model would let the consumer pick either."""
+    import torch
+
+    service, _ = _commit_layers(tmp_path, range(16))
+    service.write_staged("org/model", {l: torch.randn(4, 4) for l in [1, 2]}, "c: t\n")
+    service.commit("org/model", _passing_report(), allow_coverage_loss=True)
+
+    slugs = [a.slug for a in service.list_artifacts()]
+    assert slugs == ["model"], (
+        f"discovery returned {slugs}; a superseded artifact must not be "
+        "servable, or a stale lens is one directory listing away from being used"
+    )
+
+
+def test_a_refit_that_ADDS_layers_is_not_refused(tmp_path):
+    """Negative control: the guard must not block a genuine upgrade."""
+    import torch
+
+    service, _ = _commit_layers(tmp_path, [1, 2])
+    service.write_staged(
+        "org/model", {l: torch.randn(4, 4) for l in range(16)}, "c: t\n"
+    )
+    ref = service.commit("org/model", _passing_report())
+    payload = service._load_payload(ref)
+    assert sorted(int(k) for k in payload) == list(range(16))

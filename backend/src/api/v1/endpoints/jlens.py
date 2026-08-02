@@ -183,6 +183,10 @@ class FitRequest(BaseModel):
     #: must not appear in the prompt: a token already present is recovered by an
     #: artifact encoding nothing at all.
     semantic_probe: Optional[Dict[str, Any]] = None
+    #: Publish even though the existing artifact covers layers this fit does
+    #: not. Off by default: a refit is not automatically an upgrade, and a
+    #: 16-layer lens was destroyed by a 9-layer one with no warning at all.
+    allow_coverage_loss: bool = False
 
 
 class FitAccepted(BaseModel):
@@ -221,6 +225,7 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         freeze_qk=request.freeze_qk,
         corpus_name=request.corpus_name,
         semantic_probe=request.semantic_probe,
+        allow_coverage_loss=request.allow_coverage_loss,
     )
     return FitAccepted(task_id=task.id, model_id=request.model_id, queue="extraction")
 
@@ -1010,6 +1015,64 @@ class WatchlistResponse(BaseModel):
     artifact_ref: str
     scoring_definition: str
     concept_count: int
+
+
+class InterventionRequest(BaseModel):
+    """Run one intervention AND its size-matched control (BR-016..018).
+
+    There is no way to request an intervention WITHOUT a control. `control_seed`
+    and `k` define it, and the result carries both outcomes plus their
+    difference — an intervention that moves the output says nothing until
+    compared with what a random direction of the same size does.
+    """
+
+    model_id: str
+    prompt: str = Field(..., min_length=1, max_length=8000)
+    primitive: str
+    layers: List[int] = Field(..., min_length=1)
+    direction: Optional[List[float]] = None
+    strength: float = 1.0
+    #: Control size. Size-matched to the intervention, never 0.
+    k: int = Field(1, ge=1)
+    #: Required in practice: a control nobody can reconstruct is not a control.
+    control_seed: int = 0
+    positions: Optional[List[int]] = None
+    artifact_id: Optional[str] = None
+
+
+@router.post(
+    "/interventions",
+    response_model=BandTaskAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Run a J-space intervention with its matched control (BR-018)",
+)
+async def run_intervention(
+    request: InterventionRequest, db: AsyncSession = Depends(get_db)
+) -> BandTaskAccepted:
+    """Queue an intervention. The control runs in the same task, always."""
+    from ....models.model import Model
+    from ....workers.jlens_intervention_tasks import run_intervention_task
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    task = run_intervention_task.delay(
+        model_id=request.model_id,
+        prompt=request.prompt,
+        primitive=request.primitive,
+        layers=request.layers,
+        direction=request.direction,
+        strength=request.strength,
+        k=request.k,
+        control_seed=request.control_seed,
+        positions=request.positions,
+        artifact_id=request.artifact_id,
+    )
+    return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
 
 
 @router.post(

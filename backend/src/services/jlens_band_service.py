@@ -105,7 +105,14 @@ def compute_band_report(
             residual = captured.by_layer[layer]
             per_layer_residuals[layer].append(residual)
             normed = readout_service._normalize(residual)  # noqa: SLF001
-            logits = normed @ readout_service.W_U.T
+            # ONE COMPUTE DTYPE, same as the readout's own ranking. This is a
+            # SECOND implementation of "project through the unembedding", and it
+            # carried the bug the first one had already fixed: a real checkpoint
+            # keeps a bf16 residual while W_U is cast to fp32 once, and torch
+            # raises rather than promoting — "expected m1 and m2 to have the
+            # same dtype, but got: c10::BFloat16 != float", on the first real
+            # band report ever run.
+            logits = normed.to(readout_service.W_U.dtype) @ readout_service.W_U.T
             per_layer_top1[layer].extend(int(i) for i in logits.argmax(dim=-1))
             for row in logits:
                 per_layer_readout_kurtosis[layer].append(excess_kurtosis(row))
