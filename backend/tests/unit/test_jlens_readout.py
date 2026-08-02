@@ -892,3 +892,122 @@ def test_a_written_artifact_is_moved_to_cpu_before_it_is_saved(tmp_path):
     # map_location, because they have no reason to pass one.
     payload = torch.load(ref.lens_path, weights_only=True)
     assert set(payload) == {24, 25}
+
+
+# ---------------------------------------------------------------------------
+# EACH LENS TYPE CARRIES ITS OWN LAYER LIST (F1, F9)
+#
+# Reproduced on the cluster before this was written:
+#   POST /jlens/readout  m_88d55564  types=[JACOBIAN_LENS, LOGIT_LENS]
+#   FAILURE: 'No Jacobian for layer 0. Refusing to fall back to identity...'
+#
+# The panel sends no explicit layers, the server defaulted to every layer, and
+# the 9-of-16-layer LFM2 artifact refused the first one it lacked. The refusal
+# was correct; making the request was not. `layers_by_type` is per lens type in
+# the wire format precisely so the two can differ, and both were given the same
+# list — which ALSO made the client's Diff compare row i of one axis against
+# row i of the other.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * layers_by_type back to {type: selected} for all  -> "own list" fails
+#   * covers() returns all layers on JacobianTransport -> "partial" fails
+#   * capture the full `selected` instead of `needed`  -> "captures only" fails
+# ---------------------------------------------------------------------------
+
+
+class _StubTok:
+    def __call__(self, text, return_tensors=None):
+        return {"input_ids": torch.tensor([[1, 2, 3]])}
+
+    def decode(self, ids):
+        return f"t{ids[0]}"
+
+
+def _service_over(n_layers: int, d_model: int = 4):
+    """A ReadoutService whose capture is stubbed — the axis logic is the subject."""
+    from src.services.jlens_readout_service import ReadoutService
+
+    svc = ReadoutService.__new__(ReadoutService)
+    svc.tokenizer = _StubTok()
+    svc.model_name = "test/model"
+    svc.model = None
+    svc.capture_device = "cpu"
+    svc.structure = type("S", (), {"num_layers": n_layers})()
+    svc.W_U = torch.randn(7, d_model)
+    svc.n_vocab, svc.d_model = svc.W_U.shape
+    svc._final_norm = None
+    svc._decode_cache = {}
+    svc._capture_residuals = lambda ids, layers: type(
+        "C", (), {"by_layer": {l: torch.randn(3, d_model) for l in layers},
+                  "hook_target": "layers_module[L]"}
+    )()
+    return svc
+
+
+def test_a_partial_jacobian_artifact_reports_only_the_layers_it_has():
+    from src.schemas.jlens import LensMetaMessage
+    from src.services.jlens_readout_service import (
+        IdentityTransport,
+        JacobianTransport,
+    )
+
+    fitted = [1, 2, 3, 10, 11]
+    jac = JacobianTransport({l: torch.eye(4) for l in fitted})
+    svc = _service_over(16)
+
+    messages = list(svc.stream("hi", [jac, IdentityTransport()], layers=None, top_n=2))
+    meta = next(m for m in messages if isinstance(m, LensMetaMessage))
+
+    # "own list": the Jacobian reports its fitted layers, the logit lens all 16.
+    assert meta.layers_by_type["JACOBIAN_LENS"] == fitted, (
+        f"Jacobian axis is {meta.layers_by_type['JACOBIAN_LENS']}; a partial "
+        "artifact must report the layers it actually holds"
+    )
+    assert meta.layers_by_type["LOGIT_LENS"] == list(range(16))
+
+    # "partial": and the stream completes rather than raising at layer 0.
+    from src.schemas.jlens import LensTokenMessage
+
+    tokens = [m for m in messages if isinstance(m, LensTokenMessage)]
+    assert tokens, "the stream produced no tokens"
+    jac_slice = next(s for s in tokens[0].results if s.type == "JACOBIAN_LENS")
+    assert len(jac_slice.top_tokens) == len(fitted)
+    logit_slice = next(s for s in tokens[0].results if s.type == "LOGIT_LENS")
+    assert len(logit_slice.top_tokens) == 16
+
+
+def test_the_readout_captures_only_layers_some_lens_will_read():
+    """Capture is the expensive half; capturing 16 to read 5 is wasted work."""
+    from src.services.jlens_readout_service import JacobianTransport
+
+    fitted = [2, 7]
+    svc = _service_over(16)
+    seen = {}
+
+    def spy(ids, layers):
+        seen["layers"] = list(layers)
+        return type(
+            "C", (), {"by_layer": {l: torch.randn(3, 4) for l in layers},
+                      "hook_target": "layers_module[L]"}
+        )()
+
+    svc._capture_residuals = spy
+    list(svc.stream("hi", [JacobianTransport({l: torch.eye(4) for l in fitted})],
+                    layers=None, top_n=2))
+
+    assert seen["layers"] == fitted, (
+        f"captured {seen['layers']} to read {fitted}"
+    )
+
+
+def test_a_lens_covering_nothing_is_refused_rather_than_emitted_empty():
+    """An empty slice renders as a lens that found nothing."""
+    import pytest
+
+    from src.services.jlens_readout_service import JacobianTransport
+
+    svc = _service_over(16)
+    jac = JacobianTransport({20: torch.eye(4)})  # outside the requested range
+
+    with pytest.raises(ValueError, match="covers any of layers"):
+        list(svc.stream("hi", [jac], layers=[0, 1, 2], top_n=2))

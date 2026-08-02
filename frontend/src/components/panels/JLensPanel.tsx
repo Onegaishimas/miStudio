@@ -318,6 +318,10 @@ export function JLensPanel() {
                 mode={lensMode}
                 sliceOf={(t) => sliceFor(t, readType)}
                 logitSliceOf={(t) => sliceFor(t, 'LOGIT_LENS')}
+                // The logit lens's OWN axis. Diff aligns by absolute layer,
+                // and the two axes are independent now that a partial artifact
+                // reports only the layers it was fitted for.
+                logitAxis={axisFor(meta, 'LOGIT_LENS')}
                 pinned={pinned}
                 selPos={selPos}
                 selLayerIdx={selLayerIdx}

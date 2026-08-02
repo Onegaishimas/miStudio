@@ -126,6 +126,16 @@ class LensTransport(ABC):
     def requires_artifact(self) -> bool:
         ...
 
+    def covers(self, layers: Sequence[int]) -> List[int]:
+        """Which of `layers` this transport can actually serve.
+
+        A transport that cannot answer for a layer must say so HERE, before any
+        work happens, rather than raising partway through a stream. The logit
+        lens covers everything; a Jacobian artifact covers what was fitted, and
+        a partial fit is a shape the product offers.
+        """
+        return list(layers)
+
 
 class IdentityTransport(LensTransport):
     """Logit lens: J = I. Requires no artifact at all (BR-005).
@@ -182,6 +192,9 @@ class JacobianTransport(LensTransport):
 
     def requires_artifact(self) -> bool:
         return True
+
+    def covers(self, layers: Sequence[int]) -> List[int]:
+        return [l for l in layers if l in self._j]
 
 
 @dataclass
@@ -473,7 +486,31 @@ class ReadoutService:
         # see check_readout_budget.
         check_readout_budget(len(ids), len(selected), self.d_model)
 
-        residuals = self._capture_residuals(input_ids, selected)
+        # EACH TYPE GETS ITS OWN LAYER LIST. `layers_by_type` is per lens type
+        # in the wire format precisely because the types can differ, and giving
+        # both the same list made the Jacobian lens unusable on any PARTIAL
+        # artifact: the panel sends no explicit layers, the server defaulted to
+        # every layer, and the transport refused the first one it lacked —
+        # "No Jacobian for layer 0" on a 9-of-16-layer fit. The refusal was
+        # right; asking was not.
+        #
+        # A type that covers NOTHING in the requested range is dropped entirely
+        # rather than emitted with an empty axis: an empty slice renders as a
+        # lens that found nothing, which is the confusion this whole feature
+        # exists to prevent.
+        covered = [(t, t.covers(selected)) for t in transports]
+        servable = [(t, ls) for t, ls in covered if ls]
+        if not servable:
+            missing = ", ".join(t.lens_type for t, _ in covered)
+            raise ValueError(
+                f"none of the requested lenses ({missing}) covers any of layers "
+                f"{selected}. A Jacobian lens covers the layers it was fitted "
+                "for; fit the missing layers or narrow the request."
+            )
+
+        # Capture only what some transport will actually read.
+        needed = sorted({l for _, ls in servable for l in ls})
+        residuals = self._capture_residuals(input_ids, needed)
 
         applicability = build_layer_applicability(
             self.structure, getattr(self.model, "config", None)
@@ -481,8 +518,8 @@ class ReadoutService:
 
         yield LensMetaMessage(
             model=self.model_name,
-            types=[t.lens_type for t in transports],
-            layers_by_type={t.lens_type: list(selected) for t in transports},
+            types=[t.lens_type for t, _ in servable],
+            layers_by_type={t.lens_type: list(ls) for t, ls in servable},
             top_n=top_n,
             prompt_len=len(ids),
             layer_applicability=applicability,
@@ -490,10 +527,10 @@ class ReadoutService:
 
         for position, token_id in enumerate(ids):
             slices: List[LensTypeSlice] = []
-            for transport in transports:
+            for transport, transport_layers in servable:
                 per_layer_tokens: List[List[str]] = []
                 per_layer_probs: List[List[float]] = []
-                for layer in selected:
+                for layer in transport_layers:
                     h = residuals.by_layer[layer][position]
                     toks, probs = self._rank_at(h, layer, transport, top_n)
                     per_layer_tokens.append(toks)

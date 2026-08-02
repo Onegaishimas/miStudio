@@ -85,3 +85,26 @@ export const PIN_COLORS = [
   '#38bdf8', // sky
   '#c084fc', // purple
 ];
+
+
+/**
+ * Cell colour for DIFF, keyed on RANK DISPLACEMENT rather than agreement.
+ *
+ * `rank` is where the Jacobian lens's top token sits in the LOGIT lens's list
+ * at the same layer: 0 means both lenses lead with it, and `null` means the
+ * logit lens does not carry it in its top-n at all.
+ *
+ * Agreement alone was one bit, and it hid the quantity worth seeing. A cell
+ * where the logit lens ranks the same token second is nearly agreement; one
+ * where it does not rank it at all is the Jacobian lens seeing something the
+ * logit lens cannot, which is the entire reason the substrate exists.
+ */
+export function diffColor(rank: number | null, topN: number): string {
+  if (rank === 0) return 'rgba(100,116,139,.16)';
+  if (rank === null) return 'rgba(244,63,94,.34)';
+  // Ramp amber -> red across the visible depth. Guard topN <= 1 so a top-1
+  // readout does not divide by zero and paint every cell the same.
+  const span = Math.max(topN - 1, 1);
+  const t = Math.min(rank / span, 1);
+  return `rgba(245,158,11,${(0.18 + 0.16 * t).toFixed(3)})`;
+}
