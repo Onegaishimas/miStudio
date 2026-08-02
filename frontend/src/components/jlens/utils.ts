@@ -46,11 +46,42 @@ export function isDiffuse(topProb: number | undefined): boolean {
 }
 
 /** Stable colours for pinned-token series, shared by the grid legend and chart. */
+/**
+ * One colour per pin, and there must be AT LEAST `MAX_PINNED` of them.
+ *
+ * Both consumers index with `% PIN_COLORS.length`, so a palette shorter than
+ * the pin cap does not crash — it silently RECYCLES, and two different pinned
+ * tokens get the same colour in the trajectory chart and the chip list. That is
+ * a misread rather than an error: the user compares two lines believing they
+ * are one token. `utils.test.ts` pins the relationship so raising the cap
+ * cannot quietly start recycling again.
+ *
+ * ORDERED FOR ADJACENT CONTRAST, not by hue. Pins are assigned in the order
+ * they are made, so what matters is that index 0 and index 1 look nothing
+ * alike — a palette sorted around the colour wheel gives neighbouring pins
+ * neighbouring hues, which is the one arrangement guaranteed to be hard to
+ * read. Warm and cool alternate instead.
+ *
+ * All sixteen sit in the Tailwind 400-500 band so they stay legible against
+ * both the light and dark themes; a darker set would read well on white and
+ * disappear as a chart stroke on slate-900. Six spare beyond `MAX_PINNED`
+ * leave room to raise the cap without revisiting this.
+ */
 export const PIN_COLORS = [
-  '#34d399',
-  '#60a5fa',
-  '#f59e0b',
-  '#f472b6',
-  '#a78bfa',
-  '#2dd4bf',
+  '#34d399', // emerald
+  '#f472b6', // pink
+  '#60a5fa', // blue
+  '#f59e0b', // amber
+  '#a78bfa', // violet
+  '#a3e635', // lime
+  '#f87171', // red
+  '#22d3ee', // cyan
+  '#fb923c', // orange
+  '#818cf8', // indigo
+  '#4ade80', // green
+  '#e879f9', // fuchsia
+  '#2dd4bf', // teal
+  '#fbbf24', // yellow
+  '#38bdf8', // sky
+  '#c084fc', // purple
 ];

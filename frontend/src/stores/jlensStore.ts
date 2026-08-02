@@ -31,8 +31,19 @@ import type {
   ReadoutProvenance,
 } from '../types/jlens';
 
-/** Mirrors the server cap; the request is rejected above this anyway. */
-export const MAX_PINNED = 6;
+/**
+ * How many tokens can be pinned at once.
+ *
+ * NOT a server cap. Pins never leave the browser — they are token strings the
+ * grid and the trajectory chart colour by, and the readout request does not
+ * carry them. The previous comment here claimed the server rejected anything
+ * above this, which would have sent the next person to change a backend limit
+ * that does not exist.
+ *
+ * The real coupling is `PIN_COLORS`, which must be at least this long or pins
+ * beyond the palette silently reuse a colour and become indistinguishable.
+ */
+export const MAX_PINNED = 10;
 
 /**
  * Matches `ReadoutRequest.prompt`'s `max_length` in backend/src/schemas/jlens.py.
