@@ -91,11 +91,9 @@ def compute_readout(
             continue
         # Imported here so the API's validation logic stays the single
         # definition of what a serviceable artifact is.
-        from ..api.v1.endpoints.jlens import _service, _validated_report
+        from ..api.v1.endpoints.jlens import _jacobian_transport
 
-        report = _validated_report(loaded, artifact_id)
-        jacobians = _service().load_for_readout(loaded.name, report=report)
-        transports.append(JacobianTransport(jacobians))
+        transports.append(_jacobian_transport(loaded, artifact_id))
 
     self.update_state(state="PROGRESS", meta={"stage": "reading_out"})
     service = ReadoutService(

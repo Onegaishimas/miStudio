@@ -73,12 +73,9 @@ def compute_probe(
         # Same definition of "serviceable" as the readout path — imported
         # rather than restated, so an artifact cannot be serviceable for one
         # mode and not the other.
-        from ..api.v1.endpoints.jlens import _service, _validated_report
+        from ..api.v1.endpoints.jlens import _jacobian_transport
 
-        report = _validated_report(loaded, artifact_id)
-        transport = JacobianTransport(
-            _service().load_for_readout(loaded.name, report=report)
-        )
+        transport = _jacobian_transport(loaded, artifact_id)
     else:
         transport = IdentityTransport()
 

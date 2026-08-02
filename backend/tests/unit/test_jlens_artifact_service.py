@@ -487,3 +487,106 @@ def test_a_refit_that_ADDS_layers_is_not_refused(tmp_path):
     ref = service.commit("org/model", _passing_report())
     payload = service._load_payload(ref)
     assert sorted(int(k) for k in payload) == list(range(16))
+
+
+# ---------------------------------------------------------------------------
+# The fp16 storage scale must SURVIVE to the readout (F2)
+#
+# `_to_storage_dtype` divides each matrix down so the fp16 cast cannot saturate
+# — GPT-2's layer-6 Jacobian peaks around 1.7e7 against fp16's 65504 ceiling —
+# and its docstring has always said "The scale is stored in the artifact's
+# config.yaml". It was not. `FitResult.scales` was computed, returned, and
+# dropped on the floor.
+#
+# Ranked readouts never noticed: the model's final norm divides a positive
+# scalar straight back out, so `softmax(W_U @ norm(alpha * J @ h))` is exactly
+# `softmax(W_U @ norm(J @ h))`. Everything that does NOT normalise did notice —
+# probe scores and intervention magnitudes came out scaled by an unrecorded
+# per-layer alpha and were not comparable across layers.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * stop writing layer_scales into config.yaml -> "round trip" fails
+#   * JacobianTransport ignores `scales`         -> "unscales" fails
+# ---------------------------------------------------------------------------
+
+
+def test_layer_scales_round_trip_through_the_written_config(tmp_path):
+    """Write a fit's scales, read them back off disk."""
+    import torch
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+    from src.workers.jlens_fit_tasks import _config_yaml
+
+    class _Result:
+        scales = {24: 1.0, 25: 259.4}
+        prompts_seen = 100
+        converged = False
+        convergence_delta = 1e-3
+
+    class _Loaded:
+        name = "org/model"
+        d_model = 4
+        n_layers = 26
+        n_vocab = 256
+        model = None
+        structure = type("S", (), {"num_layers": 26, "attention_module": None})()
+
+    service = JLensArtifactService(tmp_path)
+    ref = service.write_staged(
+        "org/model",
+        {24: torch.randn(4, 4), 25: torch.randn(4, 4)},
+        _config_yaml(_Loaded(), _Result(), freeze_qk=True, corpus_name="t"),
+    )
+
+    recovered = service.layer_scales(ref)
+    assert recovered == {24: 1.0, 25: 259.4}, (
+        f"scales did not survive the write/read round trip: {recovered}. An "
+        "unrecorded scale makes every probe and intervention magnitude wrong "
+        "by a per-layer factor, and the artifact unreconstructible"
+    )
+
+
+def test_the_transport_undoes_the_storage_scale():
+    """A scaled matrix read back unscaled is the stored J, not the fitted J."""
+    import torch
+
+    from src.services.jlens_readout_service import JacobianTransport
+
+    true_j = torch.eye(4) * 3.0
+    alpha = 100.0
+    stored = true_j / alpha  # what _to_storage_dtype would have written
+
+    unscaled = JacobianTransport({7: stored}, scales={7: alpha})
+    h = torch.ones(4)
+    assert torch.allclose(unscaled.apply(h, 7), true_j @ h, atol=1e-4), (
+        "the transport did not undo the storage scale; probe scores and "
+        "intervention magnitudes are off by that factor"
+    )
+
+    # And an artifact with no recorded scale is read as-is rather than refused,
+    # so lenses fitted before the scale was written stay usable.
+    plain = JacobianTransport({7: stored})
+    assert torch.allclose(plain.apply(h, 7), stored @ h, atol=1e-6)
+
+
+def test_ranking_is_invariant_to_the_scale_but_probing_is_not():
+    """Why this went unnoticed, pinned so the reasoning is not re-derived."""
+    import torch
+
+    from src.services.jlens_readout_service import JacobianTransport
+
+    j = torch.randn(6, 6)
+    h = torch.randn(6)
+    alpha = 250.0
+
+    scaled = JacobianTransport({0: j / alpha}, scales={0: alpha}).apply(h, 0)
+    unscaled = JacobianTransport({0: j / alpha}).apply(h, 0)
+
+    # RMS-normalised, the two are identical — which is exactly why every ranked
+    # readout looked correct while the magnitudes were wrong.
+    def rms_norm(x):
+        return x / x.pow(2).mean().sqrt().clamp_min(1e-6)
+
+    assert torch.allclose(rms_norm(scaled), rms_norm(unscaled), atol=1e-4)
+    # Unnormalised — a probe score — they differ by the factor.
+    assert not torch.allclose(scaled, unscaled, atol=1e-3)
