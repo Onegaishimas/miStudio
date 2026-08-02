@@ -608,6 +608,7 @@ class _RecipeResult:
     convergence_delta = 1e-3
     residual_mean = {0: 0.011, 1: 0.022}
     residual_max = {0: 0.031, 1: 0.044}
+    degenerate_layers = [1]
 
 
 def _written_config(freeze_qk=True):
@@ -741,3 +742,46 @@ def test_the_sdpa_patch_is_serialised_and_always_restored():
             f"freeze windows interleaved, so two fits shared one patched "
             f"global and restored it out of order: {order}"
         )
+
+
+# ---------------------------------------------------------------------------
+# The final layer's lens IS the logit lens (degenerate layers)
+#
+# The last decoder layer has no blocks after it, so its sub-network is the
+# identity map and J = I exactly. That is correct — and it means a Diff at that
+# layer is empty because the two lenses ARE the same lens, not because they
+# happen to agree. Observed on the cluster: gemma L25 read identically through
+# both lenses while L24 differed, and nothing in the product said why.
+#
+# MUTATION CONTROLS:
+#   * identity_distance returns 0 for everything -> "only the identity" fails
+#   * degenerate_layers is never populated       -> "records" fails
+# ---------------------------------------------------------------------------
+
+
+def test_identity_distance_is_zero_only_for_the_identity():
+    from src.ml.jlens_fitter import IDENTITY_TOLERANCE, identity_distance
+
+    assert identity_distance(torch.eye(8)) == pytest.approx(0.0, abs=1e-9)
+    # A scaled identity is NOT the identity: it is the same direction with a
+    # different magnitude, and probe scores through it differ.
+    assert identity_distance(torch.eye(8) * 2.0) > IDENTITY_TOLERANCE
+    assert identity_distance(torch.randn(8, 8)) > IDENTITY_TOLERANCE
+    # Non-square cannot be compared and must not read as "close to identity".
+    assert identity_distance(torch.randn(4, 8)) == float("inf")
+
+
+def test_the_fit_records_which_layers_are_degenerate():
+    """The LAST fitted layer has nothing after it, so its J is the identity."""
+    stack, _, _ = make_stack(37)
+    structure = Structure(stack)
+    fitter = JacobianFitter(
+        stack, Tokenizer(), structure, freeze_qk=False, min_prompts=1, chunk=3
+    )
+    last = structure.num_layers - 1
+    result = fitter.fit(["abc"], layers=[last])
+
+    assert last in result.degenerate_layers, (
+        f"layer {last} is the final block, so its sub-network is the identity "
+        f"and J = I — degenerate_layers was {result.degenerate_layers}"
+    )

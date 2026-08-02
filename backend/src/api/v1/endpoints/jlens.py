@@ -81,6 +81,10 @@ class ArtifactSummary(BaseModel):
     #: check. A partial fit was previously indistinguishable from a full one
     #: here, which is how a 9-of-16-layer lens reached a readout asking for 16.
     layers: List[int] = []
+    #: Layers where J is the identity — the lens there IS the logit lens. A
+    #: Diff at such a layer is empty by construction, and saying so is the
+    #: difference between "no signal" and "the same lens twice".
+    degenerate_layers: List[int] = []
 
 
 class CheckOutcome(BaseModel):
@@ -126,6 +130,7 @@ async def list_artifacts() -> List[ArtifactSummary]:
             size_bytes=ref.size_bytes,
             has_config=ref.config_path is not None,
             layers=service.fitted_layers(ref),
+            degenerate_layers=service.degenerate_layers(ref),
         )
         for ref in service.list_artifacts()
     ]

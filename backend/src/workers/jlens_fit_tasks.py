@@ -351,6 +351,12 @@ def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
         # listing never carried the fact and a partial fit looked identical to
         # a full one right up until the readout refused.
         f"fitted_layers: {sorted(result.jacobians)}",
+        # LAYERS WHERE THE LENS IS THE LOGIT LENS, exactly. The last decoder
+        # layer has no blocks after it, so its sub-network is the identity and
+        # J = I by construction. A Diff there is empty because the two lenses
+        # ARE the same lens — not because they happen to agree — and an empty
+        # top row read without that context looks like a finding.
+        f"degenerate_layers: {result.degenerate_layers}",
         f"corpus: {corpus_name}",
         f"n_prompts: {result.prompts_seen}",
         f"converged: {str(result.converged).lower()}",
