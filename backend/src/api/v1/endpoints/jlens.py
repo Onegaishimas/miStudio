@@ -893,7 +893,10 @@ class AnnotateRequest(BaseModel):
     sae_id: str
     feature_id: str
     layer: int
-    direction: List[float]
+    #: OPTIONAL now. Omit it and the server resolves this feature's decoder
+    #: column from `sae_id`. A d_model vector is not something a browser can
+    #: produce, so requiring it here is what kept this endpoint UI-less.
+    direction: Optional[List[float]] = None
     label_tokens: List[str] = []
     top_k: int = 8
 
@@ -946,7 +949,14 @@ async def annotate(
     except ModelNotAvailable as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
-    direction = torch.tensor(request.direction, dtype=torch.float32)
+    if request.direction is not None:
+        direction = torch.tensor(request.direction, dtype=torch.float32)
+    else:
+        # RESOLVED SERVER-SIDE from the SAE's decoder column. A d_model vector
+        # is not something a browser can produce, so requiring one here is what
+        # left this endpoint without any UI at all.
+        direction = _feature_direction(request.sae_id, request.feature_id)
+
     if direction.numel() != loaded.d_model:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -983,6 +993,53 @@ async def annotate(
         disagreement_score=score,
         has_disagreement=bool(score is not None and score >= 0.8),
     )
+
+
+def _feature_direction(sae_id: str, feature_id: str):
+    """One SAE feature's decoder direction, as a d_model vector.
+
+    Reuses `resolve_decoder_weight` — the same resolver steering and circuit
+    intervention use — rather than reading the checkpoint again here. A second
+    reader is a second chance to disagree about which matrix is the decoder,
+    and the two would disagree silently: both produce a d_model vector.
+    """
+    import torch
+
+    from ....services.steering_service import resolve_decoder_weight
+    from ....services.circuit_capture_service import _load_sae_sync
+    from ....core.database import get_sync_db
+    from ....models.external_sae import ExternalSAE
+
+    with get_sync_db() as db:
+        record = db.query(ExternalSAE).filter(ExternalSAE.id == sae_id).first()
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No SAE with id {sae_id!r}",
+            )
+        sae = _load_sae_sync(record, "cpu")
+
+    w_dec = resolve_decoder_weight(sae)  # [d_model, d_sae]
+    if w_dec is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"SAE {sae_id!r} exposes no decoder weight to annotate against",
+        )
+    try:
+        index = int(feature_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"feature_id {feature_id!r} is not an index into this SAE",
+        )
+    if index < 0 or index >= w_dec.shape[1]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"feature {index} is outside this SAE's {w_dec.shape[1]} features"
+            ),
+        )
+    return w_dec[:, index].detach().to(torch.float32).cpu()
 
 
 def _band_report_object(directory):
@@ -1060,7 +1117,15 @@ class InterventionRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=8000)
     primitive: str
     layers: List[int] = Field(..., min_length=1)
+    #: A raw d_model vector. Usable from a script; NOT usable from a browser,
+    #: which has no access to the unembedding or to SAE decoder weights — which
+    #: is why `direction_token` exists and why this whole surface had no UI.
     direction: Optional[List[float]] = None
+    #: Resolve the direction SERVER-SIDE from a token string: the direction is
+    #: that token's unembedding row. This is what makes the intervention
+    #: reachable from the readout panel, where tokens are the thing on screen.
+    #: Supplying both is refused rather than silently preferring one.
+    direction_token: Optional[str] = None
     strength: float = 1.0
     #: Control size. Size-matched to the intervention, never 0.
     k: int = Field(1, ge=1)
@@ -1090,12 +1155,23 @@ async def run_intervention(
             detail=f"No model with id {request.model_id!r}",
         )
 
+    if request.direction is not None and request.direction_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "supply direction OR direction_token, not both — silently "
+                "preferring one would run an intervention along a direction "
+                "the caller did not choose"
+            ),
+        )
+
     task = run_intervention_task.delay(
         model_id=request.model_id,
         prompt=request.prompt,
         primitive=request.primitive,
         layers=request.layers,
         direction=request.direction,
+        direction_token=request.direction_token,
         strength=request.strength,
         k=request.k,
         control_seed=request.control_seed,

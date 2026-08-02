@@ -600,6 +600,8 @@ class _RecipeLoaded:
 
 
 class _RecipeResult:
+    # `_config_yaml` records the fitted layers from this.
+    jacobians = {0: None, 1: None}
     scales = {0: 1.0, 1: 2.5}
     prompts_seen = 120
     converged = True

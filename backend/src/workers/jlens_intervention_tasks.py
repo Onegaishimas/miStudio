@@ -37,6 +37,7 @@ def run_intervention_task(
     primitive: str,
     layers: List[int],
     direction: Optional[List[float]] = None,
+    direction_token: Optional[str] = None,
     strength: float = 1.0,
     k: int = 1,
     control_seed: int = 0,
@@ -124,7 +125,27 @@ def run_intervention_task(
     self.update_state(state="PROGRESS", meta={"stage": "clean_pass"})
     residuals = service._capture_residuals(input_ids, layers)  # noqa: SLF001
 
-    if direction is not None:
+    if direction is None and direction_token:
+        # A TOKEN'S DIRECTION IS ITS UNEMBEDDING ROW. Resolved here rather than
+        # in the browser: the client has neither W_U nor any way to produce a
+        # d_model vector, which is why this surface had no UI.
+        ids = service.tokenizer.encode(direction_token, add_special_tokens=False)
+        if not ids:
+            raise ValueError(
+                f"{direction_token!r} does not tokenise to anything; there is "
+                "no direction to intervene along"
+            )
+        if len(ids) > 1:
+            # STATED, not silently truncated. A multi-token string has no single
+            # direction, and taking the first piece would intervene along
+            # something the caller did not name.
+            raise ValueError(
+                f"{direction_token!r} is {len(ids)} tokens. A lens direction is "
+                "defined for a SINGLE token; pick one, or pass an explicit "
+                "direction vector."
+            )
+        named = service.W_U[ids[0]].to(READOUT_DEVICE).to(torch.float32)
+    elif direction is not None:
         named = torch.tensor(direction, dtype=torch.float32, device=READOUT_DEVICE)
         if named.shape[-1] != service.d_model:
             raise ValueError(

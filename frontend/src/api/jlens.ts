@@ -9,6 +9,11 @@
 
 import { fetchAPI } from './client';
 import type {
+  JLensAnnotateRequest,
+  JLensAnnotation,
+  JLensInterventionRequest,
+  JLensWatchlistRequest,
+  JLensWatchlistResponse,
   JLensArtifactSummary,
   JLensFitAccepted,
   JLensFitRequest,
@@ -55,6 +60,27 @@ export const jlensApi = {
         `?d_model=${dims.d_model}&n_layers=${dims.n_layers}&n_vocab=${dims.n_vocab}`,
       { method: 'POST' }
     ),
+
+  /** Queue an intervention AND its matched control. Poll the task id. */
+  intervene: (request: JLensInterventionRequest) =>
+    fetchAPI<JLensFitAccepted>('/jlens/interventions', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  /** Describe an SAE feature in J-space. Rung 0 — present is not used. */
+  annotate: (request: JLensAnnotateRequest) =>
+    fetchAPI<JLensAnnotation>('/jlens/annotate', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  /** Validate a watchlist definition. REFUSES one missing its scoring rule. */
+  createWatchlist: (request: JLensWatchlistRequest) =>
+    fetchAPI<JLensWatchlistResponse>('/jlens/watchlists', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
 
   /** Queue a fit. GPU-bound and long-running; poll the task id. */
   fit: (request: JLensFitRequest) =>

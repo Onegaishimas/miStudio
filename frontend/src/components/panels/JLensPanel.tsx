@@ -24,6 +24,8 @@ import { ArtifactsStrip } from '../jlens/ArtifactsStrip';
 import { ByLayerRail } from '../jlens/ByLayerRail';
 import { EvidenceRungCard } from '../jlens/EvidenceRungCard';
 import { FitLensCard } from '../jlens/FitLensCard';
+import { InterventionCard } from '../jlens/InterventionCard';
+import { WatchlistCard } from '../jlens/WatchlistCard';
 import { LensModeTabs } from '../jlens/LensModeTabs';
 import { ProvenanceStrip } from '../jlens/ProvenanceStrip';
 import { ReadoutGrid } from '../jlens/ReadoutGrid';
@@ -338,6 +340,26 @@ export function JLensPanel() {
           // invented would be a second registry that can disagree with the one
           // the readout path actually reads.
           onFitted={() => void useJLensStore.getState().fetchArtifacts()}
+        />
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <InterventionCard
+          modelId={modelId}
+          // Pinned tokens ARE the available directions: the server resolves a
+          // token's unembedding row, which is what makes this reachable at all.
+          pinned={pinned}
+          layers={axis}
+          artifactId={
+            artifacts.find((a) => a.slug === artifactSlugFor(modelRepoId))?.slug ??
+            null
+          }
+        />
+        <WatchlistCard
+          artifactId={
+            artifacts.find((a) => a.slug === artifactSlugFor(modelRepoId))?.slug ??
+            null
+          }
         />
       </div>
 

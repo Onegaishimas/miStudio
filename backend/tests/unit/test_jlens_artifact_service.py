@@ -518,6 +518,8 @@ def test_layer_scales_round_trip_through_the_written_config(tmp_path):
     from src.workers.jlens_fit_tasks import _config_yaml
 
     class _Result:
+        # `_config_yaml` records the fitted layers from this.
+        jacobians = {24: None, 25: None}
         scales = {24: 1.0, 25: 259.4}
         prompts_seen = 100
         converged = False
