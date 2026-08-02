@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Eraser, Layers, Pin, PinOff } from 'lucide-react';
+import { Check, ChevronRight, Eraser, Layers, Link2, Pin, PinOff } from 'lucide-react';
 import { ArtifactsStrip } from '../jlens/ArtifactsStrip';
 import { ByLayerRail } from '../jlens/ByLayerRail';
 import { EvidenceRungCard } from '../jlens/EvidenceRungCard';
@@ -34,6 +34,8 @@ import {
   artifactSlugFor,
   axisFor,
   readTypeFor,
+  decodePermalink,
+  encodePermalink,
   sliceFor,
   tokenAtPosition,
   useJLensStore,
@@ -73,6 +75,8 @@ export function JLensPanel() {
   // each tick even though only the dropdown depends on it.
   const models = useModelsStore((s) => s.models);
   const [promptDraft, setPromptDraft] = useState(prompt);
+  const [fitPrefill, setFitPrefill] = useState<number[] | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // MOUNT ONCE, and deliberately not keyed on the action identities. Zustand
   // actions are stable in production, so `[fetchModels, fetchArtifacts]` looks
@@ -84,6 +88,31 @@ export function JLensPanel() {
     useModelsStore.getState().fetchModels();
     void useJLensStore.getState().fetchArtifacts();
   }, []);
+
+  // A permalink WINS over the persisted setup, and only on arrival. Someone
+  // following a link is asking for that link's readout, not for whatever they
+  // were last looking at — and re-applying it on every render would make the
+  // form unusable, since every edit would be reverted.
+  useEffect(() => {
+    const link = decodePermalink(window.location.hash);
+    if (!link) return;
+    const store = useJLensStore.getState();
+    if (link.prompt) {
+      store.setPrompt(link.prompt);
+      setPromptDraft(link.prompt);
+    }
+    store.setLensMode(link.mode);
+    store.clearPins();
+    for (const pin of link.pins) store.togglePin(pin);
+    if (link.repo) {
+      // The model is resolved by REPO ID: `m_xxxxxxxx` is local to one
+      // installation, so a link built from it means nothing anywhere else.
+      const match = useModelsStore
+        .getState()
+        .models.find((m) => m.repo_id === link.repo);
+      if (match) store.setModelId(match.id, link.repo);
+    }
+  }, [models]);
 
   const readyModels = useMemo(
     () => models.filter((m) => m.status === 'ready'),
@@ -225,6 +254,39 @@ export function JLensPanel() {
             <Eraser className="h-3.5 w-3.5" />
             Clear
           </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const link =
+                window.location.origin +
+                window.location.pathname +
+                encodePermalink({
+                  repo: modelRepoId,
+                  prompt: promptDraft,
+                  mode: lensMode,
+                  pins: pinned,
+                });
+              try {
+                await navigator.clipboard.writeText(link);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1800);
+              } catch {
+                // Clipboard access is denied outside a secure context. Say so
+                // rather than showing a tick for something that did not happen.
+                setCopied(false);
+              }
+            }}
+            disabled={!modelRepoId && !promptDraft}
+            title="Copy a link to this model, prompt, lens and pins. Setup only — the readout is recomputed by whoever opens it."
+            className="flex items-center gap-1 rounded border border-slate-300 px-2.5 py-1.5 text-sm text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Link2 className="h-3.5 w-3.5" />
+            )}
+            {copied ? 'Copied' : 'Link'}
+          </button>
         </div>
         {promptDraft.length > MAX_PROMPT_CHARS * 0.9 && (
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-500">
@@ -249,12 +311,28 @@ export function JLensPanel() {
           // sending placeholders would produce a bound derived from nothing —
           // a check that reports a verdict it never computed.
           dims={artifactDims}
+          // THE UNION, not the complement. Fitting only the missing layers
+          // would produce an artifact holding only those — the server refuses
+          // it now, and offering it here would be offering a coverage loss.
+          onFitMissing={(missing) =>
+            setFitPrefill(
+              Array.from(
+                new Set([
+                  ...(artifacts.find(
+                    (a) => a.slug === artifactSlugFor(modelRepoId)
+                  )?.layers ?? []),
+                  ...missing,
+                ])
+              ).sort((a, b) => a - b)
+            )
+          }
         />
       </div>
 
       <div className="mb-4">
         <FitLensCard
           modelId={modelId}
+          prefillLayers={fitPrefill}
           // Re-list the registry rather than optimistically inserting a row:
           // the filesystem IS the registry (PADR IDL-46), and a row this client
           // invented would be a second registry that can disagree with the one
@@ -380,6 +458,19 @@ export function JLensPanel() {
             {pinned.length > 0 && (
               <section className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
                 <TrajectoryChart
+                  // Overlay the OTHER lens whenever the readout carries both,
+                  // so "the Jacobian leads the logit lens" is something you can
+                  // see rather than something the docs assert.
+                  compareSlice={
+                    readType === 'JACOBIAN_LENS'
+                      ? sliceFor(selToken, 'LOGIT_LENS')
+                      : undefined
+                  }
+                  compareAxis={
+                    readType === 'JACOBIAN_LENS'
+                      ? axisFor(meta, 'LOGIT_LENS')
+                      : undefined
+                  }
                   axis={axis}
                   slice={selSlice}
                   pinned={pinned}

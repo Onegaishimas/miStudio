@@ -16,6 +16,7 @@
 import { useState } from 'react';
 import { CheckCircle2, CircleSlash, Loader2, XCircle } from 'lucide-react';
 import { jlensApi } from '../../api/jlens';
+import { LayerCoverage, missingLayers } from './LayerCoverage';
 import type {
   JLensArtifactSummary,
   JLensValidationResponse,
@@ -23,6 +24,8 @@ import type {
 
 interface ArtifactsStripProps {
   artifacts: JLensArtifactSummary[];
+  /** Pre-fill a fit with exactly the layers this artifact is missing. */
+  onFitMissing?: (layers: number[]) => void;
   /** Slug this model's repo id would produce; '' when no model is selected. */
   expectedSlug: string;
   /** Dimensions the envelope bound is derived from — of THIS model. */
@@ -41,7 +44,12 @@ function statusIcon(status: string) {
   return <CircleSlash className="h-3.5 w-3.5 text-slate-400" />;
 }
 
-export function ArtifactsStrip({ artifacts, expectedSlug, dims }: ArtifactsStripProps) {
+export function ArtifactsStrip({
+  artifacts,
+  expectedSlug,
+  dims,
+  onFitMissing,
+}: ArtifactsStripProps) {
   const [report, setReport] = useState<JLensValidationResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +98,23 @@ export function ArtifactsStrip({ artifacts, expectedSlug, dims }: ArtifactsStrip
                 no config.yaml — the construction recipe is missing
               </span>
             )}
+            <LayerCoverage covered={mine.layers ?? []} total={dims?.n_layers ?? null} />
+            {onFitMissing &&
+              dims?.n_layers &&
+              (mine.layers?.length ?? 0) > 0 &&
+              missingLayers(mine.layers ?? [], dims.n_layers).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onFitMissing(missingLayers(mine.layers ?? [], dims.n_layers))
+                  }
+                  title="Open the fit form with exactly the unfitted layers filled in"
+                  className="rounded border border-amber-400 px-2 py-0.5 text-[10px] text-amber-700 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-400 dark:hover:bg-amber-950/40"
+                >
+                  Fit the missing{' '}
+                  {missingLayers(mine.layers ?? [], dims.n_layers).length}
+                </button>
+              )}
             <button
               type="button"
               onClick={runValidation}

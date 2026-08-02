@@ -345,6 +345,12 @@ def _config_yaml(loaded, result, freeze_qk: bool, corpus_name: str) -> str:
         # treatment and where it actually applied are separate facts.
         f"attention_gradients_requested: {treatment}",
         f"attention_gradients_applied_to_layers: {attended}",
+        # THE LAYERS THIS ARTIFACT ACTUALLY COVERS, stated once and cheaply.
+        # Everything else that needs them had to deserialise the whole tensor
+        # file — 276 MB to answer "which layers?" — which is why the artifact
+        # listing never carried the fact and a partial fit looked identical to
+        # a full one right up until the readout refused.
+        f"fitted_layers: {sorted(result.jacobians)}",
         f"corpus: {corpus_name}",
         f"n_prompts: {result.prompts_seen}",
         f"converged: {str(result.converged).lower()}",

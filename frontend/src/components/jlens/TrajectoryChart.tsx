@@ -33,6 +33,21 @@ interface TrajectoryChartProps {
   topN: number;
   selPos: number;
   bandReport: BandReport | null;
+  /**
+   * The OTHER lens's slice and axis, drawn dashed beneath the primary.
+   *
+   * The whole claim of the Jacobian lens is that it sees a token rise EARLIER
+   * than the logit lens does. That claim was unfalsifiable from this chart:
+   * one lens at a time, so a reader had to switch tabs and remember a shape.
+   * Drawn together, the lead is simply visible — or absent, which is equally
+   * worth seeing.
+   *
+   * Its own axis, because a partial artifact and the logit lens do not share
+   * one and matching by row index would draw the comparison at wrong layers.
+   */
+  compareSlice?: LensTypeSlice | undefined;
+  compareAxis?: number[];
+  compareLabel?: string;
 }
 
 export function TrajectoryChart({
@@ -42,6 +57,9 @@ export function TrajectoryChart({
   topN,
   selPos,
   bandReport,
+  compareSlice,
+  compareAxis,
+  compareLabel = 'logit lens',
 }: TrajectoryChartProps) {
   /**
    * Series are keyed by an ALIAS, never by the token text.
@@ -56,10 +74,21 @@ export function TrajectoryChart({
    */
   const series = pinned.map((token, i) => ({ token, key: `s${i}` }));
 
+  // BY ABSOLUTE LAYER on both sides. The two lenses have independent axes, so
+  // the comparison series is looked up by layer number rather than row index.
+  const compareRow = new Map<number, number>();
+  (compareAxis ?? []).forEach((layer, i) => compareRow.set(layer, i));
+  const hasCompare = Boolean(compareSlice && (compareAxis ?? []).length);
+
   const data = axis.map((layer, i) => {
     const row: Record<string, number | null> = { layer };
     for (const { token, key } of series) {
       row[key] = rankOf(slice, i, token);
+      if (hasCompare) {
+        const ci = compareRow.get(layer);
+        row[`c${key}`] =
+          ci === undefined ? null : rankOf(compareSlice, ci, token);
+      }
     }
     return row;
   });
@@ -72,6 +101,7 @@ export function TrajectoryChart({
         </span>
         <span className="text-[10px] text-slate-500 dark:text-slate-500">
           lower is stronger · gaps are layers where the token left the top-{topN}
+          {hasCompare ? ` · dashed = ${compareLabel}` : ''}
         </span>
       </div>
       <div className="h-52">
@@ -121,6 +151,22 @@ export function TrajectoryChart({
               }}
               labelStyle={{ color: '#94a3b8' }}
             />
+            {hasCompare &&
+              series.map(({ token, key }, i) => (
+                <Line
+                  key={`c${key}`}
+                  type="monotone"
+                  dataKey={`c${key}`}
+                  name={`${token} · ${compareLabel}`}
+                  stroke={PIN_COLORS[i % PIN_COLORS.length]}
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                  strokeOpacity={0.55}
+                  dot={false}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                />
+              ))}
             {series.map(({ token, key }, i) => (
               <Line
                 key={key}

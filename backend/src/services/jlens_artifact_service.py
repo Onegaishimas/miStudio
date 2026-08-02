@@ -444,6 +444,30 @@ class JLensArtifactService:
             raise ArtifactNotValidated(f"{ref.lens_path} did not deserialize")
         return {int(k): v for k, v in payload.items()}
 
+    def fitted_layers(self, ref: ArtifactRef) -> List[int]:
+        """Layers this artifact covers, from config.yaml — no tensor load.
+
+        Falls back to the `layer_scales` keys, which carry one entry per fitted
+        layer, so artifacts written before `fitted_layers` existed still answer.
+        An empty list means "unknown", not "none": the caller must not render
+        that as an artifact covering nothing.
+        """
+        if ref.config_path is None or not ref.config_path.is_file():
+            return []
+        try:
+            for raw in ref.config_path.read_text().splitlines():
+                key, _, value = raw.partition(":")
+                if key.strip() != "fitted_layers":
+                    continue
+                inner = value.strip().strip("[]")
+                if not inner:
+                    return []
+                return sorted(int(p) for p in inner.split(",") if p.strip())
+        except (OSError, ValueError) as exc:  # noqa: BLE001 - reported
+            logger.warning("Unreadable fitted_layers in %s: %s", ref.config_path, exc)
+            return []
+        return sorted(self.layer_scales(ref))
+
     def layer_scales(self, ref: ArtifactRef) -> Dict[int, float]:
         """Per-layer factors the stored matrices were divided by, from config.yaml.
 
