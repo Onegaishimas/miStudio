@@ -219,3 +219,63 @@ export interface ReadoutResult {
   readout?: ReadoutResponse | null;
   error?: string | null;
 }
+
+
+/**
+ * An intervention and the control it is meaningless without (BR-018).
+ *
+ * There is no way to request one WITHOUT a control: `k` and `control_seed`
+ * define it and both are always sent. An intervention that moves the output
+ * says nothing until compared with what a random direction of the same size
+ * does.
+ */
+export interface JLensInterventionRequest {
+  model_id: string;
+  prompt: string;
+  primitive: string;
+  layers: number[];
+  /** A SINGLE token; the server resolves its unembedding row. */
+  direction_token?: string | null;
+  strength?: number;
+  k?: number;
+  control_seed?: number;
+  artifact_id?: string | null;
+}
+
+export interface JLensAnnotateRequest {
+  model_id: string;
+  sae_id: string;
+  feature_id: string;
+  layer: number;
+  label_tokens?: string[];
+  top_k?: number;
+}
+
+export interface JLensAnnotation {
+  feature_id: string;
+  layer: number;
+  lens_kurtosis: number | null;
+  /** UNKNOWN without a band report for this model — a real answer, not a gap. */
+  workspace_class: string;
+  top_tokens: string[];
+  disagreement_score?: number | null;
+  has_disagreement?: boolean;
+  evidence_rung?: number;
+}
+
+export interface JLensWatchlistRequest {
+  name: string;
+  artifact_ref: string;
+  /** REQUIRED. A threshold applied to a differently computed score is a
+   *  different detector, and the consumer cannot notice. */
+  scoring_definition: string;
+  concepts: Array<{ token: string; threshold: number }>;
+  control_set?: string[];
+}
+
+export interface JLensWatchlistResponse {
+  name: string;
+  artifact_ref: string;
+  scoring_definition: string;
+  concept_count: number;
+}

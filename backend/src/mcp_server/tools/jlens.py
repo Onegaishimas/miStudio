@@ -152,9 +152,9 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         sae_id: Annotated[str, Field(description="SAE the feature belongs to")],
         feature_id: Annotated[str, Field(description="Feature id being annotated")],
         layer: Annotated[int, Field(description="Layer the feature lives at")],
-        direction: Annotated[List[float], Field(description="The feature's decoder direction, d_model long")],
         label_tokens: Annotated[Optional[List[str]], Field(description="The feature's existing label, to compare the readout against. Omit and no disagreement is computed")] = None,
         top_k: Annotated[int, Field(description="How many readout tokens to return")] = 8,
+        direction: Annotated[Optional[List[float]], Field(description="Explicit d_model decoder direction. OMIT IT and the server resolves this feature's decoder column from sae_id — which is what makes this callable without shipping thousands of floats")] = None,
     ) -> Any:
         """Describe an SAE feature in J-space: what it pushes TOWARD.
 
@@ -175,9 +175,10 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "sae_id": sae_id,
             "feature_id": feature_id,
             "layer": layer,
-            "direction": direction,
             "top_k": top_k,
         }
+        if direction:
+            body["direction"] = direction
         if label_tokens:
             body["label_tokens"] = label_tokens
         return await client.post("/jlens/annotate", json_body=body)
@@ -258,7 +259,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         primitive: Annotated[str, Field(description="additive | projective_ablation | dynamic_topk_ablation | coordinate_swap")],
         layers: Annotated[List[int], Field(description="Absolute layer indices to act at")],
         control_seed: Annotated[int, Field(description="REQUIRED in practice. 'A random direction' is not a control; 'k random directions from seed s' is, and a control nobody can reconstruct is not one")],
-        direction: Annotated[Optional[List[float]], Field(description="d_model vector to act along. Required for additive and projective_ablation")] = None,
+        direction: Annotated[Optional[List[float]], Field(description="Explicit d_model vector to act along")] = None,
+        direction_token: Annotated[Optional[str], Field(description="Resolve the direction from a SINGLE token's unembedding row instead of passing d_model floats. Multi-token strings are REFUSED rather than truncated — a lens direction is defined for one token")] = None,
         strength: Annotated[float, Field(description="Additive scale")] = 1.0,
         k: Annotated[int, Field(description="Control size, matched to the intervention")] = 1,
         positions: Annotated[Optional[List[int]], Field(description="Token positions; defaults to the last")] = None,
@@ -291,6 +293,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         }
         if direction:
             body["direction"] = direction
+        if direction_token:
+            body["direction_token"] = direction_token
         if positions:
             body["positions"] = positions
         if artifact_id:
