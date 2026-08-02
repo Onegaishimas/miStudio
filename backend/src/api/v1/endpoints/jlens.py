@@ -903,10 +903,18 @@ async def probe_result(task_id: str) -> ProbeResult:
 class AnnotateRequest(BaseModel):
     """Annotate one SAE feature's decoder direction (BR-012..015)."""
 
-    model_id: str
-    sae_id: str
+    #: All three are OPTIONAL and resolved from `feature_id` when omitted.
+    #:
+    #: The caller who wants this is looking at a FEATURE, and a feature knows
+    #: its own SAE, that SAE's model and its layer. Demanding they be restated
+    #: made the endpoint unusable from the one screen where features live —
+    #: the modal has `training_id` and `neuron_index`, not these.
+    model_id: Optional[str] = None
+    sae_id: Optional[str] = None
+    layer: Optional[int] = None
+    #: A miStudio feature id (`feat_sae_<sae>_<index>`), or a bare index when
+    #: sae_id is given explicitly.
     feature_id: str
-    layer: int
     #: OPTIONAL now. Omit it and the server resolves this feature's decoder
     #: column from `sae_id`. A d_model vector is not something a browser can
     #: produce, so requiring it here is what kept this endpoint UI-less.
@@ -953,10 +961,15 @@ async def annotate(
     from ....services.jlens_band_service import load_band_report
     from ....services.jlens_readout_service import IdentityTransport
 
-    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    # RESOLVE WHAT THE CALLER DID NOT RESTATE. A feature knows its own SAE,
+    # that SAE's model and its layer; requiring all three made this endpoint
+    # unusable from the screen where features actually live.
+    sae_id, feature_index, model_id, layer = _resolve_feature_context(request)
+
+    result = await db.execute(select(Model).where(Model.id == model_id))
     record = result.scalar_one_or_none()
     if record is None:
-        raise HTTPException(status_code=404, detail=f"No model {request.model_id!r}")
+        raise HTTPException(status_code=404, detail=f"No model {model_id!r}")
 
     try:
         loaded = load_for_readout(record)
@@ -969,7 +982,7 @@ async def annotate(
         # RESOLVED SERVER-SIDE from the SAE's decoder column. A d_model vector
         # is not something a browser can produce, so requiring one here is what
         # left this endpoint without any UI at all.
-        direction = _feature_direction(request.sae_id, request.feature_id)
+        direction = _feature_direction(sae_id, feature_index)
 
     if direction.numel() != loaded.d_model:
         raise HTTPException(
@@ -987,7 +1000,7 @@ async def annotate(
         direction,
         IdentityTransport(),
         loaded.unembedding,
-        layer=request.layer,
+        layer=layer,
         feature_id=request.feature_id,
         decode=lambda ids: loaded.tokenizer.convert_ids_to_tokens(ids),
         top_k=request.top_k,
@@ -1007,6 +1020,64 @@ async def annotate(
         disagreement_score=score,
         has_disagreement=bool(score is not None and score >= 0.8),
     )
+
+
+def _resolve_feature_context(request):
+    """(sae_id, feature_index, model_id, layer) from whatever the caller gave.
+
+    Explicit values always win — a caller who states them is answering for
+    them. Anything omitted is derived from the feature row and its SAE, which
+    is where those facts already live. Nothing is DEFAULTED: an unresolvable
+    field is refused with what was missing, because annotating the wrong
+    layer's direction produces a complete, plausible, wrong answer.
+    """
+    from ....core.database import get_sync_db
+    from ....models.external_sae import ExternalSAE
+    from ....models.feature import Feature
+
+    sae_id = request.sae_id
+    model_id = request.model_id
+    layer = request.layer
+    feature_index = request.feature_id
+
+    needs_lookup = not (sae_id and model_id and layer is not None)
+    if needs_lookup:
+        with get_sync_db() as db:
+            feature = db.query(Feature).filter(Feature.id == request.feature_id).first()
+            if feature is None and needs_lookup and not sae_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        f"No feature {request.feature_id!r}. Pass sae_id, "
+                        "model_id and layer explicitly, or a feature id this "
+                        "installation knows."
+                    ),
+                )
+            if feature is not None:
+                feature_index = str(feature.neuron_index)
+                sae_id = sae_id or feature.external_sae_id
+            if sae_id:
+                sae = db.query(ExternalSAE).filter(ExternalSAE.id == sae_id).first()
+                if sae is not None:
+                    model_id = model_id or sae.model_id
+                    layer = layer if layer is not None else sae.layer
+
+    missing = [
+        name
+        for name, value in (("sae_id", sae_id), ("model_id", model_id), ("layer", layer))
+        if value is None
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"could not resolve {missing} for feature {request.feature_id!r}. "
+                "Annotating against the wrong layer's direction produces a "
+                "complete, plausible, wrong answer, so it is refused rather "
+                "than guessed."
+            ),
+        )
+    return sae_id, feature_index, model_id, int(layer)
 
 
 def _feature_direction(sae_id: str, feature_id: str):

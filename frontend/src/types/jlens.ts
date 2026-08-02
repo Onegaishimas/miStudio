@@ -252,10 +252,11 @@ export interface JLensInterventionRequest {
 }
 
 export interface JLensAnnotateRequest {
-  model_id: string;
-  sae_id: string;
+  /** All this needs. The rest is resolved server-side from the feature row. */
   feature_id: string;
-  layer: number;
+  model_id?: string;
+  sae_id?: string;
+  layer?: number;
   label_tokens?: string[];
   top_k?: number;
 }

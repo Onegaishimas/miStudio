@@ -16,6 +16,7 @@ import { useFeaturesStore } from '../../stores/featuresStore';
 import { useEnhancedLabeling } from '../../hooks/useEnhancedLabeling';
 import { ExampleRow } from './ExampleRow';
 import { LogitLensView } from './LogitLensView';
+import { JSpaceAnnotation } from './JSpaceAnnotation';
 import { FeatureCorrelations } from './FeatureCorrelations';
 import { AblationAnalysis } from './AblationAnalysis';
 import { FeatureTokenAnalysis } from './FeatureTokenAnalysis';
@@ -29,7 +30,7 @@ interface FeatureDetailModalProps {
   onClose: () => void;
 }
 
-type TabType = 'examples' | 'logit-lens' | 'token-analysis' | 'nlp-analysis' | 'correlations' | 'ablation';
+type TabType = 'examples' | 'logit-lens' | 'j-space' | 'token-analysis' | 'nlp-analysis' | 'correlations' | 'ablation';
 
 export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
   featureId,
@@ -435,6 +436,17 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
               <span>Logit Lens</span>
             </button>
             <button
+              onClick={() => setActiveTab('j-space')}
+              className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
+                activeTab === 'j-space'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <Info className="w-4 h-4" />
+              <span>J-Space</span>
+            </button>
+            <button
               onClick={() => setActiveTab('token-analysis')}
               className={`flex items-center gap-2 px-4 py-3 border-b-2 transition-colors ${
                 activeTab === 'token-analysis'
@@ -606,6 +618,20 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Logit Lens Analysis</h3>
               <LogitLensView featureId={featureId} />
+            </div>
+          )}
+
+          {activeTab === 'j-space' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+                J-Space Annotation
+              </h3>
+              <JSpaceAnnotation
+                featureId={featureId}
+                labelTokens={
+                  selectedFeature?.name ? selectedFeature.name.split(/\s+/) : []
+                }
+              />
             </div>
           )}
 
