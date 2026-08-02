@@ -32,6 +32,15 @@ interface FitLensCardProps {
   modelId: string;
   /** Refresh the registry once a fit commits an artifact. */
   onFitted: () => void;
+  /**
+   * Layers to pre-fill, set by "Fit the missing N" on the artifact card.
+   *
+   * TOPPING UP MUST NOT LOSE COVERAGE. A fit naming only the missing layers
+   * would replace the artifact with one holding ONLY those — the server now
+   * refuses that, and this form must not ask for it in the first place. The
+   * prefill is therefore the UNION of what exists and what is missing.
+   */
+  prefillLayers?: number[] | null;
 }
 
 type Phase =
@@ -63,7 +72,11 @@ export function parseLayers(raw: string): number[] | null {
   return parts.length ? parts : null;
 }
 
-export function FitLensCard({ modelId, onFitted }: FitLensCardProps) {
+export function FitLensCard({
+  modelId,
+  onFitted,
+  prefillLayers,
+}: FitLensCardProps) {
   const [open, setOpen] = useState(false);
   const [corpus, setCorpus] = useState('');
   const [corpusName, setCorpusName] = useState('');
@@ -73,6 +86,16 @@ export function FitLensCard({ modelId, onFitted }: FitLensCardProps) {
   const [probeExpected, setProbeExpected] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Open and fill when the artifact card asks for a top-up. Keyed on the list's
+  // content, not its identity: a parent re-render must not reopen a form the
+  // user just closed.
+  const prefillKey = (prefillLayers ?? []).join(',');
+  useEffect(() => {
+    if (!prefillKey) return;
+    setLayersRaw(prefillKey.split(',').join(', '));
+    setOpen(true);
+  }, [prefillKey]);
 
   // Stop polling when the card unmounts or the model changes; otherwise the
   // loop outlives the component and calls onFitted for a model no longer shown.

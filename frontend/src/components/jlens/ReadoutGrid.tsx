@@ -94,6 +94,40 @@ export function ReadoutGrid({
   // is how the trajectory is described everywhere else in the product.
   const rows = axis.map((layer, i) => ({ layer, i })).reverse();
 
+  /**
+   * The lowest layer at which the two lenses stop agreeing, at the SELECTED
+   * position. That crossing is the quantity the Diff view exists to show — it
+   * is where the Jacobian lens starts seeing something the logit lens does not
+   * — and it was previously only findable by scanning the column by eye.
+   *
+   * Null when the lenses agree everywhere, when there is no logit slice to
+   * compare against, or when the mode is not DIFF. Null renders nothing rather
+   * than a layer number, because "they never disagree" and "we could not tell"
+   * must not look the same.
+   */
+  const firstDisagreement = useMemo(() => {
+    if (mode !== 'DIFF') return null;
+    const token = tokens.find((t) => t.position === selPos);
+    if (!token) return null;
+    const jac = sliceOf(token);
+    const logit = logitSliceOf(token);
+    if (!jac || !logit) return null;
+    const logitRow = new Map<number, number>();
+    logitAxis.forEach((l, idx) => logitRow.set(l, idx));
+
+    for (let i = 0; i < axis.length; i += 1) {
+      const layer = axis[i];
+      const lr = logitRow.get(layer);
+      if (lr === undefined) continue;
+      const mine = jac.top_tokens[i]?.[0];
+      const theirs = logit.top_tokens[lr]?.[0];
+      if (mine !== undefined && theirs !== undefined && mine !== theirs) {
+        return layer;
+      }
+    }
+    return null;
+  }, [mode, tokens, selPos, sliceOf, logitSliceOf, axis, logitAxis]);
+
   // ABSOLUTE LAYER -> the logit lens's own row index. The two lenses have
   // independent axes, so a Jacobian row number is not a logit row number.
   const logitRowOf = useMemo(() => {
@@ -112,6 +146,11 @@ export function ReadoutGrid({
               ? 'Jacobian top token, shaded by its rank in the logit lens'
               : 'Top readout · layer × position'}
         </div>
+        {mode === 'DIFF' && firstDisagreement !== null && (
+          <span className="rounded border border-amber-400 px-1.5 py-0.5 font-mono text-[10px] text-amber-700 dark:border-amber-600 dark:text-amber-400">
+            lenses first diverge at L{firstDisagreement}
+          </span>
+        )}
         {mode === 'DIFF' && !pinned.length && (
           // The ramp is meaningless without saying what it measures, and
           // "disagrees" was never the interesting quantity — HOW FAR the two
@@ -182,7 +221,25 @@ export function ReadoutGrid({
                           : 'border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-600'
                     }`}
                   >
-                    L{layer}
+                    <span className="flex items-center justify-end gap-1.5">
+                      L{layer}
+                      <span
+                        // The gutter. `transparent` when no band report exists,
+                        // which is the honest rendering — BR-002 forbids a
+                        // default, so an unbanded model shows no stripe rather
+                        // than a neutral one implying "sensory".
+                        title={band ? BAND_LABEL[band] : undefined}
+                        className={`inline-block h-full min-h-[14px] w-[3px] rounded-[1px] ${
+                          band === 'workspace'
+                            ? 'bg-emerald-500'
+                            : band === 'motor'
+                              ? 'bg-amber-500'
+                              : band === 'sensory'
+                                ? 'bg-slate-400 dark:bg-slate-600'
+                                : 'bg-transparent'
+                        }`}
+                      />
+                    </span>
                   </td>
                   {tokens.map((tk) => {
                     const slice = sliceOf(tk);
@@ -242,9 +299,12 @@ export function ReadoutGrid({
                               ? ` · both lenses lead with ${mine}`
                               : ` · Jacobian: ${mine} — logit ranks it #${r + 1}`;
                       }
-                    } else if (band === 'workspace') {
-                      background = 'rgba(52,211,153,.10)';
                     } else {
+                      // BANDS NO LONGER TINT THE CELL. Band shading and the pin
+                      // heatmap were competing for the same channel — the one a
+                      // reader uses to answer "where is my token" — so a banded
+                      // grid made ranks harder to read for information already
+                      // carried by the row. Bands moved to the gutter below.
                       background = 'rgba(100,116,139,.10)';
                     }
 

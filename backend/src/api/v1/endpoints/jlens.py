@@ -75,6 +75,12 @@ class ArtifactSummary(BaseModel):
     lens_file: str
     size_bytes: int
     has_config: bool
+    #: Layers this artifact covers. EMPTY MEANS UNKNOWN, not "none" — an
+    #: artifact whose config cannot be read still holds whatever it holds, and
+    #: rendering unknown as zero coverage would be a claim the listing did not
+    #: check. A partial fit was previously indistinguishable from a full one
+    #: here, which is how a 9-of-16-layer lens reached a readout asking for 16.
+    layers: List[int] = []
 
 
 class CheckOutcome(BaseModel):
@@ -111,6 +117,7 @@ async def list_artifacts() -> List[ArtifactSummary]:
     an artifact, and the whole point of staging is that it is invisible until
     it commits.
     """
+    service = _service()
     return [
         ArtifactSummary(
             slug=ref.slug,
@@ -118,8 +125,9 @@ async def list_artifacts() -> List[ArtifactSummary]:
             lens_file=ref.lens_path.name,
             size_bytes=ref.size_bytes,
             has_config=ref.config_path is not None,
+            layers=service.fitted_layers(ref),
         )
-        for ref in _service().list_artifacts()
+        for ref in service.list_artifacts()
     ]
 
 

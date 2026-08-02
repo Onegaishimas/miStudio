@@ -134,6 +134,14 @@ export interface JLensArtifactSummary {
   lens_file: string;
   size_bytes: number;
   has_config: boolean;
+  /**
+   * Layers this artifact covers.
+   *
+   * EMPTY MEANS UNKNOWN, not "none". An artifact whose config could not be
+   * read still holds whatever it holds, and drawing that as zero coverage
+   * would assert something the listing never checked.
+   */
+  layers?: number[];
 }
 
 export interface JLensCheckOutcome {

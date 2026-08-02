@@ -935,3 +935,82 @@ describe('the setup survives a refresh, and Clear forgets it', () => {
     expect(screen.getByRole('button', { name: /clear/i })).toBeDisabled();
   });
 });
+
+describe('the Diff view shows where the lenses part company', () => {
+  function bothLenses(jacTop: string[][], logitTop: string[][], layers: number[]) {
+    const mk = (type: LensType, top: string[][]) => ({
+      type,
+      top_tokens: top,
+      top_probs: top.map((r) => r.map(() => 0.5)),
+    });
+    return {
+      meta: {
+        kind: 'meta' as const,
+        model: 'm',
+        types: ['JACOBIAN_LENS', 'LOGIT_LENS'] as LensType[],
+        layers_by_type: { JACOBIAN_LENS: layers, LOGIT_LENS: layers },
+        top_n: 2,
+        prompt_len: 1,
+      },
+      tokens: [
+        {
+          kind: 'token' as const,
+          position: 0,
+          token: 'x',
+          id: 1,
+          is_generated: false,
+          results: [mk('JACOBIAN_LENS', jacTop), mk('LOGIT_LENS', logitTop)],
+        },
+      ],
+    };
+  }
+
+  it('names the first layer at which the two lenses disagree', () => {
+    // MUTATION CONTROL: return the LAST disagreement, or the row index instead
+    // of the absolute layer, and this fails.
+    render(<JLensPanel />);
+    act(() =>
+      useJLensStore.setState({
+        // TWO disagreements, so "first" and "last" are DIFFERENT layers. The
+        // earlier fixture had exactly one, which meant a mutation returning
+        // the last disagreement passed — verified: it survived.
+        //   L10 agree · L11 differ · L12 differ · L13 differ
+        ...bothLenses(
+          [['a', 'b'], ['Paris', 'b'], ['Paris', 'b'], ['Paris', 'b']],
+          [['a', 'b'], ['a', 'b'], ['a', 'b'], ['b', 'a']],
+          [10, 11, 12, 13]
+        ),
+        modelId: 'm_lfm2',
+        lensMode: 'DIFF',
+        selPos: 0,
+        selLayerIdx: 0,
+        pinned: [],
+        isLoading: false,
+        error: null,
+        bandReport: null,
+      })
+    );
+
+    expect(screen.getByText(/lenses first diverge at L11/)).toBeInTheDocument();
+  });
+
+  it('says nothing when the lenses agree everywhere', () => {
+    // "they never disagree" and "we could not tell" must not look the same.
+    render(<JLensPanel />);
+    act(() =>
+      useJLensStore.setState({
+        ...bothLenses([['a', 'b'], ['a', 'b']], [['a', 'b'], ['a', 'b']], [0, 1]),
+        modelId: 'm_lfm2',
+        lensMode: 'DIFF',
+        selPos: 0,
+        selLayerIdx: 0,
+        pinned: [],
+        isLoading: false,
+        error: null,
+        bandReport: null,
+      })
+    );
+
+    expect(screen.queryByText(/lenses first diverge/)).toBeNull();
+  });
+});

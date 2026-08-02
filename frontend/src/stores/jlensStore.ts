@@ -508,3 +508,55 @@ export function rankOf(
   const i = row.indexOf(token);
   return i === -1 ? null : i + 1;
 }
+
+
+/**
+ * Serialise the setup into a shareable URL fragment, and read one back.
+ *
+ * SETUP ONLY, never results — the same line the persistence draws. A link
+ * carrying a readout would show its recipient a grid computed on someone
+ * else's machine, at some earlier time, against an artifact that may since
+ * have been refitted. The link says what to READ OUT; the reader's own server
+ * produces the readout.
+ *
+ * The model is carried by REPO ID rather than miStudio's `m_xxxxxxxx`, because
+ * those ids are local to one installation and a link built from them is
+ * meaningless anywhere else.
+ */
+export interface JLensPermalink {
+  repo: string;
+  prompt: string;
+  mode: LensMode;
+  pins: string[];
+}
+
+export function encodePermalink(state: JLensPermalink): string {
+  const params = new URLSearchParams();
+  if (state.repo) params.set('repo', state.repo);
+  if (state.prompt) params.set('p', state.prompt);
+  if (state.mode) params.set('lens', state.mode);
+  for (const pin of state.pins) params.append('pin', pin);
+  return `#jlens?${params.toString()}`;
+}
+
+export function decodePermalink(fragment: string): JLensPermalink | null {
+  const q = fragment.replace(/^#?jlens\?/, '');
+  if (q === fragment && !fragment.startsWith('?')) return null;
+  const params = new URLSearchParams(q);
+  const repo = params.get('repo') ?? '';
+  const prompt = params.get('p') ?? '';
+  if (!repo && !prompt) return null;
+  const mode = params.get('lens');
+  return {
+    repo,
+    prompt,
+    // An unrecognised lens falls back to LOGIT rather than being trusted: the
+    // logit lens needs no artifact, so it is the one mode that always works
+    // for whoever opens the link.
+    mode:
+      mode === 'JACOBIAN_LENS' || mode === 'DIFF' || mode === 'LOGIT_LENS'
+        ? (mode as LensMode)
+        : 'LOGIT_LENS',
+    pins: params.getAll('pin').slice(0, MAX_PINNED),
+  };
+}
