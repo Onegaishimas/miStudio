@@ -267,6 +267,12 @@ class CorrelatedFeature(BaseModel):
     feature_id: str
     feature_name: str
     correlation: float
+    #: The number the product calls this feature everywhere else ("Feature #13").
+    #:
+    #: The row used to show `feature_id` alone — `feat_sae_20260223_131023_01619`
+    #: — which is an internal key the user has never seen and cannot match to
+    #: anything on screen. The index was already in hand here and thrown away.
+    neuron_index: Optional[int] = None
 
 
 class CorrelationsResponse(BaseModel):

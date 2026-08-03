@@ -625,6 +625,10 @@ class AnalysisService:
                     similarities.append({
                         "feature_id": other.id,
                         "feature_name": other.name or f"Feature {other.neuron_index}",
+                        # Carried through so the UI can name this feature the
+                        # way the rest of the product does, instead of showing
+                        # an internal id nobody recognises.
+                        "neuron_index": other.neuron_index,
                         "correlation": float(combined_similarity),
                         "_token_sim": token_similarity,
                         "_freq_sim": freq_similarity,

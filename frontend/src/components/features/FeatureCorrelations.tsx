@@ -17,6 +17,8 @@ import { Loader2, TrendingUp, Sparkles } from 'lucide-react';
 interface CorrelatedFeature {
   feature_id: string;
   feature_name: string;
+  /** The number the product calls this feature everywhere else. */
+  neuron_index?: number | null;
   correlation: number; // This is actually a similarity score (0-1)
 }
 
@@ -34,6 +36,20 @@ interface FeatureCorrelationsProps {
  * FeatureCorrelations component.
  * Fetches and displays similarity analysis for a feature.
  */
+/**
+ * How a correlated feature is named in the table.
+ *
+ * `#1619` matches the modal title ("Feature #13") and the browser listing. The
+ * internal id is not a name — it is a key, and showing it here meant a row the
+ * user could not connect to anything they had seen.
+ */
+export function featureLabelFor(feature: {
+  feature_id: string;
+  neuron_index?: number | null;
+}): string {
+  return feature.neuron_index != null ? `#${feature.neuron_index}` : feature.feature_id;
+}
+
 export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
   featureId,
   onFeatureClick,
@@ -116,7 +132,7 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
           <thead className="bg-slate-100 dark:bg-slate-800/50">
             <tr>
               <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 dark:text-slate-400">
-                Feature ID
+                Feature
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 dark:text-slate-400">
                 Label
@@ -139,16 +155,29 @@ export const FeatureCorrelations: React.FC<FeatureCorrelationsProps> = ({
                   className="hover:bg-slate-100 dark:hover:bg-slate-800/30 transition-colors"
                 >
                   <td className="px-4 py-3">
+                    {/* THE NUMBER THE USER KNOWS, not the internal key.
+                        This column showed `feat_sae_20260223_131023_01619`,
+                        which appears nowhere else in the product — the modal
+                        title says "Feature #13" and the browser lists numbers.
+                        The raw id stays reachable on hover for support, since
+                        it is what the API and the logs speak.
+                        Falls back to the id when the index is absent rather
+                        than inventing one: an artifact of an older response
+                        genuinely does not carry it. */}
                     {onFeatureClick ? (
                       <button
                         onClick={() => onFeatureClick(feature.feature_id)}
+                        title={feature.feature_id}
                         className="font-mono text-sm text-blue-400 hover:text-blue-300 underline"
                       >
-                        {feature.feature_id}
+                        {featureLabelFor(feature)}
                       </button>
                     ) : (
-                      <span className="font-mono text-sm text-slate-700 dark:text-slate-300">
-                        {feature.feature_id}
+                      <span
+                        title={feature.feature_id}
+                        className="font-mono text-sm text-slate-700 dark:text-slate-300"
+                      >
+                        {featureLabelFor(feature)}
                       </span>
                     )}
                   </td>
