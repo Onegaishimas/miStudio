@@ -16,9 +16,22 @@ interface LayerCoverageProps {
   covered: number[];
   /** The model's full layer count, or null when the model's dims are unknown. */
   total: number | null;
+  /**
+   * The recipe's target block, when recorded.
+   *
+   * A `penultimate` target makes the TOP LAYER UNFITTABLE — its gradient to the
+   * target is zero by causality — so a complete fit covers `total - 1` layers.
+   * Without this the strip reports a correct artifact as incomplete and colours
+   * it amber, which is a recipe choice rendered as a defect.
+   */
+  targetLayer?: string | null;
 }
 
-export function LayerCoverage({ covered, total }: LayerCoverageProps) {
+export function LayerCoverage({
+  covered,
+  total,
+  targetLayer,
+}: LayerCoverageProps) {
   if (!total) {
     return (
       <span className="text-[10px] text-slate-500 dark:text-slate-500">
@@ -35,14 +48,16 @@ export function LayerCoverage({ covered, total }: LayerCoverageProps) {
   }
 
   const set = new Set(covered);
-  const complete = covered.length === total;
+  // How many layers this recipe CAN cover, which is what "complete" means.
+  const fittable = targetLayer === 'penultimate' ? Math.max(total - 1, 1) : total;
+  const complete = covered.length >= fittable;
 
   return (
     <span className="flex items-center gap-1.5">
       <span
         className="flex gap-[1px]"
         role="img"
-        aria-label={`covers ${covered.length} of ${total} layers`}
+        aria-label={`covers ${covered.length} of ${fittable} layers`}
       >
         {Array.from({ length: total }, (_, layer) => (
           <span
@@ -63,7 +78,8 @@ export function LayerCoverage({ covered, total }: LayerCoverageProps) {
             : 'text-amber-600 dark:text-amber-400'
         }`}
       >
-        {covered.length}/{total} layers
+        {covered.length}/{fittable} layers
+        {fittable !== total ? ' · penultimate target' : ''}
       </span>
     </span>
   );

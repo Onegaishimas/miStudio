@@ -490,6 +490,26 @@ class JLensArtifactService:
             logger.warning("Unreadable degenerate_layers in %s: %s", ref.config_path, exc)
         return []
 
+    def target_layer(self, ref: ArtifactRef) -> Optional[str]:
+        """Which block the Jacobian was taken TO, from config.yaml.
+
+        The coverage strip needs it: with a `penultimate` target a COMPLETE fit
+        covers 0..N-2, so comparing against the model's layer count would render
+        a full artifact as "25/26" and colour it amber — reporting a recipe
+        choice as a defect.
+        """
+        if ref.config_path is None or not ref.config_path.is_file():
+            return None
+        try:
+            for raw in ref.config_path.read_text().splitlines():
+                key, _, value = raw.partition(":")
+                if key.strip() == "target_layer":
+                    got = value.strip()
+                    return got if got in ("final", "penultimate") else None
+        except OSError as exc:  # noqa: BLE001
+            logger.warning("Could not read %s: %s", ref.config_path, exc)
+        return None
+
     def layer_scales(self, ref: ArtifactRef) -> Dict[int, float]:
         """Per-layer factors the stored matrices were divided by, from config.yaml.
 

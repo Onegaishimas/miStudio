@@ -151,6 +151,14 @@ export interface JLensArtifactSummary {
    * top row read without that context looks like a finding.
    */
   degenerate_layers?: number[];
+  /**
+   * Which block the Jacobian was taken TO.
+   *
+   * With a `penultimate` target a COMPLETE fit covers 0..N-2, so comparing
+   * coverage against the model's layer count renders a full artifact as
+   * "25/26" and colours it amber — reporting a recipe choice as a defect.
+   */
+  target_layer?: string | null;
 }
 
 export interface JLensCheckOutcome {

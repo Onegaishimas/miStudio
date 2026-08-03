@@ -48,3 +48,25 @@ describe('missingLayers', () => {
     expect(missingLayers([0, 1, 2], 3)).toEqual([]);
   });
 });
+
+describe('a penultimate target makes the top layer unfittable', () => {
+  it('reports a complete penultimate fit as complete, not 25/26', () => {
+    // The top layer's gradient to a penultimate target is zero by causality,
+    // so a full fit covers N-1 layers. Comparing against the model's layer
+    // count renders a correct artifact as incomplete and colours it amber —
+    // a recipe choice reported as a defect.
+    //
+    // MUTATION CONTROL: ignore targetLayer and this fails.
+    const covered = Array.from({ length: 25 }, (_, i) => i);
+    render(<LayerCoverage covered={covered} total={26} targetLayer="penultimate" />);
+
+    expect(screen.getByText(/25\/25 layers/)).toBeInTheDocument();
+    expect(screen.getByText(/penultimate target/)).toBeInTheDocument();
+  });
+
+  it('still measures against the full stack for a final target', () => {
+    const covered = Array.from({ length: 25 }, (_, i) => i);
+    render(<LayerCoverage covered={covered} total={26} targetLayer="final" />);
+    expect(screen.getByText(/25\/26 layers/)).toBeInTheDocument();
+  });
+});

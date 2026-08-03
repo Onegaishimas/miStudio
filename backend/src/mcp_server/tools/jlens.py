@@ -369,10 +369,11 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         model_id: Annotated[str, Field(description="miStudio model id to fit a lens for")],
         prompts: Annotated[List[str], Field(description="Fitting corpus. The fitter REFUSES fewer than 100 — an under-fitted lens is indistinguishable from a fitted one by inspection")],
         layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit for every layer")] = None,
-        freeze_qk: Annotated[bool, Field(description="Freeze Q/K as well as norms. INAPPLICABLE on layers that do not attend, and recorded per layer rather than claimed wholesale")] = True,
+        freeze_qk: Annotated[bool, Field(description="Freeze attention patterns. OFF by default — the paper treats freezing as an ABLATION, not the standard recipe. It slightly reduces readout quality while tending to produce directions that respond MORE strongly to intervention — an association reported by the source paper, not a validated claim about this artifact, and the reason frozen-Q/K is the suggested variant when the lens is built for intervention work rather than reading. INAPPLICABLE on layers that do not attend, and recorded per layer rather than claimed wholesale")] = True,
         corpus_name: Annotated[str, Field(description="Recorded in the artifact's recipe (BR-007) — name the corpus, do not leave it unspecified")] = "unspecified",
         convergence_delta: Annotated[Optional[float], Field(description="Relative Frobenius change in J below which the fit is settled. Omit for the fitter default (1e-3). A LOOSER value converges sooner without more corpus; the artifact records whichever was used, so two fits are never compared as though they met the same criterion")] = None,
-        full_sequence: Annotated[bool, Field(description="Run the sub-network at the REAL sequence length. COSTS S TIMES THE COMPUTE. Off by default, and a lens fitted without it OVERSTATES the self-attention path: the cheap path runs length-1, where a softmax over one key is 1.0, so the perturbed position gets full attention weight instead of the share it actually had. The artifact records which was used")] = False,
+        freeze_norms: Annotated[bool, Field(description="Freeze normalisation statistics too. Off by default: freezing makes the map exactly AFFINE, which is convenient and is not what the paper computes — its J is a local linearisation whose departure is reported rather than engineered away")] = False,
+        target_layer: Annotated[str, Field(description="'penultimate' (default) or 'final'. The last block is specialised for next-token calibration and adds noise, per BRD A.2. Layers ABOVE the target are REFUSED — their gradient to it is zero by causality, and a zero lens reads out as confident uniform noise")] = "penultimate",
         allow_coverage_loss: Annotated[bool, Field(description="Publish even though the EXISTING artifact covers layers this fit does not. Off by default and refused otherwise — a 16-layer lens was once destroyed by a 9-layer refit with no warning. Losing coverage must be a decision")] = False,
         semantic_probe: Annotated[Optional[Dict[str, Any]], Field(description="Fixture for the SEMANTIC check: {prompt, expected_intermediate, layer?, top_k?}. WITHOUT IT NOTHING IS PUBLISHED — the check cannot run and the suite fails closed. The intermediate must NOT appear in the prompt, or a lens encoding nothing would pass")] = None,
     ) -> Any:
@@ -400,7 +401,8 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "freeze_qk": freeze_qk,
             "corpus_name": corpus_name,
             "allow_coverage_loss": allow_coverage_loss,
-            "full_sequence": full_sequence,
+            "freeze_norms": freeze_norms,
+            "target_layer": target_layer,
             **({"convergence_delta": convergence_delta} if convergence_delta else {}),
         }
         if layers:

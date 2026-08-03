@@ -44,7 +44,8 @@ def fit_jlens_artifact(
     corpus_name: str = "unspecified",
     semantic_probe: Optional[Dict[str, Any]] = None,
     allow_coverage_loss: bool = False,
-    full_sequence: bool = False,
+    freeze_norms: bool = False,
+    target_layer: str = "penultimate",
     convergence_delta: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fit, validate and publish a J-lens artifact for one model.
@@ -91,7 +92,8 @@ def fit_jlens_artifact(
         loaded.tokenizer,
         loaded.structure,
         freeze_qk=freeze_qk,
-        full_sequence=full_sequence,
+        freeze_norms=freeze_norms,
+        target_layer=target_layer,
         convergence_delta=(
             convergence_delta
             if convergence_delta is not None
@@ -126,7 +128,12 @@ def fit_jlens_artifact(
 
     service = JLensArtifactService(settings.jlens_artifacts_dir)
     config_yaml = _config_yaml(
-        loaded, result, freeze_qk, corpus_name, full_sequence=full_sequence
+        loaded,
+        result,
+        freeze_qk,
+        corpus_name,
+        freeze_norms=freeze_norms,
+        target_layer=target_layer,
     )
     ref = service.write_staged(repo_id, result.jacobians, config_yaml)
 
@@ -331,7 +338,12 @@ def _local_pass(report):
 
 
 def _config_yaml(
-    loaded, result, freeze_qk: bool, corpus_name: str, full_sequence: bool = False
+    loaded,
+    result,
+    freeze_qk: bool,
+    corpus_name: str,
+    freeze_norms: bool = False,
+    target_layer: str = "penultimate",
 ) -> str:
     """The construction recipe, sufficient to rebuild the artifact (BR-007).
 
@@ -367,20 +379,21 @@ def _config_yaml(
         #                         one position with the mask sliced to it
         #                         (`_batch_kwargs`), which is SELF_ONLY.
         "target_layer: final",
-        # NAMED FOR WHAT IT IS. The cheap path runs the sub-network on a
-        # LENGTH-1 sequence, where a softmax over one key is 1.0 — so the
-        # perturbed position receives its full attention weight instead of the
-        # share it actually had. That is a different computation, not a scope
-        # choice, and calling it plain "self_only" overstated it.
-        f"target_position_scope: {'self_only' if full_sequence else 'self_only_isolated'}",
-        f"sub_network_sequence: {'full' if full_sequence else 'single_position'}",
+        # THE PAPER'S DEFINITION, recorded as it was run: an expectation over
+        # SOURCE positions of the summed effect on all subsequent target
+        # positions. The previous fitter recorded `self_only_isolated` because
+        # that is what it did — one source position, length-1 sub-network.
+        "target_position_scope: all_subsequent",
+        "source_position_aggregation: mean_over_all_positions",
+        "differentiation_mode: reverse",
         "aggregation: mean",
-        f"seq_len: {getattr(result, 'seq_len', 1)}",
+        f"seq_len: {getattr(result, 'mean_seq_len', 0.0):.1f}",
         # PER-LAYER, NOT WHOLESALE. Describing a hybrid model's lens as
         # "frozen_qk" when the treatment reached 6 of 16 layers is the exact
         # overstatement this file's own docstring warns about. The requested
         # treatment and where it actually applied are separate facts.
         f"attention_gradients_requested: {treatment}",
+        f"norm_statistics: {'frozen' if freeze_norms else 'differentiated'}",
         f"attention_gradients_applied_to_layers: {attended}",
         # THE LAYERS THIS ARTIFACT ACTUALLY COVERS, stated once and cheaply.
         # Everything else that needs them had to deserialise the whole tensor
