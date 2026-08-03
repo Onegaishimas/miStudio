@@ -1965,3 +1965,54 @@ def test_a_layer_that_never_ran_is_refused_not_silently_dropped():
 
     with pytest.raises(ValueError, match=r"never produced an activation"):
         fitter.fit(["abc"], layers=[0, 1])
+
+
+def test_the_semantic_probe_defaults_to_MID_STACK_not_the_top():
+    """The top of the stack is the worst place to look for an intermediate.
+
+    OBSERVED ON HARDWARE. A bridge-entity fixture that a readout finds at L13
+    of 16 failed the check, because the check defaulted to the LAST fitted
+    layer (L15) — by which point the model has moved on to the answer. The
+    artifact then correctly refused to publish, for a reason that said nothing
+    about the lens.
+
+    MUTATION CONTROL: default back to `fitted_layers[-1]` and this fails.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import src.workers.jlens_fit_tasks as task_mod
+
+    seen = {}
+
+    def fake_check_semantic(readout, prompt, layer, expected_intermediate, top_k=8):
+        seen["layer"] = layer
+        from src.services.jlens_validation import CheckClass, CheckResult, CheckStatus
+
+        return CheckResult(CheckClass.SEMANTIC, CheckStatus.PASS, "stub")
+
+    loaded = MagicMock()
+    loaded.n_layers = 16
+    service = MagicMock()
+    service._load_payload.return_value = {i: None for i in range(16)}
+    service.layer_scales.return_value = {}
+
+    from src.services import jlens_readout_service, jlens_validation
+
+    with patch.object(jlens_validation, "check_semantic", fake_check_semantic), patch.object(
+        jlens_readout_service, "ReadoutService", lambda **kw: MagicMock()
+    ), patch.object(
+        jlens_readout_service, "JacobianTransport", lambda j, **kw: object()
+    ):
+        task_mod._run_semantic_check(
+            service=service,
+            ref=MagicMock(),
+            loaded=loaded,
+            probe={"prompt": "p", "expected_intermediate": " France"},
+            fitted_layers=list(range(16)),
+        )
+
+    # Two thirds of 16, minus one -> 9. Emphatically not 15.
+    assert seen["layer"] == 9, (
+        f"probe ran at layer {seen['layer']}; defaulting to the top of the "
+        "stack tests next-token content, not an unspoken intermediate"
+    )

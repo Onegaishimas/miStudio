@@ -260,7 +260,22 @@ def _run_semantic_check(service, ref, loaded, probe: Dict[str, Any], fitted_laye
     expected = str(probe.get("expected_intermediate", ""))
     top_k = int(probe.get("top_k", 8))
     layer = probe.get("layer")
-    layer = int(layer) if layer is not None else fitted_layers[-1]
+    if layer is not None:
+        layer = int(layer)
+    else:
+        # MID-STACK, NOT THE TOP. Defaulting to the last fitted layer put the
+        # check at the worst possible place to find an UNSPOKEN intermediate:
+        # by the top of the stack the model has moved on to the answer. Observed
+        # on hardware — a bridge-entity fixture that a readout finds at L13 of
+        # 16 failed the check, which ran at L15, and the artifact correctly
+        # refused to publish for a reason that said nothing about the lens.
+        #
+        # Two thirds up, snapped to the nearest FITTED layer, matching the
+        # built-in check in the readout endpoint so the two cannot disagree
+        # about where "mid-band" is.
+        n_layers = int(getattr(loaded, "n_layers", 0) or (max(fitted_layers) + 1))
+        target = max(0, int(n_layers * 2 / 3) - 1)
+        layer = min(fitted_layers, key=lambda c: abs(c - target))
 
     if layer not in fitted_layers:
         return CheckResult(
