@@ -70,3 +70,60 @@ class TestStaleness:
         """A report finished last week is not orphaned, it is done."""
         ancient = {"heartbeat": time.time() - 86400}
         assert looks_orphaned(state, ancient) is False
+
+
+class TestTheStatusEndpointActuallyRuns:
+    """The endpoint that READS the heartbeat had no test, and I broke it.
+
+    `from ...workers.task_heartbeat import ...` resolves to `src.api.workers`,
+    one package short of `src.workers`. Because the import sits INSIDE the
+    handler it does not fail at module import, so nothing noticed: the whole
+    backend suite passed, CI went green, the image shipped, and every call to
+    /models/tasks/{id} returned 500 — which is how a band report that had
+    finished successfully read as unreachable.
+
+    MUTATION CONTROLS:
+      * restore the ...workers depth  -> "resolves its imports" fails
+      * drop the orphan branch        -> "reports orphaned" fails
+    """
+
+    def _status(self, state, info):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from src.api.v1.endpoints.models import get_task_status
+
+        result = MagicMock()
+        result.state = state
+        result.info = info
+        result.ready.return_value = state in ("SUCCESS", "FAILURE")
+        result.successful.return_value = state == "SUCCESS"
+        result.failed.return_value = state == "FAILURE"
+        result.result = {}
+
+        with patch("celery.result.AsyncResult", return_value=result):
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(get_task_status("t-1"))
+            finally:
+                loop.close()
+
+    def test_it_resolves_its_imports_and_returns(self):
+        """Exercises the handler BODY. A module-import check would not have
+        caught this — the bad import is inside the function."""
+        body = self._status("PROGRESS", beat({"stage": "profiling"}))
+        assert body["task_id"] == "t-1"
+        assert body["state"] == "PROGRESS"
+        assert body["seconds_since_heartbeat"] is not None
+
+    def test_it_reports_orphaned_when_the_beat_goes_stale(self):
+        stale = {"stage": "profiling", "heartbeat": time.time() - STALE_AFTER_SECONDS - 60}
+        body = self._status("PROGRESS", stale)
+        assert body["state"] == "ORPHANED"
+        assert body["ready"] is True
+        assert "stopped reporting" in body["error"]
+
+    def test_a_healthy_task_is_untouched(self):
+        body = self._status("SUCCESS", {"heartbeat": time.time() - 99999})
+        assert body["state"] == "SUCCESS"
+        assert "error" not in body

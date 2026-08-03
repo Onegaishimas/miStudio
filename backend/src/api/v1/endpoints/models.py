@@ -1271,7 +1271,7 @@ async def get_task_status(task_id: str):
 
     task_result = AsyncResult(task_id, app=celery_app)
 
-    from ...workers.task_heartbeat import (
+    from ....workers.task_heartbeat import (
         STALE_AFTER_SECONDS,
         looks_orphaned,
         seconds_since_beat,
