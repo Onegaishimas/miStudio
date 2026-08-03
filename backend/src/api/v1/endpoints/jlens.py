@@ -257,6 +257,8 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
             detail=f"No model with id {request.model_id!r}",
         )
 
+    from ....workers import jlens_progress
+
     task = fit_jlens_artifact.delay(
         model_id=request.model_id,
         prompts=request.prompts,
@@ -267,6 +269,10 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         allow_coverage_loss=request.allow_coverage_loss,
         full_sequence=request.full_sequence,
     )
+    # VISIBLE WHILE IT RUNS. A 45-minute fit used to burn the GPU with nothing
+    # in the product saying so — the panel's fit card only knew about a fit the
+    # same browser tab had started.
+    jlens_progress.open_row(jlens_progress.FIT, request.model_id, task.id)
     return FitAccepted(task_id=task.id, model_id=request.model_id, queue="extraction")
 
 
@@ -351,12 +357,17 @@ async def compute_band_report(
             detail=f"No model with id {request.model_id!r}",
         )
 
+    from ....workers import jlens_progress
+
     task = compute_band_report_task.delay(
         model_id=request.model_id,
         prompts=request.prompts,
         control_seed=request.control_seed,
         layers=request.layers,
         use_artifact=request.use_artifact,
+    )
+    jlens_progress.open_row(
+        jlens_progress.BAND_REPORT, request.model_id, task.id
     )
     return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
 
@@ -734,6 +745,8 @@ async def readout(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No model with id {request.model_id!r}",
         )
+
+    from ....workers import jlens_progress
 
     task = compute_readout.delay(
         model_id=request.model_id,
@@ -1250,6 +1263,8 @@ async def run_intervention(
             ),
         )
 
+    from ....workers import jlens_progress
+
     task = run_intervention_task.delay(
         model_id=request.model_id,
         prompt=request.prompt,
@@ -1262,6 +1277,9 @@ async def run_intervention(
         control_seed=request.control_seed,
         positions=request.positions,
         artifact_id=request.artifact_id,
+    )
+    jlens_progress.open_row(
+        jlens_progress.INTERVENTION, request.model_id, task.id
     )
     return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
 

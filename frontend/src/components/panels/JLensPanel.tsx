@@ -29,6 +29,7 @@ import { WatchlistCard } from '../jlens/WatchlistCard';
 import { LensModeTabs } from '../jlens/LensModeTabs';
 import { ProvenanceStrip } from '../jlens/ProvenanceStrip';
 import { ReadoutGrid } from '../jlens/ReadoutGrid';
+import { RunningWork } from '../jlens/RunningWork';
 import { TrajectoryChart } from '../jlens/TrajectoryChart';
 import { PIN_COLORS, displayToken } from '../jlens/utils';
 import {
@@ -219,6 +220,10 @@ export function JLensPanel() {
           />
         </div>
       </header>
+
+      {/* Above the scroller: work in flight must stay visible while the user
+          reads the grid, and it is the answer to "why is the GPU busy". */}
+      <RunningWork modelId={modelId} />
 
       {/* ------------------------------------------------------------ request */}
       <section className="mb-4 shrink-0 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">

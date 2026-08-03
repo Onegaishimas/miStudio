@@ -26,6 +26,14 @@ export enum TaskType {
   TOKENIZATION = 'tokenization',
   LABELING = 'labeling',
   NEURONPEDIA_PUSH = 'neuronpedia_push',
+  // J-space work. Prefixed so Active Operations can tell a 45-minute lens fit
+  // apart from a training run at a glance — and so the J-Lens panel can filter
+  // to just its own jobs without matching on entity ids.
+  JLENS_FIT = 'jlens_fit',
+  JLENS_BAND_REPORT = 'jlens_band_report',
+  JLENS_INTERVENTION = 'jlens_intervention',
+  JLENS_READOUT = 'jlens_readout',
+  JLENS_PROBE = 'jlens_probe',
 }
 
 /**

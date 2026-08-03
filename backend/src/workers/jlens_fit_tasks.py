@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
 from .task_heartbeat import beat
+from . import jlens_progress
 from ..core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,17 @@ def fit_jlens_artifact(
 
     self.update_state(state="PROGRESS", meta={"stage": "fitting", "prompts_seen": 0})
 
+    total_prompts = max(len(prompts), 1)
+
     def on_progress(progress):
+        # The SAME numbers the heartbeat carries, written where Active
+        # Operations and the J-Lens panel can see them. Without this a fit is
+        # visible only to the browser tab that started it.
+        jlens_progress.update_row(
+            self.request.id,
+            status="running",
+            progress=100.0 * progress.prompts_seen / total_prompts,
+        )
         self.update_state(
             state="PROGRESS",
             meta=beat({
@@ -181,6 +192,7 @@ def fit_jlens_artifact(
                 "The artifact failed a local validation class; see `validation`."
             )
 
+    jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
     return {
         "model_id": model_id,
         "repo_id": repo_id,

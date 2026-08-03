@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
 from .task_heartbeat import beat
+from . import jlens_progress
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,9 @@ def compute_band_report_task(
     from ..services.jlens_band_service import compute_band_report
 
     def on_prompt(index: int, total: int) -> None:
+        jlens_progress.update_row(
+            self.request.id, status="running", progress=100.0 * index / max(total, 1)
+        )
         # Inside the loop, not at its edges: this stage runs for tens of
         # minutes and a beat only at its start would be indistinguishable from
         # a worker that died at its start.
@@ -151,6 +155,7 @@ def compute_band_report_task(
     path = save_band_report(ref.directory, report)
     logger.info("Wrote band report for %s to %s", loaded.name, path)
 
+    jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
     return {
         "model_id": loaded.name,
         "slug": ref.slug,

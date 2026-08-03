@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
 from .task_heartbeat import beat
+from . import jlens_progress
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,7 @@ def run_intervention_task(
         positions=chosen_positions,
     )
 
+    jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
     return {
         "model": loaded.name,
         "primitive": result.primitive.value,
