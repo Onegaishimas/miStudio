@@ -45,6 +45,7 @@ def fit_jlens_artifact(
     semantic_probe: Optional[Dict[str, Any]] = None,
     allow_coverage_loss: bool = False,
     full_sequence: bool = False,
+    convergence_delta: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fit, validate and publish a J-lens artifact for one model.
 
@@ -79,12 +80,23 @@ def fit_jlens_artifact(
         device = "cuda" if torch.cuda.is_available() else "cpu"
         loaded = load_for_readout(record, capture_device=device)
 
+    from ..ml.jlens_fitter import DEFAULT_CONVERGENCE_DELTA
+
+    # None means the fitter's default. Passed explicitly rather than defaulted
+    # in the signature so the value that was ACTUALLY used is the one written
+    # into config.yaml below — a recipe naming a threshold the fit did not use
+    # is worse than one naming none.
     fitter = JacobianFitter(
         loaded.model,
         loaded.tokenizer,
         loaded.structure,
         freeze_qk=freeze_qk,
         full_sequence=full_sequence,
+        convergence_delta=(
+            convergence_delta
+            if convergence_delta is not None
+            else DEFAULT_CONVERGENCE_DELTA
+        ),
     )
 
     self.update_state(state="PROGRESS", meta={"stage": "fitting", "prompts_seen": 0})
