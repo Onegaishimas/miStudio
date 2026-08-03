@@ -210,7 +210,13 @@ class FitRequest(BaseModel):
     model_id: str
     prompts: List[str]
     layers: Optional[List[int]] = None
-    freeze_qk: bool = True
+    #: FULL BACKWARD IS THE STANDARD RECIPE (D4); frozen Q/K is an ABLATION.
+    #: Defaulting this to True made the ablation the only thing an API or
+    #: MCP caller could get without naming the flag, and the recipe written
+    #: beside the artifact then honestly recorded `frozen_qk` — an aligned
+    #: request producing an unaligned lens, with the provenance telling the
+    #: truth about it and nobody reading.
+    freeze_qk: bool = False
     corpus_name: str = "unspecified"
     #: Fixture for the SEMANTIC validation class: {prompt, expected_intermediate,
     #: layer?, top_k?}. Optional, and its absence FAILS CLOSED — the artifact is
