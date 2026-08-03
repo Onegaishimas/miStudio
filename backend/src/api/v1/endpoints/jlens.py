@@ -218,6 +218,21 @@ class FitRequest(BaseModel):
     #: not. Off by default: a refit is not automatically an upgrade, and a
     #: 16-layer lens was destroyed by a 9-layer one with no warning at all.
     allow_coverage_loss: bool = False
+    #: Relative Frobenius change in the accumulated J below which the fit is
+    #: considered settled, sustained across consecutive shards.
+    #:
+    #: EXPOSED BECAUSE BUYING CONVERGENCE WITH GPU HOURS IS NOT THE ONLY
+    #: OPTION. Both 400-prompt fits reported converged=false at the built-in
+    #: 1e-3, and the only lever was more corpus. A caller who wants a looser
+    #: criterion should be able to ask for one and have it RECORDED, rather
+    #: than have the artifact silently describe a threshold it was not fitted
+    #: against.
+    #:
+    #: None keeps the fitter's own default. Bounded below at 0 because a
+    #: non-positive delta can never be met and would fit the entire corpus
+    #: while reporting "not converged" — indistinguishable from a genuine
+    #: failure to settle.
+    convergence_delta: Optional[float] = Field(None, gt=0)
     #: Run the sub-network at the REAL sequence length.
     #:
     #: COSTS S TIMES THE COMPUTE and is the only setting under which downstream
@@ -268,6 +283,7 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         semantic_probe=request.semantic_probe,
         allow_coverage_loss=request.allow_coverage_loss,
         full_sequence=request.full_sequence,
+        convergence_delta=request.convergence_delta,
     )
     # VISIBLE WHILE IT RUNS. A 45-minute fit used to burn the GPU with nothing
     # in the product saying so — the panel's fit card only knew about a fit the

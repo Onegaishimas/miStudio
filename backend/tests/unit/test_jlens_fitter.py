@@ -944,3 +944,102 @@ def test_the_faithful_path_perturbs_only_the_target_position():
     a = forward(point)
     b = forward(point + 1.0)
     assert not torch.allclose(a, b), "the target position had no effect at all"
+
+
+# ---------------------------------------------------------------------------
+# The convergence threshold is the CALLER'S to set, and is recorded as used
+#
+# Both 400-prompt fits reported converged=false at the built-in 1e-3, and the
+# only lever available was more corpus — an hour of GPU to answer a question
+# about a threshold. Exposing it means a looser criterion can be ASKED for.
+#
+# What must never happen is a recipe naming a threshold the fit did not use:
+# two artifacts fitted at different deltas would then be compared as though
+# they had met the same criterion.
+#
+# MUTATION CONTROLS:
+#   * task ignores the argument and takes the default -> "honours" fails
+#   * config writes the default instead of the used   -> "records" fails
+# ---------------------------------------------------------------------------
+
+
+def test_the_fitter_honours_a_caller_supplied_convergence_delta():
+    from src.ml.jlens_fitter import DEFAULT_CONVERGENCE_DELTA
+
+    stack, _, _ = make_stack(41)
+    loose = JacobianFitter(
+        stack, Tokenizer(), Structure(stack), freeze_qk=False,
+        min_prompts=1, chunk=3, convergence_delta=5e-2,
+    )
+    assert loose.convergence_delta == 5e-2
+    assert loose.convergence_delta != DEFAULT_CONVERGENCE_DELTA
+
+    result = loose.fit(["abc", "abcd"])
+    # The RESULT carries what was used, which is what the config writer reads.
+    assert result.convergence_delta == 5e-2
+
+
+def test_the_config_records_the_convergence_delta_that_was_actually_used():
+    """A recipe naming an unused threshold is worse than one naming none."""
+
+    class _R(_RecipeResult):
+        convergence_delta = 5e-2
+
+    from src.workers.jlens_fit_tasks import _config_yaml
+
+    text = _config_yaml(_RecipeLoaded(), _R(), freeze_qk=True, corpus_name="c")
+    assert "convergence_delta: 0.05" in text, (
+        f"config did not record the delta the fit ran at:\n{text[:400]}"
+    )
+
+
+def test_the_TASK_threads_the_caller_s_convergence_delta_to_the_fitter():
+    """Exercises `fit_jlens_artifact` itself, not JacobianFitter directly.
+
+    An earlier version of this section tested the fitter and the config writer
+    in isolation. Both mutations survived: constructing a JacobianFitter by
+    hand never runs the task, so a task that ignored its own argument passed.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import src.workers.jlens_fit_tasks as task_mod
+
+    seen = {}
+
+    class _Fitter:
+        def __init__(self, *_a, convergence_delta=None, **_kw):
+            seen["delta"] = convergence_delta
+
+        def fit(self, *_a, **_kw):
+            raise RuntimeError("stop here — construction is what is under test")
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = MagicMock(
+        repo_id="org/model"
+    )
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    with patch("src.ml.jlens_fitter.JacobianFitter", _Fitter), patch(
+        "src.core.database.get_sync_db", fake_db
+    ), patch(
+        "src.services.jlens_model_registry.load_for_readout",
+        return_value=MagicMock(),
+    ), patch.object(
+        task_mod.fit_jlens_artifact, "update_state", MagicMock()
+    ):
+        try:
+            task_mod.fit_jlens_artifact.run(
+                model_id="m_1", prompts=["a"], convergence_delta=0.05
+            )
+        except RuntimeError:
+            pass
+
+    assert seen.get("delta") == 0.05, (
+        f"the task built its fitter with delta={seen.get('delta')}, not the "
+        "0.05 the caller asked for — the argument is being dropped"
+    )

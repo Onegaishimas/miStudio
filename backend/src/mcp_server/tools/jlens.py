@@ -371,6 +371,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         layers: Annotated[Optional[List[int]], Field(description="Absolute layer indices; omit for every layer")] = None,
         freeze_qk: Annotated[bool, Field(description="Freeze Q/K as well as norms. INAPPLICABLE on layers that do not attend, and recorded per layer rather than claimed wholesale")] = True,
         corpus_name: Annotated[str, Field(description="Recorded in the artifact's recipe (BR-007) — name the corpus, do not leave it unspecified")] = "unspecified",
+        convergence_delta: Annotated[Optional[float], Field(description="Relative Frobenius change in J below which the fit is settled. Omit for the fitter default (1e-3). A LOOSER value converges sooner without more corpus; the artifact records whichever was used, so two fits are never compared as though they met the same criterion")] = None,
         full_sequence: Annotated[bool, Field(description="Run the sub-network at the REAL sequence length. COSTS S TIMES THE COMPUTE. Off by default, and a lens fitted without it OVERSTATES the self-attention path: the cheap path runs length-1, where a softmax over one key is 1.0, so the perturbed position gets full attention weight instead of the share it actually had. The artifact records which was used")] = False,
         allow_coverage_loss: Annotated[bool, Field(description="Publish even though the EXISTING artifact covers layers this fit does not. Off by default and refused otherwise — a 16-layer lens was once destroyed by a 9-layer refit with no warning. Losing coverage must be a decision")] = False,
         semantic_probe: Annotated[Optional[Dict[str, Any]], Field(description="Fixture for the SEMANTIC check: {prompt, expected_intermediate, layer?, top_k?}. WITHOUT IT NOTHING IS PUBLISHED — the check cannot run and the suite fails closed. The intermediate must NOT appear in the prompt, or a lens encoding nothing would pass")] = None,
@@ -400,6 +401,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "corpus_name": corpus_name,
             "allow_coverage_loss": allow_coverage_loss,
             "full_sequence": full_sequence,
+            **({"convergence_delta": convergence_delta} if convergence_delta else {}),
         }
         if layers:
             body["layers"] = layers
