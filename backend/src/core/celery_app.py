@@ -236,6 +236,9 @@ celery_app.conf.update(
         "cleanup_stuck_circuit_runs": {"queue": "low_priority"},
         "cleanup_stuck_enhanced_labeling": {"queue": "low_priority"},
         "cleanup_task_queue": {"queue": "low_priority"},
+        # SHORT NAME, explicit queue — the trap documented above. A glob on the
+        # module path would never match this task.
+        "cleanup_orphaned_tasks": {"queue": "low_priority"},
         "gpu_watchdog": {"queue": "low_priority"},
         "steering_worker_reconcile": {"queue": "low_priority"},
 
@@ -401,6 +404,24 @@ celery_app.conf.update(
                 "queue": "low_priority",
             },
         },
+        # Close rows whose worker stopped reporting — every 5 minutes.
+        #
+        # A row is written when a task is QUEUED and moved by the task ITSELF,
+        # so a worker killed by a pod roll writes nothing and the row keeps its
+        # last progress forever. A J-lens fit sat at "running 21.5%" in Active
+        # Operations for hours while the GPU was idle at 0%.
+        #
+        # FIVE MINUTES, not an hour: this is what a user is looking at while
+        # wondering whether their job is alive, and the heartbeat threshold is
+        # already ten minutes, so an hourly sweep would leave a ghost visible
+        # for up to seventy.
+        "cleanup-orphaned-tasks": {
+            "task": "cleanup_orphaned_tasks",
+            "schedule": 300.0,
+            "options": {
+                "queue": "low_priority",
+            },
+        },
         # Checkpoint retention pruning (Feature 021) - runs daily.
         # No-ops unless checkpoint_prune_enabled=true, and reports without
         # deleting while checkpoint_prune_dry_run=true (both defaults).
@@ -462,6 +483,7 @@ celery_app.autodiscover_tasks(
         "src.workers.cleanup_stuck_nlp",
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
+        "src.workers.cleanup_orphaned_tasks",
         "src.workers.jlens_fit_tasks",
         "src.workers.jlens_readout_tasks",
         "src.workers.jlens_probe_tasks",

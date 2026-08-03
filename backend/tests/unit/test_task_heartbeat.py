@@ -183,3 +183,111 @@ class TestActiveOperationsAgreesWithTheHeartbeat:
         task.status = "running"
         task.task_id = None
         assert _looks_orphaned(task) is False
+
+
+class TestTheJanitorClosesGhostRows:
+    """Read-time reconciliation makes the LISTING honest; this makes it STOP.
+
+    A GET must not have side effects, so the write belongs in a janitor. Without
+    one the row stays "running" in the database forever and every consumer that
+    reads it directly — not just the reconciled listing — keeps believing it.
+
+    MUTATION CONTROLS:
+      * janitor also closes QUEUED rows      -> "only running" fails
+      * janitor RETRIES instead of failing   -> "does not resubmit" fails
+      * task not registered / wrong queue    -> "reachable" fails
+    """
+
+    def test_the_janitor_is_registered_and_routed_to_a_real_queue(self):
+        from src.core.celery_app import celery_app
+
+        assert "cleanup_orphaned_tasks" in celery_app.tasks, (
+            "the janitor is not in the live registry, so beat would schedule a "
+            "task no worker can execute"
+        )
+        # Short name + explicit queue: a module-path glob never matches these,
+        # which this file's own celery_app comment records as a shipped defect.
+        assert celery_app.conf.task_routes["cleanup_orphaned_tasks"]["queue"] == (
+            "low_priority"
+        )
+        entry = celery_app.conf.beat_schedule["cleanup-orphaned-tasks"]
+        assert entry["task"] == "cleanup_orphaned_tasks"
+        assert entry["schedule"] <= STALE_AFTER_SECONDS, (
+            "the sweep must run at least as often as the staleness threshold, "
+            "or a ghost row stays visible for the sum of both"
+        )
+
+    def test_it_closes_only_rows_that_claim_to_be_RUNNING(self):
+        """A queued task has not started and cannot beat.
+
+        On a single-GPU queue everything waits behind a long job, so condemning
+        queued rows would fail the entire backlog.
+
+        THE FILTER IS INSPECTED, not assumed. An earlier version of this test
+        used a fake that returned the same row whatever it was asked, so
+        deleting the status filter from the janitor changed nothing observable
+        and the mutation survived.
+        """
+        import src.workers.cleanup_orphaned_tasks as janitor
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock, patch
+
+        running = MagicMock(status="running", task_id="t-dead", error_message=None)
+        criteria = []
+
+        class _Q:
+            def query(self, _m):
+                return self
+
+            def filter(self, *args, **_kw):
+                criteria.extend(str(a) for a in args)
+                return self
+
+            def all(self):
+                return [running]
+
+            def commit(self):
+                pass
+
+        @contextmanager
+        def fake_db():
+            yield _Q()
+
+        dead = MagicMock()
+        dead.state = "PROGRESS"
+        dead.info = {"heartbeat": time.time() - STALE_AFTER_SECONDS - 60}
+
+        with patch("src.core.database.get_sync_db", fake_db), patch(
+            "celery.result.AsyncResult", return_value=dead
+        ):
+            out = janitor.cleanup_orphaned_tasks_task.run()
+
+        assert out["closed"] == 1
+        assert running.status == "failed"
+        assert "presumed gone" in running.error_message
+
+        joined = " ".join(criteria)
+        assert "status" in joined, (
+            f"the janitor did not filter on status; criteria were {criteria}. "
+            "Without it every QUEUED row waiting behind a long job would be "
+            "marked failed."
+        )
+        assert "task_id" in joined, (
+            "the janitor did not filter out rows with no Celery id — federated "
+            "rows from other job tables have none and cannot be checked"
+        )
+
+    def test_it_does_not_resubmit_the_work(self):
+        """A dead fit lost every prompt it processed; the accumulator was in
+        worker memory. Re-running automatically would take the GPU for another
+        hour without being asked."""
+        import inspect
+
+        import src.workers.cleanup_orphaned_tasks as janitor
+
+        source = inspect.getsource(janitor)
+        for resubmit in (".delay(", ".apply_async(", ".retry("):
+            assert resubmit not in source, (
+                f"the janitor calls {resubmit} — it must mark the row and stop, "
+                "not silently reclaim the GPU"
+            )
