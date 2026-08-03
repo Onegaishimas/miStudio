@@ -684,35 +684,45 @@ def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = No
     scales = service.layer_scales(ref)
     transport = JacobianTransport(jacobians, scales=scales)
 
-    def top_at(prompt: str, layer: int, top_k: int):
+    def top_at(prompt: str, at_layers, top_k: int):
+        """Top-k at the last position for every requested layer, in ONE pass.
+
+        `stream` captures residuals once and reads each requested layer off
+        them, so passing the whole scan here costs one forward pass rather than
+        one per layer.
+        """
+        ordered = list(at_layers)
         last = None
-        for message in readout.stream(prompt, [transport], layers=[layer], top_n=top_k):
+        for message in readout.stream(
+            prompt, [transport], layers=ordered, top_n=top_k
+        ):
             if isinstance(message, LensTokenMessage):
                 last = message
         if last is None:
             # An empty stream is a FAILED semantic check, not a NameError and
             # not an empty pass — the distinction this feature exists for.
             raise ValueError("readout produced no token messages")
-        return last.results[0].top_tokens[0]
+        rows = last.results[0].top_tokens
+        # Indexed by POSITION IN THE REQUESTED LIST, not by absolute layer.
+        return {layer: rows[i] for i, layer in enumerate(ordered) if i < len(rows)}
 
-    # Mid-band by position in the stack, not by a band constant: no band report
-    # is required to say "about two thirds of the way up", and BR-002 forbids a
-    # boundary constant anywhere.
+    # SCAN THE LAYERS THE ARTIFACT ACTUALLY HAS. This used to probe "about two
+    # thirds of the way up", with a comment insisting that was not a band
+    # constant. It was one: it asserts where in the stack an unspoken
+    # intermediate must live, which is exactly the kind of imported boundary
+    # BR-002 exists to forbid. It cost a converged LFM2 artifact, whose L9
+    # readout was the right concept field with the token elsewhere.
     #
-    # PROBE A LAYER THE ARTIFACT ACTUALLY HAS. On a partial fit the mid-stack
-    # index is usually absent, and reading out there has no Jacobian to apply —
-    # the check would fail for a reason that says nothing about the lens. Fall
-    # back to the present layer nearest the target.
-    mid = max(0, int(loaded.n_layers * 2 / 3) - 1)
+    # The scan is weaker than a single layer, so it carries a matched control:
+    # the same token must NOT surface for an unrelated prompt.
     layers = sorted(present) if present else []
-    if layers and mid not in layers:
-        mid = min(layers, key=lambda candidate: abs(candidate - mid))
 
     return check_semantic(
         top_at,
         prompt=SEMANTIC_FIXTURE_PROMPT,
-        layer=mid,
+        layers=layers,
         expected_intermediate=SEMANTIC_FIXTURE_ANSWER,
+        control_prompt=SEMANTIC_FIXTURE_CONTROL,
     )
 
 
@@ -720,6 +730,12 @@ def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = No
 # recovering it cannot be explained by the artifact encoding nothing.
 SEMANTIC_FIXTURE_PROMPT = "The number of legs on the animal that spins webs is"
 SEMANTIC_FIXTURE_ANSWER = "spider"
+
+# The MATCHED CONTROL for the scan above. A prompt for which the expected
+# answer would be an absurd continuation: if the lens surfaces 'spider' here
+# too, then surfacing it for the real prompt says nothing about the artifact,
+# and the check fails however well the real prompt scored.
+SEMANTIC_FIXTURE_CONTROL = "The interest rate set by the central bank was raised to"
 
 
 class ReadoutAccepted(BaseModel):

@@ -609,10 +609,18 @@ def _looks_orphaned(task) -> bool:
         from celery.result import AsyncResult
 
         from ....core.celery_app import celery_app
-        from ....workers.task_heartbeat import looks_orphaned
+        from ....workers.task_heartbeat import (
+            looks_abandoned,
+            seconds_since_row_update,
+        )
 
         result = AsyncResult(task.task_id, app=celery_app)
-        return looks_orphaned(result.state, result.info)
+        # Covers the expired-result case too: a worker that died between
+        # progress reports leaves Celery answering PENDING with no info, and
+        # the heartbeat rule alone reads that as healthy.
+        return looks_abandoned(
+            result.state, result.info, seconds_since_row_update(task)
+        )
     except Exception:  # noqa: BLE001 - a listing must not fail on one bad row
         return False
 

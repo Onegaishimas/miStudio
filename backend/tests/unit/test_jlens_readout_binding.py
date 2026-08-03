@@ -475,15 +475,34 @@ def test_a_partial_fit_validates_through_the_real_readout_binding(tmp_path, monk
     )
 
 
-def test_the_semantic_check_probes_a_layer_the_artifact_actually_holds(monkeypatch):
-    """Calls `_semantic_check` ITSELF and records the layer it targets."""
+def test_the_semantic_check_scans_only_layers_the_artifact_actually_holds(monkeypatch):
+    """Calls `_semantic_check` ITSELF and records the layers it targets.
+
+    The endpoint used to probe "about two thirds of the way up", with a comment
+    asserting that was not a band constant. It was one — it asserts WHERE an
+    unspoken intermediate must live, and BR-002 forbids this project assuming a
+    band it has not measured for the model in front of it. It also cost a
+    converged LFM2 artifact whose readout at that depth was the correct concept
+    field with the token elsewhere in the stack.
+
+    Scanning must still be confined to the layers PRESENT: reading out at a
+    layer the artifact does not hold has no Jacobian to apply, and would fail
+    for a reason that says nothing about the lens.
+
+    MUTATION CONTROL: restore the `mid = max(0, int(n_layers * 2 / 3) - 1)`
+    target, or pass `sorted(range(loaded.n_layers))` instead of `present`, and
+    this fails.
+    """
     from src.api.v1.endpoints import jlens
     from src.services import jlens_readout_service, jlens_validation
 
     targeted = {}
 
-    def fake_check_semantic(readout, prompt, layer, expected_intermediate, top_k=8):
-        targeted["layer"] = layer
+    def fake_check_semantic(
+        readout, prompt, layers, expected_intermediate, top_k=8, control_prompt=None
+    ):
+        targeted["layers"] = layers
+        targeted["control_prompt"] = control_prompt
         from src.services.jlens_validation import CheckClass, CheckResult, CheckStatus
 
         return CheckResult(CheckClass.SEMANTIC, CheckStatus.PASS, "stubbed")
@@ -507,14 +526,17 @@ def test_the_semantic_check_probes_a_layer_the_artifact_actually_holds(monkeypat
 
     monkeypatch.setattr(jlens, "_service", lambda: _Svc())
 
-    # Mid-stack for a 26-layer model is 16, which this artifact does NOT hold.
+    # A PARTIAL artifact is scanned over exactly what it holds — never over the
+    # model's full layer range.
     jlens._semantic_check(_Loaded(), object(), [24, 25])
-    assert targeted["layer"] == 24, (
-        f"the probe targeted layer {targeted['layer']}, which the artifact does "
-        "not hold — the readout there has no Jacobian to apply and the check "
-        "would fail for a reason that says nothing about the lens"
+    assert targeted["layers"] == [24, 25], (
+        f"the probe scanned {targeted['layers']}, which is not the set the "
+        "artifact holds — a readout there has no Jacobian to apply"
     )
 
-    # A full fit keeps the mid-stack target unchanged.
+    # A full fit scans the whole stack rather than picking a depth.
     jlens._semantic_check(_Loaded(), object(), list(range(26)))
-    assert targeted["layer"] == 16
+    assert targeted["layers"] == list(range(26))
+
+    # And the matched control travels with it, or the scan is a rubber stamp.
+    assert targeted["control_prompt"] == jlens.SEMANTIC_FIXTURE_CONTROL

@@ -399,10 +399,11 @@ class JLensArtifactService:
             return None
         return stored
 
-    def discard_staged(self, repo_id: str) -> None:
-        staging = self.staging_dir(repo_id)
-        if staging.exists():
-            shutil.rmtree(staging)
+    # There is deliberately no `discard_staged`. It existed, and its only caller
+    # deleted a converged artifact the moment a fixture failed — the expensive
+    # half of the work thrown away to save a directory that `write_staged`
+    # clears anyway on the next fit. A failed validation leaves the staged fit
+    # in place so it can be re-validated for free.
 
     # ------------------------------------------------------------- serving
 
