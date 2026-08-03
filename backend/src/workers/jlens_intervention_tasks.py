@@ -21,6 +21,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
+from .task_heartbeat import beat
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def run_intervention_task(
         if record is None:
             raise ValueError(f"No model with id {model_id!r}")
 
-        self.update_state(state="PROGRESS", meta={"stage": "loading_model"})
+        self.update_state(state="PROGRESS", meta=beat({"stage": "loading_model"}))
         try:
             loaded = load_for_readout(record, capture_device=None)
         except ModelNotAvailable as exc:
@@ -122,7 +123,7 @@ def run_intervention_task(
     if bad:
         raise ValueError(f"positions {bad} outside 0..{n_positions - 1}")
 
-    self.update_state(state="PROGRESS", meta={"stage": "clean_pass"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "clean_pass"}))
     residuals = service._capture_residuals(input_ids, layers)  # noqa: SLF001
 
     if direction is None and direction_token:
@@ -186,10 +187,10 @@ def run_intervention_task(
                 cells += 1
         return total / max(cells, 1)
 
-    self.update_state(state="PROGRESS", meta={"stage": "intervened_pass"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "intervened_pass"}))
     intervened = outcome(named if named is not None else controls[0])
 
-    self.update_state(state="PROGRESS", meta={"stage": "control_pass"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "control_pass"}))
     # Averaged over all k controls rather than the first: one random direction
     # has its own variance, and comparing against a single draw reports that
     # variance as an effect.

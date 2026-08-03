@@ -1271,13 +1271,45 @@ async def get_task_status(task_id: str):
 
     task_result = AsyncResult(task_id, app=celery_app)
 
+    from ...workers.task_heartbeat import (
+        STALE_AFTER_SECONDS,
+        looks_orphaned,
+        seconds_since_beat,
+    )
+
+    state = task_result.state
+    info = task_result.info
+
+    # A TASK WHOSE WORKER DIED USED TO READ AS PROGRESS FOREVER.
+    #
+    # Celery keeps whatever the task last reported, and nothing writes a
+    # terminal state when a worker vanishes — a pod roll, an OOM kill, a node
+    # drain. A band report killed by a deploy kept reading as "profiling" for
+    # forty minutes and three status checks called it healthy.
+    #
+    # Reported as ORPHANED rather than FAILURE: the task may well have done
+    # real work before it died, and claiming it failed asserts something this
+    # check did not observe. What it observed is that the task stopped saying
+    # anything.
+    orphaned = looks_orphaned(state, info)
+    if orphaned:
+        state = "ORPHANED"
+
     response = {
         "task_id": task_id,
-        "state": task_result.state,
-        "ready": task_result.ready(),
+        "state": state,
+        "ready": task_result.ready() or orphaned,
         "successful": task_result.successful() if task_result.ready() else None,
         "failed": task_result.failed() if task_result.ready() else None,
+        "seconds_since_heartbeat": seconds_since_beat(info),
     }
+    if orphaned:
+        response["error"] = (
+            f"the worker running this task stopped reporting more than "
+            f"{STALE_AFTER_SECONDS // 60} minutes ago and is presumed gone "
+            "(a deploy, an eviction or a crash). Any work it completed was not "
+            "saved. Re-run it."
+        )
 
     # Add result if task is ready
     if task_result.ready():

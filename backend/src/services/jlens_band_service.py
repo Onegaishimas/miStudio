@@ -27,7 +27,7 @@ import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import torch
 
@@ -60,6 +60,7 @@ def compute_band_report(
     control_seed: int,
     model_id: str,
     jacobians: Optional[Dict[int, torch.Tensor]] = None,
+    on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> BandReport:
     """Measure this model's per-layer profile and derive its own boundaries.
 
@@ -89,7 +90,14 @@ def compute_band_report(
     per_layer_readout_kurtosis: Dict[int, List[float]] = {l: [] for l in layers}
 
     total_cells = 0
-    for prompt in prompts:
+    for prompt_index, prompt in enumerate(prompts):
+        # A HEARTBEAT, not decoration. This loop runs for tens of minutes on a
+        # real model, and without a beat inside it the task's last reported
+        # state is "profiling" from minute zero — indistinguishable from a task
+        # whose worker died. That ambiguity let a job that had been dead for 40
+        # minutes keep reading as in-progress.
+        if on_progress is not None:
+            on_progress(prompt_index, len(prompts))
         input_ids = readout_service.tokenizer(prompt, return_tensors="pt")["input_ids"]
         total_cells += int(input_ids.shape[-1]) * len(layers)
         if total_cells > MAX_BAND_REPORT_CELLS:

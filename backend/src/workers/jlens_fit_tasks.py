@@ -23,6 +23,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
+from .task_heartbeat import beat
 from ..core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -90,12 +91,12 @@ def fit_jlens_artifact(
     def on_progress(progress):
         self.update_state(
             state="PROGRESS",
-            meta={
+            meta=beat({
                 "stage": "fitting",
                 "prompts_seen": progress.prompts_seen,
                 "last_delta": progress.last_delta,
                 "converged": progress.converged,
-            },
+            }),
         )
 
     result = fitter.fit(prompts, layers=layers, on_progress=on_progress)
