@@ -167,8 +167,14 @@ export function JLensPanel() {
   };
 
   return (
-    <div className="px-6 py-8">
-      <header className="mb-4 flex flex-wrap items-center gap-3">
+    // A TWO-REGION PANEL. The request block stays put while the readout
+    // scrolls under it: the grid is tall, and losing the model selector and
+    // the prompt off the top of the page meant scrolling back up to change
+    // either. Height is the viewport minus the app header, which is `h-14`
+    // and `sticky` — taking 100dvh here would push the request block off the
+    // bottom by exactly that much.
+    <div className="flex h-[calc(100dvh-3.5rem)] flex-col px-6 pt-8">
+      <header className="mb-4 flex shrink-0 flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
           <Layers className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
           <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
@@ -215,7 +221,7 @@ export function JLensPanel() {
       </header>
 
       {/* ------------------------------------------------------------ request */}
-      <section className="mb-4 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+      <section className="mb-4 shrink-0 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
@@ -325,6 +331,12 @@ export function JLensPanel() {
         )}
       </section>
 
+      {/* Everything below scrolls as ONE region, so the artifact strip, the
+          cards and the grid move together rather than the grid scrolling
+          inside a box inside a scrolling page. `min-h-0` is load-bearing: a
+          flex child defaults to min-height:auto and would refuse to shrink,
+          which makes the container grow instead of scrolling. */}
+      <div className="min-h-0 flex-1 overflow-y-auto pb-8">
       <div className="mb-4">
         <ArtifactsStrip
           artifacts={artifacts}
@@ -584,6 +596,7 @@ export function JLensPanel() {
       )}
 
       <ProvenanceStrip provenance={provenance} bandsAvailable={bandReport != null} />
+      </div>
     </div>
   );
 }
