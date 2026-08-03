@@ -333,7 +333,16 @@ export function ReadoutGrid({
                             : 'border-slate-100 dark:border-slate-800'
                         } ${
                           dim
-                            ? 'text-slate-400 dark:text-slate-700'
+                            ? // A DIFFUSE READOUT MUST STILL BE READABLE.
+                              // `dark:text-slate-700` was near-black on a
+                              // slate cell and invisible on the red DIFF
+                              // shading — the cells carrying the MOST
+                              // interesting signal (a token the logit lens
+                              // does not rank at all) were the hardest to
+                              // read. Pink says "low confidence" by being a
+                              // different hue rather than by being dim, so
+                              // legibility no longer trades against meaning.
+                              'text-pink-600 dark:text-pink-300'
                             : 'text-slate-800 dark:text-slate-200'
                         }`}
                       >

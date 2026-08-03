@@ -1094,3 +1094,67 @@ describe('a restored readout says which prompt it describes', () => {
     expect(screen.queryByText(/restored from your last session/i)).toBeNull();
   });
 });
+
+describe('the request block stays while the readout scrolls', () => {
+  it('gives the panel its own scroll region below a fixed request block', () => {
+    // The grid is tall. Scrolling the whole page took the model selector and
+    // the prompt off the top, so changing either meant scrolling back up.
+    //
+    // MUTATION CONTROLS: drop `min-h-0` from the scroller, or the height
+    // calc from the root, and this fails. `min-h-0` is load-bearing — a flex
+    // child defaults to min-height:auto and grows instead of scrolling.
+    const { container } = render(<JLensPanel />);
+    const root = container.firstElementChild as HTMLElement;
+
+    expect(root.className).toContain('flex');
+    expect(root.className).toContain('flex-col');
+    // Viewport minus the app header, which is h-14 and sticky.
+    expect(root.className).toContain('h-[calc(100dvh-3.5rem)]');
+
+    const scroller = container.querySelector('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(scroller!.className).toContain('min-h-0');
+    expect(scroller!.className).toContain('flex-1');
+  });
+
+  it('keeps the model and prompt controls OUT of the scrolling region', () => {
+    const { container } = render(<JLensPanel />);
+    const scroller = container.querySelector('.overflow-y-auto')!;
+
+    // If either lands inside the scroller it scrolls away, which is the whole
+    // problem this layout exists to fix.
+    expect(scroller.querySelector('select')).toBeNull();
+    expect(
+      scroller.querySelector('input[placeholder="The capital of France is"]')
+    ).toBeNull();
+  });
+});
+
+describe('a diffuse readout stays readable', () => {
+  it('marks low confidence by HUE, not by fading toward the background', () => {
+    // `dark:text-slate-700` was near-black on a slate cell and invisible on
+    // the red DIFF shading — so the cells carrying the most interesting
+    // signal (a token the logit lens does not rank at all) were the hardest
+    // to read.
+    //
+    // MUTATION CONTROL: restore a slate/grey class for the diffuse case and
+    // this fails.
+    render(<JLensPanel />);
+    // top-1 probabilities here are well under the diffuse threshold.
+    const response = makeReadout([0, 1, 2]);
+    for (const tk of response.tokens) {
+      for (const slice of tk.results) {
+        slice.top_probs = slice.top_probs.map((row) => row.map(() => 0.01));
+      }
+    }
+    seed(response);
+
+    const dimmed = Array.from(
+      document.querySelectorAll('td[class*="text-pink"]')
+    );
+    expect(dimmed.length).toBeGreaterThan(0);
+    for (const cell of dimmed) {
+      expect(cell.className).not.toMatch(/text-slate-(600|700)\b/);
+    }
+  });
+});

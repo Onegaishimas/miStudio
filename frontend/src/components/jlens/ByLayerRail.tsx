@@ -1,6 +1,13 @@
 /**
  * Per-layer readout at the selected position, output end first.
  *
+ * DIFFUSE IS MARKED BY HUE, NOT BY DIMNESS. These rows used to be greyed to
+ * near-invisibility, which made the least confident readouts also the least
+ * legible — and on the DIFF grid the same treatment hid the cells carrying the
+ * most interesting signal, where the Jacobian lens names a token the logit
+ * lens does not rank at all. Pink says "low confidence" while staying readable,
+ * so legibility no longer trades against meaning.
+ *
  * Layers whose top-1 probability is below the diffuse threshold are marked
  * *expected to be uninterpretable* rather than presented as content (FPRD
  * §3.7). That marking is measured from the readout's own distribution — it is
@@ -63,7 +70,7 @@ export function ByLayerRail({
               <span
                 className={`mt-px w-9 shrink-0 font-mono text-[10px] ${
                   diffuse
-                    ? 'text-slate-400 dark:text-slate-600'
+                    ? 'text-pink-600 dark:text-pink-300'
                     : 'text-slate-700 dark:text-slate-300'
                 }`}
               >
@@ -80,7 +87,7 @@ export function ByLayerRail({
                       pinned.includes(t)
                         ? 'rounded bg-emerald-100 px-1 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200'
                         : diffuse
-                          ? 'text-slate-400 dark:text-slate-600'
+                          ? 'text-pink-600 dark:text-pink-300'
                           : k === 0
                             ? 'text-slate-800 dark:text-slate-200'
                             : 'text-slate-500 dark:text-slate-500'
@@ -90,7 +97,7 @@ export function ByLayerRail({
                   </span>
                 ))}
                 {diffuse && (
-                  <span className="text-[10px] italic text-slate-400 dark:text-slate-600">
+                  <span className="text-[10px] italic text-pink-600 dark:text-pink-300">
                     diffuse
                   </span>
                 )}
