@@ -40,7 +40,11 @@ def cleanup_orphaned_tasks_task(self):
 
     from ..core.database import get_sync_db
     from ..models.task_queue import TaskQueue
-    from .task_heartbeat import STALE_AFTER_SECONDS, looks_orphaned
+    from .task_heartbeat import (
+        STALE_AFTER_SECONDS,
+        looks_abandoned,
+        seconds_since_row_update,
+    )
 
     closed = 0
     with get_sync_db() as db:
@@ -53,7 +57,14 @@ def cleanup_orphaned_tasks_task(self):
         for row in rows:
             try:
                 result = AsyncResult(row.task_id, app=celery_app)
-                if not looks_orphaned(result.state, result.info):
+                # `looks_abandoned`, not `looks_orphaned`: the row this
+                # janitor was written to clear reports PENDING with no info,
+                # which the heartbeat rule alone cannot see.
+                if not looks_abandoned(
+                    result.state,
+                    result.info,
+                    seconds_since_row_update(row),
+                ):
                     continue
             except Exception as exc:  # noqa: BLE001 - one bad row must not stop the sweep
                 logger.warning("Could not check %s: %s", row.task_id, exc)

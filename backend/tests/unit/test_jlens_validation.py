@@ -217,9 +217,9 @@ def test_envelope_catches_a_materialisation_that_a_65k_bound_would_miss():
 
 def test_semantic_recovers_an_unspoken_intermediate():
     result = check_semantic(
-        lambda p, l, k: ["spider", "web", "legs"],
+        lambda p, ls, k: {l: ["spider", "web", "legs"] for l in ls},
         prompt="the animal that spins webs has this many legs",
-        layer=8,
+        layers=8,
         expected_intermediate="spider",
     )
     assert result.passed
@@ -228,9 +228,9 @@ def test_semantic_recovers_an_unspoken_intermediate():
 def test_semantic_rejects_a_fixture_whose_answer_is_in_the_prompt():
     """A token already in the prompt is recoverable by a broken lens."""
     result = check_semantic(
-        lambda p, l, k: ["spider"],
+        lambda p, ls, k: {l: ["spider"] for l in ls},
         prompt="a spider spins webs",
-        layer=8,
+        layers=8,
         expected_intermediate="spider",
     )
     assert not result.passed and "appears in the" in result.detail
@@ -238,9 +238,9 @@ def test_semantic_rejects_a_fixture_whose_answer_is_in_the_prompt():
 
 def test_semantic_fails_when_the_intermediate_is_absent():
     result = check_semantic(
-        lambda p, l, k: ["the", "a", "of"],
+        lambda p, ls, k: {l: ["the", "a", "of"] for l in ls},
         prompt="the animal that spins webs",
-        layer=8,
+        layers=8,
         expected_intermediate="spider",
     )
     assert not result.passed
@@ -252,6 +252,101 @@ def test_semantic_reports_rather_than_swallows_a_raising_readout():
 
     result = check_semantic(boom, "the animal that spins webs", 8, "spider")
     assert not result.passed and "cuda oom" in result.detail
+
+
+def test_semantic_scans_the_stack_rather_than_asserting_one_layer():
+    """The claim is that the intermediate surfaces, not WHERE it surfaces.
+
+    Pinning one layer discarded a converged LFM2 artifact whose mid-stack
+    readout was the correct concept field. Which depth carries a bridge entity
+    is a property of the model, and BR-002 forbids assuming one.
+
+    MUTATION CONTROL: narrow `scan` in `check_semantic` back to `scan[:1]` and
+    this fails — the token lives at layer 11, nowhere near the first layer.
+    """
+
+    def readout(_prompt, layers, _k):
+        return {
+            l: (["spider", "web"] if l == 11 else ["the", "a", "of"]) for l in layers
+        }
+
+    result = check_semantic(
+        readout,
+        prompt="the animal that spins webs",
+        layers=[0, 4, 8, 11, 14],
+        expected_intermediate="spider",
+    )
+    assert result.passed
+    assert result.evidence["layer"] == 11
+    assert result.evidence["rank"] == 0
+
+
+def test_semantic_reports_where_and_at_what_rank_it_surfaced():
+    """A pass that does not say where it passed cannot be judged by a human."""
+
+    def readout(prompt, layers, _k):
+        return {
+            l: (["a", "b", "spider"] if ("webs" in prompt and l == 7) else ["x"])
+            for l in layers
+        }
+
+    result = check_semantic(
+        readout,
+        prompt="the animal that spins webs",
+        layers=[3, 7],
+        expected_intermediate="spider",
+        control_prompt="the recipe calls for two cups of",
+    )
+    assert result.passed
+    assert result.evidence["layer"] == 7 and result.evidence["rank"] == 2
+    assert "layer 7" in result.detail and "rank 2" in result.detail
+
+
+def test_semantic_fails_when_the_control_prompt_recovers_it_too():
+    """A lens that answers 'spider' to everything has demonstrated nothing.
+
+    The scan is weaker than a single layer, so it needs a false-positive
+    control; without this, loosening the check to a scan would be a pure
+    weakening of the one class that catches a structurally perfect artifact
+    with no content in it.
+
+    MUTATION CONTROL: drop the `if ctrl_layer is not None` branch and this
+    passes — the scan happily reports the hit on the real prompt.
+    """
+    result = check_semantic(
+        lambda _p, ls, _k: {l: ["spider", "web"] for l in ls},  # spider regardless of prompt
+        prompt="the animal that spins webs",
+        layers=[0, 4, 8],
+        expected_intermediate="spider",
+        control_prompt="the recipe calls for two cups of",
+    )
+    assert not result.passed
+    assert "control" in result.detail
+    assert result.evidence["control_layer"] == 0
+
+
+def test_semantic_says_so_when_no_control_was_supplied():
+    """An unmeasured control must not read as a control that passed."""
+    result = check_semantic(
+        lambda _p, ls, _k: {l: ["spider"] for l in ls},
+        prompt="the animal that spins webs",
+        layers=[0],
+        expected_intermediate="spider",
+    )
+    assert result.passed
+    assert "not measured" in result.detail
+    assert result.evidence["control"] == "not supplied"
+
+
+def test_semantic_fails_closed_on_an_empty_layer_set():
+    """No layers to scan is not a pass."""
+    result = check_semantic(
+        lambda _p, ls, _k: {l: ["spider"] for l in ls},
+        prompt="the animal that spins webs",
+        layers=[],
+        expected_intermediate="spider",
+    )
+    assert not result.passed
 
 
 # --------------------------------------------------------- cross-implementation
@@ -336,3 +431,58 @@ def test_structural_rejects_a_PARTIALLY_saturated_artifact():
     matrix[0, 0] = float("inf")
     result = check_structural({0: matrix}, d_model=8, expected_layers=[0])
     assert not result.passed
+
+
+def test_the_scan_costs_ONE_readout_per_prompt_not_one_per_layer():
+    """A readout is a forward pass; the scan must not multiply them.
+
+    `stream` captures residuals once and reads every requested layer off them.
+    Scanning layer-by-layer turned a 25-layer artifact's check into 25 forward
+    passes, doubled by the control — a change that is invisible in the result
+    and only shows up as validation taking minutes.
+
+    Asserts the CALL COUNT, not merely that a call happened: "was called"
+    passes just as happily against the per-layer version.
+
+    MUTATION CONTROL: put the `readout(...)` back inside the `for layer in
+    scan` loop and this fails.
+    """
+    calls = []
+
+    def readout(prompt, layers, k):
+        calls.append((prompt, tuple(layers)))
+        return {l: ["the", "a"] for l in layers}
+
+    scan = list(range(25))
+    check_semantic(
+        readout,
+        prompt="the animal that spins webs",
+        layers=scan,
+        expected_intermediate="spider",
+        control_prompt="the interest rate was raised to",
+    )
+
+    # One for the real prompt. The control never runs: the token was not found,
+    # so there is nothing to control FOR.
+    assert len(calls) == 1, f"{len(calls)} readouts for a 25-layer scan: {calls}"
+    assert calls[0][1] == tuple(scan), "the scan did not ask for every layer at once"
+
+
+def test_a_hit_scans_the_control_in_ONE_further_readout():
+    """Two passes total when the token is found — one real, one control."""
+    calls = []
+
+    def readout(prompt, layers, k):
+        calls.append(prompt)
+        found = "webs" in prompt
+        return {l: (["spider"] if found else ["x"]) for l in layers}
+
+    result = check_semantic(
+        readout,
+        prompt="the animal that spins webs",
+        layers=list(range(25)),
+        expected_intermediate="spider",
+        control_prompt="the interest rate was raised to",
+    )
+    assert result.passed
+    assert len(calls) == 2, f"expected real+control, got {len(calls)}"

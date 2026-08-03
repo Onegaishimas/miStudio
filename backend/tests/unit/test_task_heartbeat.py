@@ -291,3 +291,139 @@ class TestTheJanitorClosesGhostRows:
                 f"the janitor calls {resubmit} — it must mark the row and stop, "
                 "not silently reclaim the GPU"
             )
+
+
+# ---------------------------------------------------------------------------
+# The half of the problem the heartbeat rule cannot see.
+#
+# A janitor written specifically to clear a dead row could not clear it: the
+# worker died AND its result-backend entry expired, so Celery answered PENDING
+# with no info. `looks_orphaned` only ever inspects PROGRESS/STARTED, so it
+# returned False and the row sat at "running 21.5%" for hours with the GPU idle
+# at 0%. Observed on hardware, through a janitor, twice reported by the user.
+# ---------------------------------------------------------------------------
+
+
+def test_a_pending_task_with_an_old_row_is_abandoned():
+    """The exact shape that survived the janitor.
+
+    MUTATION CONTROL: delete the `state == "PENDING"` branch of
+    `looks_abandoned` and this fails — which is the state the code was in when
+    the ghost row was reported.
+    """
+    from src.workers.task_heartbeat import STALE_AFTER_SECONDS, looks_abandoned
+
+    assert looks_abandoned("PENDING", None, STALE_AFTER_SECONDS + 60)
+
+
+def test_a_pending_task_whose_row_is_fresh_is_left_alone():
+    """A task that has just been dispatched has not failed."""
+    from src.workers.task_heartbeat import looks_abandoned
+
+    assert not looks_abandoned("PENDING", None, 5)
+
+
+def test_a_pending_task_with_no_row_age_is_not_condemned():
+    """Absent evidence is not evidence of death — fail safe, not closed."""
+    from src.workers.task_heartbeat import looks_abandoned
+
+    assert not looks_abandoned("PENDING", None, None)
+
+
+def test_a_terminal_task_is_never_abandoned_however_old_its_row():
+    """A row left open behind a SUCCESS is stale bookkeeping, not a dead job.
+
+    Marking it failed would tell the user their completed fit died.
+
+    MUTATION CONTROL: drop the TERMINAL_STATES guard and this fails.
+    """
+    from src.workers.task_heartbeat import looks_abandoned
+
+    for state in ("SUCCESS", "FAILURE", "REVOKED"):
+        assert not looks_abandoned(state, None, 999_999), state
+
+
+def test_a_stale_heartbeat_is_still_caught():
+    """The original rule must keep working — this is a widening, not a swap."""
+    from src.workers.task_heartbeat import STALE_AFTER_SECONDS, looks_abandoned
+
+    stale = {"heartbeat": 1_000.0}
+    now = 1_000.0 + STALE_AFTER_SECONDS + 1
+    assert looks_abandoned("PROGRESS", stale, None, now=now)
+
+
+def test_a_beating_task_is_never_abandoned():
+    """A working job must not be condemned by the widened rule."""
+    from src.workers.task_heartbeat import looks_abandoned
+
+    fresh = {"heartbeat": 1_000.0}
+    assert not looks_abandoned("PROGRESS", fresh, 999_999, now=1_010.0)
+
+
+def test_row_age_reads_naive_and_aware_timestamps_alike():
+    """The column has carried both; comparing across them raises.
+
+    A janitor that raises on one row stops sweeping every row after it.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from src.workers.task_heartbeat import seconds_since_row_update
+
+    class _Row:
+        def __init__(self, stamp):
+            self.updated_at = stamp
+            self.created_at = None
+
+    naive = _Row(datetime.utcnow() - timedelta(seconds=900))
+    aware = _Row(datetime.now(timezone.utc) - timedelta(seconds=900))
+
+    for row in (naive, aware):
+        age = seconds_since_row_update(row)
+        assert age is not None and 800 < age < 1000, age
+
+
+def test_the_janitor_uses_the_widened_rule_not_the_heartbeat_one():
+    """Reachability: the fix must be the rule the sweep actually calls.
+
+    The previous janitor imported `looks_orphaned` and was therefore blind to
+    the case it existed to clear. Asserting the module imports the widened rule
+    is not enough — this drives the sweep and asserts the row is closed.
+
+    MUTATION CONTROL: point the janitor back at `looks_orphaned` and this fails.
+    """
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import MagicMock, patch
+
+    import src.workers.cleanup_orphaned_tasks as janitor
+
+    class _Row:
+        status = "running"
+        task_id = "dead-task"
+        error_message = None
+        updated_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        created_at = updated_at
+
+    row = _Row()
+    db = MagicMock()
+    db.query.return_value.filter.return_value.filter.return_value.all.return_value = [row]
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    # The shape that beat the old janitor: no record left in the backend.
+    dead = MagicMock(state="PENDING", info=None)
+
+    with patch("src.core.database.get_sync_db", fake_db), patch(
+        "celery.result.AsyncResult", return_value=dead
+    ):
+        out = janitor.cleanup_orphaned_tasks_task.run()
+
+    assert out["closed"] == 1, (
+        "the sweep left a PENDING row with a three-hour-old timestamp open — "
+        "this is the ghost job the janitor was written to clear"
+    )
+    assert row.status == "failed"
+    assert "presumed gone" in (row.error_message or "")

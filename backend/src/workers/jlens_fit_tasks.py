@@ -20,7 +20,7 @@ served, and the consumer says nothing about it.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..core.celery_app import celery_app
 from .task_heartbeat import beat
@@ -186,10 +186,23 @@ def fit_jlens_artifact(
         except Exception as exc:  # noqa: BLE001 - reported, not swallowed
             logger.error("Publishing %s failed: %s", repo_id, exc)
     else:
-        # A coverage refusal never reaches here — it happens inside the
-        # serviceable branch, so the staged fit survives for a deliberate
-        # re-publish without needing a condition to protect it.
-        service.discard_staged(repo_id)
+        # THE STAGED FIT SURVIVES A FAILED VALIDATION. This used to be
+        # `service.discard_staged(repo_id)`, which destroyed a converged
+        # 15-layer LFM2 artifact — 754 seconds of GPU time — because one
+        # fixture token did not appear at one layer. The lens was fine; the
+        # fixture was wrong, and there was then nothing left to re-validate
+        # against, so proving that required paying for the whole fit again.
+        #
+        # Keeping it is safe: staging is excluded from discovery, so nothing
+        # serves it, and `write_staged` clears the directory before the next
+        # fit, so it cannot accumulate beyond one per model.
+        logger.warning(
+            "Not publishing %s: %s. The staged fit is kept at %s so it can be "
+            "re-validated without refitting.",
+            repo_id,
+            report.summary(),
+            service.staging_dir(repo_id),
+        )
 
     # Say WHY nothing was published when the cause is a missing fixture rather
     # than a bad lens. Without this the result reads "semantic=not_run" and the
@@ -269,31 +282,40 @@ def _run_semantic_check(service, ref, loaded, probe: Dict[str, Any], fitted_laye
     prompt = str(probe.get("prompt", ""))
     expected = str(probe.get("expected_intermediate", ""))
     top_k = int(probe.get("top_k", 8))
+    control_prompt = probe.get("control_prompt")
+    if control_prompt is not None:
+        control_prompt = str(control_prompt)
     layer = probe.get("layer")
     if layer is not None:
-        layer = int(layer)
+        # An EXPLICIT layer is honoured exactly. A caller naming a layer is
+        # making a claim about that layer, and quietly scanning around it would
+        # answer a question they did not ask.
+        scan: Sequence[int] = [int(layer)]
     else:
-        # MID-STACK, NOT THE TOP. Defaulting to the last fitted layer put the
-        # check at the worst possible place to find an UNSPOKEN intermediate:
-        # by the top of the stack the model has moved on to the answer. Observed
-        # on hardware — a bridge-entity fixture that a readout finds at L13 of
-        # 16 failed the check, which ran at L15, and the artifact correctly
-        # refused to publish for a reason that said nothing about the lens.
+        # EVERY FITTED LAYER. Two earlier defaults were both wrong for the same
+        # reason: they asserted WHERE an unspoken intermediate must appear. The
+        # top of the stack was wrong because the model has moved on to the
+        # answer by then; "two thirds up" was wrong because that is a band
+        # constant, and BR-002 forbids this project assuming a band it has not
+        # measured for the model in front of it.
         #
-        # Two thirds up, snapped to the nearest FITTED layer, matching the
-        # built-in check in the readout endpoint so the two cannot disagree
-        # about where "mid-band" is.
-        n_layers = int(getattr(loaded, "n_layers", 0) or (max(fitted_layers) + 1))
-        target = max(0, int(n_layers * 2 / 3) - 1)
-        layer = min(fitted_layers, key=lambda c: abs(c - target))
+        # Observed on hardware: the aligned LFM2 lens reads
+        # ' tourism'/' located'/' geography' at L9 for an Eiffel-Tower fixture —
+        # the concept field, correct and useful — and a single-layer check
+        # discarded a converged 15-layer artifact over it.
+        #
+        # Scanning is weaker than a single layer, which is why the fixture's
+        # control prompt matters; see `check_semantic`.
+        scan = list(fitted_layers)
 
-    if layer not in fitted_layers:
+    unfitted = [c for c in scan if c not in fitted_layers]
+    if unfitted:
         return CheckResult(
             CheckClass.SEMANTIC,
             CheckStatus.FAIL,
             (
-                f"probe layer {layer} was not fitted (fitted: {fitted_layers}); "
-                "there is no Jacobian to read out through"
+                f"probe layer(s) {unfitted} were not fitted (fitted: "
+                f"{list(fitted_layers)}); there is no Jacobian to read out through"
             ),
         )
 
@@ -318,19 +340,32 @@ def _run_semantic_check(service, ref, loaded, probe: Dict[str, Any], fitted_laye
         model_name=loaded.name,
     )
 
-    def readout(text: str, at_layer: int, k: int):
-        """Top-k at the LAST position — where the next token is being formed."""
+    def readout(text: str, at_layers: Sequence[int], k: int) -> Dict[int, List[str]]:
+        """Top-k at the LAST position, for EVERY requested layer, in one pass.
+
+        The last position is where the next token is being formed. One stream
+        call covers the whole layer list: `stream` captures residuals once and
+        reads each requested layer off them, so asking per layer would re-run
+        the model once per layer.
+        """
+        ordered = list(at_layers)
         last = None
         for message in readout_service.stream(
-            text, [transport], layers=[at_layer], top_n=k
+            text, [transport], layers=ordered, top_n=k
         ):
             if isinstance(message, LensTokenMessage):
                 last = message
         if last is None:
             raise ValueError("readout produced no tokens")
-        return last.results[0].top_tokens[0]
+        rows = last.results[0].top_tokens
+        # `top_tokens` is indexed by POSITION IN THE REQUESTED LIST, not by
+        # absolute layer number. Zipping against `ordered` is what keeps a
+        # partial artifact from reading the wrong layer's row.
+        return {layer: rows[i] for i, layer in enumerate(ordered) if i < len(rows)}
 
-    return check_semantic(readout, prompt, layer, expected, top_k=top_k)
+    return check_semantic(
+        readout, prompt, scan, expected, top_k=top_k, control_prompt=control_prompt
+    )
 
 
 def _local_pass(report):

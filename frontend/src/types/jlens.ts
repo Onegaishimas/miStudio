@@ -195,7 +195,23 @@ export interface JLensValidationResponse {
 export interface JLensSemanticProbe {
   prompt: string;
   expected_intermediate: string;
+  /**
+   * Omit to SCAN every fitted layer — the default.
+   *
+   * Naming a layer asserts WHERE an unspoken intermediate lives, which is a
+   * property of the model and not something this project may assume (BR-002).
+   * Two such defaults were shipped and both were wrong; the second discarded a
+   * converged artifact whose mid-stack readout was the correct concept field.
+   */
   layer?: number | null;
+  /**
+   * An unrelated prompt for which `expected_intermediate` would be absurd.
+   *
+   * A scan has more chances to hit than a single layer, so it needs a
+   * false-positive control: if the token surfaces here too, the check FAILS
+   * however well the real prompt scored.
+   */
+  control_prompt?: string | null;
   top_k?: number;
 }
 

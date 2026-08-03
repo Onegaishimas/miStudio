@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -341,17 +341,36 @@ def check_envelope(
 
 
 def check_semantic(
-    readout: Callable[[str, int, int], Sequence[str]],
+    readout: Callable[[str, Sequence[int], int], Dict[int, Sequence[str]]],
     prompt: str,
-    layer: int,
+    layers: Union[int, Sequence[int]],
     expected_intermediate: str,
     top_k: int = 8,
+    control_prompt: Optional[str] = None,
 ) -> CheckResult:
-    """A known UNSPOKEN intermediate is recovered at a mid-band layer.
+    """A known UNSPOKEN intermediate is recovered SOMEWHERE in the stack.
 
     Deliberately an intermediate that appears in neither the prompt nor the
     output: a token present in the prompt can be recovered by an artifact that
     encodes nothing at all, so it would pass against a broken lens.
+
+    SCANS THE FITTED LAYERS RATHER THAN ASSERTING ONE. The claim under test is
+    that the lens surfaces an unspoken intermediate, not that it surfaces it at
+    a particular depth — which depth is a property of the model, and this
+    project may not assume one (BR-002 forbids a band constant, and "two thirds
+    up" is a band constant wearing a different hat). Pinning a layer made the
+    check fail on a lens that was working: on LFM2 the aligned artifact reads
+    ' tourism'/' located'/' geography' at L9 for an Eiffel-Tower fixture — the
+    concept field, with the specific token surfacing elsewhere in the stack.
+
+    A scan is a WEAKER test than a single layer (more chances to hit), so it
+    carries a matched control. `control_prompt` should be an unrelated prompt
+    for which `expected_intermediate` would be an absurd continuation. If the
+    token surfaces there too, the scan is not discriminative and this FAILS
+    however well the real prompt did — a lens that answers ' France' to
+    everything has told us nothing. Without a control prompt the check still
+    runs, and says so, because the control is evidence and its absence must not
+    read as having passed one.
     """
     if expected_intermediate.strip() and expected_intermediate.strip() in prompt:
         return CheckResult(
@@ -362,26 +381,111 @@ def check_semantic(
                 "prompt, so recovering it proves nothing"
             ),
         )
+
+    scan = [int(layers)] if isinstance(layers, int) else [int(x) for x in layers]
+    if not scan:
+        return CheckResult(
+            CheckClass.SEMANTIC,
+            CheckStatus.FAIL,
+            "no layers to scan; the artifact reports no fitted layers",
+        )
+
+    wanted = expected_intermediate.strip().lower()
+
+    def _scan(text: str) -> Tuple[Optional[int], Optional[int], Dict[int, List[str]]]:
+        """First (layer, rank) the token surfaces at, plus every top-k seen.
+
+        ONE call for the whole scan, not one per layer. A readout is a forward
+        pass with the residuals captured once and every requested layer read off
+        it; asking layer by layer re-ran the model for each, turning a 25-layer
+        artifact's check into 50 forward passes (the control doubles it).
+        """
+        tops = readout(text, scan, top_k)
+        seen: Dict[int, List[str]] = {}
+        for layer in scan:
+            top = list(tops.get(layer, []))
+            seen[layer] = top
+            for rank, token in enumerate(top):
+                if token.strip().lower() == wanted:
+                    # Record the layers actually examined, then stop reporting.
+                    return layer, rank, seen
+        return None, None, seen
+
     try:
-        top = list(readout(prompt, layer, top_k))
+        hit_layer, hit_rank, seen = _scan(prompt)
     except Exception as exc:  # noqa: BLE001 - reported, not swallowed
         return CheckResult(
             CheckClass.SEMANTIC, CheckStatus.FAIL, f"readout raised: {exc}"
         )
 
-    normalised = [t.strip().lower() for t in top]
-    if expected_intermediate.strip().lower() in normalised:
+    evidence: Dict[str, Any] = {
+        "scanned_layers": scan,
+        "top_k": top_k,
+        "tops_by_layer": {str(k): v for k, v in seen.items()},
+    }
+
+    if hit_layer is None:
+        return CheckResult(
+            CheckClass.SEMANTIC,
+            CheckStatus.FAIL,
+            (
+                f"{expected_intermediate!r} absent from the top-{top_k} at every "
+                f"fitted layer {scan[0]}..{scan[-1]}"
+            ),
+            evidence,
+        )
+
+    evidence["layer"] = hit_layer
+    evidence["rank"] = hit_rank
+    evidence["top"] = seen[hit_layer]
+
+    if control_prompt is None:
+        evidence["control"] = "not supplied"
         return CheckResult(
             CheckClass.SEMANTIC,
             CheckStatus.PASS,
-            f"recovered {expected_intermediate!r} at layer {layer}",
-            {"top": top},
+            (
+                f"recovered {expected_intermediate!r} at layer {hit_layer} "
+                f"(rank {hit_rank}); no control prompt supplied, so this scan's "
+                "discriminative power was not measured"
+            ),
+            evidence,
         )
+
+    try:
+        ctrl_layer, ctrl_rank, ctrl_seen = _scan(control_prompt)
+    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+        return CheckResult(
+            CheckClass.SEMANTIC, CheckStatus.FAIL, f"control readout raised: {exc}"
+        )
+
+    evidence["control"] = {
+        "prompt": control_prompt,
+        "tops_by_layer": {str(k): v for k, v in ctrl_seen.items()},
+    }
+
+    if ctrl_layer is not None:
+        evidence["control_layer"] = ctrl_layer
+        evidence["control_rank"] = ctrl_rank
+        return CheckResult(
+            CheckClass.SEMANTIC,
+            CheckStatus.FAIL,
+            (
+                f"{expected_intermediate!r} surfaces for the UNRELATED control "
+                f"prompt too (layer {ctrl_layer}, rank {ctrl_rank}), so recovering "
+                f"it at layer {hit_layer} demonstrates nothing about the lens"
+            ),
+            evidence,
+        )
+
     return CheckResult(
         CheckClass.SEMANTIC,
-        CheckStatus.FAIL,
-        f"{expected_intermediate!r} absent from the top-{top_k} at layer {layer}",
-        {"top": top},
+        CheckStatus.PASS,
+        (
+            f"recovered {expected_intermediate!r} at layer {hit_layer} "
+            f"(rank {hit_rank}) and absent for the control prompt"
+        ),
+        evidence,
     )
 
 

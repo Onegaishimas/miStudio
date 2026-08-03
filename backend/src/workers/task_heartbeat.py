@@ -65,8 +65,79 @@ def looks_orphaned(state: str, info: Any, now: Optional[float] = None) -> bool:
     Only ever true for a task claiming to be in progress. A SUCCESS or FAILURE
     is terminal and its age says nothing — a report finished last week is not
     orphaned, it is done.
+
+    THIS SEES ONLY HALF THE PROBLEM. It needs the worker's last PROGRESS report
+    to still be in the result backend. When that entry has expired — or was
+    never persisted, because the pod died between reports — Celery answers
+    PENDING with no info, and this returns False forever. Use `looks_abandoned`
+    anywhere a task_queue row is being judged; it covers both.
     """
     if state not in ("PROGRESS", "STARTED"):
         return False
     age = seconds_since_beat(info, now=now)
     return age is not None and age > STALE_AFTER_SECONDS
+
+
+def looks_abandoned(
+    state: str,
+    info: Any,
+    seconds_since_row_update: Optional[float] = None,
+    now: Optional[float] = None,
+) -> bool:
+    """Whether a row claiming to be RUNNING belongs to a task that is gone.
+
+    A task disappears in two ways, and the heartbeat rule alone sees only one:
+
+      1. The worker died and the result backend still holds its last PROGRESS.
+         The heartbeat is stale — `looks_orphaned` catches it.
+
+      2. The worker died AND the result entry expired or was never written.
+         Celery reports PENDING with `info=None`, which is indistinguishable
+         from a task id that was never dispatched. `looks_orphaned` returns
+         False, so the row sits at "running 21.5%" forever with the GPU idle.
+         OBSERVED ON HARDWARE: a fit killed by a pod roll at 16:19 was still
+         claiming to run hours later, through a janitor written specifically to
+         clear it.
+
+    Case 2 has no heartbeat to consult, so it falls back to the ROW's own
+    clock. That is only safe because a row reaches "running" when the task
+    ITSELF reports progress: work still QUEUED behind a long job is status
+    "queued" and never reaches this check. Passing a row-update age for a
+    queued row would condemn everything waiting on a single-GPU queue.
+
+    A terminal state (SUCCESS/FAILURE/REVOKED) can never reach a True return
+    here: neither branch below admits it. That is asserted by test rather than
+    restated as a guard — an `if state in TERMINAL_STATES: return False` line
+    looked protective, but no mutation of it could change any answer, which
+    makes it decoration that a future reader would trust.
+    """
+    if looks_orphaned(state, info, now=now):
+        return True
+    if state == "PENDING" and seconds_since_row_update is not None:
+        return seconds_since_row_update > STALE_AFTER_SECONDS
+    return False
+
+
+def seconds_since_row_update(row: Any, now: Optional[float] = None) -> Optional[float]:
+    """Age of a task_queue row's last write, in seconds.
+
+    Handles naive and tz-aware timestamps, because the column has carried both:
+    a naive value compared against an aware one raises, and a janitor that
+    raises on one row stops sweeping the rest.
+    """
+    from datetime import datetime, timezone
+
+    stamp = getattr(row, "updated_at", None) or getattr(row, "created_at", None)
+    if stamp is None:
+        return None
+    try:
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        current = (
+            datetime.fromtimestamp(now, tz=timezone.utc)
+            if now is not None
+            else datetime.now(timezone.utc)
+        )
+        return max(0.0, (current - stamp).total_seconds())
+    except Exception:  # noqa: BLE001 - an unreadable timestamp is not a verdict
+        return None

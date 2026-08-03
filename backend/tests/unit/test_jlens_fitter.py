@@ -1967,16 +1967,21 @@ def test_a_layer_that_never_ran_is_refused_not_silently_dropped():
         fitter.fit(["abc"], layers=[0, 1])
 
 
-def test_the_semantic_probe_defaults_to_MID_STACK_not_the_top():
-    """The top of the stack is the worst place to look for an intermediate.
+def test_the_semantic_probe_scans_every_fitted_layer_by_default():
+    """The check may not assume WHERE an unspoken intermediate lives.
 
-    OBSERVED ON HARDWARE. A bridge-entity fixture that a readout finds at L13
-    of 16 failed the check, because the check defaulted to the LAST fitted
-    layer (L15) — by which point the model has moved on to the answer. The
-    artifact then correctly refused to publish, for a reason that said nothing
-    about the lens.
+    OBSERVED ON HARDWARE, TWICE. Defaulting to the last fitted layer (L15 of
+    16) tested next-token content, not an intermediate. Defaulting to "two
+    thirds up" then discarded a converged 15-layer LFM2 artifact whose L9
+    readout was ' tourism'/' located'/' geography' — the correct concept field,
+    with the specific token elsewhere in the stack.
 
-    MUTATION CONTROL: default back to `fitted_layers[-1]` and this fails.
+    Both defaults were the same mistake: asserting a depth. Which depth carries
+    a bridge entity is a property of the model, and BR-002 forbids this project
+    assuming a band it has not measured for the model in front of it.
+
+    MUTATION CONTROL: default `scan` back to a single layer — `[fitted_layers[-1]]`
+    or the old two-thirds expression — and this fails.
     """
     from unittest.mock import MagicMock, patch
 
@@ -1984,8 +1989,11 @@ def test_the_semantic_probe_defaults_to_MID_STACK_not_the_top():
 
     seen = {}
 
-    def fake_check_semantic(readout, prompt, layer, expected_intermediate, top_k=8):
-        seen["layer"] = layer
+    def fake_check_semantic(
+        readout, prompt, layers, expected_intermediate, top_k=8, control_prompt=None
+    ):
+        seen["layers"] = layers
+        seen["control_prompt"] = control_prompt
         from src.services.jlens_validation import CheckClass, CheckResult, CheckStatus
 
         return CheckResult(CheckClass.SEMANTIC, CheckStatus.PASS, "stub")
@@ -1993,7 +2001,7 @@ def test_the_semantic_probe_defaults_to_MID_STACK_not_the_top():
     loaded = MagicMock()
     loaded.n_layers = 16
     service = MagicMock()
-    service._load_payload.return_value = {i: None for i in range(16)}
+    service._load_payload.return_value = {i: None for i in range(15)}
     service.layer_scales.return_value = {}
 
     from src.services import jlens_readout_service, jlens_validation
@@ -2007,15 +2015,69 @@ def test_the_semantic_probe_defaults_to_MID_STACK_not_the_top():
             service=service,
             ref=MagicMock(),
             loaded=loaded,
-            probe={"prompt": "p", "expected_intermediate": " France"},
-            fitted_layers=list(range(16)),
+            probe={
+                "prompt": "p",
+                "expected_intermediate": " France",
+                "control_prompt": "unrelated",
+            },
+            fitted_layers=list(range(15)),
         )
 
-    # Two thirds of 16, minus one -> 9. Emphatically not 15.
-    assert seen["layer"] == 9, (
-        f"probe ran at layer {seen['layer']}; defaulting to the top of the "
-        "stack tests next-token content, not an unspoken intermediate"
+    assert seen["layers"] == list(range(15)), (
+        f"probe scanned {seen['layers']}; a default that names a depth asserts "
+        "a band this project has not measured"
     )
+    assert seen["control_prompt"] == "unrelated", (
+        "the fixture's control prompt was dropped, so the scan runs without the "
+        "false-positive control that makes it more than a rubber stamp"
+    )
+
+
+def test_an_explicit_probe_layer_is_honoured_exactly():
+    """A caller naming a layer is making a claim ABOUT that layer.
+
+    Scanning around it would answer a question they did not ask, and would
+    silently turn a failing single-layer assertion into a pass.
+
+    MUTATION CONTROL: make the explicit branch fall through to `fitted_layers`
+    and this fails.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import src.workers.jlens_fit_tasks as task_mod
+
+    seen = {}
+
+    def fake_check_semantic(
+        readout, prompt, layers, expected_intermediate, top_k=8, control_prompt=None
+    ):
+        seen["layers"] = layers
+        from src.services.jlens_validation import CheckClass, CheckResult, CheckStatus
+
+        return CheckResult(CheckClass.SEMANTIC, CheckStatus.PASS, "stub")
+
+    loaded = MagicMock()
+    loaded.n_layers = 16
+    service = MagicMock()
+    service._load_payload.return_value = {i: None for i in range(15)}
+    service.layer_scales.return_value = {}
+
+    from src.services import jlens_readout_service, jlens_validation
+
+    with patch.object(jlens_validation, "check_semantic", fake_check_semantic), patch.object(
+        jlens_readout_service, "ReadoutService", lambda **kw: MagicMock()
+    ), patch.object(
+        jlens_readout_service, "JacobianTransport", lambda j, **kw: object()
+    ):
+        task_mod._run_semantic_check(
+            service=service,
+            ref=MagicMock(),
+            loaded=loaded,
+            probe={"prompt": "p", "expected_intermediate": " France", "layer": 6},
+            fitted_layers=list(range(15)),
+        )
+
+    assert seen["layers"] == [6]
 
 
 def test_a_failed_check_reports_what_it_actually_saw():
@@ -2057,4 +2119,96 @@ def test_a_failed_check_reports_what_it_actually_saw():
     assert payload[0]["evidence"]["top"] == [" Paris", " the", " a"], (
         "the check's own evidence was dropped, so a failure says only that "
         "something was absent and never what was present"
+    )
+
+
+def test_a_fit_that_fails_validation_KEEPS_its_staged_artifact(tmp_path):
+    """The cheap half of the work must not destroy the expensive half.
+
+    OBSERVED ON HARDWARE. A converged 15-layer LFM2 fit — 754 seconds of GPU
+    time — was deleted the instant one fixture token failed to appear, leaving
+    nothing to re-validate. Proving the lens was fine then required paying for
+    the entire fit a second time.
+
+    Staging is excluded from discovery, so keeping it serves nothing, and
+    `write_staged` clears it before the next fit, so it cannot accumulate.
+
+    MUTATION CONTROL: re-add `shutil.rmtree(service.staging_dir(repo_id))` to
+    the non-serviceable branch of the task and this fails.
+    """
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock, patch
+
+    import torch
+
+    import src.workers.jlens_fit_tasks as task_mod
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    d_model = 8
+    layers = [0, 1]
+
+    class _Result:
+        jacobians = {i: torch.eye(d_model, dtype=torch.float16) for i in layers}
+        scales = {i: 1.0 for i in layers}
+        prompts_seen = 42
+        converged = True
+        last_delta = 1e-4
+        mean_seq_len = 12.0
+        degenerate_layers: list = []
+        residual_mean = 0.0
+        residual_max = 0.0
+        convergence_delta = 1e-3
+
+        @staticmethod
+        def size_bytes():
+            return 2 * 8 * 8 * 2
+
+    class _Fitter:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def fit(self, *_a, **_kw):
+            return _Result()
+
+    loaded = MagicMock()
+    loaded.d_model = d_model
+    loaded.n_vocab = 64
+    loaded.n_layers = 4
+    loaded.name = "org/model"
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = MagicMock(
+        repo_id="org/model"
+    )
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    root = tmp_path / "artifacts"
+
+    with patch("src.ml.jlens_fitter.JacobianFitter", _Fitter), patch(
+        "src.core.database.get_sync_db", fake_db
+    ), patch(
+        "src.services.jlens_model_registry.load_for_readout", return_value=loaded
+    ), patch.object(
+        type(task_mod.settings),
+        "jlens_artifacts_dir",
+        property(lambda _self: root),
+    ), patch.object(
+        task_mod.fit_jlens_artifact, "update_state", MagicMock()
+    ):
+        # NO semantic probe -> SEMANTIC is NOT_RUN -> not serviceable -> the
+        # branch under test.
+        out = task_mod.fit_jlens_artifact.run(model_id="m_1", prompts=["a"])
+
+    assert out["published"] is False, "precondition: this fit must not publish"
+
+    staging = JLensArtifactService(root).staging_dir("org/model")
+    assert staging.is_dir(), (
+        "the staged fit was deleted after a failed validation; re-validating it "
+        "now costs a full refit"
+    )
+    assert list(staging.glob("*_jacobian_lens.pt")), (
+        f"staging survived but is empty: {list(staging.iterdir())}"
     )
