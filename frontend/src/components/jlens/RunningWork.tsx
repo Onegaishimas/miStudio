@@ -28,6 +28,20 @@ const LABELS: Partial<Record<TaskType, string>> = {
   [TaskType.JLENS_PROBE]: 'Probing',
 };
 
+/** "1 running, 2 queued" — never a bare total that implies concurrency. */
+export function summarise(rows: Array<{ status: string }>): string {
+  const running = rows.filter((r) => r.status === 'running').length;
+  const queued = rows.filter((r) => r.status === 'queued').length;
+  const orphaned = rows.filter((r) => r.status === 'orphaned').length;
+  const parts: string[] = [];
+  if (running) parts.push(`${running} running`);
+  if (queued) parts.push(`${queued} queued`);
+  // Surfaced, not hidden: a job whose worker died is the thing a reader most
+  // needs to notice, and folding it into a total buries it.
+  if (orphaned) parts.push(`${orphaned} stopped reporting`);
+  return parts.join(' · ') || 'idle';
+}
+
 export function isJSpaceWork(entry: TaskQueueEntry): boolean {
   return String(entry.task_type).startsWith('jlens_');
 }
@@ -67,9 +81,16 @@ export function RunningWork({ modelId }: RunningWorkProps) {
   return (
     <section className="mb-4 shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-950/40">
       <div className="flex flex-wrap items-center gap-2">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
+        <Loader2
+          className={`h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 ${
+            mine.some((r) => r.status === 'running') ? 'animate-spin' : ''
+          }`}
+        />
         <span className="text-xs font-medium text-emerald-800 dark:text-emerald-300">
-          {mine.length === 1 ? 'Running now' : `${mine.length} jobs running`}
+          {/* COUNT WHAT IS ACTUALLY RUNNING. This said "3 jobs running" for one
+              running job and two queued behind it — a single-GPU queue runs one
+              at a time, so the plural was never right. */}
+          {summarise(mine)}
         </span>
       </div>
       <ul className="mt-2 space-y-1.5">
