@@ -127,3 +127,59 @@ class TestTheStatusEndpointActuallyRuns:
         body = self._status("SUCCESS", {"heartbeat": time.time() - 99999})
         assert body["state"] == "SUCCESS"
         assert "error" not in body
+
+
+class TestActiveOperationsAgreesWithTheHeartbeat:
+    """The two surfaces must not disagree about what is running.
+
+    OBSERVED: a fit killed by a pod roll showed "running 21.5%" in Active
+    Operations while /models/tasks/{id} correctly reported ORPHANED. The row is
+    written when the task is queued and moved by the task itself — so a worker
+    that dies writes nothing and the row sits at its last progress forever.
+
+    MUTATION CONTROLS:
+      * drop the reconciliation        -> "reports orphaned" fails
+      * reconcile QUEUED rows too      -> "queued is not orphaned" fails
+    """
+
+    def _row(self, status, state, info):
+        from unittest.mock import MagicMock, patch
+
+        from src.api.v1.endpoints.task_queue import _looks_orphaned
+
+        task = MagicMock()
+        task.status = status
+        task.task_id = "t-1"
+
+        result = MagicMock()
+        result.state = state
+        result.info = info
+        with patch("celery.result.AsyncResult", return_value=result):
+            return _looks_orphaned(task)
+
+    def test_it_reports_a_running_row_whose_task_stopped_beating(self):
+        stale = {"stage": "fitting", "heartbeat": time.time() - STALE_AFTER_SECONDS - 60}
+        assert self._row("running", "PROGRESS", stale) is True
+
+    def test_a_live_row_is_left_alone(self):
+        assert self._row("running", "PROGRESS", beat({"stage": "fitting"})) is False
+
+    def test_a_QUEUED_row_is_never_orphaned(self):
+        """A task waiting behind a long job has not started and cannot beat.
+
+        Condemning it would mark everything in the queue as dead.
+        """
+        stale = {"heartbeat": time.time() - STALE_AFTER_SECONDS - 60}
+        assert self._row("queued", "PENDING", stale) is False
+        assert self._row("queued", "PROGRESS", stale) is False
+
+    def test_a_row_with_no_task_id_is_never_orphaned(self):
+        """Federated rows from other job tables carry no Celery id."""
+        from unittest.mock import MagicMock
+
+        from src.api.v1.endpoints.task_queue import _looks_orphaned
+
+        task = MagicMock()
+        task.status = "running"
+        task.task_id = None
+        assert _looks_orphaned(task) is False

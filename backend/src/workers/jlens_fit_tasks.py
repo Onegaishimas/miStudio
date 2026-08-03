@@ -227,7 +227,17 @@ def fit_jlens_artifact(
             "passed": report.passed,
             "summary": report.summary(),
             "results": [
-                {"check": r.check.value, "status": r.status.value, "detail": r.detail}
+                {
+                    "check": r.check.value,
+                    "status": r.status.value,
+                    "detail": r.detail,
+                    # WHAT THE CHECK ACTUALLY SAW. Dropped until now, which
+                    # made a failed SEMANTIC check unactionable: it said the
+                    # intermediate was absent from the top-k and never said
+                    # what WAS there, so the only way to learn was to publish
+                    # the artifact the check had just refused.
+                    "evidence": r.evidence,
+                }
                 for r in report.results
             ],
         },

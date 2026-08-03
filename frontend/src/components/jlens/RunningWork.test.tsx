@@ -15,7 +15,7 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { RunningWork, isJSpaceWork } from './RunningWork';
+import { RunningWork, isJSpaceWork, summarise } from './RunningWork';
 import { TaskType } from '../../types/taskQueue';
 
 vi.mock('../../api/taskQueue', () => ({ getActiveTasks: vi.fn() }));
@@ -124,5 +124,28 @@ describe('RunningWork', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('the summary counts what is actually running', () => {
+  it('says "1 running · 2 queued", never "3 jobs running"', () => {
+    // A single-GPU queue runs one at a time, so a bare total implies
+    // concurrency the product does not have.
+    //
+    // MUTATION CONTROL: return `${rows.length} jobs running` and this fails.
+    expect(
+      summarise([{ status: 'running' }, { status: 'queued' }, { status: 'queued' }])
+    ).toBe('1 running · 2 queued');
+  });
+
+  it('surfaces a stopped job rather than folding it into a total', () => {
+    // A worker that died is the thing a reader most needs to notice.
+    expect(
+      summarise([{ status: 'running' }, { status: 'orphaned' }])
+    ).toBe('1 running · 1 stopped reporting');
+  });
+
+  it('says idle rather than an empty string', () => {
+    expect(summarise([])).toBe('idle');
   });
 });

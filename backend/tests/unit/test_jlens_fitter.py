@@ -2016,3 +2016,45 @@ def test_the_semantic_probe_defaults_to_MID_STACK_not_the_top():
         f"probe ran at layer {seen['layer']}; defaulting to the top of the "
         "stack tests next-token content, not an unspoken intermediate"
     )
+
+
+def test_a_failed_check_reports_what_it_actually_saw():
+    """A refusal that will not say what it found cannot be acted on.
+
+    OBSERVED ON HARDWARE: two fits failed SEMANTIC and reported only that the
+    intermediate was "absent from the top-8". Learning what the lens DID
+    surface required publishing the artifact the check had just refused —
+    circular, and the reason the fixture could not be diagnosed.
+
+    MUTATION CONTROL: drop `evidence` from the result dict and this fails.
+    """
+    from src.services.jlens_validation import (
+        CheckClass,
+        CheckResult,
+        CheckStatus,
+        ValidationReport,
+    )
+
+    report = ValidationReport(
+        [
+            CheckResult(
+                CheckClass.SEMANTIC,
+                CheckStatus.FAIL,
+                "' France' absent from the top-8 at layer 9",
+                {"top": [" Paris", " the", " a"]},
+            )
+        ]
+    )
+    payload = [
+        {
+            "check": r.check.value,
+            "status": r.status.value,
+            "detail": r.detail,
+            "evidence": r.evidence,
+        }
+        for r in report.results
+    ]
+    assert payload[0]["evidence"]["top"] == [" Paris", " the", " a"], (
+        "the check's own evidence was dropped, so a failure says only that "
+        "something was absent and never what was present"
+    )
