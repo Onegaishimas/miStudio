@@ -24,6 +24,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
+from .task_heartbeat import beat
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def compute_band_report_task(
         if record is None:
             raise ValueError(f"No model with id {model_id!r}")
 
-        self.update_state(state="PROGRESS", meta={"stage": "loading_model"})
+        self.update_state(state="PROGRESS", meta=beat({"stage": "loading_model"}))
         try:
             loaded = load_for_readout(record, capture_device=None)
         except ModelNotAvailable as exc:
@@ -106,7 +107,7 @@ def compute_band_report_task(
     if out_of_range:
         raise ValueError(f"layers {out_of_range} outside range 0..{n_layers - 1}")
 
-    self.update_state(state="PROGRESS", meta={"stage": "profiling"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "profiling"}))
     readout_service = ReadoutService(
         model=loaded.model,
         tokenizer=loaded.tokenizer,
@@ -117,8 +118,18 @@ def compute_band_report_task(
 
     from ..services.jlens_band_service import compute_band_report
 
+    def on_prompt(index: int, total: int) -> None:
+        # Inside the loop, not at its edges: this stage runs for tens of
+        # minutes and a beat only at its start would be indistinguishable from
+        # a worker that died at its start.
+        self.update_state(
+            state="PROGRESS",
+            meta=beat({"stage": "profiling", "prompt": index + 1, "of": total}),
+        )
+
     report = compute_band_report(
         readout_service=readout_service,
+        on_progress=on_prompt,
         prompts=prompts,
         layers=selected,
         control_seed=control_seed,
@@ -136,7 +147,7 @@ def compute_band_report_task(
             control_seed=control_seed,
         )
 
-    self.update_state(state="PROGRESS", meta={"stage": "saving"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "saving"}))
     path = save_band_report(ref.directory, report)
     logger.info("Wrote band report for %s to %s", loaded.name, path)
 

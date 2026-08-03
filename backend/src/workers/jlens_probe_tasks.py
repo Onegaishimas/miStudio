@@ -20,6 +20,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
+from .task_heartbeat import beat
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def compute_probe(
         if record is None:
             raise ValueError(f"No model with id {model_id!r}")
 
-        self.update_state(state="PROGRESS", meta={"stage": "loading_model"})
+        self.update_state(state="PROGRESS", meta=beat({"stage": "loading_model"}))
         try:
             # None = any resident copy. A fit may have left this model on the GPU;
             # capturing there is free, and the readout maths runs on
@@ -102,7 +103,7 @@ def compute_probe(
     # 8.4 GB the readout's per-field limits once permitted.
     check_readout_budget(len(ids), len(selected), service.d_model)
 
-    self.update_state(state="PROGRESS", meta={"stage": "probing"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "probing"}))
     residuals = service._capture_residuals(input_ids, selected)
 
     rows: List[Dict[str, Any]] = []

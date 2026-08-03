@@ -31,6 +31,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
+from .task_heartbeat import beat
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ def compute_readout(
         if record is None:
             raise ValueError(f"No model with id {model_id!r}")
 
-        self.update_state(state="PROGRESS", meta={"stage": "loading_model"})
+        self.update_state(state="PROGRESS", meta=beat({"stage": "loading_model"}))
         try:
             # None = any resident copy. A fit may have left this model on the GPU;
             # capturing there is free, and the readout maths runs on
@@ -95,7 +96,7 @@ def compute_readout(
 
         transports.append(_jacobian_transport(loaded, artifact_id))
 
-    self.update_state(state="PROGRESS", meta={"stage": "reading_out"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "reading_out"}))
     service = ReadoutService(
         model=loaded.model,
         tokenizer=loaded.tokenizer,
