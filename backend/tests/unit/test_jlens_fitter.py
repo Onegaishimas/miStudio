@@ -1914,3 +1914,54 @@ def test_the_backward_chunk_is_narrowed_to_stay_within_a_memory_bound(monkeypatc
         "allocate without limit"
     )
     assert max(widths) >= 1, "narrowing must never reach zero"
+
+
+def test_a_layer_that_never_ran_is_refused_not_silently_dropped():
+    """Coverage loss must be loud.
+
+    A layer present in `layers_module` but never executed captures nothing. The
+    old code excluded it from `present`, so it never accumulated, never appeared
+    in the result, and the artifact shipped with fewer layers than requested and
+    nothing saying which.
+
+    MUTATION CONTROL: turn the `missing` check into `if False` and this fails.
+    """
+    d_model = 4
+
+    class _Block(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.w = torch.nn.Parameter(torch.eye(d_model))
+
+        def forward(self, hidden, **_kw):
+            return (hidden @ self.w,)
+
+    blocks = torch.nn.ModuleList([_Block() for _ in range(4)])
+
+    class _S:
+        layers_module = blocks
+        num_layers = 4
+        attention_module = None
+
+    class _Tok:
+        def __call__(self, text, return_tensors=None):
+            return {"input_ids": torch.zeros(1, 3, dtype=torch.long)}
+
+    class _SkippingModel(torch.nn.Module):
+        """Runs blocks 0 and 2 only — block 1 is declared and never executed."""
+
+        def __init__(self):
+            super().__init__()
+            self.blocks = blocks
+            self.embed = torch.nn.Embedding(2, d_model)
+
+        def forward(self, input_ids=None, **_kw):
+            h = self.embed(input_ids)
+            for i in (0, 2):
+                h = self.blocks[i](h)[0]
+            return h
+
+    fitter = JacobianFitter(_SkippingModel(), _Tok(), _S(), min_prompts=1, chunk=2)
+
+    with pytest.raises(ValueError, match=r"never produced an activation"):
+        fitter.fit(["abc"], layers=[0, 1])
