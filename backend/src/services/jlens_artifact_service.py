@@ -30,7 +30,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -274,13 +274,32 @@ class JLensArtifactService:
         # and the replacement covered 9 on 400 — neither dominates, and nothing
         # told the user they were about to lose seven layers. Losing coverage
         # must be a DECISION, so it is refused unless asked for by name.
-        lost = self._coverage_lost(repo_id, staging)
+        lost, out_of_scope = self._coverage_delta(repo_id, staging)
         if lost and not allow_coverage_loss:
             raise ArtifactCoverageLoss(
                 f"refusing to publish {repo_id}: the existing artifact covers "
                 f"layers {lost} that this fit does not. Publishing would "
                 "destroy them. Re-run with allow_coverage_loss=true if that is "
                 "what you want, or fit the missing layers as well."
+            )
+        if out_of_scope:
+            # NOT A LOSS — A RECIPE CHANGE. A layer above the new target has no
+            # Jacobian to that target: the path is zero by causality, and the
+            # fitter refuses to fit it at all. The old artifact holds those
+            # layers only because it targeted a higher block.
+            #
+            # This used to raise. The refusal told the user to "fit the missing
+            # layers as well", which is IMPOSSIBLE under the new target, so a
+            # penultimate refit over a final-target artifact could not be
+            # published by any action the message suggested. The previous
+            # artifact is archived to `.superseded`, so nothing is unrecoverable.
+            logger.info(
+                "Publishing %s drops layers %s, which are above its %s target and "
+                "cannot be fitted under this recipe. The previous artifact is "
+                "archived, not deleted.",
+                repo_id,
+                out_of_scope,
+                self.target_layer(self._ref_for(staging)) or "declared",
             )
 
         final = self.root / slug_for(repo_id)
@@ -333,28 +352,70 @@ class JLensArtifactService:
                 digest.update(chunk)
         return digest.hexdigest()
 
-    def _coverage_lost(self, repo_id: str, staging: Path) -> List[int]:
-        """Layers the CURRENT artifact has that the staged one does not.
+    def _coverage_delta(self, repo_id: str, staging: Path) -> Tuple[List[int], List[int]]:
+        """Layers the CURRENT artifact has that the staged one does not, SPLIT.
 
-        Empty when there is no current artifact, when either side is
-        unreadable, or when the new fit is a superset. Unreadable is treated as
-        "nothing to lose" deliberately: a guard that blocks publishing because
-        it could not parse the old file turns a corrupt artifact into a
-        permanent obstruction.
+        Returns `(lost, out_of_scope)`:
+
+          * `lost` — layers the new fit could have covered and did not. Real
+            loss, and the thing worth refusing over.
+          * `out_of_scope` — layers ABOVE the staged fit's target. Their
+            Jacobian to that target is zero by causality and the fitter refuses
+            to fit them, so their absence is the recipe, not a gap.
+
+        Both empty when there is no current artifact or either side is
+        unreadable. Unreadable is treated as "nothing to lose" deliberately: a
+        guard that blocks publishing because it could not parse the old file
+        turns a corrupt artifact into a permanent obstruction.
         """
         current = self.find(repo_id)
         if current is None:
-            return []
+            return [], []
         staged = self._ref_for(staging)
         if staged is None:
-            return []
+            return [], []
         old = self._load_payload(current)
         new = self._load_payload(staged)
         if not isinstance(old, dict) or not isinstance(new, dict):
-            return []
-        old_layers = {int(k) for k in old}
-        new_layers = {int(k) for k in new}
-        return sorted(old_layers - new_layers)
+            return [], []
+        missing = sorted({int(k) for k in old} - {int(k) for k in new})
+        if not missing:
+            return [], []
+
+        ceiling = self._target_index(staged)
+        if ceiling is None:
+            # No recipe to appeal to, so nothing may be excused. Fail closed:
+            # treating an unreadable recipe as permission to drop layers is how
+            # a guard becomes decorative.
+            return missing, []
+        lost = [l for l in missing if l <= ceiling]
+        out_of_scope = [l for l in missing if l > ceiling]
+        return lost, out_of_scope
+
+    def _target_index(self, ref: ArtifactRef) -> Optional[int]:
+        """Highest layer this artifact's recipe COULD cover, from its own config.
+
+        `None` when either the target or the layer count is unreadable — the
+        caller must then excuse nothing.
+        """
+        target = self.target_layer(ref)
+        n_layers = self._config_int(ref, "n_layers")
+        if target is None or n_layers is None:
+            return None
+        return n_layers - 2 if target == "penultimate" else n_layers - 1
+
+    def _config_int(self, ref: ArtifactRef, key: str) -> Optional[int]:
+        """One integer field from config.yaml, or None if absent/unparseable."""
+        if ref.config_path is None or not ref.config_path.is_file():
+            return None
+        try:
+            for raw in ref.config_path.read_text().splitlines():
+                name, _, value = raw.partition(":")
+                if name.strip() == key:
+                    return int(value.strip())
+        except (OSError, ValueError) as exc:  # noqa: BLE001
+            logger.warning("Could not read %s from %s: %s", key, ref.config_path, exc)
+        return None
 
     def _write_report(self, ref: ArtifactRef, report: ValidationReport) -> None:
         stat = ref.lens_path.stat()

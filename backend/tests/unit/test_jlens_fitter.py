@@ -2212,3 +2212,214 @@ def test_a_fit_that_fails_validation_KEEPS_its_staged_artifact(tmp_path):
     assert list(staging.glob("*_jacobian_lens.pt")), (
         f"staging survived but is empty: {list(staging.iterdir())}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Two defects a fully green suite published to hardware.
+#
+# The LFM2 artifact fitted on 2026-08-03 converged over 888 prompts and wrote a
+# recipe claiming `target_layer: final` for a fit that targeted the PENULTIMATE
+# block, and `attention_gradients_requested: frozen_qk` for a request that
+# believed it was asking for the paper-standard full backward. Neither was
+# caught by reading, by 2338 passing tests, or by the review round that
+# introduced the parameter.
+# ---------------------------------------------------------------------------
+
+
+def test_the_recipe_records_the_target_layer_that_WAS_USED():
+    """A recipe naming a target the fit did not use is worse than none (BR-007).
+
+    `target_layer` was added to `_config_yaml`'s signature, threaded from the
+    API through the task and into the call — and then dropped on the last line,
+    where the value was a hardcoded literal "final". Every penultimate fit
+    published provenance for a recipe it did not run.
+
+    MUTATION CONTROL: put back `"target_layer: final",` and this fails.
+    """
+    from src.workers.jlens_fit_tasks import _config_yaml
+
+    from unittest.mock import MagicMock
+
+    class _Loaded:
+        name = "org/model"
+        d_model = 8
+        n_vocab = 64
+        n_layers = 16
+        structure = MagicMock(num_layers=16)
+        model = MagicMock(config=None)
+
+    class _R:
+        jacobians = {i: None for i in range(15)}
+        prompts_seen = 888
+        converged = True
+        mean_seq_len = 68.2
+        degenerate_layers: list = []
+        residual_mean = 0.0
+        residual_max = 0.0
+        convergence_delta = 1e-3
+        scales = {i: 1.0 for i in range(15)}
+
+    for target in ("penultimate", "final"):
+        text = _config_yaml(
+            _Loaded(), _R(), freeze_qk=False, corpus_name="c", target_layer=target
+        )
+        assert f"target_layer: {target}" in text, (
+            f"asked for target_layer={target!r}; the recipe says otherwise:\n"
+            + "\n".join(l for l in text.splitlines() if "target_layer" in l)
+        )
+
+
+def test_full_backward_is_the_DEFAULT_recipe_everywhere_a_fit_starts():
+    """Frozen Q/K is an ablation. It must not be what a caller gets by default.
+
+    The fitter class already defaulted `freeze_qk=False`, which made this look
+    settled — but every real fit is started through the task, the REST schema or
+    the MCP tool, and all three defaulted to True. The class default was
+    unreachable, so the aligned recipe could only be obtained by naming the flag,
+    and the MCP tool's own description said "OFF by default" while defaulting it
+    on.
+
+    Asserts the ENTRY POINTS, not the class: a test of the class passes against
+    exactly the state that shipped the ablation to hardware.
+
+    MUTATION CONTROL: flip any one of the three back to True and this fails.
+    """
+    import inspect
+
+    from src.api.v1.endpoints.jlens import FitRequest
+    from src.workers.jlens_fit_tasks import fit_jlens_artifact
+
+    task_default = inspect.signature(
+        fit_jlens_artifact.run if hasattr(fit_jlens_artifact, "run") else fit_jlens_artifact
+    ).parameters["freeze_qk"].default
+    assert task_default is False, f"Celery task defaults freeze_qk={task_default}"
+
+    assert FitRequest.model_fields["freeze_qk"].default is False, (
+        "the REST schema defaults to the ablation"
+    )
+
+    from src.mcp_server.tools import jlens as mcp_jlens
+
+    src = inspect.getsource(mcp_jlens)
+    marker = "recorded per layer rather than claimed wholesale\")] = "
+    assert marker in src, "the MCP freeze_qk annotation moved; update this test"
+    default_text = src.split(marker, 1)[1].split(",", 1)[0].strip()
+    assert default_text == "False", (
+        f"the MCP tool defaults freeze_qk={default_text}, so an agent asking for "
+        "a standard fit silently gets the ablation"
+    )
+
+
+# ---------------------------------------------------------------------------
+# THE FIT MUST GIVE THE CARD BACK.
+#
+# `load_for_readout` caches the model so a fit does not reload it per prompt.
+# `clear_cache` existed to drop it and had ZERO callers — the same
+# declared-but-never-wired shape this repo has shipped before. Observed: an
+# LFM2 fit finished at 22:09 and 4.0 GB was still resident on the shared 3090
+# at 0% utilisation half an hour later, on the card miLLM serves from.
+# ---------------------------------------------------------------------------
+
+
+def _fit_task_harness(tmp_path, cuda: bool, blow_up: bool = False):
+    """Run `fit_jlens_artifact` with everything mocked, recording cache clears."""
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock, patch
+
+    import torch
+
+    import src.workers.jlens_fit_tasks as task_mod
+    from src.services import jlens_model_registry
+
+    cleared = []
+
+    class _Result:
+        jacobians = {i: torch.eye(8, dtype=torch.float16) for i in (0, 1)}
+        scales = {0: 1.0, 1: 1.0}
+        prompts_seen = 4
+        converged = True
+        mean_seq_len = 10.0
+        degenerate_layers: list = []
+        residual_mean = 0.0
+        residual_max = 0.0
+        convergence_delta = 1e-3
+
+        @staticmethod
+        def size_bytes():
+            return 8 * 8 * 2 * 2
+
+    class _Fitter:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def fit(self, *_a, **_kw):
+            if blow_up:
+                raise RuntimeError("CUDA out of memory")
+            return _Result()
+
+    loaded = MagicMock()
+    loaded.d_model, loaded.n_vocab, loaded.n_layers = 8, 64, 4
+    loaded.name = "org/model"
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = MagicMock(
+        repo_id="org/model"
+    )
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    with patch("src.ml.jlens_fitter.JacobianFitter", _Fitter), patch(
+        "src.core.database.get_sync_db", fake_db
+    ), patch(
+        "src.services.jlens_model_registry.load_for_readout", return_value=loaded
+    ), patch.object(
+        jlens_model_registry, "clear_cache", lambda: cleared.append(True)
+    ), patch(
+        "torch.cuda.is_available", lambda: cuda
+    ), patch.object(
+        type(task_mod.settings),
+        "jlens_artifacts_dir",
+        property(lambda _s: tmp_path / "artifacts"),
+    ), patch.object(
+        task_mod.fit_jlens_artifact, "update_state", MagicMock()
+    ):
+        try:
+            task_mod.fit_jlens_artifact.run(model_id="m_1", prompts=["a"])
+            raised = False
+        except RuntimeError:
+            raised = True
+    return cleared, raised
+
+
+def test_a_gpu_fit_RELEASES_the_model_when_it_finishes(tmp_path):
+    """Otherwise the card stays occupied until the pod restarts.
+
+    MUTATION CONTROL: drop the `finally: clear_cache()` block and this fails.
+    """
+    cleared, _ = _fit_task_harness(tmp_path, cuda=True)
+    assert cleared, (
+        "the fit finished without releasing the model; the GPU stays occupied "
+        "at 0% utilisation on a card that is shared with serving"
+    )
+
+
+def test_a_gpu_fit_RELEASES_the_model_even_when_it_FAILS(tmp_path):
+    """An OOM is exactly when the card most needs to come back.
+
+    MUTATION CONTROL: move the release out of `finally` into the success path
+    and this fails while the test above still passes — which is why both exist.
+    """
+    cleared, raised = _fit_task_harness(tmp_path, cuda=True, blow_up=True)
+    assert raised, "precondition: this fit must fail"
+    assert cleared, "a failed fit kept the GPU"
+
+
+def test_a_CPU_fit_does_not_evict_the_cache(tmp_path):
+    """There is no card to give back, and evicting costs the next readout a reload.
+
+    MUTATION CONTROL: clear unconditionally and this fails.
+    """
+    cleared, _ = _fit_task_harness(tmp_path, cuda=False)
+    assert not cleared, "a CPU fit evicted the cache for no benefit"

@@ -40,7 +40,13 @@ def fit_jlens_artifact(
     model_id: str,
     prompts: List[str],
     layers: Optional[List[int]] = None,
-    freeze_qk: bool = True,
+    # FULL BACKWARD IS THE STANDARD RECIPE (D4). Frozen Q/K is an
+    # ABLATION — useful, and not the default. This defaulted to True, so
+    # every fit started from the API or MCP silently ran the ablation while
+    # the fitter class it constructs defaults to False; the aligned recipe
+    # was unreachable without naming the flag explicitly, and the artifact
+    # published on 2026-08-03 records `frozen_qk` for exactly this reason.
+    freeze_qk: bool = False,
     corpus_name: str = "unspecified",
     semantic_probe: Optional[Dict[str, Any]] = None,
     allow_coverage_loss: bool = False,
@@ -81,7 +87,60 @@ def fit_jlens_artifact(
         device = "cuda" if torch.cuda.is_available() else "cpu"
         loaded = load_for_readout(record, capture_device=device)
 
-    from ..ml.jlens_fitter import DEFAULT_CONVERGENCE_DELTA
+    # RELEASE THE CARD WHEN THE FIT IS DONE. `load_for_readout` caches the model
+    # so a fit does not reload it per prompt, and NOTHING dropped it afterwards:
+    # `clear_cache` existed with zero callers. An LFM2 fit left 4.0 GB resident
+    # on the shared 3090 at 0% utilisation from the moment it finished until the
+    # pod was next restarted — on a card miLLM serves from.
+    #
+    # `try/finally` around everything after the load, because the release must
+    # happen on the failure paths too: an OOM or a validation raise is exactly
+    # when the card most needs to come back.
+    try:
+        return _fit_and_publish(
+            self,
+            loaded=loaded,
+            model_id=model_id,
+            repo_id=repo_id,
+            prompts=prompts,
+            layers=layers,
+            freeze_qk=freeze_qk,
+            corpus_name=corpus_name,
+            semantic_probe=semantic_probe,
+            allow_coverage_loss=allow_coverage_loss,
+            freeze_norms=freeze_norms,
+            target_layer=target_layer,
+            convergence_delta=convergence_delta,
+        )
+    finally:
+        if device == "cuda":
+            from ..services.jlens_model_registry import clear_cache
+
+            clear_cache()
+            logger.info("Released the fitted model from GPU memory")
+
+
+def _fit_and_publish(
+    self,
+    loaded,
+    model_id: str,
+    repo_id: str,
+    prompts: List[str],
+    layers: Optional[List[int]],
+    freeze_qk: bool,
+    corpus_name: str,
+    semantic_probe: Optional[Dict[str, Any]],
+    allow_coverage_loss: bool,
+    freeze_norms: bool,
+    target_layer: str,
+    convergence_delta: Optional[float],
+) -> Dict[str, Any]:
+    """The fit itself, split out so the caller can guarantee the GPU release."""
+    from ..ml.jlens_fitter import DEFAULT_CONVERGENCE_DELTA, JacobianFitter
+    from ..services.jlens_artifact_service import (
+        ArtifactCoverageLoss,
+        JLensArtifactService,
+    )
 
     # None means the fitter's default. Passed explicitly rather than defaulted
     # in the signature so the value that was ACTUALLY used is the one written
@@ -428,17 +487,18 @@ def _config_yaml(
         f"n_vocab: {loaded.n_vocab}",
         "dtype: fp16",
         # THE RECIPE'S OWN VOCABULARY (BR-007). `JLensArtifactRecipe` declares
-        # these four fields and this writer emitted none of them, so the schema
-        # was a contract nothing honoured and the provenance said nothing about
-        # how the lens was built. They are written from what the fitter ACTUALLY
-        # does, not from the schema's defaults — which disagreed with it:
+        # these fields and this writer emitted none of them, so the schema was a
+        # contract nothing honoured and the provenance said nothing about how the
+        # lens was built.
         #
-        #   target_layer          declared "penultimate"; the fit runs the
-        #                         sub-network to the FINAL block.
-        #   target_position_scope declared "all_subsequent"; the extraction runs
-        #                         one position with the mask sliced to it
-        #                         (`_batch_kwargs`), which is SELF_ONLY.
-        "target_layer: final",
+        # THE TARGET IS THE CALLER'S CHOICE AND MUST BE REPORTED AS RUN. This
+        # line was the literal string "final" — correct when the fitter always
+        # ran to the last block, and a LIE the moment the target became
+        # selectable. The parameter was added to this function's signature and
+        # then never read, so a 15-of-16-layer penultimate fit published a
+        # recipe claiming it targeted the final block. Nothing objected: the
+        # value was threaded the whole way here and dropped on the last line.
+        f"target_layer: {target_layer}",
         # THE PAPER'S DEFINITION, recorded as it was run: an expectation over
         # SOURCE positions of the summed effect on all subsequent target
         # positions. The previous fitter recorded `self_only_isolated` because

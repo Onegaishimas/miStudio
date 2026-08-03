@@ -595,3 +595,124 @@ def test_ranking_is_invariant_to_the_scale_but_probing_is_not():
     assert torch.allclose(rms_norm(scaled), rms_norm(unscaled), atol=1e-4)
     # Unnormalised — a probe score — they differ by the factor.
     assert not torch.allclose(scaled, unscaled, atol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# A RECIPE CHANGE IS NOT DATA LOSS.
+#
+# The first paper-aligned LFM2 fit converged over 888 prompts, passed every
+# local class including SEMANTIC, and was then refused publication because the
+# previous artifact held layer 15 and this one did not. The refusal advised
+# "fit the missing layers as well" — impossible: under a PENULTIMATE target,
+# layer 15 is above the target, its Jacobian to that target is zero by
+# causality, and the fitter refuses to fit it at all.
+# ---------------------------------------------------------------------------
+
+
+def _recipe(target: str, n_layers: int = 16) -> str:
+    return f"corpus: t\nn_layers: {n_layers}\ntarget_layer: {target}\n"
+
+
+def test_a_penultimate_refit_over_a_final_target_artifact_PUBLISHES(tmp_path):
+    """The dropped layer is above the new target, so it is scope, not loss.
+
+    MUTATION CONTROL: make `_coverage_delta` return `(missing, [])` and this
+    fails with ArtifactCoverageLoss — the state that blocked a good artifact.
+    """
+    import torch
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    service.write_staged(
+        "org/model",
+        {l: torch.randn(4, 4) for l in range(16)},
+        _recipe("final"),
+    )
+    service.commit("org/model", _passing_report())
+
+    # The aligned refit: 0..14, targeting the penultimate block of a 16-layer model.
+    service.write_staged(
+        "org/model",
+        {l: torch.randn(4, 4) for l in range(15)},
+        _recipe("penultimate"),
+    )
+    service.commit("org/model", _passing_report())  # must NOT raise
+
+    payload = service._load_payload(service.find("org/model"))
+    assert sorted(int(k) for k in payload) == list(range(15))
+
+    # And the artifact it replaced is archived, not destroyed.
+    archived = tmp_path / "model.superseded"
+    assert archived.is_dir(), "the previous artifact was deleted rather than archived"
+
+
+def test_a_GENUINE_partial_refit_is_still_refused_when_the_recipe_is_readable(tmp_path):
+    """Excusing layers above the target must not excuse a hole below it.
+
+    This is the guard the change above could have destroyed: same readable
+    recipe, but the missing layers are ones this target could have covered.
+
+    MUTATION CONTROL: excuse every missing layer regardless of the ceiling and
+    this fails.
+    """
+    import torch
+
+    import pytest as _pytest
+
+    from src.services.jlens_artifact_service import (
+        ArtifactCoverageLoss,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    service.write_staged(
+        "org/model", {l: torch.randn(4, 4) for l in range(16)}, _recipe("final")
+    )
+    service.commit("org/model", _passing_report())
+
+    # Penultimate target, but only 0..8 fitted: layers 9..14 are BELOW the
+    # ceiling of 14 and are real loss. 15 is above it and is not.
+    service.write_staged(
+        "org/model",
+        {l: torch.randn(4, 4) for l in range(9)},
+        _recipe("penultimate"),
+    )
+    with _pytest.raises(ArtifactCoverageLoss) as excinfo:
+        service.commit("org/model", _passing_report())
+
+    message = str(excinfo.value)
+    for layer in range(9, 15):
+        assert str(layer) in message, f"layer {layer} not named in: {message}"
+
+
+def test_an_unreadable_recipe_excuses_NOTHING(tmp_path):
+    """Fail closed: no recipe to appeal to means no layer may be dropped.
+
+    Treating an unparseable config as permission to drop layers would make the
+    guard decorative exactly when the artifact is least trustworthy.
+
+    MUTATION CONTROL: return `([], missing)` when `_target_index` is None and
+    this fails.
+    """
+    import torch
+
+    import pytest as _pytest
+
+    from src.services.jlens_artifact_service import (
+        ArtifactCoverageLoss,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    service.write_staged(
+        "org/model", {l: torch.randn(4, 4) for l in range(16)}, _recipe("final")
+    )
+    service.commit("org/model", _passing_report())
+
+    # No target_layer and no n_layers -> nothing to reason with.
+    service.write_staged(
+        "org/model", {l: torch.randn(4, 4) for l in range(15)}, "corpus: t\n"
+    )
+    with _pytest.raises(ArtifactCoverageLoss):
+        service.commit("org/model", _passing_report())
