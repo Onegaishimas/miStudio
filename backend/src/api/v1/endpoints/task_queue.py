@@ -596,6 +596,27 @@ async def undismiss_failed_operation(
     return {"dismissed": False, "task_type": task_type, "source_id": source_id}
 
 
+def _looks_orphaned(task) -> bool:
+    """Whether a row claiming to be active belongs to a task that stopped talking.
+
+    Only ever consults Celery for rows that CLAIM to be running: a queued task
+    has not started and legitimately has no heartbeat, and calling it orphaned
+    would condemn everything waiting behind a long job.
+    """
+    if getattr(task, "status", None) != "running" or not getattr(task, "task_id", None):
+        return False
+    try:
+        from celery.result import AsyncResult
+
+        from ....core.celery_app import celery_app
+        from ....workers.task_heartbeat import looks_orphaned
+
+        result = AsyncResult(task.task_id, app=celery_app)
+        return looks_orphaned(result.state, result.info)
+    except Exception:  # noqa: BLE001 - a listing must not fail on one bad row
+        return False
+
+
 @router.get("/active", response_model=TaskQueueListResponse)
 async def list_active_tasks(db: AsyncSession = Depends(get_db)):
     """
@@ -615,7 +636,24 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
         entity_info = await TaskQueueService.get_entity_info(
             db, task.entity_id, task.entity_type
         )
-        enriched_tasks.append(_serialize_task(task, entity_info))
+        row = _serialize_task(task, entity_info)
+        # RECONCILE AGAINST THE HEARTBEAT, so this list cannot disagree with
+        # /models/tasks/{id}. A row is written when the task is queued and moved
+        # by the task itself; a worker that dies writes nothing, so the row sits
+        # at whatever progress it had reached — forever. Observed exactly that:
+        # a fit killed by a pod roll showed "running 21.5%" in Active Operations
+        # while the task endpoint correctly reported ORPHANED.
+        #
+        # Reported, not rewritten. This endpoint reads; a background janitor is
+        # the right place to make the state terminal, and inventing a write here
+        # would mean a GET with side effects.
+        if _looks_orphaned(task):
+            row["status"] = "orphaned"
+            row["error_message"] = (
+                "the worker running this stopped reporting and is presumed gone "
+                "(a deploy, an eviction or a crash). Re-run it."
+            )
+        enriched_tasks.append(row)
 
     enriched_tasks.extend(
         await _federated_trainings(db, ("pending", "initializing", "running"))
