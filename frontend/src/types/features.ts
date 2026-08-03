@@ -244,6 +244,8 @@ export interface LogitLensResponse {
 export interface CorrelatedFeature {
   feature_id: string;
   feature_name: string;
+  /** The number the product calls this feature everywhere else ("Feature #13"). */
+  neuron_index?: number | null;
   correlation: number;
 }
 
