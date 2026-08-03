@@ -107,10 +107,25 @@ def make_stack(seed: int = 0):
     return TinyStack(weights, scales), weights, scales
 
 
-def analytic_jacobian(weights, scales, layer: int) -> torch.Tensor:
-    """d h_final / d h_layer = product of (W_i . diag(s_i)) for i > layer."""
+#: Index of the block the Jacobian is taken TO, for a 4-block stack under the
+#: default `penultimate` target. Derived, not hardcoded to 2, so the fixture
+#: cannot silently agree with a changed default.
+def target_index(n_blocks: int, target: str = "penultimate") -> int:
+    return n_blocks - 1 if target == "final" else max(0, n_blocks - 2)
+
+
+def analytic_jacobian(weights, scales, layer: int, target: str = "penultimate"):
+    """d h_target / d h_layer = product of (W_i . diag(s_i)) for layer < i <= target.
+
+    The stack is position-independent, so no cross-position term exists: the
+    sum over target positions t' collapses to the t' = t term, and the mean over
+    source positions t is that same product. The new expectation therefore has
+    the SAME form as the old one — only the upper limit moved, from the final
+    block to the target block.
+    """
+    stop = target_index(len(weights), target)
     j = torch.eye(D)
-    for w, s in zip(weights[layer + 1 :], scales[layer + 1 :]):
+    for w, s in zip(weights[layer + 1 : stop + 1], scales[layer + 1 : stop + 1]):
         j = (w @ torch.diag(s)) @ j
     return j
 
@@ -253,85 +268,64 @@ def test_fit_recovers_the_known_jacobian_at_every_layer():
     result = fitter.fit([f"prompt {i}" for i in range(4)])
 
     assert result.d_model == D
-    for layer in range(len(weights)):
+    # Only layers AT OR BELOW the target have a defined Jacobian to it; above
+    # it the gradient is zero by causality and `fit` refuses them outright.
+    for layer in range(target_index(len(weights)) + 1):
         expected = analytic_jacobian(weights, scales, layer)
         got = result.jacobians[layer].to(torch.float32)
         assert torch.allclose(got, expected, atol=2e-2), f"layer {layer}"
 
 
 class NormHookedFitter(JacobianFitter):
-    """The WRONG fitter: sub-network starts after the next block's norm.
+    """The WRONG fitter: captures the residual at the next block's NORM.
 
     This is what hooking `residual_norm_module` actually does — the norm's
-    rescaling ends up OUTSIDE the fitted map instead of inside it. Reproduced
-    here rather than described, because in production the difference is
-    plausible numbers and no error at all.
+    rescaling ends up outside the fitted map instead of inside it. Reproduced
+    rather than described, because in production the difference is plausible
+    numbers and no error at all.
+
+    Overrides `_capture_module`, the seam the real fitter exposes for exactly
+    this control. An earlier version overrode `_sub_network`; when the fitter
+    moved to reverse mode that method vanished and the override became INERT —
+    the control silently stopped biting while still reporting green.
     """
 
-    def _sub_network(self, input_ids, layer):
+    def _capture_module(self, layer: int):
         if layer + 1 >= self.structure.num_layers:
-            # No next block to mis-hook; the final layer is unaffected either
-            # way, which is itself worth knowing — the defect hides in depth.
-            return super()._sub_network(input_ids, layer)
-        captured = {}
-
-        def capture(_module, _inputs, output):
-            hidden = output[0] if isinstance(output, tuple) else output
-            captured["h"] = hidden[0, -1].detach().clone()
-
-        # The norm INSIDE the next block, not the block's own output.
-        target = self.structure.layers_module[layer + 1].input_norm
-        handle = target.register_forward_hook(capture)
-        try:
-            with torch.no_grad():
-                self.model(input_ids=input_ids)
-        finally:
-            handle.remove()
-
-        def forward(h):
-            batched = h.dim() > 1
-            hidden = h.reshape(-1, 1, h.shape[-1]) if batched else h.view(1, 1, -1)
-            # Skips the norm the correct map would include.
-            hidden = hidden @ self.structure.layers_module[layer + 1].weight.T
-            for idx in range(layer + 2, self.structure.num_layers):
-                result = self.structure.layers_module[idx](hidden)
-                hidden = result[0] if isinstance(result, tuple) else result
-            return hidden.reshape(hidden.shape[0], -1) if batched else hidden.view(-1)
-
-        return captured["h"], forward
+            # No next block to mis-hook; the top of the stack is unaffected
+            # either way, which is itself worth knowing — the defect hides in
+            # depth rather than at the edges.
+            return super()._capture_module(layer)
+        return self.structure.layers_module[layer + 1].input_norm
 
 
 def test_hook_target_is_the_decoder_layer_not_a_norm():
-    """Negative control for the trap that cost this project an increment.
+    """A wrong capture point must never ship silently.
 
-    Hooking the norm module leaves the norm's rescaling OUTSIDE the fitted map,
-    so the lens no longer equals the analytic product. In production the
-    symptom is not an error — it is a well-shaped artifact with the signal
-    scaled out, which is why this is a control rather than a comment.
+    Hooking `residual_norm_module` puts the norm's rescaling outside the fitted
+    map — plausible numbers, signal scaled away, no error (PADR IDL-38).
+
+    DETECTION NOW COMES IN TWO FORMS and either is a pass: a norm downstream of
+    the target has NO gradient path to it and is refused outright, and one
+    upstream yields a measurably different lens. The old assertion accepted only
+    the second, so tightening the fitter would have looked like a regression.
     """
-    stack, weights, scales = make_stack(4)
+    stack, _, _ = make_stack(11)
     structure = Structure(stack)
+    right = JacobianFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
+    wrong = NormHookedFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
 
-    correct = (
-        JacobianFitter(stack, Tokenizer(), structure, freeze_qk=False, min_prompts=1, chunk=3)
-        .fit(["abc"])
-        .jacobians[0]
-        .to(torch.float32)
-    )
-    wrong = (
-        NormHookedFitter(stack, Tokenizer(), structure, freeze_qk=False, min_prompts=1, chunk=3)
-        .fit(["abc"])
-        .jacobians[0]
-        .to(torch.float32)
-    )
+    layer = 0  # well below the target, so both fitters can run
+    good = right.fit(["abc"], layers=[layer]).jacobians[layer].to(torch.float32)
+    try:
+        bad = wrong.fit(["abc"], layers=[layer]).jacobians[layer].to(torch.float32)
+    except ValueError:
+        return  # refused outright — the strongest possible detection
 
-    expected = analytic_jacobian(weights, scales, 0)
-    assert torch.allclose(correct, expected, atol=2e-2)
-    assert not torch.allclose(wrong, expected, atol=2e-2), (
+    assert not torch.allclose(good, bad, atol=1e-3), (
         "hooking the norm produced the same lens as hooking resid_post — the "
         "control does not bite, so a wrong hook target would ship undetected"
     )
-
 
 def test_corpus_floor_is_refused_not_warned():
     stack, _, _ = make_stack(5)
@@ -443,26 +437,36 @@ class LeakyFitter(JacobianFitter):
         return point, leaky
 
 
-def test_a_nonlinear_sub_network_RECORDS_its_departure_rather_than_being_refused():
-    """Corrected after the first real fit.
+def test_position_spread_is_recorded_and_means_what_it_says():
+    """The per-layer number is SPREAD ACROSS SOURCE POSITIONS, not a residual.
 
-    The refusal rested on freezing making the map affine. It does not — the
-    MLP activation is non-linear — so the check fired on every real model and
-    would have blocked every genuine fit. The departure is a property of the
-    model worth recording, not a fault worth refusing.
+    It replaced a "linearisation residual" that had stopped describing
+    anything: it compared the MEAN J against a SINGLE position's activation and
+    the SUMMED target — three different objects.
+
+    Spread is zero on a position-independent stack because every source
+    position genuinely gives the same Jacobian there, and non-zero the moment
+    positions mix. For intervention work it is the number that matters: a lens
+    with large spread transports differently depending on where in the sequence
+    it is applied.
     """
     stack, _, _ = make_stack(21)
-    fitter = LeakyFitter(
-        stack, Tokenizer(), Structure(stack), freeze_qk=False, min_prompts=1, chunk=3
+    flat = JacobianFitter(stack, Tokenizer(), stack_structure := Structure(stack),
+                          min_prompts=1, chunk=3)
+    result = flat.fit(["abc"], layers=[0])
+    assert result.residual_mean, "no per-layer spread was recorded at all"
+    assert result.residual_mean[0] == pytest.approx(0.0, abs=1e-5), (
+        "a position-independent stack must show ZERO spread; a non-zero value "
+        "means the number is measuring something else"
     )
-    # No longer refused — a non-affine sub-network is the NORMAL case on any
-    # real model, and refusing it refused every genuine fit. The departure is
-    # RECORDED instead, so the artifact says how local its lens is.
-    result = fitter.fit(["abc"])
-    assert result.jacobians
-    assert fitter._last_residuals, "the linearisation residual was not recorded"
-    assert max(fitter._last_residuals.values()) > 0.0
 
+    model, structure, tok = _mixing_model(3, 4, 6)
+    mixed = JacobianFitter(model, tok, structure, min_prompts=1, chunk=2)
+    mixed_result = mixed.fit(["x"], layers=[0])
+    assert mixed_result.residual_mean[0] > 1e-4, (
+        "a position-MIXING stack must show non-zero spread, or the measure is "
+        "not sensitive to the thing it claims to measure"
+    )
 
 def test_a_properly_frozen_fit_is_accepted():
     """Negative control for the guard: it must not refuse a good fit."""
@@ -638,25 +642,35 @@ def test_the_config_uses_the_recipe_schema_vocabulary():
 
 
 def test_the_declared_scope_agrees_with_what_the_fitter_does():
-    """The schema must not describe a recipe the code does not implement."""
+    """The schema must describe the recipe the code implements.
+
+    THIS TEST PREVIOUSLY PINNED THE WRONG RECIPE. It asserted
+    `self_only_isolated`, faithfully describing a fitter that took one source
+    position on a length-1 sub-network — and the source paper takes an
+    expectation over ALL source positions of the summed effect on ALL
+    subsequent target positions. A test can hold an implementation and its
+    schema in perfect agreement while both disagree with the thing they model.
+    """
     from src.schemas.jlens import JLensArtifactRecipe
 
     fields = JLensArtifactRecipe.model_fields
-    assert fields["target_position_scope"].default == "self_only_isolated", (
-        "the schema must default to what the CHEAP path actually does. It runs "
-        "the sub-network at length 1, where a softmax over one key is 1.0 — the "
-        "perturbed position gets full attention weight instead of its real "
-        "share. That is not plain `self_only`, and naming it so overstates it."
+    assert fields["target_position_scope"].default == "all_subsequent", (
+        "the schema must default to the paper's scope: an expectation over "
+        "source positions of the effect on all subsequent target positions"
     )
-    assert fields["target_layer"].default == "final", (
-        "the schema defaults to 'penultimate'; `_sub_network` runs the remaining "
-        "blocks to the FINAL layer"
+    assert fields["target_layer"].default == "penultimate", (
+        "BRD A.2 choice 1 defaults to penultimate — the last block is "
+        "specialised for next-token calibration and adds readout noise"
+    )
+    assert fields["attention_gradients"].default == "full", (
+        "the paper's standard recipe is FULL backward; freezing Q/K is an "
+        "ablation, not the default"
     )
 
     text = _written_config()
-    assert "target_position_scope: self_only_isolated" in text
-    assert "sub_network_sequence: single_position" in text
-    assert "target_layer: final" in text
+    assert "target_position_scope: all_subsequent" in text
+    assert "source_position_aggregation: mean_over_all_positions" in text
+    assert "differentiation_mode: reverse" in text
 
 
 def test_the_freeze_is_recorded_per_layer_not_wholesale():
@@ -775,19 +789,308 @@ def test_identity_distance_is_zero_only_for_the_identity():
 
 
 def test_the_fit_records_which_layers_are_degenerate():
-    """The LAST fitted layer has nothing after it, so its J is the identity."""
+    """The TARGET layer's Jacobian to itself is the identity.
+
+    Under the default penultimate target that is block N-2, not N-1. Layer N-1
+    is above the target and is REFUSED outright — its gradient is zero by
+    causality, and a zero lens reads out as uniform noise wearing a confident
+    face.
+    """
     stack, _, _ = make_stack(37)
     structure = Structure(stack)
     fitter = JacobianFitter(
-        stack, Tokenizer(), structure, freeze_qk=False, min_prompts=1, chunk=3
+        stack, Tokenizer(), structure, min_prompts=1, chunk=3
     )
-    last = structure.num_layers - 1
-    result = fitter.fit(["abc"], layers=[last])
+    tgt = target_index(structure.num_layers)
+    result = fitter.fit(["abc"], layers=[tgt])
 
-    assert last in result.degenerate_layers, (
-        f"layer {last} is the final block, so its sub-network is the identity "
-        f"and J = I — degenerate_layers was {result.degenerate_layers}"
+    assert tgt in result.degenerate_layers, (
+        f"layer {tgt} is the target block, so J = I there — degenerate_layers "
+        f"was {result.degenerate_layers}"
     )
+
+
+def test_a_layer_above_the_target_is_refused_not_silently_dropped():
+    """A zero Jacobian is worse than a missing one: it reads out confidently."""
+    import pytest as _pytest
+
+    stack, _, _ = make_stack(38)
+    structure = Structure(stack)
+    fitter = JacobianFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
+
+    with _pytest.raises(ValueError, match="above the penultimate target"):
+        fitter.fit(["abc"], layers=[structure.num_layers - 1])
+
+    # And "every layer" means every layer that CAN be fitted, rather than
+    # raising on the ordinary call.
+    assert max(fitter.fit(["abc"]).jacobians) == target_index(structure.num_layers)
+
+
+
+# ---------------------------------------------------------------------------
+# THE PAPER'S DEFINITION (D1 + D2)
+#
+#     J_l = E_t [ sum_{t' >= t} d h_target,t' / d h_l,t ]
+#
+# The old forward-mode fitter took ONE source position per prompt and ran the
+# remaining blocks on a length-1 sequence. That is neither the expectation over
+# source positions the paper takes, nor the sum over subsequent target
+# positions — and the length-1 sub-network also gave the perturbed position full
+# attention weight instead of its real share.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * mean over source positions -> take only the last  -> "every source" fails
+#   * cotangent set at one target position only         -> "all subsequent" fails
+# ---------------------------------------------------------------------------
+
+
+class _MixingBlock(torch.nn.Module):
+    """Mixes positions, so source-position averaging is observable.
+
+    A position-independent block makes every source position identical, and a
+    fitter that used only the last one would agree by construction — the exact
+    trap that let the old single-position path look correct.
+    """
+
+    def __init__(self, d_model: int, seed: int):
+        super().__init__()
+        g = torch.Generator().manual_seed(seed)
+        self.w = torch.nn.Parameter(torch.randn(d_model, d_model, generator=g) * 0.3)
+
+    def forward(self, hidden, **_kw):
+        pooled = hidden.cumsum(dim=1) / torch.arange(
+            1, hidden.shape[1] + 1, device=hidden.device, dtype=hidden.dtype
+        ).view(1, -1, 1)
+        return (pooled @ self.w,)
+
+
+def _mixing_model(n_blocks: int, d_model: int, seq: int):
+    blocks = torch.nn.ModuleList(
+        [_MixingBlock(d_model, seed=i) for i in range(n_blocks)]
+    )
+
+    class _S:
+        layers_module = blocks
+        num_layers = n_blocks
+        attention_module = None
+
+    class _Tok:
+        def __call__(self, text, return_tensors=None):
+            return {"input_ids": torch.zeros(1, seq, dtype=torch.long)}
+
+    class _Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = blocks
+            self.embed = torch.nn.Embedding(2, d_model)
+
+        def forward(self, input_ids=None, **_kw):
+            h = self.embed(input_ids)
+            # Positions differ, or averaging over them proves nothing.
+            h = h + torch.arange(
+                h.shape[1], dtype=h.dtype, device=h.device
+            ).view(1, -1, 1) * 0.1
+            for b in self.blocks:
+                h = b(h)[0]
+            return h
+
+    return _Model(), _S(), _Tok()
+
+
+def _reference_J(model, structure, tok, layer: int, seq: int, d_model: int):
+    """The paper's quantity, computed independently of the fitter."""
+    captured = {}
+
+    def cap(_m, _i, out):
+        captured["h"] = out[0] if isinstance(out, tuple) else out
+
+    tgt = target_index(structure.num_layers)
+
+    def cap_t(_m, _i, out):
+        captured["t"] = out[0] if isinstance(out, tuple) else out
+
+    h1 = structure.layers_module[layer].register_forward_hook(cap)
+    h2 = structure.layers_module[tgt].register_forward_hook(cap_t)
+    try:
+        model(input_ids=tok("x")["input_ids"])
+    finally:
+        h1.remove(); h2.remove()
+
+    src, target = captured["h"], captured["t"]
+    rows = []
+    for j in range(d_model):
+        cot = torch.zeros_like(target)
+        cot[..., j] = 1.0            # every target position t'
+        (g,) = torch.autograd.grad(target, src, grad_outputs=cot, retain_graph=True)
+        rows.append(g[0].mean(dim=0))  # mean over source positions t
+    return torch.stack(rows)
+
+
+def test_J_matches_the_papers_definition_on_a_position_mixing_stack():
+    """Independent reference, not a restatement of the implementation."""
+    d_model, n_blocks, seq = 4, 3, 5
+    model, structure, tok = _mixing_model(n_blocks, d_model, seq)
+    fitter = JacobianFitter(model, tok, structure, min_prompts=1, chunk=2)
+
+    got = fitter.fit(["x"], layers=[0]).jacobians[0].to(torch.float32)
+    want = _reference_J(model, structure, tok, 0, seq, d_model)
+
+    assert torch.allclose(got, want, atol=1e-3), (
+        f"fitted J does not match E_t[sum_t' dh/dh]:\n{got}\nvs\n{want}"
+    )
+
+
+def test_every_source_position_contributes():
+    """Averaging over t must differ from taking the last t alone."""
+    d_model, n_blocks, seq = 4, 3, 6
+    model, structure, tok = _mixing_model(n_blocks, d_model, seq)
+    fitter = JacobianFitter(model, tok, structure, min_prompts=1, chunk=2)
+    got = fitter.fit(["x"], layers=[0]).jacobians[0].to(torch.float32)
+
+    # The same computation restricted to the FINAL source position — what the
+    # old fitter produced.
+    captured = {}
+    tgt = target_index(structure.num_layers)
+    h1 = structure.layers_module[0].register_forward_hook(
+        lambda _m, _i, o: captured.__setitem__("h", o[0] if isinstance(o, tuple) else o)
+    )
+    h2 = structure.layers_module[tgt].register_forward_hook(
+        lambda _m, _i, o: captured.__setitem__("t", o[0] if isinstance(o, tuple) else o)
+    )
+    try:
+        model(input_ids=tok("x")["input_ids"])
+    finally:
+        h1.remove(); h2.remove()
+    rows = []
+    for j in range(d_model):
+        cot = torch.zeros_like(captured["t"]); cot[..., j] = 1.0
+        (g,) = torch.autograd.grad(
+            captured["t"], captured["h"], grad_outputs=cot, retain_graph=True
+        )
+        rows.append(g[0, -1])           # LAST source position only
+    last_only = torch.stack(rows)
+
+    assert not torch.allclose(got, last_only, atol=1e-4), (
+        "averaging over source positions gave the same answer as using only "
+        "the last one, so this fixture does not mix positions and the test "
+        "proves nothing"
+    )
+
+
+def test_the_sdpa_patch_is_serialised_and_always_restored():
+    """F11: the patch is process-wide, so overlapping freezes must not nest.
+
+    Two concurrent fits would otherwise restore each other's originals in the
+    wrong order and leave attention frozen for every model in the process
+    afterwards — silently, permanently, presenting only as "readouts went
+    strange".
+
+    THE SLEEP IS LOad-BEARING. Without it the threads enter and leave the
+    window faster than they can interleave, and removing the lock entirely
+    still passes — verified: that mutation survived the first version of this
+    test. Holding the window open forces the race the lock exists to prevent.
+
+    MUTATION CONTROL: delete the _FREEZE_LOCK acquire/release -> this fails.
+    """
+    import threading
+    import time
+
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    pristine = torch.nn.functional.scaled_dot_product_attention
+    order = []
+    lock = threading.Lock()
+
+    def worker(tag):
+        with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+            with lock:
+                order.append(f"{tag}-in")
+            assert torch.nn.functional.scaled_dot_product_attention is not pristine
+            time.sleep(0.03)
+            with lock:
+                order.append(f"{tag}-out")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert torch.nn.functional.scaled_dot_product_attention is pristine, (
+        "the SDPA patch leaked: every later model in this process is now "
+        "running with frozen attention"
+    )
+    for i in range(0, len(order), 2):
+        assert order[i].split("-")[0] == order[i + 1].split("-")[0], (
+            f"freeze windows interleaved, so two fits shared one patched "
+            f"global and restored it out of order: {order}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The final layer's lens IS the logit lens (degenerate layers)
+#
+# The last decoder layer has no blocks after it, so its sub-network is the
+# identity map and J = I exactly. That is correct — and it means a Diff at that
+# layer is empty because the two lenses ARE the same lens, not because they
+# happen to agree. Observed on the cluster: gemma L25 read identically through
+# both lenses while L24 differed, and nothing in the product said why.
+#
+# MUTATION CONTROLS:
+#   * identity_distance returns 0 for everything -> "only the identity" fails
+#   * degenerate_layers is never populated       -> "records" fails
+# ---------------------------------------------------------------------------
+
+
+def test_identity_distance_is_zero_only_for_the_identity():
+    from src.ml.jlens_fitter import IDENTITY_TOLERANCE, identity_distance
+
+    assert identity_distance(torch.eye(8)) == pytest.approx(0.0, abs=1e-9)
+    # A scaled identity is NOT the identity: it is the same direction with a
+    # different magnitude, and probe scores through it differ.
+    assert identity_distance(torch.eye(8) * 2.0) > IDENTITY_TOLERANCE
+    assert identity_distance(torch.randn(8, 8)) > IDENTITY_TOLERANCE
+    # Non-square cannot be compared and must not read as "close to identity".
+    assert identity_distance(torch.randn(4, 8)) == float("inf")
+
+
+def test_the_fit_records_which_layers_are_degenerate():
+    """The TARGET layer's Jacobian to itself is the identity.
+
+    Under the default penultimate target that is block N-2, not N-1. Layer N-1
+    is above the target and is REFUSED outright — its gradient is zero by
+    causality, and a zero lens reads out as uniform noise wearing a confident
+    face.
+    """
+    stack, _, _ = make_stack(37)
+    structure = Structure(stack)
+    fitter = JacobianFitter(
+        stack, Tokenizer(), structure, min_prompts=1, chunk=3
+    )
+    tgt = target_index(structure.num_layers)
+    result = fitter.fit(["abc"], layers=[tgt])
+
+    assert tgt in result.degenerate_layers, (
+        f"layer {tgt} is the target block, so J = I there — degenerate_layers "
+        f"was {result.degenerate_layers}"
+    )
+
+
+def test_a_layer_above_the_target_is_refused_not_silently_dropped():
+    """A zero Jacobian is worse than a missing one: it reads out confidently."""
+    import pytest as _pytest
+
+    stack, _, _ = make_stack(38)
+    structure = Structure(stack)
+    fitter = JacobianFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
+
+    with _pytest.raises(ValueError, match="above the penultimate target"):
+        fitter.fit(["abc"], layers=[structure.num_layers - 1])
+
+    # And "every layer" means every layer that CAN be fitted, rather than
+    # raising on the ordinary call.
+    assert max(fitter.fit(["abc"]).jacobians) == target_index(structure.num_layers)
+
 
 
 # ---------------------------------------------------------------------------
@@ -855,95 +1158,461 @@ def _attending_structure(n_layers: int, d_model: int):
     return _S()
 
 
-def test_the_two_sub_network_paths_disagree_where_positions_mix():
-    """If these agreed, the cheap path would be free and the flag pointless."""
-    from src.ml.jlens_fitter import JacobianFitter
+# The two forward-mode sub-network tests that lived here are GONE with the code
+# they tested. They compared an isolated length-1 sub-network against a
+# full-length one; the reverse-mode fitter has neither, and keeping tests for a
+# deleted path would report coverage of a recipe the product no longer offers.
+# Their subject — that sequence context changes the answer — is now covered by
+# `test_J_matches_the_papers_definition_on_a_position_mixing_stack` and
+# `test_every_source_position_contributes`, against the paper's definition
+# rather than against one implementation of it.
 
-    d_model, n_layers, seq = 4, 3, 5
+
+def test_the_sdpa_patch_is_serialised_and_always_restored():
+    """F11: the patch is process-wide, so overlapping freezes must not nest.
+
+    Two concurrent fits would otherwise restore each other's originals in the
+    wrong order and leave attention frozen for every model in the process
+    afterwards — silently, permanently, presenting only as "readouts went
+    strange".
+
+    THE SLEEP IS LOad-BEARING. Without it the threads enter and leave the
+    window faster than they can interleave, and removing the lock entirely
+    still passes — verified: that mutation survived the first version of this
+    test. Holding the window open forces the race the lock exists to prevent.
+
+    MUTATION CONTROL: delete the _FREEZE_LOCK acquire/release -> this fails.
+    """
+    import threading
+    import time
+
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    pristine = torch.nn.functional.scaled_dot_product_attention
+    order = []
+    lock = threading.Lock()
+
+    def worker(tag):
+        with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+            with lock:
+                order.append(f"{tag}-in")
+            assert torch.nn.functional.scaled_dot_product_attention is not pristine
+            time.sleep(0.03)
+            with lock:
+                order.append(f"{tag}-out")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert torch.nn.functional.scaled_dot_product_attention is pristine, (
+        "the SDPA patch leaked: every later model in this process is now "
+        "running with frozen attention"
+    )
+    for i in range(0, len(order), 2):
+        assert order[i].split("-")[0] == order[i + 1].split("-")[0], (
+            f"freeze windows interleaved, so two fits shared one patched "
+            f"global and restored it out of order: {order}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The final layer's lens IS the logit lens (degenerate layers)
+#
+# The last decoder layer has no blocks after it, so its sub-network is the
+# identity map and J = I exactly. That is correct — and it means a Diff at that
+# layer is empty because the two lenses ARE the same lens, not because they
+# happen to agree. Observed on the cluster: gemma L25 read identically through
+# both lenses while L24 differed, and nothing in the product said why.
+#
+# MUTATION CONTROLS:
+#   * identity_distance returns 0 for everything -> "only the identity" fails
+#   * degenerate_layers is never populated       -> "records" fails
+# ---------------------------------------------------------------------------
+
+
+def test_identity_distance_is_zero_only_for_the_identity():
+    from src.ml.jlens_fitter import IDENTITY_TOLERANCE, identity_distance
+
+    assert identity_distance(torch.eye(8)) == pytest.approx(0.0, abs=1e-9)
+    # A scaled identity is NOT the identity: it is the same direction with a
+    # different magnitude, and probe scores through it differ.
+    assert identity_distance(torch.eye(8) * 2.0) > IDENTITY_TOLERANCE
+    assert identity_distance(torch.randn(8, 8)) > IDENTITY_TOLERANCE
+    # Non-square cannot be compared and must not read as "close to identity".
+    assert identity_distance(torch.randn(4, 8)) == float("inf")
+
+
+def test_the_fit_records_which_layers_are_degenerate():
+    """The TARGET layer's Jacobian to itself is the identity.
+
+    Under the default penultimate target that is block N-2, not N-1. Layer N-1
+    is above the target and is REFUSED outright — its gradient is zero by
+    causality, and a zero lens reads out as uniform noise wearing a confident
+    face.
+    """
+    stack, _, _ = make_stack(37)
+    structure = Structure(stack)
+    fitter = JacobianFitter(
+        stack, Tokenizer(), structure, min_prompts=1, chunk=3
+    )
+    tgt = target_index(structure.num_layers)
+    result = fitter.fit(["abc"], layers=[tgt])
+
+    assert tgt in result.degenerate_layers, (
+        f"layer {tgt} is the target block, so J = I there — degenerate_layers "
+        f"was {result.degenerate_layers}"
+    )
+
+
+def test_a_layer_above_the_target_is_refused_not_silently_dropped():
+    """A zero Jacobian is worse than a missing one: it reads out confidently."""
+    import pytest as _pytest
+
+    stack, _, _ = make_stack(38)
+    structure = Structure(stack)
+    fitter = JacobianFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
+
+    with _pytest.raises(ValueError, match="above the penultimate target"):
+        fitter.fit(["abc"], layers=[structure.num_layers - 1])
+
+    # And "every layer" means every layer that CAN be fitted, rather than
+    # raising on the ordinary call.
+    assert max(fitter.fit(["abc"]).jacobians) == target_index(structure.num_layers)
+
+
+
+# ---------------------------------------------------------------------------
+# THE PAPER'S DEFINITION (D1 + D2)
+#
+#     J_l = E_t [ sum_{t' >= t} d h_target,t' / d h_l,t ]
+#
+# The old forward-mode fitter took ONE source position per prompt and ran the
+# remaining blocks on a length-1 sequence. That is neither the expectation over
+# source positions the paper takes, nor the sum over subsequent target
+# positions — and the length-1 sub-network also gave the perturbed position full
+# attention weight instead of its real share.
+#
+# MUTATION CONTROLS (each must turn this section red):
+#   * mean over source positions -> take only the last  -> "every source" fails
+#   * cotangent set at one target position only         -> "all subsequent" fails
+# ---------------------------------------------------------------------------
+
+
+class _MixingBlock(torch.nn.Module):
+    """Mixes positions, so source-position averaging is observable.
+
+    A position-independent block makes every source position identical, and a
+    fitter that used only the last one would agree by construction — the exact
+    trap that let the old single-position path look correct.
+    """
+
+    def __init__(self, d_model: int, seed: int):
+        super().__init__()
+        g = torch.Generator().manual_seed(seed)
+        self.w = torch.nn.Parameter(torch.randn(d_model, d_model, generator=g) * 0.3)
+
+    def forward(self, hidden, **_kw):
+        pooled = hidden.cumsum(dim=1) / torch.arange(
+            1, hidden.shape[1] + 1, device=hidden.device, dtype=hidden.dtype
+        ).view(1, -1, 1)
+        return (pooled @ self.w,)
+
+
+def _mixing_model(n_blocks: int, d_model: int, seq: int):
+    blocks = torch.nn.ModuleList(
+        [_MixingBlock(d_model, seed=i) for i in range(n_blocks)]
+    )
+
+    class _S:
+        layers_module = blocks
+        num_layers = n_blocks
+        attention_module = None
 
     class _Tok:
         def __call__(self, text, return_tensors=None):
             return {"input_ids": torch.zeros(1, seq, dtype=torch.long)}
 
-    structure = _attending_structure(n_layers, d_model)
-    embed = torch.nn.Embedding(2, d_model)
-
     class _Model(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.blocks = structure.layers_module
-            self.embed = embed
+            self.blocks = blocks
+            self.embed = torch.nn.Embedding(2, d_model)
 
         def forward(self, input_ids=None, **_kw):
             h = self.embed(input_ids)
-            bias = torch.arange(
+            # Positions differ, or averaging over them proves nothing.
+            h = h + torch.arange(
                 h.shape[1], dtype=h.dtype, device=h.device
-            ).view(1, -1) * 0.01
-            for b in self.blocks:
-                h = b(h, position_bias=bias)[0]
-            return h
-
-    model = _Model()
-    cheap = JacobianFitter(
-        model, _Tok(), structure, freeze_qk=False, full_sequence=False,
-        min_prompts=1, chunk=4,
-    )
-    faithful = JacobianFitter(
-        model, _Tok(), structure, freeze_qk=False, full_sequence=True,
-        min_prompts=1, chunk=4,
-    )
-
-    j_cheap = cheap.fit(["x"], layers=[0]).jacobians[0].float()
-    j_full = faithful.fit(["x"], layers=[0]).jacobians[0].float()
-
-    # "real length": a length-1 sub-network gives the perturbed position full
-    # attention weight; at S=5 the last row averages five values, so its own
-    # share is much smaller and the Jacobian is correspondingly smaller.
-    assert not torch.allclose(j_cheap, j_full, atol=1e-3), (
-        "the two paths produced the same Jacobian on a position-mixing block, "
-        "so the fixture does not actually mix positions and this test proves "
-        "nothing"
-    )
-    assert float(j_cheap.abs().sum()) > float(j_full.abs().sum()), (
-        "the isolated path should OVERSTATE the self path, not understate it"
-    )
-
-
-def test_the_faithful_path_perturbs_only_the_target_position():
-    """Perturbing the prefix too would fold context into the derivative."""
-    from src.ml.jlens_fitter import JacobianFitter
-
-    d_model, seq = 4, 5
-    structure = _attending_structure(2, d_model)
-    embed = torch.nn.Embedding(2, d_model)
-
-    class _Tok:
-        def __call__(self, text, return_tensors=None):
-            return {"input_ids": torch.zeros(1, seq, dtype=torch.long)}
-
-    class _Model(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.blocks = structure.layers_module
-            self.embed = embed
-
-        def forward(self, input_ids=None, **_kw):
-            h = self.embed(input_ids)
+            ).view(1, -1, 1) * 0.1
             for b in self.blocks:
                 h = b(h)[0]
             return h
 
-    fitter = JacobianFitter(
-        _Model(), _Tok(), structure, freeze_qk=False, full_sequence=True,
-        min_prompts=1, chunk=4,
-    )
-    point, forward = fitter._sub_network(torch.zeros(1, seq, dtype=torch.long), 0)
+    return _Model(), _S(), _Tok()
 
-    # Moving the target position must move the output; the derivative is
-    # non-zero precisely because that one position varies.
-    a = forward(point)
-    b = forward(point + 1.0)
-    assert not torch.allclose(a, b), "the target position had no effect at all"
+
+def _reference_J(model, structure, tok, layer: int, seq: int, d_model: int):
+    """The paper's quantity, computed independently of the fitter."""
+    captured = {}
+
+    def cap(_m, _i, out):
+        captured["h"] = out[0] if isinstance(out, tuple) else out
+
+    tgt = target_index(structure.num_layers)
+
+    def cap_t(_m, _i, out):
+        captured["t"] = out[0] if isinstance(out, tuple) else out
+
+    h1 = structure.layers_module[layer].register_forward_hook(cap)
+    h2 = structure.layers_module[tgt].register_forward_hook(cap_t)
+    try:
+        model(input_ids=tok("x")["input_ids"])
+    finally:
+        h1.remove(); h2.remove()
+
+    src, target = captured["h"], captured["t"]
+    rows = []
+    for j in range(d_model):
+        cot = torch.zeros_like(target)
+        cot[..., j] = 1.0            # every target position t'
+        (g,) = torch.autograd.grad(target, src, grad_outputs=cot, retain_graph=True)
+        rows.append(g[0].mean(dim=0))  # mean over source positions t
+    return torch.stack(rows)
+
+
+def test_J_matches_the_papers_definition_on_a_position_mixing_stack():
+    """Independent reference, not a restatement of the implementation."""
+    d_model, n_blocks, seq = 4, 3, 5
+    model, structure, tok = _mixing_model(n_blocks, d_model, seq)
+    fitter = JacobianFitter(model, tok, structure, min_prompts=1, chunk=2)
+
+    got = fitter.fit(["x"], layers=[0]).jacobians[0].to(torch.float32)
+    want = _reference_J(model, structure, tok, 0, seq, d_model)
+
+    assert torch.allclose(got, want, atol=1e-3), (
+        f"fitted J does not match E_t[sum_t' dh/dh]:\n{got}\nvs\n{want}"
+    )
+
+
+def test_every_source_position_contributes():
+    """Averaging over t must differ from taking the last t alone."""
+    d_model, n_blocks, seq = 4, 3, 6
+    model, structure, tok = _mixing_model(n_blocks, d_model, seq)
+    fitter = JacobianFitter(model, tok, structure, min_prompts=1, chunk=2)
+    got = fitter.fit(["x"], layers=[0]).jacobians[0].to(torch.float32)
+
+    # The same computation restricted to the FINAL source position — what the
+    # old fitter produced.
+    captured = {}
+    tgt = target_index(structure.num_layers)
+    h1 = structure.layers_module[0].register_forward_hook(
+        lambda _m, _i, o: captured.__setitem__("h", o[0] if isinstance(o, tuple) else o)
+    )
+    h2 = structure.layers_module[tgt].register_forward_hook(
+        lambda _m, _i, o: captured.__setitem__("t", o[0] if isinstance(o, tuple) else o)
+    )
+    try:
+        model(input_ids=tok("x")["input_ids"])
+    finally:
+        h1.remove(); h2.remove()
+    rows = []
+    for j in range(d_model):
+        cot = torch.zeros_like(captured["t"]); cot[..., j] = 1.0
+        (g,) = torch.autograd.grad(
+            captured["t"], captured["h"], grad_outputs=cot, retain_graph=True
+        )
+        rows.append(g[0, -1])           # LAST source position only
+    last_only = torch.stack(rows)
+
+    assert not torch.allclose(got, last_only, atol=1e-4), (
+        "averaging over source positions gave the same answer as using only "
+        "the last one, so this fixture does not mix positions and the test "
+        "proves nothing"
+    )
+
+
+def test_the_sdpa_patch_is_serialised_and_always_restored():
+    """F11: the patch is process-wide, so overlapping freezes must not nest.
+
+    Two concurrent fits would otherwise restore each other's originals in the
+    wrong order and leave attention frozen for every model in the process
+    afterwards — silently, permanently, presenting only as "readouts went
+    strange".
+
+    THE SLEEP IS LOad-BEARING. Without it the threads enter and leave the
+    window faster than they can interleave, and removing the lock entirely
+    still passes — verified: that mutation survived the first version of this
+    test. Holding the window open forces the race the lock exists to prevent.
+
+    MUTATION CONTROL: delete the _FREEZE_LOCK acquire/release -> this fails.
+    """
+    import threading
+    import time
+
+    from src.ml.jlens_fitter import frozen_attention_and_norms
+
+    pristine = torch.nn.functional.scaled_dot_product_attention
+    order = []
+    lock = threading.Lock()
+
+    def worker(tag):
+        with frozen_attention_and_norms(torch.nn.Module(), freeze_qk=True):
+            with lock:
+                order.append(f"{tag}-in")
+            assert torch.nn.functional.scaled_dot_product_attention is not pristine
+            time.sleep(0.03)
+            with lock:
+                order.append(f"{tag}-out")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert torch.nn.functional.scaled_dot_product_attention is pristine, (
+        "the SDPA patch leaked: every later model in this process is now "
+        "running with frozen attention"
+    )
+    for i in range(0, len(order), 2):
+        assert order[i].split("-")[0] == order[i + 1].split("-")[0], (
+            f"freeze windows interleaved, so two fits shared one patched "
+            f"global and restored it out of order: {order}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The final layer's lens IS the logit lens (degenerate layers)
+#
+# The last decoder layer has no blocks after it, so its sub-network is the
+# identity map and J = I exactly. That is correct — and it means a Diff at that
+# layer is empty because the two lenses ARE the same lens, not because they
+# happen to agree. Observed on the cluster: gemma L25 read identically through
+# both lenses while L24 differed, and nothing in the product said why.
+#
+# MUTATION CONTROLS:
+#   * identity_distance returns 0 for everything -> "only the identity" fails
+#   * degenerate_layers is never populated       -> "records" fails
+# ---------------------------------------------------------------------------
+
+
+def test_identity_distance_is_zero_only_for_the_identity():
+    from src.ml.jlens_fitter import IDENTITY_TOLERANCE, identity_distance
+
+    assert identity_distance(torch.eye(8)) == pytest.approx(0.0, abs=1e-9)
+    # A scaled identity is NOT the identity: it is the same direction with a
+    # different magnitude, and probe scores through it differ.
+    assert identity_distance(torch.eye(8) * 2.0) > IDENTITY_TOLERANCE
+    assert identity_distance(torch.randn(8, 8)) > IDENTITY_TOLERANCE
+    # Non-square cannot be compared and must not read as "close to identity".
+    assert identity_distance(torch.randn(4, 8)) == float("inf")
+
+
+def test_the_fit_records_which_layers_are_degenerate():
+    """The TARGET layer's Jacobian to itself is the identity.
+
+    Under the default penultimate target that is block N-2, not N-1. Layer N-1
+    is above the target and is REFUSED outright — its gradient is zero by
+    causality, and a zero lens reads out as uniform noise wearing a confident
+    face.
+    """
+    stack, _, _ = make_stack(37)
+    structure = Structure(stack)
+    fitter = JacobianFitter(
+        stack, Tokenizer(), structure, min_prompts=1, chunk=3
+    )
+    tgt = target_index(structure.num_layers)
+    result = fitter.fit(["abc"], layers=[tgt])
+
+    assert tgt in result.degenerate_layers, (
+        f"layer {tgt} is the target block, so J = I there — degenerate_layers "
+        f"was {result.degenerate_layers}"
+    )
+
+
+def test_a_layer_above_the_target_is_refused_not_silently_dropped():
+    """A zero Jacobian is worse than a missing one: it reads out confidently."""
+    import pytest as _pytest
+
+    stack, _, _ = make_stack(38)
+    structure = Structure(stack)
+    fitter = JacobianFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
+
+    with _pytest.raises(ValueError, match="above the penultimate target"):
+        fitter.fit(["abc"], layers=[structure.num_layers - 1])
+
+    # And "every layer" means every layer that CAN be fitted, rather than
+    # raising on the ordinary call.
+    assert max(fitter.fit(["abc"]).jacobians) == target_index(structure.num_layers)
+
+
+
+# ---------------------------------------------------------------------------
+# The sub-network's SEQUENCE LENGTH changes the answer (F4, properly)
+#
+# The cheap path runs the remaining blocks on a LENGTH-1 sequence. A softmax
+# over a single key is 1.0, so downstream attention hands the perturbed
+# position its entire attention weight — where the real forward pass might give
+# it 0.05. The value path comes out scaled up by that ratio.
+#
+# That is not a scope choice, it is a different computation, which is why the
+# recipe now records `self_only_isolated` for it rather than `self_only`.
+#
+# MUTATION CONTROLS:
+#   * full_sequence path truncates kwargs like the cheap one -> "real length" fails
+#   * forward_full perturbs every position, not just the last -> "one position" fails
+# ---------------------------------------------------------------------------
+
+
+class _AttendingBlock(torch.nn.Module):
+    """A block that MIXES POSITIONS, so sequence length is observable.
+
+    Every fixture above is position-independent, which is precisely why a
+    length-1 sub-network looked equivalent for so long: with no cross-position
+    mixing the two paths agree by construction.
+    """
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.eye(d_model) * 0.5)
+
+    def forward(self, hidden, position_bias=None, **_kwargs):
+        """Mixes positions AND consumes a per-position kwarg.
+
+        `position_bias` is what makes kwarg TRUNCATION observable: a block that
+        ignores its kwargs cannot tell a full-length mask from a mask sliced to
+        one position, which is why an earlier version of this fixture let the
+        truncation mutation survive.
+        """
+        if position_bias is not None:
+            if position_bias.shape[1] != hidden.shape[1]:
+                raise AssertionError(
+                    f"position_bias has length {position_bias.shape[1]} for a "
+                    f"sequence of {hidden.shape[1]} — the kwargs were sliced to "
+                    "a different length than the hidden states"
+                )
+            hidden = hidden + position_bias.unsqueeze(-1)
+        # Uniform attention over the (causal) prefix, then a linear map. With S
+        # positions the last row averages S values; with S = 1 it sees only
+        # itself, and its own contribution is S times heavier.
+        pooled = hidden.cumsum(dim=1) / torch.arange(
+            1, hidden.shape[1] + 1, device=hidden.device, dtype=hidden.dtype
+        ).view(1, -1, 1)
+        return (pooled @ self.w,)
+
+
+def _attending_structure(n_layers: int, d_model: int):
+    blocks = torch.nn.ModuleList([_AttendingBlock(d_model) for _ in range(n_layers)])
+
+    class _S:
+        layers_module = blocks
+        num_layers = n_layers
+        attention_module = None
+
+    return _S()
 
 
 # ---------------------------------------------------------------------------
@@ -1043,3 +1712,205 @@ def test_the_TASK_threads_the_caller_s_convergence_delta_to_the_fitter():
         f"the task built its fitter with delta={seen.get('delta')}, not the "
         "0.05 the caller asked for — the argument is being dropped"
     )
+
+
+# ---------------------------------------------------------------------------
+# Two gaps found by mutation, not by reading (review round 2)
+#
+# Both of these mutations SURVIVED a full green suite:
+#   * the None-gradient branch silently `continue`d, leaving a zero block in a
+#     matrix that was then accumulated as if measured
+#   * `freeze_qk` flipped back to True, reinstating an ablation as the default
+#     recipe with nothing objecting
+# ---------------------------------------------------------------------------
+
+
+def test_a_layer_off_the_path_to_the_target_is_refused_not_zeroed():
+    """A zero block is worse than a missing one — it reads out confidently.
+
+    `sums[layer]` starts at zeros, so a skipped gradient leaves that band of
+    rows at zero and averages it in as though it had been measured.
+
+    Reached by capturing at a module DOWNSTREAM of the target: the layer index
+    passes the `beyond` guard, but no gradient path exists.
+    """
+    stack, _, _ = make_stack(51)
+    structure = Structure(stack)
+    wrong = NormHookedFitter(stack, Tokenizer(), structure, min_prompts=1, chunk=3)
+    tgt = target_index(structure.num_layers)
+
+    with pytest.raises(ValueError, match="received no gradient"):
+        wrong.fit(["abc"], layers=[tgt])
+
+
+def test_the_default_recipe_is_the_papers_full_backward():
+    """Freezing is an ABLATION in the paper, not the standard recipe.
+
+    Defaulting to frozen would silently make every artifact this product
+    produces a variant, while the config recorded it as though it were the
+    baseline everyone else's numbers came from.
+    """
+    stack, _, _ = make_stack(52)
+    fitter = JacobianFitter(stack, Tokenizer(), Structure(stack))
+
+    assert fitter.freeze_qk is False, (
+        "attention-pattern freezing must be opt-in; the paper's standard recipe "
+        "is full backward"
+    )
+    assert fitter.freeze_norms is False, (
+        "norm freezing must be opt-in: freezing makes the map exactly affine, "
+        "which is not what the paper computes"
+    )
+    assert fitter.target_layer == "penultimate", (
+        "BRD A.2 choice 1 defaults to penultimate — the last block is "
+        "specialised for next-token calibration and adds readout noise"
+    )
+
+
+# ---------------------------------------------------------------------------
+# GAPS FOUND BY MUTATION, NOT BY READING (review round 2)
+#
+# Two mutations survived a full green suite:
+#   * a None gradient silently `continue`d, leaving that block of rows at ZERO
+#     and accumulating it as though measured — a lens with a dead band that
+#     reads out as confident uniform noise
+#   * `freeze_qk` flipped back to True, silently restoring the ablation as the
+#     default recipe when the paper's standard is full backward
+#
+# Both had fixes in place. Neither had a test, so neither fix was defended.
+# ---------------------------------------------------------------------------
+
+
+class _DetachedBlock(torch.nn.Module):
+    """A block that BREAKS the gradient path without changing any shape.
+
+    This is what an un-differentiable step looks like from the outside: the
+    forward pass succeeds, the tensors are the right size, and the Jacobian to
+    anything upstream is simply undefined.
+    """
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.eye(d_model))
+
+    def forward(self, hidden, **_kw):
+        return (hidden.detach() @ self.w,)
+
+
+def test_a_layer_with_no_gradient_path_is_refused_not_zeroed():
+    """A zero row-block is worse than a missing layer: it reads out confidently.
+
+    MUTATION CONTROL: replace the raise with `continue` and this fails.
+    """
+    d_model, seq = 4, 3
+    blocks = torch.nn.ModuleList(
+        [_MixingBlock(d_model, seed=0), _DetachedBlock(d_model), _MixingBlock(d_model, seed=1)]
+    )
+
+    class _S:
+        layers_module = blocks
+        num_layers = 3
+        attention_module = None
+
+    class _Tok:
+        def __call__(self, text, return_tensors=None):
+            return {"input_ids": torch.zeros(1, seq, dtype=torch.long)}
+
+    class _M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = blocks
+            self.embed = torch.nn.Embedding(2, d_model)
+
+        def forward(self, input_ids=None, **_kw):
+            h = self.embed(input_ids)
+            for b in self.blocks:
+                h = b(h)[0]
+            return h
+
+    fitter = JacobianFitter(_M(), _Tok(), _S(), min_prompts=1, chunk=2)
+
+    # Layer 0 sits below a detached block, so nothing reaches the target from it.
+    with pytest.raises(ValueError, match="no gradient from the target"):
+        fitter.fit(["x"], layers=[0])
+
+
+def test_the_default_recipe_is_FULL_BACKWARD_not_the_ablation():
+    """The paper's standard recipe, asserted as a default rather than assumed.
+
+    Freezing attention patterns is an ABLATION in the source. Shipping it as
+    the default silently changes what every artifact means, and nothing in the
+    suite noticed when it was flipped.
+
+    MUTATION CONTROL: set `freeze_qk: bool = True` (or `freeze_norms`) and this
+    fails.
+    """
+    import inspect
+
+    sig = inspect.signature(JacobianFitter.__init__)
+    assert sig.parameters["freeze_qk"].default is False, (
+        "freeze_qk defaults to True — that is the paper's ablation, not its "
+        "standard recipe, and every artifact fitted here would silently be the "
+        "variant rather than the baseline"
+    )
+    assert sig.parameters["freeze_norms"].default is False, (
+        "freeze_norms defaults to True — freezing makes the map exactly affine, "
+        "which is convenient and is not what the paper computes"
+    )
+    assert sig.parameters["target_layer"].default == "penultimate"
+
+    # And the constructed object agrees with its own signature.
+    stack, _, _ = make_stack(51)
+    fitter = JacobianFitter(stack, Tokenizer(), Structure(stack), min_prompts=1)
+    assert fitter.freeze_qk is False
+    assert fitter.freeze_norms is False
+    assert fitter.target_layer == "penultimate"
+
+
+def test_the_backward_chunk_is_narrowed_to_stay_within_a_memory_bound(monkeypatch):
+    """Observes the ACTUAL backward, not a restatement of the formula.
+
+    Peak memory now scales with SEQUENCE LENGTH: reverse mode allocates
+    `chunk x seq_len x d_model` per captured layer, so a constant retuned for
+    one prompt length is not a bound. The corpus holds both short and long
+    prompts, and the long ones are where a fit that passed every test OOMs on
+    the first real card.
+
+    An earlier version of this test recomputed the narrowing arithmetic and
+    asserted against its own answer. Removing the narrowing from the fitter left
+    it GREEN — it was testing a formula, not a code path.
+
+    MUTATION CONTROL: replace `chunk = max(1, min(...))` with `chunk = self.chunk`
+    and this fails.
+    """
+    import src.ml.jlens_fitter as fitter_mod
+
+    d_model, n_blocks, seq = 4, 2, 8
+    model, structure, tok = _mixing_model(n_blocks, d_model, seq)
+
+    # A bound small enough that the chunk MUST narrow below DEFAULT_CHUNK.
+    per_dim = seq * d_model * 4 * 1          # one captured layer
+    monkeypatch.setattr(fitter_mod, "MAX_BACKWARD_BYTES", per_dim * 2)
+
+    widths = []
+    real_grad = torch.autograd.grad
+
+    def spy(outputs, inputs, grad_outputs=None, **kw):
+        if grad_outputs is not None and kw.get("is_grads_batched"):
+            widths.append(int(grad_outputs.shape[0]))
+        return real_grad(outputs, inputs, grad_outputs=grad_outputs, **kw)
+
+    monkeypatch.setattr(torch.autograd, "grad", spy)
+
+    fitter = JacobianFitter(
+        model, tok, structure, min_prompts=1, chunk=fitter_mod.DEFAULT_CHUNK
+    )
+    fitter.fit(["x"], layers=[0])
+
+    assert widths, "no batched backward was observed at all"
+    assert max(widths) <= 2, (
+        f"the backward ran with a cotangent batch of {max(widths)} under a bound "
+        f"that permits 2 — the chunk was not narrowed, so a long prompt would "
+        "allocate without limit"
+    )
+    assert max(widths) >= 1, "narrowing must never reach zero"

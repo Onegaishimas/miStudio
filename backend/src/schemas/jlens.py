@@ -301,17 +301,17 @@ class JLensArtifactRecipe(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # DEFAULTS MATCH THE FITTER, not the paper's menu. These declared
-    # "penultimate" and "all_subsequent" while `jlens_fitter` runs the
-    # sub-network to the FINAL block and extracts at ONE position with the
-    # attention mask sliced to it — self-only. A schema whose defaults
-    # contradict the only implementation is worse than no schema: it is a
-    # contract that reads as a description.
-    target_layer: Literal["final", "penultimate"] = "final"
+    # DEFAULTS MATCH THE PAPER, and the fitter now implements it. An earlier
+    # revision "fixed" these the wrong way round: the fitter took one source
+    # position on a length-1 sub-network, so the schema was edited to say
+    # `self_only_isolated` and `final` to match the CODE. That made schema and
+    # implementation agree while both disagreed with the source. Alignment is
+    # against the paper; the code moved to meet it.
+    target_layer: Literal["final", "penultimate"] = "penultimate"
     attention_gradients: Literal["full", "frozen_qk"] = "full"
     target_position_scope: Literal[
         "self_only", "self_only_isolated", "future_only", "all_subsequent"
-    ] = "self_only_isolated"
+    ] = "all_subsequent"
     aggregation: Literal["mean", "median"] = "mean"
     corpus: str
     n_prompts: int = Field(..., ge=100, description="Floor of 100 (Appendix A.2)")

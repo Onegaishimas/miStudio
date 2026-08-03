@@ -98,7 +98,11 @@ export function ArtifactsStrip({
                 no config.yaml — the construction recipe is missing
               </span>
             )}
-            <LayerCoverage covered={mine.layers ?? []} total={dims?.n_layers ?? null} />
+            <LayerCoverage
+              covered={mine.layers ?? []}
+              total={dims?.n_layers ?? null}
+              targetLayer={mine.target_layer}
+            />
             {onFitMissing &&
               dims?.n_layers &&
               (mine.layers?.length ?? 0) > 0 &&

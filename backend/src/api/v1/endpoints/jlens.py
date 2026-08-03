@@ -12,7 +12,7 @@ as logit data under a Jacobian label — that would breach rung discipline
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -85,6 +85,10 @@ class ArtifactSummary(BaseModel):
     #: Diff at such a layer is empty by construction, and saying so is the
     #: difference between "no signal" and "the same lens twice".
     degenerate_layers: List[int] = []
+    #: Which block the Jacobian was taken TO. With a `penultimate` target a
+    #: COMPLETE fit covers 0..N-2, so a client comparing coverage against the
+    #: model's layer count would render a full artifact as incomplete.
+    target_layer: Optional[str] = None
 
 
 class CheckOutcome(BaseModel):
@@ -131,6 +135,7 @@ async def list_artifacts() -> List[ArtifactSummary]:
             has_config=ref.config_path is not None,
             layers=service.fitted_layers(ref),
             degenerate_layers=service.degenerate_layers(ref),
+            target_layer=service.target_layer(ref),
         )
         for ref in service.list_artifacts()
     ]
@@ -233,14 +238,15 @@ class FitRequest(BaseModel):
     #: while reporting "not converged" — indistinguishable from a genuine
     #: failure to settle.
     convergence_delta: Optional[float] = Field(None, gt=0)
-    #: Run the sub-network at the REAL sequence length.
-    #:
-    #: COSTS S TIMES THE COMPUTE and is the only setting under which downstream
-    #: attention weights are the ones the model actually used. Off by default
-    #: because a 400-prompt fit that took nine minutes would take hours — but a
-    #: lens fitted without it overstates the self-attention path, and the
-    #: artifact records which was used so the two are never confused.
-    full_sequence: bool = False
+    #: Freeze normalisation statistics as well. Off by default: freezing makes
+    #: the map exactly affine, which is convenient and is NOT what the paper
+    #: computes — its J is a local linearisation whose departure is reported.
+    freeze_norms: bool = False
+    #: Which block's output the Jacobian runs TO. Penultimate by default per
+    #: BRD A.2: the last block is specialised for next-token calibration and
+    #: adds noise. Layers ABOVE the target are refused — their gradient to it is
+    #: zero by causality and a zero lens reads out as confident uniform noise.
+    target_layer: Literal["final", "penultimate"] = "penultimate"
 
 
 class FitAccepted(BaseModel):
@@ -282,7 +288,8 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         corpus_name=request.corpus_name,
         semantic_probe=request.semantic_probe,
         allow_coverage_loss=request.allow_coverage_loss,
-        full_sequence=request.full_sequence,
+        freeze_norms=request.freeze_norms,
+        target_layer=request.target_layer,
         convergence_delta=request.convergence_delta,
     )
     # VISIBLE WHILE IT RUNS. A 45-minute fit used to burn the GPU with nothing

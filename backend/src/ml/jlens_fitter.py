@@ -1,12 +1,25 @@
 """
 Fit a Jacobian lens for any loadable model.
 
-WHAT IS BEING COMPUTED. `J_l` is the Jacobian of the final residual with respect
-to the residual at layer `l`, taken with ATTENTION PATTERNS AND NORMALISATION
-STATISTICS FROZEN. Freezing is what makes the map linear: with the patterns and
-scales held fixed, `h_final = J_l @ h_l` exactly, and `J_l` is a plain
-`d_model x d_model` matrix rather than a local linearisation that only holds
-near the point it was taken at.
+WHAT IS BEING COMPUTED, in the source paper's own terms:
+
+    J_l = E_t [ sum_{t' >= t} d h_target,t' / d h_l,t ]
+
+an expectation over SOURCE positions `t` of the total downstream effect on every
+subsequent target position `t'`, averaged again over a corpus. Read out as
+`softmax(W_U norm(J_l h_l))`, with the logit lens being the degenerate case
+`J_l = I`.
+
+FOUR RECIPE CHOICES CHANGE THE ARTIFACT and are recorded with it (BRD A.2):
+target layer (default PENULTIMATE — the last block is specialised for
+next-token calibration and adds noise), attention-gradient treatment (default
+FULL backward; frozen Q/K is an ablation, recommended only for intervention
+artifacts), target-position scope (all subsequent), and aggregation (mean).
+
+FREEZING IS NOT THE DEFAULT. An earlier version of this module froze attention
+patterns and norm statistics unconditionally, which makes the map exactly affine
+— convenient, and not what the paper computes. Its J is a local linearisation
+and the departure is REPORTED rather than engineered away.
 
 MODEL-AGNOSTIC BY CONSTRUCTION (BR-032, PADR IDL-41). Structure comes from
 `discover_transformer_structure`; freezing is applied by patching the operations
@@ -46,9 +59,24 @@ logger = logging.getLogger(__name__)
 # from a fitted one by inspection.
 MIN_PROMPTS = 100
 
-# Basis vectors pushed through the frozen network at once. Memory, not
-# correctness: the full identity is d_model^2 and chunking bounds the peak.
-DEFAULT_CHUNK = 128
+# Output dimensions differentiated in one batched backward.
+#
+# RETUNED FOR REVERSE MODE. Under the old forward-mode path this bounded a
+# [chunk, d_model] evaluation on a LENGTH-1 sequence, and 128 was cheap. The
+# batched-cotangent backward instead allocates chunk x S x d_model floats PER
+# CAPTURED LAYER — at chunk=128, S=60 and 26 layers that is ~1.8 GB of gradient
+# on top of a resident model and a retained graph, which is how a fit that
+# passes every test OOMs on the first real card.
+DEFAULT_CHUNK = 32
+
+#: Ceiling on the transient allocation for ONE batched backward.
+#:
+#: A retuned constant is not a bound: sequence length varies across the corpus,
+#: so a chunk that is safe on a 60-token prompt is not safe on a 400-token one.
+#: The chunk is NARROWED to fit rather than the fit being refused — a smaller
+#: chunk is slower and correct, whereas refusing would make long prompts
+#: unfittable for a reason the caller cannot act on.
+MAX_BACKWARD_BYTES = 2 * 1024 ** 3
 
 # Convergence: relative Frobenius change in the accumulated mean below this,
 # sustained for PATIENCE consecutive shards, stops the fit.
@@ -163,6 +191,11 @@ class FitResult:
     #: gets, and that is the number a reader should judge it on.
     residual_mean: Dict[int, float] = field(default_factory=dict)
     residual_max: Dict[int, float] = field(default_factory=dict)
+    #: Mean prompt length the fit actually ran over.
+    #:
+    #: Meaningful again now that the whole sequence is used. Under the old
+    #: single-position path this was 1 for every fit, which said nothing.
+    mean_seq_len: float = 0.0
     #: Layers whose fitted J is the identity to within IDENTITY_TOLERANCE — the
     #: lens there IS the logit lens. Recorded rather than dropped silently, so a
     #: consumer can say WHY the two agree instead of reporting an empty Diff.
@@ -178,7 +211,9 @@ class FitResult:
 
 
 @contextmanager
-def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[None]:
+def frozen_attention_and_norms(
+    model: Any, freeze_qk: bool = False, freeze_norms: bool = False
+) -> Iterator[None]:
     """Hold attention patterns and normalisation statistics fixed.
 
     Applied by patching the OPERATIONS rather than the modules, so it works on
@@ -191,10 +226,14 @@ def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[N
     * every normalisation module's scale computed from detached statistics, so
       the norm behaves as a fixed diagonal rescaling.
 
-    `freeze_qk=False` leaves attention differentiable (the "full" variant) while
-    still freezing norms. Both are legitimate recipes and the artifact records
-    which was used, per layer — the treatment is INAPPLICABLE on a layer that
-    does not attend, which is not the same as unused.
+    BOTH DEFAULT TO FALSE, so the plain call is a NO-OP and gradients flow
+    fully — the paper's standard recipe. An earlier version froze norms
+    unconditionally and only made Q/K optional, which meant "full backward" was
+    never actually available: the map was always forced affine.
+
+    Each is a legitimate variant and the artifact records which was used, per
+    layer — freezing Q/K is INAPPLICABLE on a layer that does not attend, which
+    is not the same as unused.
     """
     patched: List[Callable[[], None]] = []
 
@@ -209,8 +248,12 @@ def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[N
     # The task queue serialises fits today, so this guards the invariant rather
     # than a symptom already seen. It is worth closing anyway: the failure is
     # silent, permanent, and would present as "readouts went strange".
-    _FREEZE_LOCK.acquire()
-    patched.append(_FREEZE_LOCK.release)
+    # ONLY WHEN SOMETHING IS ACTUALLY PATCHED. With both flags off this context
+    # touches no global state, and taking the lock anyway would serialise fits
+    # that cannot interfere with each other.
+    if freeze_qk or freeze_norms:
+        _FREEZE_LOCK.acquire()
+        patched.append(_FREEZE_LOCK.release)
 
     if freeze_qk:
         original_sdpa = torch.nn.functional.scaled_dot_product_attention
@@ -253,7 +296,7 @@ def frozen_attention_and_norms(model: Any, freeze_qk: bool = True) -> Iterator[N
             )
         )
 
-    handles = [_freeze_norm(m) for m in _norm_modules(model)]
+    handles = [_freeze_norm(m) for m in _norm_modules(model)] if freeze_norms else []
 
     try:
         yield
@@ -329,9 +372,17 @@ def jacobian_by_jvp(
     scale: d_model jvp calls per layer per prompt is millions of forward passes
     on a real model.
 
-    `jacobian_batched` is what actually runs. `test_jlens_fitter` asserts the
-    two agree, so the assumption the fast path depends on is verified rather
-    than asserted.
+    NEITHER OF THESE RUNS IN PRODUCTION ANY MORE. The fitter moved to reverse
+    mode — `JacobianFitter._fit_one` — because the paper's quantity is an
+    expectation over source positions of the effect on all subsequent target
+    positions, and a forward-mode sub-network at one position cannot express
+    it. This docstring previously said "`jacobian_batched` is what actually
+    runs", which stopped being true and is exactly the kind of stale claim that
+    sends a reader to the wrong file.
+
+    They are kept as a REFERENCE IMPLEMENTATION: `test_jlens_fitter` uses them
+    to check the batched extraction against a JVP computed a different way, so
+    the linear-algebra core stays independently verified.
     """
     d_in = point.numel()
     columns: List[torch.Tensor] = []
@@ -523,8 +574,9 @@ class JacobianFitter:
         tokenizer: Any,
         structure: Any,
         *,
-        freeze_qk: bool = True,
-        full_sequence: bool = False,
+        freeze_qk: bool = False,
+        freeze_norms: bool = False,
+        target_layer: str = "penultimate",
         convergence_delta: float = DEFAULT_CONVERGENCE_DELTA,
         min_prompts: int = MIN_PROMPTS,
         chunk: int = DEFAULT_CHUNK,
@@ -533,11 +585,25 @@ class JacobianFitter:
         self.model = model
         self.tokenizer = tokenizer
         self.structure = structure
+        #: FULL BACKWARD BY DEFAULT, matching the paper. Freezing attention
+        #: patterns is an ABLATION there, not the standard recipe — it slightly
+        #: reduces readout quality while tending to produce directions that respond
+        #: more strongly to intervention — an association the source paper
+        #: reports, never a validated property of any artifact fitted here. It
+        #: stays selectable and is suggested when the lens is built for
+        #: intervention work rather than reading (BRD A.2 choice 2).
         self.freeze_qk = freeze_qk
-        #: Run the sub-network at the REAL sequence length. S times the compute,
-        #: and the only setting under which downstream attention weights are
-        #: the ones the model actually used.
-        self.full_sequence = full_sequence
+        #: Norm freezing is likewise opt-in. Freezing makes the map exactly
+        #: affine, which is convenient but is not what the paper computes: its
+        #: J is a local linearisation and the residual is reported rather than
+        #: engineered away.
+        self.freeze_norms = freeze_norms
+        #: Which block's output the Jacobian is taken TO (BRD A.2 choice 1).
+        if target_layer not in ("final", "penultimate"):
+            raise ValueError(
+                f"target_layer must be 'final' or 'penultimate', got {target_layer!r}"
+            )
+        self.target_layer = target_layer
         self.convergence_delta = convergence_delta
         self.min_prompts = min_prompts
         self.chunk = chunk
@@ -554,6 +620,7 @@ class JacobianFitter:
         self._residual_sums: Dict[int, float] = {}
         self._residual_max: Dict[int, float] = {}
         self._residual_counts: Dict[int, int] = {}
+        self._seq_lens: List[int] = []
 
     def fit(
         self,
@@ -575,14 +642,42 @@ class JacobianFitter:
                 "fitted one; fitting fewer is refused rather than warned about."
             )
 
-        selected = list(layers) if layers is not None else list(range(self.structure.num_layers))
+        target_index = self._target_layer_index()
+        # "EVERY LAYER" MEANS EVERY LAYER THAT CAN BE FITTED. Layers above the
+        # target have a zero Jacobian to it, so including them in the default
+        # would make the ordinary `layers=None` call raise.
+        selected = (
+            list(layers) if layers is not None else list(range(target_index + 1))
+        )
+
+        # NO LAYER PAST THE TARGET. The Jacobian runs from a source layer to the
+        # TARGET block's output, so a source ABOVE the target is downstream of
+        # it and its gradient is identically ZERO — the model cannot route
+        # information backwards. A zero J is not a degenerate-but-honest lens
+        # like the identity: every readout through it is `softmax(W_U norm(0))`,
+        # a uniform distribution rendered as confident-looking tokens.
+        #
+        # Refused rather than dropped, because silently narrowing the layer set
+        # produces an artifact with less coverage than the caller asked for and
+        # nothing saying so.
+        beyond = [l for l in selected if l > target_index]
+        if beyond:
+            raise ValueError(
+                f"layers {beyond} are above the {self.target_layer} target "
+                f"(block {target_index}); their Jacobian to it is zero by "
+                "causality, and a zero lens reads out as uniform noise wearing "
+                "a confident face. Fit up to the target, or set "
+                "target_layer='final'."
+            )
         accumulated: Dict[int, torch.Tensor] = {}
         previous: Dict[int, torch.Tensor] = {}
         deltas: List[float] = []
         stable = 0
         seen = 0
 
-        with frozen_attention_and_norms(self.model, freeze_qk=self.freeze_qk):
+        with frozen_attention_and_norms(
+            self.model, freeze_qk=self.freeze_qk, freeze_norms=self.freeze_norms
+        ):
             for prompt in prompts:
                 per_prompt = self._fit_one(prompt, selected)
                 seen += 1
@@ -623,6 +718,9 @@ class JacobianFitter:
                 for l in self._residual_sums
             },
             residual_max=dict(self._residual_max),
+            mean_seq_len=(
+                sum(self._seq_lens) / len(self._seq_lens) if self._seq_lens else 0.0
+            ),
             degenerate_layers=sorted(
                 l for l, m in accumulated.items()
                 if identity_distance(m) <= IDENTITY_TOLERANCE
@@ -645,135 +743,207 @@ class JacobianFitter:
             return torch.device("cpu")
 
     def _fit_one(self, prompt: str, layers: Sequence[int]) -> Dict[int, torch.Tensor]:
-        """One prompt's contribution: `J` per layer at the final position."""
+        """One prompt's contribution to `J`, for every requested layer at once.
+
+        REVERSE MODE, MATCHING THE SOURCE PAPER. The quantity is
+
+            J_l = E_t [ sum_{t' >= t} d h_target,t' / d h_l,t ]
+
+        — an expectation over SOURCE positions `t`, of the total downstream
+        effect on every subsequent target position `t'`. Three properties of
+        that definition drive this implementation, and the previous forward-mode
+        one satisfied none of them:
+
+        * ALL SOURCE POSITIONS. A single backward pass yields the gradient at
+          every position simultaneously, so one sweep per output dimension fills
+          the whole (layer, source-position) grid. The old path took one source
+          position per prompt — for a 60-token prompt that is 60x fewer samples,
+          which is most of why the fit plateaued rather than converging.
+        * ALL SUBSEQUENT TARGET POSITIONS. The cotangent is 1 at every target
+          position, so the gradient arriving at source `t` is already the sum
+          over `t' >= t`. Causality does the masking: a decoder cannot route
+          information backwards, so terms with `t' < t` are identically zero and
+          need no explicit mask.
+        * EVERY LAYER FROM ONE SWEEP. Gradients w.r.t. all captured layers come
+          out of the same backward, so cost is O(d_model) sweeps per prompt
+          rather than O(d_model x n_layers) forward passes.
+        """
+        import torch as _torch
+
         encoded = self.tokenizer(prompt, return_tensors="pt")
-        # MOVED TO THE MODEL'S DEVICE. The tokenizer always returns CPU
-        # tensors; a model on CUDA then fails inside index_select at the
-        # embedding. This is invisible on a CPU-only test stack.
+        # MOVED TO THE MODEL'S DEVICE. The tokenizer always returns CPU tensors;
+        # a model on CUDA then fails inside index_select at the embedding, and
+        # that is invisible on a CPU-only test stack.
         input_ids = encoded["input_ids"].to(self.device)
-        out: Dict[int, torch.Tensor] = {}
 
-        for layer in layers:
-            point, forward = self._sub_network(input_ids, layer)
-            jacobian = jacobian_batched(forward, point, chunk=self.chunk).detach()
+        captured: Dict[int, _torch.Tensor] = {}
+        target_holder: Dict[str, _torch.Tensor] = {}
 
-            # RECORDED, not gated. A Jacobian is a local linearisation by
-            # definition, so a non-zero residual is expected on any real model
-            # — the MLP activation is non-linear and freezing does not change
-            # that. The number says how far the lens can be trusted away from
-            # the point it was taken at, which belongs in the artifact's
-            # provenance rather than in a refusal.
-            residual = linearisation_residual(forward, point, jacobian)
-            self._last_residuals[layer] = residual
-            self._residual_sums[layer] = self._residual_sums.get(layer, 0.0) + residual
-            self._residual_max[layer] = max(
-                self._residual_max.get(layer, 0.0), residual
+        def capture(idx: int):
+            def hook(_module, _inputs, output):
+                hidden = output[0] if isinstance(output, tuple) else output
+                captured[idx] = hidden
+            return hook
+
+        def capture_target(_module, _inputs, output):
+            hidden = output[0] if isinstance(output, tuple) else output
+            target_holder["h"] = hidden
+
+        target_index = self._target_layer_index()
+        handles = [
+            self._capture_module(l).register_forward_hook(capture(l)) for l in layers
+        ]
+        handles.append(
+            self.structure.layers_module[target_index].register_forward_hook(
+                capture_target
             )
+        )
+        try:
+            # NO torch.no_grad HERE. The graph is the point.
+            self.model(input_ids=input_ids)
+        finally:
+            for h in handles:
+                h.remove()
+
+        target = target_holder["h"]           # [1, S, d_model]
+        self._seq_lens.append(int(target.shape[1]))
+        d_model = int(target.shape[-1])
+        inputs = [captured[l] for l in layers if l in captured]
+        present = [l for l in layers if l in captured]
+        missing = [l for l in layers if l not in captured]
+        if missing:
+            # SILENT COVERAGE LOSS OTHERWISE. The layer would simply not appear
+            # in the result, never accumulate, and the artifact would ship with
+            # fewer layers than requested and nothing saying which.
+            raise ValueError(
+                f"layers {missing} never produced an activation during the "
+                "forward pass, so nothing was captured for them."
+            )
+        if not inputs:
+            return {}
+
+        sums: Dict[int, _torch.Tensor] = {
+            l: _torch.zeros(d_model, d_model, dtype=_torch.float32) for l in present
+        }
+        # HOW MUCH J VARIES BY SOURCE POSITION. `J` is a mean over positions, so
+        # the honest companion number is the spread it was averaged from — not a
+        # "linearisation residual", which is what this used to report and which
+        # no longer describes anything: it compared the MEAN J against a SINGLE
+        # position's activation and the SUMMED target, three different objects.
+        #
+        # For intervention work this is the number that matters: a lens with
+        # large position spread transports differently depending on where in the
+        # sequence you apply it.
+        spread: Dict[int, _torch.Tensor] = {
+            l: _torch.zeros(d_model, dtype=_torch.float32) for l in present
+        }
+
+        # NARROWED TO FIT, per prompt. Sequence length varies across the corpus,
+        # so a chunk that is safe on a short prompt can OOM on a long one — the
+        # bound has to be recomputed rather than chosen once at construction.
+        per_dim = int(target.shape[1]) * d_model * 4 * max(len(inputs), 1)
+        chunk = max(1, min(self.chunk, MAX_BACKWARD_BYTES // max(per_dim, 1)))
+        if chunk < self.chunk:
+            logger.debug(
+                "narrowing backward chunk %d -> %d to stay under %d bytes",
+                self.chunk, chunk, MAX_BACKWARD_BYTES,
+            )
+
+        for start in range(0, d_model, chunk):
+            stop = min(start + chunk, d_model)
+            width = stop - start
+            # BATCHED COTANGENTS. cot[c] selects output dimension (start + c) at
+            # EVERY target position, so one backward per output dimension
+            # returns that row of J summed over t' — for all source positions
+            # and all layers at once.
+            # fp32 COTANGENT even on an fp16 model. The gradient is averaged
+            # over hundreds of prompts; accumulating it in half precision
+            # throws away resolution the averaging is trying to recover.
+            cot = _torch.zeros(
+                (width, *target.shape),
+                dtype=torch.float32 if target.dtype == torch.float16 else target.dtype,
+                device=target.device,
+            )
+            for c in range(width):
+                cot[c, ..., start + c] = 1.0
+
+            grads = _torch.autograd.grad(
+                outputs=target,
+                inputs=inputs,
+                grad_outputs=cot,
+                retain_graph=True,
+                allow_unused=True,
+                is_grads_batched=True,
+            )
+            for layer, g in zip(present, grads):
+                if g is None:
+                    # REFUSED, not skipped. `sums[layer]` starts at zeros, so
+                    # skipping would leave that block of rows at zero and
+                    # accumulate it as though it had been measured — a lens
+                    # with a dead band that reads out as confident uniform
+                    # noise, with nothing anywhere saying so.
+                    raise ValueError(
+                        f"layer {layer} received no gradient from the target "
+                        "block. It is not on the path to the target, so its "
+                        "Jacobian is undefined rather than zero."
+                    )
+                # g: [width, 1, S, d_model]. Rows are the mean over SOURCE
+                # positions; the spread across them is kept separately.
+                per_position = g[:, 0].to(_torch.float32)      # [width, S, d_model]
+                sums[layer][start:stop, :] = per_position.mean(dim=1).detach()
+                spread[layer][start:stop] = (
+                    per_position.std(dim=1).mean(dim=-1).detach()
+                    if per_position.shape[1] > 1
+                    else _torch.zeros(per_position.shape[0])
+                )
+
+        out: Dict[int, _torch.Tensor] = {}
+        for layer in present:
+            jac = sums[layer]
+            out[layer] = jac
+            # RECORDED, not gated. A Jacobian is a local linearisation by
+            # definition, so a non-zero residual is expected on any real model.
+            # Measured against the captured point at the LAST source position,
+            # which is the one the readout is most often taken at.
+            scale = float(jac.abs().mean()) or 1.0
+            rel_spread = float(spread[layer].mean()) / scale
+            self._last_residuals[layer] = rel_spread
+            self._residual_sums[layer] = self._residual_sums.get(layer, 0.0) + rel_spread
+            self._residual_max[layer] = max(self._residual_max.get(layer, 0.0), rel_spread)
             self._residual_counts[layer] = self._residual_counts.get(layer, 0) + 1
-            out[layer] = jacobian
         return out
 
-    def _sub_network(self, input_ids: torch.Tensor, layer: int):
-        """The map from resid_post at `layer` to the final residual.
+    def _capture_module(self, layer: int):
+        """The module whose output IS the residual stream at `layer`.
 
-        HOOKED AT `structure.layers_module[layer]` — the decoder layer's own
-        output. Not a norm module: see the module docstring.
-
-        The returned callable accepts EITHER a single point of shape [d_model]
-        or a batch of shape [n, d_model], because `jacobian_batched` evaluates
-        a whole chunk of basis vectors in one call.
-
-        THE DOWNSTREAM LAYERS ARE REPLAYED WITH THEIR REAL KWARGS. A decoder
-        layer generally needs position ids, an attention mask and rotary
-        embeddings; calling it with hidden states alone either raises or —
-        worse on some families — silently takes a default path and fits a lens
-        for a model that was never run that way. The kwargs are recorded during
-        the reference forward and replayed, so the sub-network is the same
-        computation the model actually performed.
+        A SEAM, on purpose. This is the decoder block itself — never a norm
+        module — and it is the most expensive lesson in this repo: hooking
+        `residual_norm_module` puts the norm's rescaling outside the fitted map
+        and yields plausible numbers with the signal scaled away, no error
+        anywhere (PADR IDL-38). `test_jlens_fitter` overrides this method to
+        reproduce the wrong hook and assert the resulting lens DIFFERS, so the
+        mistake cannot ship undetected.
         """
-        captured: Dict[str, Any] = {}
-        recorded_kwargs: Dict[int, Dict[str, Any]] = {}
+        return self.structure.layers_module[layer]
 
-        def capture_output(_module, _inputs, output):
-            hidden = output[0] if isinstance(output, tuple) else output
-            captured["h"] = hidden[0, -1].detach().clone()
-            # The whole sequence, for the faithful path. Keeping it costs one
-            # [S, d_model] tensor and is what lets the sub-network run at the
-            # real length instead of at length 1.
-            captured["seq"] = hidden[0].detach().clone()
+    def _target_layer_index(self) -> int:
+        """Which block's output the Jacobian is taken TO.
 
-        def make_kwarg_recorder(idx: int):
-            def recorder(_module, _args, kwargs):
-                # Positional args beyond hidden_states are not replayed: every
-                # transformers decoder layer in this codebase takes them by
-                # keyword, and silently dropping one would be invisible.
-                recorded_kwargs[idx] = dict(kwargs)
-                return None
+        PENULTIMATE BY DEFAULT, per the BRD: including the last block increases
+        noisy artifacts in readouts, plausibly because that block is specialised
+        for calibrating next-token probabilities and carries less semantic
+        content. Targeting `final` also makes the last layer's J the identity by
+        construction, which is correct but adds a degenerate row to every fit.
+        """
+        n = int(self.structure.num_layers)
+        if self.target_layer == "final":
+            return n - 1
+        return max(0, n - 2)
 
-            return recorder
+    # `_sub_network` REMOVED. It built a forward-mode sub-network at a single
+    # source position and, in its cheap variant, on a length-1 sequence — which
+    # gave the perturbed position full attention weight instead of its real
+    # share. Both are superseded by the reverse-mode path in `_fit_one`, and
+    # keeping it would leave two ways to compute J that answer different
+    # questions while looking interchangeable.
 
-        handles = [self.structure.layers_module[layer].register_forward_hook(capture_output)]
-        for idx in range(layer + 1, self.structure.num_layers):
-            handles.append(
-                self.structure.layers_module[idx].register_forward_pre_hook(
-                    make_kwarg_recorder(idx), with_kwargs=True
-                )
-            )
-        try:
-            with torch.no_grad():
-                self.model(input_ids=input_ids)
-        finally:
-            for handle in handles:
-                handle.remove()
-
-        point = captured["h"]
-
-        def forward_isolated(h: torch.Tensor) -> torch.Tensor:
-            """The remaining blocks on a LENGTH-1 sequence.
-
-            Cheap, and deliberately labelled `self_only_isolated` in the recipe
-            rather than `self_only`, because it is not the same computation: a
-            softmax over a single key is 1.0, so the downstream attention gives
-            the perturbed position its FULL attention weight where the real
-            forward pass might give it 0.05. The value path is scaled up
-            accordingly. Fast, and faithful only where attention is negligible.
-            """
-            batched = h.dim() > 1
-            hidden = h.reshape(-1, 1, h.shape[-1]) if batched else h.view(1, 1, -1)
-            for idx in range(layer + 1, self.structure.num_layers):
-                kwargs = _batch_kwargs(recorded_kwargs.get(idx, {}), hidden.shape[0])
-                result = self.structure.layers_module[idx](hidden, **kwargs)
-                hidden = result[0] if isinstance(result, tuple) else result
-            return hidden.reshape(hidden.shape[0], -1) if batched else hidden.view(-1)
-
-        def forward_full(h: torch.Tensor) -> torch.Tensor:
-            """The remaining blocks on the REAL sequence, perturbing one position.
-
-            The faithful path. The prefix is held at its captured values and
-            only the target position varies, so downstream attention sees the
-            real distribution over real keys and the derivative is the true
-            d(final at p) / d(h_layer at p).
-
-            Costs a forward over S positions instead of 1 per basis chunk — S
-            times the compute — which is why it is opt-in rather than default.
-            """
-            base = captured["seq"]  # [S, d_model]
-            batched = h.dim() > 1
-            rows = h.reshape(-1, h.shape[-1]) if batched else h.view(1, -1)
-            n = rows.shape[0]
-
-            hidden = base.unsqueeze(0).repeat(n, 1, 1)
-            # Only the target position moves; everything before it is context
-            # and contributes a constant, not a derivative.
-            hidden[:, -1, :] = rows.to(hidden.dtype)
-
-            for idx in range(layer + 1, self.structure.num_layers):
-                kwargs = _expand_kwargs(recorded_kwargs.get(idx, {}), n)
-                result = self.structure.layers_module[idx](hidden, **kwargs)
-                hidden = result[0] if isinstance(result, tuple) else result
-
-            out = hidden[:, -1, :]
-            return out if batched else out.view(-1)
-
-        forward = forward_full if self.full_sequence else forward_isolated
-        return point, forward
