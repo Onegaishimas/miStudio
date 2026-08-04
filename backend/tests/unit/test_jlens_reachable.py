@@ -296,3 +296,42 @@ def _async_returning(value):
         return value
 
     return _call
+
+
+class TestRestoreSupersededIsReachable:
+    """The recovery route for a lens that was published over.
+
+    A service method nobody can call is the shape this repo has shipped before:
+    16 MCP tools fully implemented, unit-tested, documented and never
+    registered. `restore_superseded` exists to spare anyone a shell rename
+    inside the pod, and it only does that if it is reachable over HTTP.
+
+    MUTATION CONTROLS:
+      * remove the @router.post decorator      -> the path test fails
+      * change the path or the method to GET   -> the method test fails
+    """
+
+    PATH = "/jlens/artifacts/{slug}/restore-superseded"
+
+    def test_the_restore_path_is_reachable_through_the_assembled_router(self):
+        assert self.PATH in _reachable_paths(), (
+            "restore-superseded is not reachable through api_router, so the "
+            "only way to recover a displaced artifact is a shell rename inside "
+            "the pod — which is what it was written to replace"
+        )
+
+    def test_it_accepts_POST_and_not_GET(self):
+        """A restore MUTATES. A GET that swaps directories is a trap for any
+        crawler, prefetcher or retry."""
+        methods = set()
+        for included in api_router.routes:
+            origin = getattr(included, "original_router", None)
+            if origin is None:
+                continue
+            for route in getattr(origin, "routes", []):
+                if getattr(route, "path", None) == self.PATH:
+                    methods |= set(getattr(route, "methods", set()))
+        assert "POST" in methods, f"restore route methods: {methods or 'none'}"
+        assert "GET" not in methods, (
+            "a directory swap must not be reachable by GET"
+        )

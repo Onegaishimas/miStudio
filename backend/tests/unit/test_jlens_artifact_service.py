@@ -849,3 +849,98 @@ def test_an_unreadable_incumbent_recipe_does_not_block_publishing(tmp_path):
 
     _stage(service, range(15), _quality("false", 400))
     service.commit("org/model", _passing_report())  # must NOT raise
+
+
+# ---------------------------------------------------------------------------
+# RESTORING A DISPLACED ARTIFACT.
+#
+# `_quality_regression` stops the next stale fit from publishing over a better
+# lens. It does nothing for one already displaced, which on 2026-08-04 could
+# only be recovered by renaming directories inside the pod by hand.
+# ---------------------------------------------------------------------------
+
+
+def test_restore_swaps_the_archive_back_into_service(tmp_path):
+    """The good lens serves again and the bad one is archived, not deleted.
+
+    MUTATION CONTROL: make `restore_superseded` a plain move (drop the swap)
+    and the displaced-artifact assertion fails — the 400-prompt fit would be
+    gone with no way back.
+    """
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())          # the good one
+    _stage(service, range(15), _quality("false", 400))
+    service.commit("org/model", _passing_report(), allow_quality_regression=True)
+
+    # Precondition: the weak fit is serving, exactly as it was on hardware.
+    assert "n_prompts: 400" in (tmp_path / "model" / "config.yaml").read_text()
+
+    out = service.restore_superseded("model")
+
+    assert "n_prompts: 1097" in (tmp_path / "model" / "config.yaml").read_text()
+    assert out["restored"]["n_prompts"] == 1097 and out["restored"]["converged"] is True
+    assert out["displaced"]["n_prompts"] == 400
+
+    # NOTHING IS DELETED: the displaced fit is archived, so this is its own undo.
+    archived = tmp_path / "model.superseded" / "config.yaml"
+    assert archived.is_file() and "n_prompts: 400" in archived.read_text()
+
+
+def test_restore_is_its_own_undo(tmp_path):
+    """Called twice, you are back where you started."""
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+    _stage(service, range(15), _quality("false", 400))
+    service.commit("org/model", _passing_report(), allow_quality_regression=True)
+
+    service.restore_superseded("model")
+    service.restore_superseded("model")
+    assert "n_prompts: 400" in (tmp_path / "model" / "config.yaml").read_text()
+
+
+def test_restore_refuses_an_archive_whose_verdict_describes_other_weights(tmp_path):
+    """A `.superseded` directory is not privileged.
+
+    Promoting on a stale verdict would serve a lens validated against a
+    different file — the failure the whole publish gate exists to prevent.
+
+    MUTATION CONTROL: drop the `stored_report` check and this fails.
+    """
+    from src.services.jlens_artifact_service import (
+        ArtifactNotValidated,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+    _stage(service, range(15), _quality("false", 400))
+    service.commit("org/model", _passing_report(), allow_quality_regression=True)
+
+    # Tamper with the ARCHIVED lens so its recorded sha256 no longer matches.
+    archived_lens = next((tmp_path / "model.superseded").glob("*_jacobian_lens.pt"))
+    archived_lens.write_bytes(archived_lens.read_bytes() + b"tampered")
+
+    with pytest.raises(ArtifactNotValidated, match="different file|no verdict"):
+        service.restore_superseded("model")
+
+    # And the serving artifact is untouched by the refusal.
+    assert "n_prompts: 400" in (tmp_path / "model" / "config.yaml").read_text()
+
+
+def test_restore_without_an_archive_is_an_error_not_a_silent_noop(tmp_path):
+    """Silently doing nothing would read as "restored" to the caller."""
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+
+    with pytest.raises(FileNotFoundError, match="no archived artifact"):
+        service.restore_superseded("model")

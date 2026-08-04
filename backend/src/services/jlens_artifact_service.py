@@ -555,6 +555,84 @@ class JLensArtifactService:
             return None
         return stored
 
+    def restore_superseded(self, slug: str) -> Dict[str, Any]:
+        """Promote `<slug>.superseded` back to `<slug>`, archiving the incumbent.
+
+        A SWAP, NOT A MOVE, so the operation is its own undo: call it twice and
+        you are back where you started. Nothing is deleted at any point.
+
+        A swap is also the only shape that keeps both directories WITHOUT
+        inventing a third artifact. Discovery skips exactly `.staging` and
+        `.superseded`, so parking the displaced one under any other name would
+        publish it as a second, differently-slugged lens for the same model.
+
+        WHY THIS EXISTS. Publishing is last-writer-wins, and on 2026-08-04 a
+        stale 400-prompt fit that never converged published over a 1097-prompt
+        fit that did. `_quality_regression` now refuses that, but an artifact
+        already displaced needed a shell rename inside the pod to recover — an
+        operation with no audit trail, no digest check, and nothing stopping a
+        typo from destroying the archive.
+
+        The restored artifact's recorded verdict is verified against the file
+        it describes before promotion. A `.superseded` directory is not
+        privileged: it is exactly as untrusted as any other artifact on disk,
+        and serving a lens on a verdict that described different weights is the
+        failure the whole publish gate exists to prevent.
+        """
+        archived_dir = self.root / f"{slug}{SUPERSEDED_SUFFIX}"
+        archived = self._ref_for(archived_dir) if archived_dir.is_dir() else None
+        if archived is None:
+            raise FileNotFoundError(
+                f"there is no archived artifact for {slug!r} at {archived_dir}"
+            )
+
+        if self.stored_report(archived) is None:
+            raise ArtifactNotValidated(
+                f"the archived artifact for {slug!r} carries no verdict matching "
+                "its own weights, so promoting it would serve a lens on a "
+                "validation that described a different file"
+            )
+
+        current_dir = self.root / slug
+        restored_recipe = self._recipe_summary(archived)
+
+        if current_dir.is_dir():
+            displaced_ref = self._ref_for(current_dir)
+            displaced_recipe = (
+                self._recipe_summary(displaced_ref) if displaced_ref else {}
+            )
+            swap = self.root / f"{slug}.swap"
+            if swap.exists():
+                shutil.rmtree(swap)
+            current_dir.rename(swap)
+            archived_dir.rename(current_dir)
+            swap.rename(archived_dir)
+        else:
+            # Nothing to archive; a plain promotion.
+            displaced_recipe = {}
+            archived_dir.rename(current_dir)
+
+        logger.info(
+            "Restored %s from its archive (%s), displacing (%s)",
+            slug,
+            restored_recipe,
+            displaced_recipe,
+        )
+        return {
+            "slug": slug,
+            "restored": restored_recipe,
+            "displaced": displaced_recipe,
+        }
+
+    def _recipe_summary(self, ref: ArtifactRef) -> Dict[str, Any]:
+        """The few recipe fields that decide whether one lens beats another."""
+        return {
+            "n_prompts": self._config_int(ref, "n_prompts"),
+            "converged": self._config_bool(ref, "converged"),
+            "target_layer": self.target_layer(ref),
+            "fitted_layers": len(self.fitted_layers(ref)),
+        }
+
     # There is deliberately no `discard_staged`. It existed, and its only caller
     # deleted a converged artifact the moment a fixture failed — the expensive
     # half of the work thrown away to save a directory that `write_staged`
