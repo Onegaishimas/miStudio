@@ -716,3 +716,136 @@ def test_an_unreadable_recipe_excuses_NOTHING(tmp_path):
     )
     with _pytest.raises(ArtifactCoverageLoss):
         service.commit("org/model", _passing_report())
+
+
+# ---------------------------------------------------------------------------
+# PUBLISHING IS LAST-WRITER-WINS, AND "LAST" IS NOT "BEST".
+#
+# 2026-08-04: a 400-prompt fit that never converged published over a
+# 1097-prompt fit that did. The weaker job had been queued HOURS EARLIER, sat
+# unclaimed in Redis through a series of pod rolls, and ran when the queue
+# finally drained. Same code, same recipe — only the corpus differed. Nothing
+# compared them, because the coverage guard protects LAYERS and nothing
+# protected EVIDENCE.
+# ---------------------------------------------------------------------------
+
+
+def _quality(converged: str, n_prompts: int, target: str = "penultimate") -> str:
+    return (
+        f"corpus: t\nn_layers: 16\ntarget_layer: {target}\n"
+        f"converged: {converged}\nn_prompts: {n_prompts}\n"
+    )
+
+
+def _stage(service, layers, config):
+    import torch
+
+    service.write_staged("org/model", {l: torch.randn(4, 4) for l in layers}, config)
+
+
+def test_a_NON_CONVERGED_fit_may_not_replace_a_CONVERGED_one(tmp_path):
+    """The exact shape that displaced a good LFM2 lens.
+
+    MUTATION CONTROL: drop the convergence comparison from `_quality_regression`
+    and this fails.
+    """
+    from src.services.jlens_artifact_service import (
+        ArtifactQualityRegression,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+
+    _stage(service, range(15), _quality("false", 400))
+    with pytest.raises(ArtifactQualityRegression) as excinfo:
+        service.commit("org/model", _passing_report())
+
+    message = str(excinfo.value)
+    assert "1097" in message and "400" in message, (
+        f"the refusal must name both corpora so it can be judged: {message}"
+    )
+
+    # The incumbent is untouched by a refused commit.
+    from src.services.jlens_artifact_service import JLensArtifactService as _S
+    cfg = (tmp_path / "model" / "config.yaml").read_text()
+    assert "n_prompts: 1097" in cfg
+
+
+def test_a_SMALLER_corpus_may_not_replace_a_larger_one_at_equal_convergence(tmp_path):
+    """Same convergence status, less evidence — still a regression.
+
+    MUTATION CONTROL: drop the n_prompts comparison and this fails.
+    """
+    from src.services.jlens_artifact_service import (
+        ArtifactQualityRegression,
+        JLensArtifactService,
+    )
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+
+    _stage(service, range(15), _quality("true", 400))
+    with pytest.raises(ArtifactQualityRegression):
+        service.commit("org/model", _passing_report())
+
+
+def test_a_CONVERGED_fit_over_FEWER_prompts_publishes_freely(tmp_path):
+    """Converging sooner is not worse. This guard must not block a better fit.
+
+    A converged 400-prompt fit reached the threshold; a converged 1097-prompt
+    fit merely took longer to. Refusing this would make the guard an obstacle
+    to exactly the improvement it exists to protect.
+
+    MUTATION CONTROL: compare n_prompts without the equal-convergence condition
+    and this fails.
+    """
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("false", 1097))
+    service.commit("org/model", _passing_report())
+
+    _stage(service, range(15), _quality("true", 400))
+    service.commit("org/model", _passing_report())  # must NOT raise
+
+    cfg = (tmp_path / "model" / "config.yaml").read_text()
+    assert "converged: true" in cfg and "n_prompts: 400" in cfg
+
+
+def test_the_regression_can_be_overridden_deliberately(tmp_path):
+    """A refusal the user cannot override is a wall, not a guard."""
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+
+    _stage(service, range(15), _quality("false", 400))
+    service.commit("org/model", _passing_report(), allow_quality_regression=True)
+
+    cfg = (tmp_path / "model" / "config.yaml").read_text()
+    assert "n_prompts: 400" in cfg
+
+
+def test_an_unreadable_incumbent_recipe_does_not_block_publishing(tmp_path):
+    """This guard fails OPEN, unlike the coverage guard, and on purpose.
+
+    Coverage protects layers a user already paid GPU time for, so an unknown
+    must not be discarded on a guess. Here an unreadable incumbent is not
+    evidence worth defending — and failing closed would make an artifact with a
+    corrupt config impossible to ever replace.
+
+    MUTATION CONTROL: return a regression string when either recipe is
+    unreadable and this fails.
+    """
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), "corpus: t\n")  # no converged, no n_prompts
+    service.commit("org/model", _passing_report())
+
+    _stage(service, range(15), _quality("false", 400))
+    service.commit("org/model", _passing_report())  # must NOT raise

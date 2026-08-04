@@ -50,6 +50,7 @@ def fit_jlens_artifact(
     corpus_name: str = "unspecified",
     semantic_probe: Optional[Dict[str, Any]] = None,
     allow_coverage_loss: bool = False,
+    allow_quality_regression: bool = False,
     freeze_norms: bool = False,
     target_layer: str = "penultimate",
     convergence_delta: Optional[float] = None,
@@ -69,6 +70,7 @@ def fit_jlens_artifact(
     from ..models.model import Model
     from ..services.jlens_artifact_service import (
         ArtifactCoverageLoss,
+        ArtifactQualityRegression,
         JLensArtifactService,
     )
     from ..services.jlens_model_registry import load_for_readout
@@ -108,6 +110,7 @@ def fit_jlens_artifact(
             corpus_name=corpus_name,
             semantic_probe=semantic_probe,
             allow_coverage_loss=allow_coverage_loss,
+            allow_quality_regression=allow_quality_regression,
             freeze_norms=freeze_norms,
             target_layer=target_layer,
             convergence_delta=convergence_delta,
@@ -116,6 +119,17 @@ def fit_jlens_artifact(
         if device == "cuda":
             from ..services.jlens_model_registry import clear_cache
 
+            # DROP OUR OWN REFERENCE FIRST. `clear_cache` nulls the CACHE's
+            # entry and then runs gc + `torch.cuda.empty_cache()` — but this
+            # frame still held `loaded`, so there was nothing for gc to collect
+            # and `empty_cache` had no free blocks to return. The first version
+            # of this release looked correct and recovered only the activation
+            # workspace: 7706 MiB fell to 2608 MiB, which is LFM2's fp16 weights
+            # still sitting on a card miLLM serves from.
+            #
+            # The three tests written with it all passed, because they asserted
+            # `clear_cache` was CALLED. Being called is not being effective.
+            loaded = None  # noqa: F841 - the assignment IS the release
             clear_cache()
             logger.info("Released the fitted model from GPU memory")
 
@@ -131,6 +145,7 @@ def _fit_and_publish(
     corpus_name: str,
     semantic_probe: Optional[Dict[str, Any]],
     allow_coverage_loss: bool,
+    allow_quality_regression: bool,
     freeze_norms: bool,
     target_layer: str,
     convergence_delta: Optional[float],
@@ -233,9 +248,19 @@ def _fit_and_publish(
         # distinction is visible rather than implied.
         try:
             service.commit(
-                repo_id, _local_pass(report), allow_coverage_loss=allow_coverage_loss
+                repo_id,
+                _local_pass(report),
+                allow_coverage_loss=allow_coverage_loss,
+                allow_quality_regression=allow_quality_regression,
             )
             published = True
+        except ArtifactQualityRegression as exc:
+            # SAME SHAPE AS A COVERAGE REFUSAL, and for the same reason: the fit
+            # succeeded and publishing was refused to protect something the user
+            # already has. The staged fit survives so it can be published
+            # deliberately rather than refitted.
+            logger.warning("Refused to publish %s: %s", repo_id, exc)
+            coverage_refusal = str(exc)
         except ArtifactCoverageLoss as exc:
             # NOT an error the user should have to read in a log. Publishing was
             # refused to protect layers they already paid GPU time for, and the

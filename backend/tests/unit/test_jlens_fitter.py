@@ -2397,11 +2397,129 @@ def test_a_gpu_fit_RELEASES_the_model_when_it_finishes(tmp_path):
     """Otherwise the card stays occupied until the pod restarts.
 
     MUTATION CONTROL: drop the `finally: clear_cache()` block and this fails.
+
+    NOT SUFFICIENT ON ITS OWN — see the weakref test below. This asserts the
+    release was CALLED, and a release that is called while the caller still
+    holds the model frees nothing.
     """
     cleared, _ = _fit_task_harness(tmp_path, cuda=True)
     assert cleared, (
         "the fit finished without releasing the model; the GPU stays occupied "
         "at 0% utilisation on a card that is shared with serving"
+    )
+
+
+def test_the_task_has_DROPPED_the_model_by_the_time_it_releases(tmp_path):
+    """Being called is not being effective.
+
+    `clear_cache` nulls the cache entry and then runs `gc.collect()` +
+    `torch.cuda.empty_cache()`. If the task's own frame still references the
+    model at that moment, gc collects nothing and `empty_cache` has no free
+    blocks to return — so the weights stay on the card.
+
+    OBSERVED ON HARDWARE, through the first version of this release and its
+    three passing tests: 7706 MiB fell to 2608 MiB, and 2608 MiB is LFM2's fp16
+    weights. The tests could not see it because they asked whether the release
+    RAN, never whether anything was freed.
+
+    This asserts the property that actually matters: at the moment of release,
+    no strong reference to the loaded model survives anywhere. A weakref is the
+    only way to ask that question without a GPU.
+
+    MUTATION CONTROL: delete the `loaded = None` line and this fails while the
+    test above still passes — which is exactly the state that shipped.
+    """
+    import gc
+    import weakref
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock, patch
+
+    import torch
+
+    import src.workers.jlens_fit_tasks as task_mod
+    from src.services import jlens_model_registry
+
+    class _Loaded:
+        """A real object, not a Mock: MagicMock children keep parents alive."""
+
+        def __init__(self):
+            self.d_model, self.n_vocab, self.n_layers = 8, 64, 4
+            self.name = "org/model"
+            self.model = None
+            self.tokenizer = None
+            self.structure = None
+            self.unembedding = None
+
+    holder = {}
+
+    def make_loaded(*_a, **_kw):
+        # Built HERE and weakly referenced, so the test itself never holds a
+        # strong reference — `return_value=obj` would pin it and the assertion
+        # could never fail.
+        obj = _Loaded()
+        holder["ref"] = weakref.ref(obj)
+        return obj
+
+    alive_at_release = {}
+
+    def spy_clear_cache():
+        gc.collect()
+        ref = holder.get("ref")
+        alive_at_release["alive"] = ref is not None and ref() is not None
+
+    class _Result:
+        jacobians = {i: torch.eye(8, dtype=torch.float16) for i in (0, 1)}
+        scales = {0: 1.0, 1: 1.0}
+        prompts_seen = 4
+        converged = True
+        mean_seq_len = 10.0
+        degenerate_layers: list = []
+        residual_mean = 0.0
+        residual_max = 0.0
+        convergence_delta = 1e-3
+
+        @staticmethod
+        def size_bytes():
+            return 8 * 8 * 2 * 2
+
+    class _Fitter:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def fit(self, *_a, **_kw):
+            return _Result()
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = MagicMock(
+        repo_id="org/model"
+    )
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    with patch("src.ml.jlens_fitter.JacobianFitter", _Fitter), patch(
+        "src.core.database.get_sync_db", fake_db
+    ), patch(
+        "src.services.jlens_model_registry.load_for_readout", side_effect=make_loaded
+    ), patch.object(
+        jlens_model_registry, "clear_cache", spy_clear_cache
+    ), patch(
+        "torch.cuda.is_available", lambda: True
+    ), patch.object(
+        type(task_mod.settings),
+        "jlens_artifacts_dir",
+        property(lambda _s: tmp_path / "artifacts"),
+    ), patch.object(
+        task_mod.fit_jlens_artifact, "update_state", MagicMock()
+    ):
+        task_mod.fit_jlens_artifact.run(model_id="m_1", prompts=["a"])
+
+    assert "alive" in alive_at_release, "the release never ran"
+    assert alive_at_release["alive"] is False, (
+        "the task still held the loaded model when it released the GPU, so "
+        "gc collected nothing and empty_cache returned no blocks — the weights "
+        "stay resident on a card that is shared with serving"
     )
 
 

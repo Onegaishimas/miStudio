@@ -223,6 +223,16 @@ export interface JLensFitRequest {
   corpus_name?: string;
   /** Without this NOTHING IS PUBLISHED — the suite fails closed on an unrun check. */
   semantic_probe?: JLensSemanticProbe | null;
+  /**
+   * Publish even when this fit is WEAKER evidence than the artifact it
+   * replaces — fewer prompts, or not converged where the incumbent converged.
+   *
+   * Publishing is otherwise last-writer-wins, and "last" means finished last,
+   * not best: a 400-prompt fit that never converged once published over a
+   * 1097-prompt fit that did, because the weaker job had been queued hours
+   * earlier and only got a worker once the queue drained.
+   */
+  allow_quality_regression?: boolean;
 }
 
 export interface JLensFitAccepted {
