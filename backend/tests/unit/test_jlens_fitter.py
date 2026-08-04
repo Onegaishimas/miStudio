@@ -2541,3 +2541,107 @@ def test_a_CPU_fit_does_not_evict_the_cache(tmp_path):
     """
     cleared, _ = _fit_task_harness(tmp_path, cuda=False)
     assert not cleared, "a CPU fit evicted the cache for no benefit"
+
+
+def test_the_progress_meta_carries_the_DENOMINATOR_and_the_THRESHOLD(tmp_path):
+    """The tile's numbers come from here, and nothing else produced them.
+
+    FOUND BY MUTATION, not by reading: deleting `total_prompts` from the meta
+    left the whole suite green. Every test that touched it asserted how a
+    CONSUMER renders the field — the listing, the subtitle, the banner — and
+    none asserted that the PRODUCER emits it. A consumer test passes just as
+    happily against a producer that sends nothing.
+
+    `total_prompts` existed as a local used to compute the percentage and was
+    then dropped, so a reader could show "53%" but not "634 / 1200".
+    `convergence_delta` is the threshold the delta is racing; a delta with no
+    target is a number nobody can judge.
+
+    MUTATION CONTROL: remove either key from the `beat({...})` payload.
+    """
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock, patch
+
+    import torch
+
+    import src.workers.jlens_fit_tasks as task_mod
+
+    reported = []
+
+    class _Progress:
+        prompts_seen = 634
+        last_delta = 0.00103
+        converged = False
+
+    class _Result:
+        jacobians = {i: torch.eye(8, dtype=torch.float16) for i in (0, 1)}
+        scales = {0: 1.0, 1: 1.0}
+        prompts_seen = 634
+        converged = True
+        mean_seq_len = 10.0
+        degenerate_layers: list = []
+        residual_mean = 0.0
+        residual_max = 0.0
+        convergence_delta = 1e-3
+
+        @staticmethod
+        def size_bytes():
+            return 8 * 8 * 2 * 2
+
+    class _Fitter:
+        convergence_delta = 1e-3
+
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def fit(self, _prompts, layers=None, on_progress=None):
+            if on_progress:
+                on_progress(_Progress())
+            return _Result()
+
+    loaded = MagicMock()
+    loaded.d_model, loaded.n_vocab, loaded.n_layers = 8, 64, 4
+    loaded.name = "org/model"
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = MagicMock(
+        repo_id="org/model"
+    )
+
+    @contextmanager
+    def fake_db():
+        yield db
+
+    def capture(*_a, **kw):
+        if kw.get("meta"):
+            reported.append(kw["meta"])
+
+    with patch("src.ml.jlens_fitter.JacobianFitter", _Fitter), patch(
+        "src.core.database.get_sync_db", fake_db
+    ), patch(
+        "src.services.jlens_model_registry.load_for_readout", return_value=loaded
+    ), patch(
+        "torch.cuda.is_available", lambda: False
+    ), patch.object(
+        type(task_mod.settings),
+        "jlens_artifacts_dir",
+        property(lambda _s: tmp_path / "artifacts"),
+    ), patch.object(
+        task_mod.fit_jlens_artifact, "update_state", capture
+    ):
+        task_mod.fit_jlens_artifact.run(
+            model_id="m_1", prompts=["a"] * 1200, convergence_delta=1e-3
+        )
+
+    fitting = [m for m in reported if m.get("stage") == "fitting" and "last_delta" in m]
+    assert fitting, f"no fitting progress was reported: {reported}"
+    meta = fitting[-1]
+
+    assert meta.get("total_prompts") == 1200, (
+        "the progress meta carries no denominator, so a reader can show a "
+        f"percentage but not '634 / 1200': {meta}"
+    )
+    assert meta.get("convergence_delta") == 1e-3, (
+        f"the delta is reported with no threshold to judge it against: {meta}"
+    )
+    assert meta.get("prompts_seen") == 634

@@ -14,6 +14,15 @@ export enum TaskQueueStatus {
   FAILED = 'failed',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  /**
+   * The worker stopped reporting and is presumed gone.
+   *
+   * Emitted by GET /task-queue/active, which reconciles a running row against
+   * the Celery heartbeat. It was missing here while the backend already sent
+   * it, so the value arrived untyped and any `switch` over this enum fell
+   * through to its default — which is how a dead job rendered as "Queued".
+   */
+  ORPHANED = 'orphaned',
 }
 
 /**
@@ -59,6 +68,29 @@ export interface EntityInfo {
   details?: string;
   status?: string;
   type?: string;
+
+  /**
+   * Live progress merged from the worker's own report, present only for a
+   * RUNNING task that has reported at least once.
+   *
+   * Every field is optional and ABSENT MEANS UNKNOWN, never zero. A fit that
+   * has not yet reported must not render as `0 / 1200`, which would claim it
+   * had done nothing rather than that nothing is known yet.
+   *
+   * These ride on `entity_info` because it is free-form; `TaskQueueData` is a
+   * closed Pydantic model and silently drops unknown top-level keys.
+   */
+  stage?: string;
+  prompts_seen?: number;
+  /** The DENOMINATOR. Without it a reader can show a percentage but not
+   *  "634 / 1200" except by reconstructing it from a rounded number. */
+  total_prompts?: number;
+  last_delta?: number;
+  /** The threshold `last_delta` is racing. A delta with no target cannot be
+   *  judged by anyone reading it. */
+  convergence_delta?: number;
+  converged?: boolean;
+  seconds_since_heartbeat?: number;
 }
 
 /**

@@ -145,7 +145,7 @@ class TestActiveOperationsAgreesWithTheHeartbeat:
     def _row(self, status, state, info):
         from unittest.mock import MagicMock, patch
 
-        from src.api.v1.endpoints.task_queue import _looks_orphaned
+        from src.api.v1.endpoints.task_queue import _celery_view
 
         task = MagicMock()
         task.status = status
@@ -155,7 +155,8 @@ class TestActiveOperationsAgreesWithTheHeartbeat:
         result.state = state
         result.info = info
         with patch("celery.result.AsyncResult", return_value=result):
-            return _looks_orphaned(task)
+            orphaned, _live = _celery_view(task)
+            return orphaned
 
     def test_it_reports_a_running_row_whose_task_stopped_beating(self):
         stale = {"stage": "fitting", "heartbeat": time.time() - STALE_AFTER_SECONDS - 60}
@@ -177,12 +178,12 @@ class TestActiveOperationsAgreesWithTheHeartbeat:
         """Federated rows from other job tables carry no Celery id."""
         from unittest.mock import MagicMock
 
-        from src.api.v1.endpoints.task_queue import _looks_orphaned
+        from src.api.v1.endpoints.task_queue import _celery_view
 
         task = MagicMock()
         task.status = "running"
         task.task_id = None
-        assert _looks_orphaned(task) is False
+        assert _celery_view(task) == (False, {})
 
 
 class TestTheJanitorClosesGhostRows:
@@ -427,3 +428,169 @@ def test_the_janitor_uses_the_widened_rule_not_the_heartbeat_one():
     )
     assert row.status == "failed"
     assert "presumed gone" in (row.error_message or "")
+
+
+class TestTheListingCarriesLiveProgress:
+    """`/active` fetched the worker's meta and threw it away.
+
+    `_looks_orphaned` built an AsyncResult per running row, asked it one
+    question, and discarded `result.info` — the only place `prompts_seen`,
+    `total_prompts` and `last_delta` exist. So the listing had a percentage and
+    nothing else, and a J-lens fit rendered as `jlens_fit 24.4%` against a raw
+    model id. The read was already paid for; only the answer was discarded.
+
+    MUTATION CONTROLS:
+      * return `(orphaned, {})` from `_celery_view`  -> "carries the counts" fails
+      * keep `heartbeat` in the merged meta          -> "no raw timestamp" fails
+      * render absent counts as 0 in the subtitle    -> "absent, never zero" fails
+    """
+
+    def _view(self, state, info, status="running"):
+        from unittest.mock import MagicMock, patch
+
+        from src.api.v1.endpoints.task_queue import _celery_view
+
+        task = MagicMock()
+        task.status = status
+        task.task_id = "t-1"
+        result = MagicMock()
+        result.state = state
+        result.info = info
+        with patch("celery.result.AsyncResult", return_value=result):
+            return _celery_view(task)
+
+    def test_it_carries_the_counts_the_tile_needs(self):
+        _orphaned, live = self._view(
+            "PROGRESS",
+            beat({"stage": "fitting", "prompts_seen": 634, "total_prompts": 1200}),
+        )
+        assert live["prompts_seen"] == 634
+        assert live["total_prompts"] == 1200, (
+            "without the denominator a reader can show a percentage but not "
+            "'634 / 1200' except by reconstructing it from a rounded number"
+        )
+
+    def test_the_raw_heartbeat_timestamp_does_not_leak_into_the_listing(self):
+        """An epoch float is not a thing to render; its AGE is."""
+        _orphaned, live = self._view("PROGRESS", beat({"prompts_seen": 1}))
+        assert "heartbeat" not in live
+        assert isinstance(live["seconds_since_heartbeat"], float)
+
+    def test_a_queued_row_reports_nothing_live(self):
+        """A task that has not started has no progress to describe."""
+        assert self._view("PENDING", None, status="queued") == (False, {})
+
+
+class TestTheProgressSubtitle:
+    def test_absent_counts_render_as_ABSENT_never_zero(self):
+        """"0 / 1200" claims the fit has done nothing. It has not been asked.
+
+        MUTATION CONTROL: default the counts to 0 and this fails.
+        """
+        from src.api.v1.endpoints.task_queue import _progress_details
+
+        assert _progress_details({}) is None
+        assert "0" not in (_progress_details({"stage": "fitting"}) or "")
+
+    def test_it_names_the_counts_and_the_threshold_the_delta_is_racing(self):
+        from src.api.v1.endpoints.task_queue import _progress_details
+
+        text = _progress_details(
+            {
+                "prompts_seen": 634,
+                "total_prompts": 1200,
+                "last_delta": 0.00103,
+                "convergence_delta": 1e-3,
+            }
+        )
+        assert "634 / 1,200 prompts" in text
+        assert "1.03e-03" in text and "target 1e-03" in text, (
+            f"a delta with no target cannot be judged by a reader: {text}"
+        )
+
+    def test_a_stage_alone_is_still_worth_saying(self):
+        """"validating" explains a bar that has stopped moving at 53%."""
+        from src.api.v1.endpoints.task_queue import _progress_details
+
+        assert _progress_details({"stage": "validating"}) == "validating"
+
+
+class TestTheRowCarriesItsOwnClock:
+    """`started_at` and `completed_at` were never written for J-space work.
+
+    Verified on hardware: every J-lens row had both as None. Elapsed time had to
+    be derived from `created_at`, which is QUEUE time — an LFM2 fit that waited
+    three hours behind gemma would have reported a four-hour fit after one hour
+    of work.
+
+    MUTATION CONTROLS:
+      * stop stamping started_at   -> "a running row carries a start" fails
+      * stamp it on every update   -> "the start is not moved" fails
+      * stop stamping completed_at -> "a finished row carries an end" fails
+    """
+
+    def _row_after(self, transitions):
+        """Drive `update_row` through `transitions` and return (row, snapshots).
+
+        `snapshots` is `started_at` AFTER each transition, because the "is not
+        moved" property is about successive writes and cannot be observed from
+        the final state alone.
+        """
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock, patch
+
+        from src.workers import jlens_progress
+
+        row = MagicMock()
+        row.started_at = None
+        row.completed_at = None
+        row.status = "queued"
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = row
+
+        @contextmanager
+        def fake_db():
+            yield db
+
+        snapshots = []
+        with patch("src.core.database.get_sync_db", fake_db):
+            for status in transitions:
+                jlens_progress.update_row("t-1", status=status)
+                snapshots.append(row.started_at)
+        return row, snapshots
+
+    def test_a_running_row_carries_a_start_time(self):
+        row, _ = self._row_after(["running"])
+        assert row.started_at is not None
+
+    def test_the_start_time_is_not_moved_by_later_progress(self):
+        """Otherwise elapsed resets to zero on every progress report.
+
+        A fit reports every few seconds for hours; re-stamping on each would
+        make the tile read "Elapsed 3s" forever.
+
+        MUTATION CONTROL: drop the `row.started_at is None` condition and this
+        fails. The first version of this test never called `update_row` again
+        and asserted a value equalled itself, which no mutation could break.
+        """
+        _row, snapshots = self._row_after(["running", "running", "running"])
+        assert len(snapshots) == 3
+        assert snapshots[0] is not None
+        assert snapshots[1] is snapshots[0] and snapshots[2] is snapshots[0], (
+            f"the start time moved across progress reports: {snapshots}"
+        )
+
+    def test_a_finished_row_carries_an_end_time(self):
+        row, _ = self._row_after(["running", "completed"])
+        assert row.completed_at is not None
+
+    def test_a_failed_row_also_carries_an_end_time(self):
+        """A job that died has a duration too, and a row left open reads as
+        still running."""
+        row, _ = self._row_after(["running", "failed"])
+        assert row.completed_at is not None
+
+    def test_a_queued_row_has_neither(self):
+        row, _ = self._row_after([])
+        assert row.started_at is None and row.completed_at is None

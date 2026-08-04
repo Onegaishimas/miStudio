@@ -28,6 +28,27 @@ const LABELS: Partial<Record<TaskType, string>> = {
   [TaskType.JLENS_PROBE]: 'Probing',
 };
 
+/**
+ * "52.8% · 634/1200" for a fit that has reported counts, else null.
+ *
+ * Returns NULL rather than a placeholder when the counts are unknown, so the
+ * caller falls back to the status. Rendering `0/0` or `— / —` would occupy the
+ * space with something that looks like data.
+ */
+export function counts(row: {
+  progress: number | null;
+  entity_info?: { prompts_seen?: number; total_prompts?: number } | null;
+}): string | null {
+  const seen = row.entity_info?.prompts_seen;
+  const total = row.entity_info?.total_prompts;
+  if (typeof seen !== 'number' || typeof total !== 'number' || total <= 0) {
+    return null;
+  }
+  const pct = row.progress == null ? null : row.progress.toFixed(1);
+  const counted = `${seen.toLocaleString()}/${total.toLocaleString()}`;
+  return pct == null ? counted : `${pct}% · ${counted}`;
+}
+
 /** "1 running, 2 queued" — never a bare total that implies concurrency. */
 export function summarise(rows: Array<{ status: string }>): string {
   const running = rows.filter((r) => r.status === 'running').length;
@@ -98,8 +119,14 @@ export function RunningWork({ modelId }: RunningWorkProps) {
           const pct = r.progress == null ? null : Math.round(r.progress);
           return (
             <li key={r.id} className="flex items-center gap-2">
-              <span className="w-44 shrink-0 text-[11px] text-emerald-800 dark:text-emerald-300">
+              <span className="w-44 shrink-0 truncate text-[11px] text-emerald-800 dark:text-emerald-300">
                 {LABELS[r.task_type] ?? String(r.task_type)}
+                {/* WHICH MODEL. Already present in entity_info and simply never
+                    read: with two fits queued, a bare percentage cannot say
+                    which one is moving. */}
+                {r.entity_info?.name ? (
+                  <span className="ml-1.5 font-medium">{r.entity_info.name}</span>
+                ) : null}
               </span>
               <span className="h-1.5 flex-1 overflow-hidden rounded bg-emerald-200 dark:bg-emerald-900">
                 <span
@@ -110,8 +137,8 @@ export function RunningWork({ modelId }: RunningWorkProps) {
                   style={{ width: `${pct ?? 0}%` }}
                 />
               </span>
-              <span className="w-24 shrink-0 text-right font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
-                {pct == null ? r.status : `${pct}% · ${r.status}`}
+              <span className="w-48 shrink-0 text-right font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
+                {counts(r) ?? (pct == null ? r.status : `${pct}% · ${r.status}`)}
               </span>
             </li>
           );

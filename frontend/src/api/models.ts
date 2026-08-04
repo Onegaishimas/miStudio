@@ -184,6 +184,10 @@ export interface TaskStatus {
   result?: any;
   error?: string;
   info?: Record<string, any>;
+  /** Age of the worker's last progress report. The endpoint returns this
+   *  unconditionally; it was simply missing from this interface. `null` when
+   *  the task has never reported. */
+  seconds_since_heartbeat?: number | null;
 }
 
 /**

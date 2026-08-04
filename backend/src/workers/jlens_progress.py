@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,11 @@ BAND_REPORT = "jlens_band_report"
 INTERVENTION = "jlens_intervention"
 READOUT = "jlens_readout"
 PROBE = "jlens_probe"
+
+#: Statuses after which a task will never report again. `completed_at` is
+#: stamped on entering any of them, so a finished row carries a real duration
+#: rather than an open-ended one.
+TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 
 def open_row(task_type: str, entity_id: str, task_id: str) -> Optional[str]:
@@ -90,6 +96,16 @@ def update_row(
             if row is None:
                 return
             if status is not None:
+                # STAMP THE CLOCK ON THE TRANSITIONS. Both columns existed and
+                # neither was ever written for J-space work, so every J-lens row
+                # carried started_at=None and completed_at=None. Any elapsed
+                # time a reader derived had to come from `created_at`, which is
+                # QUEUE time: an LFM2 fit that waited three hours behind gemma
+                # would have reported a four-hour fit after one hour of work.
+                if status == "running" and row.started_at is None:
+                    row.started_at = datetime.now(timezone.utc)
+                if status in TERMINAL_STATUSES and row.completed_at is None:
+                    row.completed_at = datetime.now(timezone.utc)
                 row.status = status
             if progress is not None:
                 # Clamped: a progress bar past 100% reads as a bug in the bar
