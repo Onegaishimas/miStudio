@@ -199,6 +199,58 @@ async def validate_artifact(
     )
 
 
+class RestoreResponse(BaseModel):
+    """What was promoted and what was archived in its place.
+
+    Both recipes travel back, because "restored" without saying WHAT it
+    replaced is unverifiable — the caller cannot tell whether the swap did what
+    they intended, and this operation exists precisely because the wrong lens
+    was serving.
+    """
+
+    slug: str
+    restored: Dict[str, Any]
+    displaced: Dict[str, Any]
+
+
+@router.post(
+    "/artifacts/{slug}/restore-superseded",
+    response_model=RestoreResponse,
+    summary="Promote the archived artifact back into service",
+)
+async def restore_superseded(slug: str) -> RestoreResponse:
+    """Swap `<slug>.superseded` back into `<slug>`.
+
+    A SWAP, so this is its own undo and nothing is deleted. Call it twice and
+    you are back where you started.
+
+    Publishing is last-writer-wins, and "last" means finished last, not best. A
+    stale 400-prompt fit that never converged once published over a 1097-prompt
+    fit that did; `allow_quality_regression` now refuses that, but an artifact
+    already displaced could only be recovered by a shell rename inside the pod
+    — no audit trail, no digest check, and a typo away from destroying the
+    archive. This is that operation, supported.
+    """
+    from ....services.jlens_artifact_service import ArtifactNotValidated
+
+    service = _service()
+    try:
+        outcome = service.restore_superseded(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ArtifactNotValidated as exc:
+        # 409, not 400: the request is well-formed and the CONFLICT is with the
+        # state on disk. A 400 would read as "you asked wrongly".
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    logger.info("Restored the archived J-lens artifact for %s", slug)
+    return RestoreResponse(**outcome)
+
+
 class FitRequest(BaseModel):
     """Start a fit. Prompts are supplied rather than sampled server-side.
 
