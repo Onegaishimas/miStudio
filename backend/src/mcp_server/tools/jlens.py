@@ -375,6 +375,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         freeze_norms: Annotated[bool, Field(description="Freeze normalisation statistics too. Off by default: freezing makes the map exactly AFFINE, which is convenient and is not what the paper computes — its J is a local linearisation whose departure is reported rather than engineered away")] = False,
         target_layer: Annotated[str, Field(description="'penultimate' (default) or 'final'. The last block is specialised for next-token calibration and adds noise, per BRD A.2. Layers ABOVE the target are REFUSED — their gradient to it is zero by causality, and a zero lens reads out as confident uniform noise")] = "penultimate",
         allow_coverage_loss: Annotated[bool, Field(description="Publish even though the EXISTING artifact covers layers this fit does not. Off by default and refused otherwise — a 16-layer lens was once destroyed by a 9-layer refit with no warning. Losing coverage must be a decision")] = False,
+        allow_quality_regression: Annotated[bool, Field(description="Publish even when this fit is WEAKER evidence than the artifact it replaces — fewer prompts, or not converged where the published one converged. OFF by default: publishing is otherwise last-writer-wins, and a stale job that finishes last is still last. A 400-prompt non-converged fit once published over a 1097-prompt converged one this way")] = False,
         semantic_probe: Annotated[Optional[Dict[str, Any]], Field(description="Fixture for the SEMANTIC check: {prompt, expected_intermediate, control_prompt?, layer?, top_k?}. WITHOUT IT NOTHING IS PUBLISHED — the check cannot run and the suite fails closed. The intermediate must NOT appear in the prompt, or a lens encoding nothing would pass. Omit `layer` to SCAN every fitted layer (the default: which depth carries an intermediate is a property of the model, not something to assert); naming a layer pins the check to it. `control_prompt` is an unrelated prompt for which the intermediate would be absurd — if it surfaces there too the check FAILS, because a lens that answers the same thing to everything has shown nothing")] = None,
     ) -> Any:
         """Queue a J-lens fit. GPU-bound and long-running; poll get_task_status.
@@ -401,6 +402,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "freeze_qk": freeze_qk,
             "corpus_name": corpus_name,
             "allow_coverage_loss": allow_coverage_loss,
+            "allow_quality_regression": allow_quality_regression,
             "freeze_norms": freeze_norms,
             "target_layer": target_layer,
             **({"convergence_delta": convergence_delta} if convergence_delta else {}),

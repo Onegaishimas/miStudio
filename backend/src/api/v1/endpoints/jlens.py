@@ -229,6 +229,11 @@ class FitRequest(BaseModel):
     #: not. Off by default: a refit is not automatically an upgrade, and a
     #: 16-layer lens was destroyed by a 9-layer one with no warning at all.
     allow_coverage_loss: bool = False
+    #: Publish even when this fit is WEAKER evidence than the artifact it
+    #: replaces — fewer prompts, or not converged where the incumbent was.
+    #: Default False because publishing is otherwise last-writer-wins, and a
+    #: stale job that finishes last is still last.
+    allow_quality_regression: bool = False
     #: Relative Frobenius change in the accumulated J below which the fit is
     #: considered settled, sustained across consecutive shards.
     #:
@@ -294,6 +299,7 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
         corpus_name=request.corpus_name,
         semantic_probe=request.semantic_probe,
         allow_coverage_loss=request.allow_coverage_loss,
+        allow_quality_regression=request.allow_quality_regression,
         freeze_norms=request.freeze_norms,
         target_layer=request.target_layer,
         convergence_delta=request.convergence_delta,

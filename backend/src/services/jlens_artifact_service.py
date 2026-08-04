@@ -94,6 +94,18 @@ class ArtifactCoverageLoss(RuntimeError):
     """Raised rather than destroying layers the replacement does not cover."""
 
 
+class ArtifactQualityRegression(RuntimeError):
+    """Raised rather than replacing stronger evidence with weaker.
+
+    Publishing is otherwise LAST WRITER WINS, and "last" means "finished
+    last", not "best" or even "newest". Observed on 2026-08-04: a 400-prompt
+    fit that never converged published over a 1097-prompt fit that did. The
+    weaker job had been queued HOURS EARLIER, sat unclaimed in Redis through a
+    series of pod rolls, and ran when the queue finally drained — so it was
+    older by intent and newer by completion, and nothing compared the two.
+    """
+
+
 class JLensArtifactService:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
@@ -251,6 +263,7 @@ class JLensArtifactService:
         repo_id: str,
         report: ValidationReport,
         allow_coverage_loss: bool = False,
+        allow_quality_regression: bool = False,
     ) -> ArtifactRef:
         """Move a staged artifact into the mounted directory.
 
@@ -300,6 +313,14 @@ class JLensArtifactService:
                 repo_id,
                 out_of_scope,
                 self.target_layer(self._ref_for(staging)) or "declared",
+            )
+
+        regression = self._quality_regression(repo_id, staging)
+        if regression and not allow_quality_regression:
+            raise ArtifactQualityRegression(
+                f"refusing to publish {repo_id}: {regression}. The staged fit is "
+                "kept; re-run with allow_quality_regression=true to publish it "
+                "anyway."
             )
 
         final = self.root / slug_for(repo_id)
@@ -391,6 +412,80 @@ class JLensArtifactService:
         lost = [l for l in missing if l <= ceiling]
         out_of_scope = [l for l in missing if l > ceiling]
         return lost, out_of_scope
+
+    def _quality_regression(self, repo_id: str, staging: Path) -> Optional[str]:
+        """Why publishing `staging` would replace stronger evidence with weaker.
+
+        Two comparisons, both read from the recipes the fits wrote themselves:
+
+          * CONVERGENCE. A fit that reached its threshold is stronger evidence
+            than one that ran out of corpus. This is the one that bit.
+          * CORPUS SIZE, but only between fits of the SAME convergence status.
+            A converged fit over 400 prompts is not worse than a converged fit
+            over 1200; it got there sooner.
+
+        Returns None when either recipe is unreadable. Unlike the coverage
+        guard this fails OPEN, deliberately: coverage protects layers a user
+        already paid GPU time for, where an unknown must not be discarded on a
+        guess. Here an unreadable incumbent is not evidence worth defending,
+        and failing closed would make an artifact with a corrupt config
+        impossible to ever replace.
+        """
+        current = self.find(repo_id)
+        if current is None:
+            return None
+        staged = self._ref_for(staging)
+        if staged is None:
+            return None
+
+        cur_converged = self._config_bool(current, "converged")
+        new_converged = self._config_bool(staged, "converged")
+        cur_n = self._config_int(current, "n_prompts")
+        new_n = self._config_int(staged, "n_prompts")
+
+        if cur_converged is True and new_converged is False:
+            return (
+                f"the published artifact CONVERGED (over {cur_n} prompts) and this "
+                f"fit did not (it stopped at {new_n}). A fit that ran out of corpus "
+                "is weaker evidence than one that reached its threshold"
+            )
+
+        if (
+            cur_converged == new_converged
+            and cur_n is not None
+            and new_n is not None
+            and new_n < cur_n
+        ):
+            return (
+                f"this fit saw {new_n} prompts and the published artifact saw "
+                f"{cur_n}, with neither converging differently — publishing would "
+                "replace a better-supported lens with a less-supported one"
+            )
+
+        return None
+
+    def _config_bool(self, ref: ArtifactRef, key: str) -> Optional[bool]:
+        """One boolean field from config.yaml, or None if absent/unparseable.
+
+        None is NOT False. "we could not read whether it converged" and "it did
+        not converge" are different facts, and collapsing them would let an
+        unreadable recipe read as a failed one.
+        """
+        if ref.config_path is None or not ref.config_path.is_file():
+            return None
+        try:
+            for raw in ref.config_path.read_text().splitlines():
+                name, _, value = raw.partition(":")
+                if name.strip() == key:
+                    got = value.strip().lower()
+                    if got in ("true", "yes"):
+                        return True
+                    if got in ("false", "no"):
+                        return False
+                    return None
+        except OSError as exc:  # noqa: BLE001
+            logger.warning("Could not read %s from %s: %s", key, ref.config_path, exc)
+        return None
 
     def _target_index(self, ref: ArtifactRef) -> Optional[int]:
         """Highest layer this artifact's recipe COULD cover, from its own config.
