@@ -6,7 +6,7 @@ including failed tasks that can be manually retried.
 """
 
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -596,33 +596,76 @@ async def undismiss_failed_operation(
     return {"dismissed": False, "task_type": task_type, "source_id": source_id}
 
 
-def _looks_orphaned(task) -> bool:
-    """Whether a row claiming to be active belongs to a task that stopped talking.
+def _celery_view(task) -> Tuple[bool, Dict[str, Any]]:
+    """`(orphaned, live_meta)` for a row, from ONE result-backend read.
 
     Only ever consults Celery for rows that CLAIM to be running: a queued task
     has not started and legitimately has no heartbeat, and calling it orphaned
     would condemn everything waiting behind a long job.
+
+    THE META COMES BACK RATHER THAN BEING DISCARDED. This used to fetch an
+    `AsyncResult`, ask it one question, and throw away `result.info` — which is
+    the only place `prompts_seen`, `last_delta` and `stage` exist. The listing
+    therefore had a percentage and nothing else, and a J-lens fit rendered as
+    "jlens_fit 24.4%" against a raw model id. The read was already being paid
+    for; only the answer was being thrown away.
     """
     if getattr(task, "status", None) != "running" or not getattr(task, "task_id", None):
-        return False
+        return False, {}
     try:
         from celery.result import AsyncResult
 
         from ....core.celery_app import celery_app
         from ....workers.task_heartbeat import (
             looks_abandoned,
+            seconds_since_beat,
             seconds_since_row_update,
         )
 
         result = AsyncResult(task.task_id, app=celery_app)
+        info = result.info if isinstance(result.info, dict) else {}
         # Covers the expired-result case too: a worker that died between
         # progress reports leaves Celery answering PENDING with no info, and
         # the heartbeat rule alone reads that as healthy.
-        return looks_abandoned(
+        orphaned = looks_abandoned(
             result.state, result.info, seconds_since_row_update(task)
         )
+        live = {k: v for k, v in info.items() if k != "heartbeat"}
+        age = seconds_since_beat(info)
+        if age is not None:
+            live["seconds_since_heartbeat"] = round(age, 1)
+        return orphaned, live
     except Exception:  # noqa: BLE001 - a listing must not fail on one bad row
-        return False
+        return False, {}
+
+
+def _progress_details(live: Dict[str, Any]) -> Optional[str]:
+    """The one-line subtitle, following the `_federated_row` convention.
+
+    ABSENT FIELDS ARE OMITTED, never rendered as zero. A fit that has not yet
+    reported reads as "no counts available"; rendering `0 / 1200` would say the
+    fit had done nothing, which is a different and false claim.
+    """
+    seen = live.get("prompts_seen")
+    total = live.get("total_prompts")
+    parts = []
+    if isinstance(seen, int) and isinstance(total, int) and total > 0:
+        parts.append(f"{seen:,} / {total:,} prompts")
+    elif isinstance(seen, int):
+        parts.append(f"{seen:,} prompts")
+    delta = live.get("last_delta")
+    if isinstance(delta, (int, float)):
+        threshold = live.get("convergence_delta")
+        if isinstance(threshold, (int, float)):
+            parts.append(f"delta {delta:.2e} (target {threshold:.0e})")
+        else:
+            parts.append(f"delta {delta:.2e}")
+    stage = live.get("stage")
+    if isinstance(stage, str) and stage and not parts:
+        # A stage with no numbers is still worth saying: "validating" explains
+        # a bar that has stopped moving at 53%.
+        parts.append(stage)
+    return " · ".join(parts) or None
 
 
 @router.get("/active", response_model=TaskQueueListResponse)
@@ -655,12 +698,23 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
         # Reported, not rewritten. This endpoint reads; a background janitor is
         # the right place to make the state terminal, and inventing a write here
         # would mean a GET with side effects.
-        if _looks_orphaned(task):
+        orphaned, live = _celery_view(task)
+        if orphaned:
             row["status"] = "orphaned"
             row["error_message"] = (
                 "the worker running this stopped reporting and is presumed gone "
                 "(a deploy, an eviction or a crash). Re-run it."
             )
+        if live:
+            # Merged into entity_info because it is free-form (`Dict[str, Any]`)
+            # and already carries `name`/`repo_id`; `TaskQueueData` is a closed
+            # model and would silently DROP a new top-level key.
+            merged = dict(row.get("entity_info") or {})
+            merged.update(live)
+            details = _progress_details(live)
+            if details:
+                merged["details"] = details
+            row["entity_info"] = merged
         enriched_tasks.append(row)
 
     enriched_tasks.extend(

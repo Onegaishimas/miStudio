@@ -8,6 +8,7 @@
 import { useEffect } from 'react';
 import { Clock, RefreshCw } from 'lucide-react';
 import { useTaskQueueStore } from '../../stores/taskQueueStore';
+import { formatDuration } from '../../utils/formatters';
 
 const TASK_TYPE_LABELS: Record<string, string> = {
   download: 'Download',
@@ -16,6 +17,14 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   tokenization: 'Tokenization',
   labeling: 'Labeling',
   neuronpedia_push: 'Neuronpedia Push',
+  // J-space work rendered as the raw enum string — `jlens_fit` — because these
+  // were never added. A fit is the longest-running job in the product and it
+  // named itself worse than anything else in this list.
+  jlens_fit: 'J-Lens fit',
+  jlens_band_report: 'J-Lens band report',
+  jlens_intervention: 'J-Lens intervention',
+  jlens_readout: 'J-Lens readout',
+  jlens_probe: 'J-Lens probe',
 };
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
@@ -26,6 +35,46 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   labeling: 'Labeling',
   neuronpedia: 'Neuronpedia',
 };
+
+/**
+ * "Elapsed 2h 51m" for work that has STARTED, "Queued 2h 58m" for work that has
+ * not, and a heartbeat age when one is known.
+ *
+ * THE TWO CLOCKS ARE DIFFERENT AND MUST NOT BE CONFLATED. `created_at` is when
+ * the job was enqueued; `started_at` is when a worker picked it up. An LFM2 fit
+ * waited three hours behind gemma, so measuring elapsed from `created_at` would
+ * have reported a four-hour fit after one hour of work.
+ *
+ * Falls back to the raw creation timestamp when nothing better is known, rather
+ * than inventing a duration from a missing field.
+ */
+export function elapsedLabel(task: {
+  status: string;
+  started_at?: string | null;
+  created_at?: string | null;
+  entity_info?: { seconds_since_heartbeat?: number } | null;
+}): string {
+  const beat = task.entity_info?.seconds_since_heartbeat;
+  const beatText =
+    typeof beat === 'number' ? ` · beat ${formatDuration(beat)} ago` : '';
+
+  if (task.started_at) {
+    const secs = (Date.now() - Date.parse(task.started_at)) / 1000;
+    if (Number.isFinite(secs) && secs >= 0) {
+      return `Elapsed ${formatDuration(secs)}${beatText}`;
+    }
+  }
+  if (task.created_at) {
+    const secs = (Date.now() - Date.parse(task.created_at)) / 1000;
+    if (Number.isFinite(secs) && secs >= 0) {
+      // NOT "elapsed": this job has not started, and calling its wait "elapsed"
+      // is the conflation above.
+      return `Queued ${formatDuration(secs)}`;
+    }
+    return `Created: ${new Date(task.created_at).toLocaleString()}`;
+  }
+  return '';
+}
 
 export function ActiveOperationsSection() {
   const { activeTasks, activeLoading, activeError, fetchActiveTasks } = useTaskQueueStore();
@@ -45,6 +94,17 @@ export function ActiveOperationsSection() {
   const getEntityTypeLabel = (type: string): string => ENTITY_TYPE_LABELS[type] || type;
 
   const getStatusBadge = (status: string) => {
+    // ORPHANED FIRST. This badge was binary — anything that was not 'running'
+    // fell through to amber "Queued" — so a job whose worker had died rendered
+    // as one merely waiting its turn. That is the exact confusion the backend
+    // janitor removed, still on screen.
+    if (status === 'orphaned') {
+      return (
+        <span className="px-2 py-0.5 bg-red-500/20 border border-red-500/30 rounded text-xs font-medium text-red-300">
+          Stopped reporting
+        </span>
+      );
+    }
     if (status === 'running') {
       return (
         <span className="px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/30 rounded text-xs font-medium text-emerald-300 flex items-center gap-1.5">
@@ -129,9 +189,7 @@ export function ActiveOperationsSection() {
                   </div>
                 )}
                 <div className="text-xs text-slate-500 mt-1">
-                  {task.started_at
-                    ? `Started: ${new Date(task.started_at).toLocaleString()}`
-                    : `Created: ${new Date(task.created_at || '').toLocaleString()}`}
+                  {elapsedLabel(task)}
                 </div>
                 {task.retry_count > 0 && (
                   <div className="text-xs text-amber-400 mt-1">

@@ -193,7 +193,15 @@ def _fit_and_publish(
             meta=beat({
                 "stage": "fitting",
                 "prompts_seen": progress.prompts_seen,
+                # THE DENOMINATOR TRAVELS TOO. It existed only as a local used
+                # to compute the percentage and was then dropped, so a reader
+                # could show "53%" but not "634 / 1200" without reconstructing
+                # the total from a rounded percentage.
+                "total_prompts": total_prompts,
                 "last_delta": progress.last_delta,
+                # The threshold the delta is racing. A delta with no target is
+                # a number nobody can judge.
+                "convergence_delta": fitter.convergence_delta,
                 "converged": progress.converged,
             }),
         )
