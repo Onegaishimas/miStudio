@@ -1316,6 +1316,16 @@ class InterventionRequest(BaseModel):
 
     model_id: str
     prompt: str = Field(..., min_length=1, max_length=8000)
+    #: MORE PROMPTS FOR THE SAME EXPERIMENT — one TRIAL each. The source paper
+    #: reports a fraction of trials (50 two-hop prompts, 192 swap trials), never
+    #: a single number from a single prompt. One trial produces a Wilson
+    #: interval spanning almost the whole range, which is the honest rendering
+    #: of one observation.
+    prompts: Optional[List[str]] = Field(None, max_length=512)
+    #: The token whose RANK is scored in the model's output. Defaults to
+    #: `direction_token`. A coordinate swap wants them different: push
+    #: direction A, ask whether answer B arrives.
+    target_token: Optional[str] = None
     primitive: str
     layers: List[int] = Field(..., min_length=1)
     #: A raw d_model vector. Usable from a script; NOT usable from a browser,
@@ -1372,6 +1382,8 @@ async def run_intervention(
         model_id=request.model_id,
         prompt=request.prompt,
         primitive=request.primitive,
+        prompts=request.prompts,
+        target_token=request.target_token,
         layers=request.layers,
         direction=request.direction,
         direction_token=request.direction_token,
