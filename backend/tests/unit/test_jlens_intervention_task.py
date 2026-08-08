@@ -1,27 +1,29 @@
 """
-The intervention task's control discipline (BR-018).
+The intervention task, measured the way the source paper measures.
 
-FOUND BY A REVIEW ROUND, not by a failure: this module and `jlens_probe_tasks`
-had ZERO test coverage. Both were written, wired, and confirmed reachable — the
-harness proves the route exists and queues a task — and nothing exercised what
-the task body does once it runs.
+WHAT CHANGED AND WHY. The first version applied a primitive to a captured
+activation, pushed it through the Jacobian transport, and reported the mean
+absolute displacement in lens space. The paper instead perturbs and "allow[s]
+the forward pass to continue", scoring "the fraction of trials in which the swap
+places the target-appropriate answer at the top of the model's output
+distribution", with "Wilson 95% CIs". No activation-space norm appears as an
+effect size anywhere in it.
 
-The load-bearing invariant is that the control is not optional and not
-decorative. `InterventionResult` takes `control_outcome` positionally with no
-default precisely so a caller who has not run one cannot construct a result;
-this task must honour that in substance, not just in shape.
+The deviation was not cosmetic. The transport is linear and `apply_additive` is
+`h + s*v`, so `J(h + s*v) - J(h) = s*J(v)` and the activation cancels — the
+reported number could not depend on the prompt, the position, or the forward
+pass that produced the activation. Confirmed on hardware: "My favorite pet is a"
+and "The capital of France is" both returned 0.01739214 to seven significant
+figures, while the result advertised `positions: [5]` as though it mattered.
 
-MUTATION CONTROLS (each must turn this file red):
-  * average the control over the FIRST draw only  -> "averages over k" fails
-  * score the control with a different measure    -> "same measurement" fails
-  * truncate a multi-token direction              -> "refuses" fails
-  * report the intervened outcome as the finding  -> "excess" fails
-  * claim rung 2                                  -> "rung" fails
+MUTATION CONTROLS:
+  * read the logits without running the layers -> "the hook fires" fails
+  * hook a norm module instead of the layer    -> "the hook fires" fails
+  * score a fixed prompt                       -> "depends on the prompt" fails
+  * drop the control arm                       -> "control is run" fails
+  * claim rung 3                               -> "rung is 2" fails
 """
 
-from __future__ import annotations
-
-import sys
 import types
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -29,45 +31,81 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-
 D_MODEL = 6
-SEQ = 4
+VOCAB = 16
+#: MUST BE < D_MODEL. `W_U` here is `torch.eye(VOCAB, D_MODEL)`, whose rows past
+#: D_MODEL-1 are all ZERO — a target id of 7 gave a zero direction vector, so no
+#: perturbation was possible and every arm scored identically. The first version
+#: of these tests could not see that, because none of them checked the
+#: intervention had any effect at all.
+TARGET_ID = 3
 
 
 class _Tok:
+    """Different prompts tokenise DIFFERENTLY.
+
+    A stub that ignores its input makes every prompt identical, which would let
+    the prompt-dependence test pass against a prompt-independent measurement —
+    the exact defect this file exists to pin.
+    """
+
     def __call__(self, text, return_tensors=None):
-        return {"input_ids": torch.zeros(1, SEQ, dtype=torch.long)}
+        ids = [(ord(c) % VOCAB) for c in text[:4]] or [0]
+        return {"input_ids": torch.tensor([ids], dtype=torch.long)}
 
     def encode(self, s, add_special_tokens=False):
-        # " Paris" is one token; "two words" is two. The task must treat those
-        # differently rather than silently taking the first piece.
-        return [7] if s.strip() == "Paris" else [7, 8]
+        return [TARGET_ID] if s.strip() in ("Paris", "dog") else [7, 8]
 
 
-def _service_stub():
+class _Layer(torch.nn.Module):
+    """A real Module: `register_forward_hook` is what is under test."""
+
+    def forward(self, x):
+        return x
+
+
+class _Model:
+    """Embeds ids, RUNS the layers, and unembeds. Hooks fire because the layers
+    are called, which is the property the paper's method depends on."""
+
+    device = "cpu"
+
+    def __init__(self, layers):
+        self.layers = layers
+        self.calls = 0
+        torch.manual_seed(0)
+        self.embed = torch.randn(VOCAB, D_MODEL)
+        self.w_u = torch.randn(VOCAB, D_MODEL)
+
+    def __call__(self, input_ids=None):
+        self.calls += 1
+        h = self.embed[input_ids]
+        for layer in self.layers:
+            h = layer(h)
+        return types.SimpleNamespace(logits=h @ self.w_u.T)
+
+
+def _service_stub(tok):
     svc = MagicMock()
-    svc.tokenizer = _Tok()
+    svc.tokenizer = tok
     svc.capture_device = "cpu"
     svc.d_model = D_MODEL
-    svc.W_U = torch.eye(16, D_MODEL)
-    svc._capture_residuals.return_value = types.SimpleNamespace(
-        by_layer={0: torch.ones(SEQ, D_MODEL), 1: torch.ones(SEQ, D_MODEL)},
-        hook_target="layers_module[L]",
-    )
+    svc.W_U = torch.eye(VOCAB, D_MODEL)
     return svc
 
 
 @contextmanager
-def _patched(service):
-    """Patch the heavy edges so the task BODY runs on real tensors."""
+def _patched(service, layers, model_box=None):
+    model = _Model(layers)
+    if model_box is not None:
+        model_box["model"] = model
     loaded = types.SimpleNamespace(
         name="org/model",
-        model=None,
+        model=model,
         tokenizer=service.tokenizer,
-        structure=types.SimpleNamespace(num_layers=2),
+        structure=types.SimpleNamespace(num_layers=2, layers_module=layers),
         unembedding=service.W_U,
     )
-
     db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = object()
 
@@ -77,13 +115,12 @@ def _patched(service):
 
     from src.workers.jlens_intervention_tasks import run_intervention_task
 
-    # `bind=True` means the body calls self.update_state, which needs a live
-    # request id when invoked outside a worker. Patched rather than faked with
-    # a request stack: progress reporting is not what these tests are about.
     with patch("src.core.database.get_sync_db", fake_db), patch(
         "src.services.jlens_model_registry.load_for_readout", return_value=loaded
     ), patch(
         "src.services.jlens_readout_service.ReadoutService", return_value=service
+    ), patch(
+        "torch.cuda.is_available", lambda: False
     ), patch.object(
         run_intervention_task, "update_state", MagicMock()
     ):
@@ -93,7 +130,9 @@ def _patched(service):
 def _run(**overrides):
     from src.workers.jlens_intervention_tasks import run_intervention_task
 
-    service = _service_stub()
+    tok = _Tok()
+    service = _service_stub(tok)
+    layers = [_Layer(), _Layer()]
     kwargs = dict(
         model_id="m_1",
         prompt="hello",
@@ -105,123 +144,131 @@ def _run(**overrides):
         control_seed=11,
     )
     kwargs.update(overrides)
-    with _patched(service):
-        return run_intervention_task.run(**kwargs)
+    model_box = {}
+    with _patched(service, layers, model_box):
+        return run_intervention_task.run(**kwargs), model_box["model"]
+
+
+class TestTheForwardPassIsContinued:
+    def test_the_perturbation_REACHES_the_running_model(self):
+        """Not "a hook was registered" — the OUTPUT has to change.
+
+        An earlier version of this test registered its own hooks on the layers
+        and asserted they fired. They fire whether or not the TASK hooks
+        anything, because the model runs its layers regardless, so the test
+        passed against a task that never registered a hook at all. Deleting the
+        registration left it green.
+
+        The observable that cannot be faked: with the perturbation applied, the
+        intervened ranks must differ from the baseline ranks. If the hook never
+        reaches the model, the two arms are the same forward pass.
+
+        MUTATION CONTROL: remove the `register_forward_hook` loop and this
+        fails.
+        """
+        out, _model = _run(
+            prompts=["abcd", "efgh", "ijkl", "mnop"],
+            strength=250.0,  # large enough that a rank MUST move
+        )
+        assert out["baseline_top1"]["hits"] != out["intervened_top1"]["hits"] or (
+            out["baseline_top5"]["hits"] != out["intervened_top5"]["hits"]
+        ), (
+            "the intervened arm scored identically to the baseline: the "
+            "perturbation never reached the model's forward pass"
+        )
+
+    def test_the_outcome_DEPENDS_ON_THE_PROMPT(self):
+        """The defect that motivated the rewrite, pinned.
+
+        The lens-space measurement returned 0.01739214 for both "My favorite pet
+        is a" and "The capital of France is" — identical to seven significant
+        figures, because `h` cancels out of `J(h + s*v) - J(h)`.
+
+        Asserted on the BASELINE arm, which depends on nothing but the prompt,
+        so the test cannot be satisfied by control randomness.
+
+        MUTATION CONTROL: score `prompt` instead of each trial's text and this
+        fails — both runs then measure the same string.
+        """
+        a, _ = _run(prompts=["aaaa", "aaab", "aaac", "aaad"])
+        b, _ = _run(prompts=["wxyz", "zyxw", "qrst", "tsrq"])
+        assert (a["baseline_top1"]["hits"], a["baseline_top5"]["hits"]) != (
+            b["baseline_top1"]["hits"],
+            b["baseline_top5"]["hits"],
+        ), (
+            "two disjoint prompt sets produced identical baselines; the "
+            "measurement is not reading the prompt"
+        )
 
 
 class TestTheControlIsRealWork:
-    def test_the_result_reports_the_excess_and_BOTH_figures(self):
-        """The finding is the difference; the raw outcome alone is not one.
+    def test_every_trial_runs_THREE_forward_passes(self):
+        """Baseline, intervened and control, all on the SAME prompt.
 
-        Both inputs travel beside it so a reader can see the control actually
-        ran rather than taking it on trust.
+        Asserting `n == n_trials` is not enough: `n` counts trials, so it stays
+        correct when an arm is never actually measured. Setting `control_rank`
+        to None left that assertion green. The count of forward passes cannot
+        be faked the same way.
+
+        MUTATION CONTROL: drop the control arm and this fails at 2 passes/trial.
         """
-        out = _run()
-        assert "excess_over_control" in out
-        assert out["excess_over_control"] == pytest.approx(
-            out["intervened_outcome"] - out["control_outcome"], abs=1e-9
+        out, model = _run(prompts=["abcd", "efgh", "ijkl"])
+        assert out["n_trials"] == 3
+        assert model.calls == 9, (
+            f"{model.calls} forward passes for 3 trials; expected 9 "
+            "(baseline + intervened + control each)"
         )
+        for arm in ("baseline", "intervened", "control"):
+            assert out[f"{arm}_top1"]["n"] == 3
+
+    def test_the_control_construction_is_reconstructible(self):
+        """"A random direction" is not a control; "k directions from seed s" is."""
+        out, _ = _run(k=4, control_seed=11)
         assert out["control"]["k"] == 4
         assert out["control"]["seed"] == 11
+        assert out["control"]["construction"] == "gaussian_unit_norm"
 
-    def test_the_control_is_averaged_over_ALL_k_draws(self):
-        """One random direction carries its own variance.
-
-        Comparing against a single draw reports that variance as an effect.
-
-        THE ARITHMETIC IS PINNED, not inferred from k. An earlier version
-        compared control_outcome at k=1 against k=8 and assumed a difference
-        could only come from averaging — but torch fills randn in pairs, so the
-        two draws do not share a first row and the figure moved either way.
-        That test passed against a control that used only `controls[0]`.
-        """
-        from src.workers.jlens_intervention_tasks import run_intervention_task
-
-        v = torch.zeros(D_MODEL)
-        v[0] = 1.0
-        w = torch.zeros(D_MODEL)
-        w[1] = 5.0  # a deliberately different magnitude
-
-        def controls_of(*rows):
-            stacked = torch.stack(rows)
-            return lambda k, seed, d_model: stacked
-
-        def control_for(*rows):
-            service = _service_stub()
-            with _patched(service), patch(
-                "src.services.jlens_intervention.build_control",
-                controls_of(*rows),
-            ):
-                return run_intervention_task.run(
-                    model_id="m_1",
-                    prompt="hello",
-                    primitive="additive",
-                    layers=[0, 1],
-                    direction_token="Paris",
-                    strength=1.0,
-                    k=len(rows),
-                    control_seed=11,
-                )["control_outcome"]
-
-        only_v = control_for(v)
-        only_w = control_for(w)
-        both = control_for(v, w)
-
-        assert both == pytest.approx((only_v + only_w) / 2, abs=1e-6), (
-            f"the control reported {both}, not the mean of its {2} draws "
-            f"({only_v}, {only_w}) — a single draw is not a control"
+    def test_the_finding_is_reported_as_a_SEPARATION_not_a_bare_rate(self):
+        out, _ = _run(prompts=["abcd", "efgh"])
+        assert "excess_top1_over_control" in out
+        assert "separated_from_control" in out
+        assert out["excess_top1_over_control"] == pytest.approx(
+            out["intervened_top1"]["rate"] - out["control_top1"]["rate"], abs=1e-9
         )
-        # And it must not simply be the first draw.
-        assert both != pytest.approx(only_v, abs=1e-6)
 
     def test_a_multi_token_direction_is_REFUSED_not_truncated(self):
-        """A lens direction is defined for ONE token.
-
-        Taking the first piece would intervene along something the caller did
-        not name, and report it under the name they did.
-        """
-        with pytest.raises(ValueError, match="SINGLE token|is 2 tokens"):
+        with pytest.raises(ValueError, match="tokens"):
             _run(direction_token="two words")
 
-    def test_a_direction_that_tokenises_to_nothing_is_refused(self):
-        class _Empty(_Tok):
-            def encode(self, s, add_special_tokens=False):
-                return []
-
-        service = _service_stub()
-        service.tokenizer = _Empty()
-        from src.workers.jlens_intervention_tasks import run_intervention_task
-
-        with _patched(service):
-            with pytest.raises(ValueError, match="does not tokenise"):
-                run_intervention_task.run(
-                    model_id="m_1",
-                    prompt="hello",
-                    primitive="additive",
-                    layers=[0],
-                    direction_token="???",
-                    k=2,
-                    control_seed=1,
-                )
+    def test_a_target_that_is_not_one_token_is_refused(self):
+        """A rank in a next-token distribution is defined for a single token."""
+        with pytest.raises(ValueError, match="tokens"):
+            _run(direction_token="Paris", target_token="two words")
 
 
 class TestTheClaimIsNotOverstated:
-    def test_it_reports_rung_ONE_and_says_what_that_means(self):
-        """Displacement in lens space is not proof the model used the direction."""
-        out = _run()
-        assert out["evidence_rung"] == 1, (
-            "rung 2 would claim a causal finding this does not establish — that "
-            "takes a coordinate swap with a matched control at the behavioural "
-            "level, which this does not perform"
-        )
-        assert "not a causal claim" in out["caveat"]
+    def test_it_reports_rung_TWO_and_says_what_that_means(self):
+        """The perturbation reaches the model and the model's output is read.
+
+        That is a real intervention — rung 2 — where the lens-space version was
+        honestly rung 1. It is still one model, one direction and one prompt
+        set, and the caveat says so rather than implying generality.
+
+        MUTATION CONTROL: claim rung 3 and this fails.
+        """
+        out, _ = _run()
+        assert out["evidence_rung"] == 2
+        assert "forward pass" in out["method"]
+        assert "separation" in out["caveat"].lower()
+        assert "never that none exists" in out["caveat"]
 
     def test_the_primitive_and_its_parameters_travel_with_the_result(self):
-        """A run whose parameters are unrecorded cannot be reproduced."""
-        out = _run(strength=2.5)
+        """A number whose recipe is unrecorded cannot be reproduced or compared."""
+        out, _ = _run(strength=2.5, layers=[0])
         assert out["primitive"] == "additive"
         assert out["parameters"]["strength"] == 2.5
-        assert out["layers"] == [0, 1]
+        assert out["layers"] == [0]
+        assert out["target_token"] == "Paris"
 
     def test_an_unknown_primitive_is_refused_by_name(self):
         with pytest.raises(ValueError, match="unknown primitive"):
