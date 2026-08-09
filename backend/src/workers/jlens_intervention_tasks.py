@@ -73,6 +73,7 @@ def run_intervention_task(
     from ..services.jlens_intervention import (
         Primitive,
         apply_additive,
+        apply_coordinate_swap,
         apply_projective_ablation,
         build_control,
     )
@@ -199,6 +200,44 @@ def run_intervention_task(
 
         trial_prompts = list(prompts) if prompts else [prompt]
 
+        # AN UNIMPLEMENTED PRIMITIVE IS REFUSED, NOT SUBSTITUTED. The hook has
+        # no branch for this one, and the old `else` quietly ran an additive
+        # steer under its name. Nothing about being one enum member away from a
+        # working primitive makes silently running a different experiment
+        # acceptable.
+        if chosen is Primitive.DYNAMIC_TOPK_ABLATION:
+            raise ValueError(
+                "dynamic_topk_ablation is not implemented for the forward-pass "
+                "path: it needs the lens coordinates at the intervened site, "
+                "which this measurement does not compute. Use additive, "
+                "projective_ablation or coordinate_swap."
+            )
+
+        # A SWAP NEEDS TWO DIRECTIONS. `direction_token` is the coordinate to
+        # move and `target_token` the one to exchange it with; a swap with one
+        # token would be an additive push wearing the wrong name, which is the
+        # defect being fixed here.
+        swap_partner = None
+        if chosen is Primitive.COORDINATE_SWAP:
+            if not target_token or target_token == direction_token:
+                raise ValueError(
+                    "coordinate_swap needs TWO different tokens: "
+                    "`direction_token` is the coordinate to move and "
+                    "`target_token` the one to exchange it with. Supplying one "
+                    "token would run an additive steer under a swap's name."
+                )
+            partner_ids = service.tokenizer.encode(
+                target_token, add_special_tokens=False
+            )
+            if len(partner_ids) != 1:
+                raise ValueError(
+                    f"swap partner {target_token!r} is {len(partner_ids)} "
+                    "tokens; a lens coordinate is defined for a single token"
+                )
+            swap_partner = service.W_U[partner_ids[0]].to(READOUT_DEVICE).to(
+                torch.float32
+            )
+
         # POSITIONS ARE RESOLVED PER TRIAL. They used to be computed ONCE from
         # `prompt` and applied to every trial, so "the last position" of the
         # first prompt became an absolute index into all the others. Trials
@@ -264,7 +303,7 @@ def run_intervention_task(
 
         skipped = {"n": 0}
 
-        def _perturbing_hook(vector, at_positions):
+        def _perturbing_hook(vector, at_positions, partner=None):
             def hook(_module, _inp, output):
                 is_tuple = isinstance(output, tuple)
                 hidden = output[0] if is_tuple else output
@@ -272,6 +311,10 @@ def run_intervention_task(
                     return output
                 with torch.no_grad():
                     v = vector.to(dtype=hidden.dtype, device=hidden.device)
+                    if partner is not None:
+                        partner_v = partner.to(
+                            dtype=hidden.dtype, device=hidden.device
+                        )
                     for pos in at_positions:
                         if pos < 0 or pos >= hidden.shape[1]:
                             # UNREACHABLE after the validation above, and counted
@@ -281,8 +324,18 @@ def run_intervention_task(
                             skipped["n"] += 1
                             continue
                         h = hidden[0, pos]
+                        # EXHAUSTIVE, WITH NO `else`. This used to be two
+                        # branches — projective ablation, and everything else is
+                        # additive — so a request for `coordinate_swap` ran an
+                        # ADDITIVE steer and the result was labelled
+                        # `coordinate_swap` in its `steering_recipe`. That recipe
+                        # is written into `interventions.json`, which is built to
+                        # travel with the lens, so the mislabelling would have
+                        # become false provenance downstream.
                         if chosen is Primitive.PROJECTIVE_ABLATION:
                             hidden[0, pos] = apply_projective_ablation(h, v)
+                        elif chosen is Primitive.COORDINATE_SWAP:
+                            hidden[0, pos] = apply_coordinate_swap(h, v, partner_v)
                         else:
                             hidden[0, pos] = apply_additive(h, v, strength)
                 return output
@@ -301,7 +354,7 @@ def run_intervention_task(
             sites = _sites_for(n)
             handles = []
             if vector is not None:
-                hook = _perturbing_hook(vector, sites)
+                hook = _perturbing_hook(vector, sites, partner=swap_partner)
                 for L in layers:
                     handles.append(hook_layers[L].register_forward_hook(hook))
             try:

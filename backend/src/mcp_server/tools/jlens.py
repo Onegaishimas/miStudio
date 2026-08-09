@@ -256,9 +256,11 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
     async def run_jlens_intervention(
         model_id: Annotated[str, Field(description="miStudio model id")],
         prompt: Annotated[str, Field(description="Text to intervene on")],
-        primitive: Annotated[str, Field(description="additive | projective_ablation | dynamic_topk_ablation | coordinate_swap")],
+        primitive: Annotated[str, Field(description="additive (steer along a direction) | projective_ablation (remove a direction's component) | coordinate_swap (EXCHANGE two tokens' coordinates; needs target_token). dynamic_topk_ablation is REFUSED — it needs lens coordinates this path does not compute, and it used to run an additive steer under its own name")],
         layers: Annotated[List[int], Field(description="Absolute layer indices to act at")],
         control_seed: Annotated[int, Field(description="REQUIRED in practice. 'A random direction' is not a control; 'k random directions from seed s' is, and a control nobody can reconstruct is not one")],
+        prompts: Annotated[Optional[List[str]], Field(description="MORE PROMPTS, one TRIAL each. The result is a FRACTION of trials with a Wilson 95% interval; a single prompt yields an interval spanning nearly the whole range, which is the honest rendering of one observation but rarely a finding. Tens of prompts is the useful scale")] = None,
+        target_token: Annotated[Optional[str], Field(description="The token whose RANK is scored in the model's output. Defaults to direction_token. REQUIRED and must DIFFER for coordinate_swap: a swap exchanges two coordinates, and one token would be an additive steer wearing a swap's name")] = None,
         direction: Annotated[Optional[List[float]], Field(description="Explicit d_model vector to act along")] = None,
         direction_token: Annotated[Optional[str], Field(description="Resolve the direction from a SINGLE token's unembedding row instead of passing d_model floats. Multi-token strings are REFUSED rather than truncated — a lens direction is defined for one token")] = None,
         strength: Annotated[float, Field(description="Additive scale")] = 1.0,
@@ -274,11 +276,24 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         without the other, and the result reports both figures alongside their
         difference so you can see the control actually ran (BR-018).
 
-        RUNG 1, not 2. This measures displacement in lens space. That is
-        evidence about the coordinate and is not causal proof the model used
-        it. Raising the rung requires a causal intervention at the behavioural
-        level — a coordinate swap with a matched control — which this tool does
-        not perform.
+        RUNG 2. The perturbation is applied to the residual stream at
+        `layers` and the forward pass CONTINUES, so what is scored is the rank
+        of `target_token` in the model's own next-token distribution — its
+        behaviour, not the lens's geometry. This replaced a lens-space
+        displacement measure that could not see the prompt at all: the transport
+        is linear, so the activation cancelled and two unrelated prompts
+        returned the same number to seven significant figures.
+
+        REPORTED AS RATES WITH INTERVALS. `intervened_top1` / `control_top1` /
+        `baseline_top1` each carry hits, n and a Wilson 95% interval.
+        `separated_from_control` requires the intervened and control intervals
+        to be DISJOINT — a bigger rate is not a finding, and 6/10 against 5/10
+        is noise. The baseline arm matters as much: an intervention that
+        "achieves" what the model already did has moved nothing.
+
+        WHEN AN ARTIFACT IS NAMED the result is recorded beside the lens in
+        `interventions.json`, with the steering recipe that produced it, so the
+        evidence travels with the artifact rather than living only here.
 
         Long-running and model-bound; poll get_task_status.
         """
@@ -291,6 +306,10 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             "strength": strength,
             "k": k,
         }
+        if prompts:
+            body["prompts"] = prompts
+        if target_token:
+            body["target_token"] = target_token
         if direction:
             body["direction"] = direction
         if direction_token:
@@ -300,6 +319,52 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         if artifact_id:
             body["artifact_id"] = artifact_id
         return await client.post("/jlens/interventions", json_body=body)
+
+    @mcp.tool()
+    async def get_jlens_interventions(
+        slug: Annotated[str, Field(description="Artifact slug from list_jlens_artifacts")],
+    ) -> Any:
+        """What this lens has been MEASURED to do, recorded beside the weights.
+
+        Each record carries a `steering_recipe` — primitive, direction token,
+        target token, layers, positions, strength and hook target — next to the
+        rates that justify it. That is deliberate: a score alone says something
+        happened without saying what to apply, so a caller can take a record
+        whose intervened rate separated from its matched control and reproduce
+        exactly what was tested rather than inferring a recipe from a number.
+
+        BOUND TO THE WEIGHTS THAT WERE TESTED. Records are dropped on read if
+        the lens file's digest no longer matches — a refit replaces the
+        matrices, and a record describing the previous lens would attribute one
+        artifact's measured behaviour to another.
+
+        AN EMPTY LIST IS AN ANSWER: no intervention has been run against this
+        lens. That is NOT the same as one that was run and moved nothing, which
+        appears here with overlapping intervals.
+        """
+        return await client.get(f"/jlens/artifacts/{slug}/interventions")
+
+    @mcp.tool()
+    async def restore_jlens_artifact(
+        slug: Annotated[str, Field(description="Artifact slug from list_jlens_artifacts")],
+    ) -> Any:
+        """Promote the archived artifact back into service.
+
+        A SWAP, not a move, so this is its own undo: call it twice and you are
+        back where you started, and nothing is deleted at any point.
+
+        Publishing is otherwise last-writer-wins, and "last" means finished
+        last, not best — a 400-prompt fit that never converged once published
+        over a 1097-prompt fit that did, because the weaker job had been queued
+        hours earlier and only got a worker once the queue drained. The publish
+        guard now refuses that, but an artifact already displaced needed a shell
+        rename inside the pod to recover.
+
+        The archive is not privileged: its recorded verdict is verified against
+        the file it describes before promotion, and a mismatch is refused rather
+        than served.
+        """
+        return await client.post(f"/jlens/artifacts/{slug}/restore-superseded")
 
     @mcp.tool()
     async def compute_jlens_band_report(

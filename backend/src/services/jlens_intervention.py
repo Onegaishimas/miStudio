@@ -135,6 +135,66 @@ def apply_projective_ablation(
     return activation - (activation @ unit) * unit
 
 
+class DirectionsTooSimilar(ValueError):
+    """Raised rather than "swapping" two directions that are the same direction."""
+
+
+#: Above this cosine the two directions are the same direction for practical
+#: purposes, and exchanging their coordinates is a no-op dressed as an
+#: intervention. Refused rather than run: a swap that cannot move anything would
+#: report a null and invite the reading that the concept does not steer.
+MAX_SWAP_COSINE = 0.99
+
+
+def apply_coordinate_swap(
+    activation: torch.Tensor, direction_a: torch.Tensor, direction_b: torch.Tensor
+) -> torch.Tensor:
+    """EXCHANGE the activation's components along two directions.
+
+    This is the primitive acting on the RESIDUAL STREAM, which is where an
+    intervention has to happen — `coordinate_swap` below acts on a vector of
+    lens coordinates and is a different, unwired thing.
+
+    WHY THIS EXISTS. The perturbing hook had two branches, projective ablation
+    and everything-else-is-additive, so a request for `coordinate_swap` ran an
+    ADDITIVE steer and the result was then labelled `coordinate_swap` in its
+    `steering_recipe`. Since the recipe is written into `interventions.json`
+    and that file is built to travel with the lens, the mislabelling would have
+    become false provenance in whatever consumed it.
+
+    The exchange, with `c_x` the component along unit direction `x`:
+
+        h' = h + (c_b - c_a) * a_hat + (c_a - c_b) * b_hat
+
+    NON-ORTHOGONAL DIRECTIONS LEAVE CROSS-TALK, and that is stated rather than
+    hidden: the new component along `a_hat` is `c_b + (c_a - c_b)(a_hat . b_hat)`,
+    so the exchange is exact only when the two are orthogonal and approximate in
+    proportion to their overlap. Two unembedding rows for unrelated tokens are
+    close to orthogonal in a high-dimensional space, which is the case this is
+    used in; near-parallel directions are refused outright because there is
+    nothing to exchange.
+    """
+    norm_a = torch.linalg.norm(direction_a)
+    norm_b = torch.linalg.norm(direction_b)
+    if norm_a == 0 or norm_b == 0:
+        raise ValueError("a zero direction has no coordinate to swap")
+
+    unit_a = direction_a / norm_a
+    unit_b = direction_b / norm_b
+
+    cosine = float(torch.abs(unit_a @ unit_b))
+    if cosine > MAX_SWAP_COSINE:
+        raise DirectionsTooSimilar(
+            f"the two directions have cosine {cosine:.4f}; exchanging their "
+            "coordinates would move almost nothing. Pick two tokens that "
+            "differ."
+        )
+
+    c_a = activation @ unit_a
+    c_b = activation @ unit_b
+    return activation + (c_b - c_a) * unit_a + (c_a - c_b) * unit_b
+
+
 def dynamic_topk_ablation(
     coordinates: torch.Tensor, k: int, clean_pass_topk: Set[int]
 ) -> torch.Tensor:

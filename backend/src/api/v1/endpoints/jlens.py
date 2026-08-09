@@ -1313,35 +1313,6 @@ def _band_report_object(directory):
     return _Bands()
 
 
-class InterventionRequest(BaseModel):
-    """Run an intervention. The control is NOT optional (BR-018)."""
-
-    model_id: str
-    primitive: str
-    layers: List[int]
-    positions: List[int]
-    prompt: str
-    direction: Optional[List[float]] = None
-    strength: float = 1.0
-    control_seed: int = 0
-    control_k: int = 8
-
-
-class InterventionResponse(BaseModel):
-    primitive: str
-    parameters: Dict[str, Any]
-    intervened_outcome: float
-    control_outcome: float
-    #: THE finding. The raw intervened outcome is not one.
-    excess_over_control: float
-    control: Dict[str, Any]
-    layers: List[int]
-    positions: List[int]
-    #: Rung 2. Reaching it REQUIRES the size-matched control above; without one
-    #: there is no result here at all (BR-018).
-    evidence_rung: int = 2
-
-
 class WatchlistRequest(BaseModel):
     name: str
     artifact_ref: str
