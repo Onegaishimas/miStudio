@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { JLensPanel } from './JLensPanel';
@@ -43,8 +43,13 @@ vi.mock('../../api/jlens', () => ({
     readout: vi.fn(),
     readoutResult: vi.fn(),
     listArtifacts: vi.fn().mockResolvedValue([]),
+    intervene: vi.fn(),
   },
 }));
+
+// The panel polls a queued intervention to a terminal state; without this the
+// poll would reach the real client and the test would hang on a timer.
+vi.mock('../../api/models', () => ({ getTaskStatus: vi.fn() }));
 
 /**
  * The readout is a TWO-STEP contract now: POST returns a task id, and the
@@ -1156,5 +1161,114 @@ describe('a diffuse readout stays readable', () => {
     for (const cell of dimmed) {
       expect(cell.className).not.toMatch(/text-slate-(600|700)\b/);
     }
+  });
+});
+
+/**
+ * The ranked lists and the Swap/Steer path, ASSERTED THROUGH THE PANEL.
+ *
+ * The components have their own tests, and those tests passed while nothing
+ * rendered them: deleting the `<RankedReadouts />` element from the panel left
+ * this file at 53/53 green. A component nobody mounts is the reachability gate
+ * in the Code Quality Checklist, and it is the same shape as 16 MCP tools that
+ * were implemented, tested and never registered.
+ *
+ * MUTATION CONTROLS:
+ *   * delete <RankedReadouts /> from the panel   -> "renders the ranked lists" fails
+ *   * send the empty prompt from the panel       -> "intervenes on the readout prompt" fails
+ *   * queue a swap with no partner               -> "refuses a swap with no partner" fails
+ */
+describe('JLensPanel — ranked readouts and interventions', () => {
+  it('renders the ranked lists for every lens the readout carries', async () => {
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() =>
+      expect(screen.getByTestId('jlens-ranked')).toBeInTheDocument()
+    );
+    expect(screen.getByTestId('ranked-LOGIT_LENS')).toBeInTheDocument();
+  });
+
+  it('intervenes on the READOUT PROMPT and the token\u2019s OWN layers', async () => {
+    /**
+     * Not an empty string and not the whole axis: the readout on screen
+     * describes one prompt, and a result scored on anything else measures a
+     * different forward pass than the one being looked at.
+     *
+     * THE FIXTURE PUTS THE TOKEN AT A STRICT SUBSET OF THE AXIS. An earlier
+     * version used a 3-layer axis and asserted `layers.length <= 3`, which the
+     * whole axis satisfies — so handing the intervention every layer survived
+     * the mutation. Here `dog` appears at L0 and L2 of a four-layer axis, so
+     * only its own layers can produce [0, 2].
+     *
+     * MUTATION CONTROL: pass `axis` instead of the row's layers and this fails.
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-1',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    render(<JLensPanel />);
+    seed({
+      meta: {
+        kind: 'meta',
+        model: 'org/m',
+        types: ['LOGIT_LENS'],
+        layers_by_type: { LOGIT_LENS: [0, 1, 2, 3] },
+        top_n: 1,
+        prompt_len: 1,
+      },
+      tokens: [
+        {
+          kind: 'token',
+          position: 0,
+          token: 'x',
+          id: 1,
+          is_generated: false,
+          results: [
+            {
+              type: 'LOGIT_LENS',
+              // dog at L0 and L2 only; cat and pet fill the rest.
+              top_tokens: [['dog'], ['cat'], ['dog'], ['pet']],
+              top_probs: [[0.9], [0.9], [0.9], [0.9]],
+            },
+          ],
+        },
+      ],
+    } as unknown as ReadoutResponse);
+
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+    await user.click(screen.getByTitle('Steer along dog'));
+
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.prompt).toBe('The capital of France is');
+    expect(sent.primitive).toBe('additive');
+    expect(sent.layers).toEqual([0, 2]);
+  });
+
+  it('REFUSES a swap that has no partner rather than queueing a doomed one', async () => {
+    /**
+     * With nothing pinned there is no second coordinate, and a swap with one
+     * token is an additive steer wearing a swap\u2019s name. Queueing it would
+     * report "Swap queued" here and be refused on the GPU seconds later.
+     *
+     * SCOPED TO THE RANKED COLUMN. An earlier version searched the whole
+     * document for /Pin a token first/, which ALSO matches InterventionCard's
+     * disabled toggle — so the assertion passed against a ranked list whose
+     * Swap buttons were all enabled.
+     *
+     * MUTATION CONTROL: return no reason from `swapDisabledFor` and this fails.
+     */
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+
+    const column = screen.getByTestId('ranked-LOGIT_LENS');
+    const swaps = within(column).getAllByRole('button', { name: /Swap/ });
+    expect(swaps.length).toBeGreaterThan(0);
+    for (const b of swaps) expect(b).toBeDisabled();
   });
 });
