@@ -273,3 +273,90 @@ class TestTheClaimIsNotOverstated:
     def test_an_unknown_primitive_is_refused_by_name(self):
         with pytest.raises(ValueError, match="unknown primitive"):
             _run(primitive="wishful_thinking")
+
+
+class TestTheEvidenceIsFiledWithTheLens:
+    """Writing a recorder is not calling it.
+
+    This repo shipped 16 MCP tools that were implemented, unit-tested and never
+    registered. A `record_intervention_result` with no caller is the same defect:
+    the sidecar exists in tests and never appears next to a real artifact.
+
+    MUTATION CONTROLS:
+      * drop the `service.record_intervention_result(...)` call -> "it is filed" fails
+      * file it when artifact_id is absent                  -> "no artifact" fails
+      * omit steering_recipe from the record                -> "recipe" fails
+    """
+
+    @contextmanager
+    def _recorder(self):
+        recorded = []
+
+        class _Svc:
+            def __init__(self, _root):
+                pass
+
+            def record_intervention_result(self, repo_id, record):
+                recorded.append((repo_id, record))
+
+        with patch(
+            "src.services.jlens_artifact_service.JLensArtifactService", _Svc
+        ), patch(
+            "src.api.v1.endpoints.jlens._jacobian_transport",
+            return_value=types.SimpleNamespace(lens_type="JACOBIAN_LENS"),
+        ):
+            yield recorded
+
+    def test_a_run_against_an_artifact_FILES_its_evidence(self):
+        with self._recorder() as recorded:
+            _run(artifact_id="model", prompts=["abcd", "efgh"])
+
+        assert len(recorded) == 1, (
+            f"{len(recorded)} evidence records filed; the measurement ran but "
+            "nothing was written beside the lens"
+        )
+        repo_id, record = recorded[0]
+        assert repo_id == "org/model"
+
+        # THE RECIPE, asserted by content. A record that says an effect exists
+        # without saying what to apply cannot be used by a consumer.
+        recipe = record["steering_recipe"]
+        assert recipe["primitive"] == "additive"
+        assert recipe["direction_token"] == "Paris"
+        assert recipe["layers"] == [0, 1]
+        assert "resid_post" in recipe["hook_target"]
+        assert record["evidence_rung"] == 2
+        assert record["n_trials"] == 2
+        assert "separated_from_control" in record["evidence"]
+
+    def test_a_run_WITHOUT_an_artifact_files_nothing(self):
+        """A raw unembedding direction has nothing to do with any lens.
+
+        Crediting one for a finding it played no part in would put evidence
+        beside a dictionary that was never used to produce it.
+        """
+        with self._recorder() as recorded:
+            _run(prompts=["abcd"])
+        assert recorded == []
+
+    def test_a_failure_to_FILE_does_not_lose_the_MEASUREMENT(self):
+        """The expensive half must survive the cheap half failing.
+
+        A read-only directory should cost a warning, not the forward passes.
+        """
+
+        class _Broken:
+            def __init__(self, _root):
+                pass
+
+            def record_intervention_result(self, *_a, **_kw):
+                raise OSError("read-only file system")
+
+        with patch(
+            "src.services.jlens_artifact_service.JLensArtifactService", _Broken
+        ), patch(
+            "src.api.v1.endpoints.jlens._jacobian_transport",
+            return_value=types.SimpleNamespace(lens_type="JACOBIAN_LENS"),
+        ):
+            out, _ = _run(artifact_id="model", prompts=["abcd"])
+        assert out["evidence_rung"] == 2 and out["n_trials"] == 1

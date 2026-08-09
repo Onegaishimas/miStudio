@@ -335,3 +335,36 @@ class TestRestoreSupersededIsReachable:
         assert "GET" not in methods, (
             "a directory swap must not be reachable by GET"
         )
+
+
+class TestCausalEvidenceIsReachable:
+    """The read surface a serving runtime would use.
+
+    Evidence written to disk that nothing can fetch is the same defect as a
+    service method with no route: real, tested, and unreachable. This is the
+    route miLLM will call once a lens has been pulled down from HuggingFace.
+
+    MUTATION CONTROLS:
+      * remove the @router.get decorator -> the path test fails
+      * change GET to POST               -> the method test fails
+    """
+
+    PATH = "/jlens/artifacts/{slug}/interventions"
+
+    def test_the_causal_path_is_reachable_through_the_assembled_router(self):
+        assert self.PATH in _reachable_paths(), (
+            "causal evidence is written beside the lens but nothing can read "
+            "it back over HTTP"
+        )
+
+    def test_it_is_a_GET(self):
+        """Reading demonstrated behaviour has no side effects."""
+        methods = set()
+        for included in api_router.routes:
+            origin = getattr(included, "original_router", None)
+            if origin is None:
+                continue
+            for route in getattr(origin, "routes", []):
+                if getattr(route, "path", None) == self.PATH:
+                    methods |= set(getattr(route, "methods", set()))
+        assert "GET" in methods, f"causal route methods: {methods or 'none'}"

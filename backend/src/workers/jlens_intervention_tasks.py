@@ -67,6 +67,8 @@ def run_intervention_task(
 
     from ..core.database import get_sync_db
     from ..models.model import Model
+    from ..core.config import settings
+    from ..services.jlens_artifact_service import JLensArtifactService
     from ..services.jlens_causal import CausalReport, Trial
     from ..services.jlens_intervention import (
         Primitive,
@@ -305,6 +307,49 @@ def run_intervention_task(
             layers=list(layers),
             strength=strength,
         ).summary()
+
+        # ---------------------------------------------- record it beside the lens
+        # SO IT TRAVELS. A lens is consumed by mounting its directory: published
+        # to HuggingFace and pulled down by a serving runtime, it arrives as
+        # files and nothing else. Evidence living only in this task result would
+        # not make that journey, and the consumer would have a dictionary it can
+        # read with no idea which directions actually move the model.
+        #
+        # ONLY WHEN AN ARTIFACT WAS ACTUALLY USED. An intervention run without
+        # `artifact_id` steered along a raw unembedding direction and has
+        # nothing to do with any lens, so attaching its result to one would
+        # credit the lens for a finding it played no part in.
+        if artifact_id:
+            record = {
+                # WHAT A CONSUMER APPLIES. Scores alone say something worked
+                # without saying what to do; this block is the experiment,
+                # restated as instructions.
+                "steering_recipe": {
+                    "primitive": chosen.value,
+                    "direction_token": direction_token,
+                    "target_token": wanted,
+                    "layers": list(layers),
+                    "positions": chosen_positions,
+                    "strength": strength,
+                    "hook_target": "layers_module[L] (resid_post)",
+                },
+                "evidence": summary,
+                "evidence_rung": 2,
+                "n_trials": len(trials),
+                "control": {
+                    "k": k,
+                    "seed": control_seed,
+                    "construction": "gaussian_unit_norm",
+                },
+            }
+            try:
+                service = JLensArtifactService(settings.jlens_artifacts_dir)
+                service.record_intervention_result(loaded.name, record)
+            except Exception as exc:  # noqa: BLE001 - narration must not fail the run
+                # The measurement succeeded; only its filing did. Losing the
+                # result because a directory was read-only would be worse than
+                # a warning nobody has to act on immediately.
+                logger.warning("Could not record the intervention result: %s", exc)
 
         jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
         return {

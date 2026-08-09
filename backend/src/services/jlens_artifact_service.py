@@ -58,6 +58,25 @@ SUPERSEDED_SUFFIX = ".superseded"
 #: format ignores it, and `_ref_for` does not require it.
 VALIDATION_FILE = "validation.json"
 
+#: Results of interventions that were RUN against this lens, recorded beside it.
+#:
+#: THE POINT IS PORTABILITY. A lens is consumed by mounting its directory, so a
+#: lens published to HuggingFace and pulled down by a serving runtime arrives as
+#: files and nothing else. A result that lived only in a task record would not
+#: make that journey, and the consumer would be left with a dictionary it can
+#: read and no measurements of what happened when it was applied.
+#:
+#: THIS MODULE STORES; IT DOES NOT INTERPRET. Each record carries its own
+#: `evidence_rung` and its own control, and the strength of a claim is a
+#: property of the record, never of the fact that a record exists. Wording that
+#: asserted otherwise here would put a verdict in a storage layer — which is why
+#: the claims audit covers this file and does not exempt it.
+#:
+#: Named like `validation.json` so a reader of the upstream conformance format
+#: ignores it — `_ref_for` does not require either, and neither is part of the
+#: layout a third-party consumer parses.
+INTERVENTION_FILE = "interventions.json"
+
 
 def slug_for(repo_id: str) -> str:
     """The consumer's slug for a HuggingFace id.
@@ -554,6 +573,84 @@ class JLensArtifactService:
             )
             return None
         return stored
+
+    def record_intervention_result(self, repo_id: str, record: Dict[str, Any]) -> None:
+        """Append one intervention result to this artifact's records.
+
+        BOUND TO THE WEIGHTS THAT WERE TESTED. The lens digest is stored with
+        each record and checked on read, for the same reason `validation.json`
+        carries one: a refit replaces the matrices, and evidence describing the
+        previous lens travelling beside the new one is worse than no evidence —
+        it is a claim about a file that no longer exists.
+
+        REPLACED BY RECIPE, not appended blindly. Re-running the same
+        experiment — same primitive, direction, layers and strength — supersedes
+        its previous record rather than accumulating near-duplicates that a
+        reader would have to date-sort to interpret.
+        """
+        ref = self.find(repo_id)
+        if ref is None:
+            raise FileNotFoundError(f"no published artifact for {repo_id!r}")
+
+        record = dict(record)
+        record["lens_sha256"] = self._lens_digest(ref.lens_path)
+
+        existing = self._read_interventions(ref)
+        key = self._recipe_key(record)
+        kept = [r for r in existing if self._recipe_key(r) != key]
+        kept.append(record)
+        (ref.directory / INTERVENTION_FILE).write_text(json.dumps(kept, indent=2))
+        logger.info(
+            "Recorded an intervention result for %s (%s), %d record(s) total",
+            ref.slug,
+            key,
+            len(kept),
+        )
+
+    def intervention_results(self, ref: ArtifactRef) -> List[Dict[str, Any]]:
+        """Records that describe THIS lens file. Others are dropped.
+
+        A record whose digest does not match is not merely stale — it describes
+        different weights, and reporting it would attribute one lens's measured
+        behaviour to another.
+        """
+        current = self._lens_digest(ref.lens_path)
+        kept = []
+        for record in self._read_interventions(ref):
+            if record.get("lens_sha256") == current:
+                kept.append(record)
+            else:
+                logger.info(
+                    "Dropping a record for %s: it describes different weights",
+                    ref.slug,
+                )
+        return kept
+
+    def _read_interventions(self, ref: ArtifactRef) -> List[Dict[str, Any]]:
+        path = ref.directory / INTERVENTION_FILE
+        if not path.is_file():
+            return []
+        try:
+            loaded = json.loads(path.read_text())
+        except (ValueError, OSError) as exc:
+            logger.warning("Unreadable intervention records at %s: %s", path, exc)
+            return []
+        return loaded if isinstance(loaded, list) else []
+
+    @staticmethod
+    def _recipe_key(record: Dict[str, Any]) -> str:
+        """What makes two intervention runs the SAME experiment.
+
+        The direction, where it was applied, and how hard. Two runs differing in
+        any of these are different experiments and both are worth keeping; two
+        runs agreeing on all of them are the same experiment run twice, and only
+        the later one is informative.
+        """
+        recipe = record.get("steering_recipe") or {}
+        return "|".join(
+            str(recipe.get(field))
+            for field in ("primitive", "direction_token", "layers", "strength")
+        )
 
     def restore_superseded(self, slug: str) -> Dict[str, Any]:
         """Promote `<slug>.superseded` back to `<slug>`, archiving the incumbent.
