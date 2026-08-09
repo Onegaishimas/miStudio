@@ -141,13 +141,6 @@ def run_intervention_task(
         n_positions = int(input_ids.shape[-1])
         check_readout_budget(n_positions, len(layers), service.d_model)
 
-        chosen_positions = (
-            list(positions) if positions is not None else [n_positions - 1]
-        )
-        bad = [p for p in chosen_positions if p < 0 or p >= n_positions]
-        if bad:
-            raise ValueError(f"positions {bad} outside 0..{n_positions - 1}")
-
         # NO CAPTURE PASS. The lens-space version needed the residuals to transport
         # them; this one perturbs inside the model's own forward pass and never sees
         # them, so capturing would be a full extra pass whose result is discarded.
@@ -206,6 +199,45 @@ def run_intervention_task(
 
         trial_prompts = list(prompts) if prompts else [prompt]
 
+        # POSITIONS ARE RESOLVED PER TRIAL. They used to be computed ONCE from
+        # `prompt` and applied to every trial, so "the last position" of the
+        # first prompt became an absolute index into all the others. Trials
+        # shorter than that index were silently skipped by a bounds guard in the
+        # hook and then scored as though the intervention HAD been applied and
+        # had done nothing.
+        #
+        # Observed on hardware: a 24-trial sweep at strengths 2, 10 and 40
+        # returned byte-identical rates — 5/24 every time. Only the prompts long
+        # enough to contain absolute position 8 were ever perturbed, and those
+        # saturated at the lowest strength, so a 20x change in strength moved
+        # nothing. The identical numbers were the tell.
+        def _sites_for(n_tokens: int):
+            if positions is None:
+                # THIS prompt's last token, not the first prompt's.
+                return [n_tokens - 1]
+            return [q if q >= 0 else n_tokens + q for q in positions]
+
+        if positions is not None:
+            # VALIDATED AGAINST EVERY TRIAL, up front. An explicit position that
+            # does not exist in some prompts cannot be the experiment the caller
+            # asked for, and running a mixture of perturbed and unperturbed
+            # trials under one label is worse than refusing.
+            impossible = []
+            for text in trial_prompts:
+                n_t = int(
+                    service.tokenizer(text, return_tensors="pt")["input_ids"].shape[-1]
+                )
+                if any(q < 0 or q >= n_t for q in _sites_for(n_t)):
+                    impossible.append((text, n_t))
+            if impossible:
+                shown = "; ".join(f"{t!r} has {n} tokens" for t, n in impossible[:3])
+                raise ValueError(
+                    f"positions {list(positions)} do not exist in "
+                    f"{len(impossible)} of {len(trial_prompts)} trial prompts "
+                    f"({shown}). Omit `positions` to use each prompt's last "
+                    "token, or supply prompts of a consistent length."
+                )
+
         controls = build_control(k=k, seed=control_seed, d_model=service.d_model)
 
         # ---------------------------------------------------------------- the pass
@@ -230,6 +262,8 @@ def run_intervention_task(
                 raise ValueError(f"No hookable layer module for layer {L} on this model")
             hook_layers[L] = target_module
 
+        skipped = {"n": 0}
+
         def _perturbing_hook(vector, at_positions):
             def hook(_module, _inp, output):
                 is_tuple = isinstance(output, tuple)
@@ -239,7 +273,12 @@ def run_intervention_task(
                 with torch.no_grad():
                     v = vector.to(dtype=hidden.dtype, device=hidden.device)
                     for pos in at_positions:
-                        if pos >= hidden.shape[1]:
+                        if pos < 0 or pos >= hidden.shape[1]:
+                            # UNREACHABLE after the validation above, and counted
+                            # rather than passed over: a silent `continue` here is
+                            # exactly what turned "never perturbed" into "perturbed
+                            # and had no effect" for 19 of 24 trials.
+                            skipped["n"] += 1
                             continue
                         h = hidden[0, pos]
                         if chosen is Primitive.PROJECTIVE_ABLATION:
@@ -259,7 +298,7 @@ def run_intervention_task(
                 loaded.model.device
             )
             n = int(ids.shape[-1])
-            sites = [q if q >= 0 else n + q for q in chosen_positions]
+            sites = _sites_for(n)
             handles = []
             if vector is not None:
                 hook = _perturbing_hook(vector, sites)
@@ -329,7 +368,9 @@ def run_intervention_task(
                     "direction_token": direction_token,
                     "target_token": wanted,
                     "layers": list(layers),
-                    "positions": chosen_positions,
+                    "positions": (
+                        list(positions) if positions is not None else "last-per-prompt"
+                    ),
                     "strength": strength,
                     "hook_target": "layers_module[L] (resid_post)",
                 },
@@ -360,7 +401,9 @@ def run_intervention_task(
                 "k": k,
                 "artifact_id": artifact_id,
                 "lens_type": transport.lens_type,
-                "positions": chosen_positions,
+                "positions": (
+                    list(positions) if positions is not None else "last-per-prompt"
+                ),
             },
             "control": {
                 "k": k,
@@ -369,6 +412,10 @@ def run_intervention_task(
                 "matched": "one direction per trial, rotating through the seeded set",
             },
             **summary,
+        # MUST BE ZERO. Non-zero means some trials were scored without the
+        # perturbation ever being applied, and their "no effect" is an artefact
+        # of the harness rather than a measurement of the model.
+        "positions_skipped": skipped["n"],
             # RUNG 2. The perturbation is applied to the residual stream and the
             # model is RUN — this measures the model's behaviour, not the lens's
             # geometry. It remains one model, one direction and one prompt set: it
@@ -395,10 +442,23 @@ def run_intervention_task(
         if device == "cuda":
             from ..services.jlens_model_registry import clear_cache
 
-            # DROP THIS FRAME'S REFERENCE FIRST. `clear_cache` nulls the cache
-            # entry then runs gc + `empty_cache()`; with `loaded` still live
-            # here, gc collects nothing and no blocks are returned. That exact
-            # mistake left 2608 MiB of LFM2 weights resident after a fit.
+            # DROP EVERY REFERENCE, NOT JUST `loaded`. `clear_cache` nulls the
+            # cache entry then runs gc + `empty_cache()`, so anything still
+            # holding the model keeps every block allocated.
+            #
+            # `loaded = None` alone was NOT enough here and the hardware said so:
+            # 2570 MiB stayed resident after a 3-strength sweep. `ReadoutService`
+            # is constructed with `model=loaded.model` and holds its own strong
+            # reference, entirely independent of the name `loaded`; `hook_layers`
+            # holds decoder modules, which are part of the same graph.
+            #
+            # The fit task's version works because it hands `loaded` to a helper
+            # and keeps nothing else. This one builds a service, so it has more
+            # to put down. Rebinding a closed-over name updates the cell, so
+            # `final_rank` and the hook let go with it.
             loaded = None  # noqa: F841 - the assignment IS the release
+            service = None  # noqa: F841 - holds model=loaded.model independently
+            hook_layers = None  # noqa: F841 - holds the decoder modules
+            transport = None  # noqa: F841
             clear_cache()
             logger.info("Released the intervention model from GPU memory")

@@ -360,3 +360,202 @@ class TestTheEvidenceIsFiledWithTheLens:
         ):
             out, _ = _run(artifact_id="model", prompts=["abcd"])
         assert out["evidence_rung"] == 2 and out["n_trials"] == 1
+
+
+class TestPositionsAreResolvedPerTrial:
+    """"The last position" is a property of a PROMPT, not of the experiment.
+
+    OBSERVED ON HARDWARE. `chosen_positions` was computed once from `prompt` and
+    applied as an absolute index to every trial. A 24-trial sweep at strengths
+    2, 10 and 40 returned byte-identical rates — 5/24 at all three — because only
+    the prompts long enough to contain absolute position 8 were ever perturbed,
+    and those saturated at the lowest strength. The other trials were skipped by
+    a bounds guard in the hook and scored as though the intervention had been
+    applied and had done nothing.
+
+    A 20x change in strength moving nothing was the tell, exactly as two
+    unrelated prompts returning 0.01739214 had been the tell before it.
+
+    MUTATION CONTROLS:
+      * resolve positions once from `prompt`  -> "per trial" fails
+      * accept an impossible explicit position -> "refused" fails
+      * stop counting skips                    -> "skips are counted" fails
+    """
+
+    def test_prompts_of_DIFFERENT_lengths_are_each_perturbed_at_their_own_end(self):
+        """Short and long prompts must both be intervened on.
+
+        With a single absolute index the short ones are silently untouched, and
+        their baseline and intervened arms become identical by construction.
+        """
+        # "abcdefgh" is 4 tokens under _Tok (text[:4]); "ab" is 2.
+        out, model = _run(prompts=["abcdefgh", "ab"], strength=250.0)
+        assert out["positions_skipped"] == 0, (
+            f"{out['positions_skipped']} perturbations were skipped: a trial "
+            "shorter than the resolved index was scored without being perturbed"
+        )
+        assert model.calls == 6  # 2 trials x 3 arms
+
+    def test_an_explicit_position_that_some_prompts_LACK_is_REFUSED(self):
+        """Not silently mixed.
+
+        Running perturbed and unperturbed trials under one label produces a rate
+        that describes neither, which is what 5/24 was.
+        """
+        with pytest.raises(ValueError, match="do not exist in"):
+            _run(prompts=["abcdefgh", "ab"], positions=[3])
+
+    def test_an_explicit_position_valid_EVERYWHERE_is_honoured(self):
+        """A caller naming a reachable position gets exactly that."""
+        out, _ = _run(prompts=["abcd", "efgh"], positions=[1])
+        assert out["parameters"]["positions"] == [1]
+        assert out["positions_skipped"] == 0
+
+    def test_the_default_is_recorded_as_per_prompt_not_as_a_number(self):
+        """A recorded `positions: [8]` reads as "position 8 everywhere".
+
+        That is what the artifact record said while every prompt was being
+        perturbed somewhere different — or not at all.
+        """
+        out, _ = _run(prompts=["abcd", "efghij"])
+        assert out["parameters"]["positions"] == "last-per-prompt"
+
+    def test_skipped_perturbations_are_COUNTED_not_passed_over(self):
+        """Zero is the only acceptable value, and it has to be visible.
+
+        MUTATION CONTROL: drop `positions_skipped` from the result and this
+        fails — the number that would have exposed the hardware bug in one look.
+        """
+        out, _ = _run(prompts=["abcd"])
+        assert out["positions_skipped"] == 0
+
+
+class TestTheCardComesBack:
+    """`loaded = None` was not enough, and the hardware said so.
+
+    The fit task's release works because it hands `loaded` to a helper and keeps
+    nothing else. This task builds a `ReadoutService` with `model=loaded.model`,
+    which holds its own strong reference entirely independent of the NAME
+    `loaded` — so nulling that name freed nothing. Measured after a 3-strength
+    sweep: 2570 MiB of LFM2 weights still resident, on the card serving shares.
+
+    Asserted with a weakref, because "clear_cache was called" is what let the
+    first version of this mistake ship twice.
+
+    MUTATION CONTROLS:
+      * drop `service = None`      -> "nothing holds the model" fails
+      * drop `hook_layers = None`  -> "nothing holds the model" fails
+      * release only on success    -> "released after a failure" fails
+    """
+
+    class _FaithfulService:
+        """A real class, NOT a MagicMock — and it keeps the model like the real
+        `ReadoutService` does.
+
+        Both halves matter. `patch(..., return_value=mock)` creates a MagicMock
+        that records its call arguments, and the task calls it with
+        `model=loaded.model`; `_mock_call_args` then pins the model for the life
+        of the test, so the weakref stays alive no matter how perfect the
+        release is. That is a property of the harness, not the code, and it made
+        this test fail against a correct implementation — measuring the mock
+        rather than the task.
+
+        Storing `self.model` is equally deliberate: the real ReadoutService
+        does, and a stub that did not could never show that nulling `service` in
+        the release is what actually frees the card.
+        """
+
+        def __init__(self, model=None, tokenizer=None, structure=None,
+                     unembedding=None, model_name=None):
+            self.model = model
+            self.tokenizer = tokenizer
+            self.capture_device = "cpu"
+            self.d_model = D_MODEL
+            self.W_U = torch.eye(VOCAB, D_MODEL)
+
+    def _run_and_weigh(self, blow_up=False):
+        import gc
+        import weakref
+
+        import src.workers.jlens_intervention_tasks as task_mod
+        from src.services import jlens_model_registry
+
+        tok = _Tok()
+        service = _service_stub(tok)
+        layers = [_Layer(), _Layer()]
+        holder = {}
+        alive = {}
+
+        def make_loaded(*_a, **_kw):
+            # Built HERE and only weakly referenced, so the TEST never pins it.
+            model = _Model(layers)
+            obj = types.SimpleNamespace(
+                name="org/model",
+                model=model,
+                tokenizer=tok,
+                structure=types.SimpleNamespace(num_layers=2, layers_module=layers),
+                unembedding=service.W_U,
+            )
+            holder["ref"] = weakref.ref(model)
+            return obj
+
+        def spy_clear_cache():
+            gc.collect()
+            ref = holder.get("ref")
+            alive["at_release"] = ref is not None and ref() is not None
+
+        class _Boom(dict):
+            def __getitem__(self, _k):
+                raise RuntimeError("CUDA out of memory")
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = object()
+
+        @contextmanager
+        def fake_db():
+            yield db
+
+        with patch("src.core.database.get_sync_db", fake_db), patch(
+            "src.services.jlens_model_registry.load_for_readout", side_effect=make_loaded
+        ), patch(
+            "src.services.jlens_readout_service.ReadoutService",
+            self._FaithfulService,
+        ), patch.object(
+            jlens_model_registry, "clear_cache", spy_clear_cache
+        ), patch(
+            "torch.cuda.is_available", lambda: True
+        ), patch.object(
+            task_mod.run_intervention_task, "update_state", MagicMock()
+        ):
+            kwargs = dict(
+                model_id="m_1",
+                prompt="abcd",
+                primitive="wishful" if blow_up else "additive",
+                layers=[0, 1],
+                direction_token="Paris",
+                k=2,
+                control_seed=3,
+            )
+            try:
+                task_mod.run_intervention_task.run(**kwargs)
+                raised = False
+            except ValueError:
+                raised = True
+        return alive, raised
+
+    def test_NOTHING_holds_the_model_when_the_card_is_released(self):
+        alive, _ = self._run_and_weigh()
+        assert "at_release" in alive, "the release never ran"
+        assert alive["at_release"] is False, (
+            "something still referenced the model at release time — most likely "
+            "the ReadoutService, which is constructed with model=loaded.model "
+            "and is not freed by nulling the name `loaded`"
+        )
+
+    def test_it_is_released_after_a_FAILURE_too(self):
+        """An OOM is when the card most needs to come back."""
+        alive, raised = self._run_and_weigh(blow_up=True)
+        assert raised, "precondition: this run must fail"
+        # The failure happens before the model loads, so the release may not run
+        # at all — what must NOT happen is a release that leaves it held.
+        assert alive.get("at_release", False) is False
