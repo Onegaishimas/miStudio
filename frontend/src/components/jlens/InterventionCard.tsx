@@ -36,6 +36,8 @@ export const PRIMITIVES = [
 
 interface InterventionCardProps {
   modelId: string;
+  /** The prompt the readout on screen describes. */
+  prompt: string;
   /** Tokens the user pinned — the directions available to act along. */
   pinned: string[];
   /** Layers the current readout covers, so a request cannot name an absent one. */
@@ -53,6 +55,7 @@ interface Outcome {
 }
 
 export function InterventionCard({
+  prompt,
   modelId,
   pinned,
   layers,
@@ -102,7 +105,12 @@ export function InterventionCard({
     try {
       const accepted = await jlensApi.intervene({
         model_id: modelId,
-        prompt: '',
+        // THE PROMPT ON SCREEN. This was `''` — an empty string — so every
+        // intervention launched from this card scored a forward pass over
+        // nothing, while the readout beside it described a real prompt. The
+        // result named a layer and a direction and measured neither in the
+        // context the reader was looking at.
+        prompt,
         primitive,
         layers,
         direction_token: chosen,

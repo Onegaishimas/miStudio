@@ -29,6 +29,9 @@ import { WatchlistCard } from '../jlens/WatchlistCard';
 import { LensModeTabs } from '../jlens/LensModeTabs';
 import { ProvenanceStrip } from '../jlens/ProvenanceStrip';
 import { ReadoutGrid } from '../jlens/ReadoutGrid';
+import { getTaskStatus } from '../../api/models';
+import { jlensApi } from '../../api/jlens';
+import { RankedReadouts } from '../jlens/RankedReadouts';
 import { RunningWork } from '../jlens/RunningWork';
 import { TrajectoryChart } from '../jlens/TrajectoryChart';
 import { PIN_COLORS, displayToken } from '../jlens/utils';
@@ -44,6 +47,13 @@ import {
   useJLensStore,
 } from '../../stores/jlensStore';
 import { useModelsStore } from '../../stores/modelsStore';
+
+
+/** "3/24 = 12.5%" or "—" when the arm reported nothing. Absent is not zero. */
+function fmtRate(arm?: { hits?: number; n?: number; rate?: number }): string {
+  if (!arm || typeof arm.hits !== 'number' || typeof arm.n !== 'number') return '—';
+  return `${arm.hits}/${arm.n}`;
+}
 
 export function JLensPanel() {
   const {
@@ -165,6 +175,101 @@ export function JLensPanel() {
     setPrompt(promptDraft);
     // setPrompt lands before fetchReadout reads it: zustand's set is synchronous.
     void fetchReadout();
+  };
+
+  const hasArtifact = artifacts.some(
+    (a) => a.slug === artifactSlugFor(modelRepoId),
+  );
+  const [hideNonWords, setHideNonWords] = useState(true);
+  const [interventionNote, setInterventionNote] = useState<string | null>(null);
+
+  /**
+   * Launch an intervention from the token the reader is looking at.
+   *
+   * EVERYTHING COMES FROM WHAT IS ON SCREEN. The standalone card sent an EMPTY
+   * prompt and the ENTIRE layer axis, so its result described an intervention
+   * on a prompt nobody chose, at every layer at once — while the token, the
+   * layers and the prompt were all sitting in front of the user.
+   */
+  /**
+   * Poll a queued intervention to a terminal state and report what it found.
+   *
+   * The FINDING is the separation from the matched control, never the
+   * intervened rate — so that is what is surfaced, with the caveat when the
+   * intervals overlap.
+   */
+  const pollIntervention = async (taskId: string, label: string) => {
+    for (let i = 0; i < 120; i += 1) {
+      await new Promise((r) => setTimeout(r, 4000));
+      let status;
+      try {
+        status = await getTaskStatus(taskId);
+      } catch {
+        continue; // a failed poll is not a failed run
+      }
+      if (status.state === 'FAILURE' || status.state === 'ORPHANED') {
+        setInterventionNote(
+          `${label} failed: ${status.error ?? 'no reason reported'}`,
+        );
+        return;
+      }
+      if (status.state === 'SUCCESS') {
+        const r = status.result ?? {};
+        const sep = r.separated_from_control;
+        setInterventionNote(
+          `${label} done over ${r.n_trials ?? '?'} trial(s): intervened ` +
+            `${fmtRate(r.intervened_top1)} vs control ${fmtRate(r.control_top1)}` +
+            ` (baseline ${fmtRate(r.baseline_top1)}). ` +
+            (sep
+              ? 'The intervals are disjoint.'
+              : 'The intervals OVERLAP — no effect was demonstrated here, ' +
+                'which is not the same as none existing.'),
+        );
+        return;
+      }
+    }
+    setInterventionNote(`${label} is still running; check Active Operations.`);
+  };
+
+  const runIntervention = async (
+    primitive: 'additive' | 'coordinate_swap',
+    token: string,
+    layers: number[],
+  ) => {
+    setInterventionNote(null);
+    try {
+      const accepted = await jlensApi.intervene({
+        model_id: modelId,
+        // THE PROMPT THAT WAS READ OUT, not the draft in the box: the readout on
+        // screen describes `readoutPrompt`, and intervening on anything else
+        // scores a different forward pass than the one being looked at.
+        prompt: readoutPrompt || prompt,
+        primitive,
+        layers,
+        direction_token: token,
+        // A swap EXCHANGES two coordinates, so a partner is required and must
+        // differ. The first pinned token that is not this one supplies it.
+        target_token:
+          primitive === 'coordinate_swap'
+            ? pinned.find((t) => t !== token)
+            : undefined,
+        strength: 1,
+        k: 4,
+        control_seed: 20260809,
+        artifact_id: hasArtifact ? artifactSlugFor(modelRepoId) : undefined,
+      });
+      const label = primitive === 'coordinate_swap' ? 'Swap' : 'Steer';
+      setInterventionNote(`${label} queued as ${accepted.task_id.slice(0, 8)}…`);
+      // POLLED TO A TERMINAL STATE. Announcing "queued" and stopping there made
+      // success and failure indistinguishable: the row appears in Running Work
+      // and then vanishes, and a refusal on the GPU looked exactly like a
+      // finished run.
+      void pollIntervention(accepted.task_id, label);
+    } catch (err) {
+      setInterventionNote(
+        err instanceof Error ? err.message : 'The intervention was refused.',
+      );
+    }
   };
 
   return (
@@ -383,6 +488,7 @@ export function JLensPanel() {
 
       <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <InterventionCard
+              prompt={readoutPrompt || prompt}
           modelId={modelId}
           // Pinned tokens ARE the available directions: the server resolves a
           // token's unembedding row, which is what makes this reachable at all.
@@ -412,6 +518,39 @@ export function JLensPanel() {
           </p>
         </section>
       ) : (
+        <>
+        <RankedReadouts
+          tokens={tokens}
+          axes={meta.layers_by_type}
+          types={meta.types}
+          topN={meta.top_n}
+          range={null}
+          hideNonWords={hideNonWords}
+          onToggleNonWords={setHideNonWords}
+          onSteer={(t, l) => void runIntervention('additive', t, l)}
+          onSwap={(t, l) => void runIntervention('coordinate_swap', t, l)}
+          swapDisabledFor={(token) =>
+            // PER TOKEN. A swap needs a DIFFERENT token to exchange with, so
+            // "something is pinned" is not the condition — with one token
+            // pinned, that row alone has no partner. Guarding on the count let
+            // it queue a request with none, which read as "Swap queued" here
+            // and was refused on the GPU seconds later.
+            pinned.some((t) => t !== token)
+              ? undefined
+              : pinned.length === 0
+                ? 'Pin a token first — a swap exchanges TWO coordinates.'
+                : `Pin a token other than ${token} — a swap needs two.`
+          }
+        />
+        {interventionNote && (
+          <p
+            className="mb-3 text-[11px] text-slate-600 dark:text-slate-300"
+            role="status"
+            data-testid="jlens-intervention-note"
+          >
+            {interventionNote}
+          </p>
+        )}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
           <div className="min-w-0 space-y-4">
             {/* prompt strip */}
@@ -598,6 +737,7 @@ export function JLensPanel() {
             </section>
           </div>
         </div>
+        </>
       )}
 
       <ProvenanceStrip provenance={provenance} bandsAvailable={bandReport != null} />

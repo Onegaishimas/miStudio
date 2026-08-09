@@ -279,6 +279,23 @@ export interface JLensInterventionRequest {
   layers: number[];
   /** A SINGLE token; the server resolves its unembedding row. */
   direction_token?: string | null;
+  /**
+   * The token whose RANK is scored in the model's own output.
+   *
+   * Defaults server-side to `direction_token`. REQUIRED and must DIFFER for
+   * `coordinate_swap`: a swap exchanges two coordinates, and one token would be
+   * an additive steer wearing a swap's name — which is what the backend used to
+   * run, labelled as a swap, before the hook grew a branch for it.
+   */
+  target_token?: string | null;
+  /**
+   * MORE PROMPTS, one TRIAL each.
+   *
+   * The result is a fraction of trials with a Wilson 95% interval; a single
+   * prompt yields an interval spanning nearly the whole range, which is the
+   * honest rendering of one observation and rarely a finding.
+   */
+  prompts?: string[] | null;
   strength?: number;
   k?: number;
   control_seed?: number;
