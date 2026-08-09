@@ -34,6 +34,11 @@ from src.mcp_server.config import DEFAULT_CATEGORIES, VALID_CATEGORIES
 from src.mcp_server.tools import CATEGORY_MODULES
 
 EXPECTED_TOOLS = {
+    # The evidence read surface and the recovery action. Both were added with
+    # this assertion, not after it — the harness refusing an unasserted tool is
+    # the guard working, not an obstacle to route around.
+    "get_jlens_interventions",
+    "restore_jlens_artifact",
     "list_jlens_artifacts",
     "validate_jlens_artifact",
     "jlens_readout",
@@ -384,6 +389,62 @@ class TestCaller:
         assert body["k"] == 4, "the control size was dropped; it must be size-matched"
         assert body["primitive"] == "additive"
 
+    def test_the_interventions_tool_reads_the_artifact_it_was_asked_about(self):
+        """The record a serving runtime would fetch after pulling a lens down.
+
+        Asserts the PATH carries the slug, not merely that a GET happened: a
+        call to the wrong artifact returns somebody else's evidence, which is
+        the failure this whole digest-bound design exists to prevent.
+        """
+        mcp, client, _names = self._tools()
+        asyncio.run(
+            mcp.call_tool("get_jlens_interventions", {"slug": "lfm2.5-1.2b-instruct"})
+        )
+        assert (
+            client.get.await_args.args[0]
+            == "/jlens/artifacts/lfm2.5-1.2b-instruct/interventions"
+        )
+
+    def test_the_restore_tool_POSTs_to_the_named_artifact(self):
+        """A directory swap must not be reachable by a read."""
+        mcp, client, _names = self._tools()
+        asyncio.run(
+            mcp.call_tool("restore_jlens_artifact", {"slug": "gemma-2-2b-it"})
+        )
+        assert (
+            client.post.await_args.args[0]
+            == "/jlens/artifacts/gemma-2-2b-it/restore-superseded"
+        )
+
+    def test_the_intervention_tool_can_carry_TRIALS_and_a_swap_partner(self):
+        """Without these, an agent can only run n=1 and cannot swap at all.
+
+        A single trial yields a Wilson interval spanning nearly the whole range,
+        and `coordinate_swap` needs two tokens — so a tool missing `prompts` and
+        `target_token` offers the agent a strictly weaker experiment than the
+        API supports, silently.
+        """
+        mcp, client, _names = self._tools()
+        asyncio.run(
+            mcp.call_tool(
+                "run_jlens_intervention",
+                {
+                    "model_id": "m_1",
+                    "prompt": "hello",
+                    "prompts": ["a", "b", "c"],
+                    "primitive": "coordinate_swap",
+                    "target_token": " cat",
+                    "direction_token": " dog",
+                    "layers": [5],
+                    "control_seed": 77,
+                },
+            )
+        )
+        body = client.post.await_args.kwargs["json_body"]
+        assert body["prompts"] == ["a", "b", "c"], "trials were dropped"
+        assert body["target_token"] == " cat", "the swap partner was dropped"
+        assert body["direction_token"] == " dog"
+
     def test_every_registered_tool_is_covered_here(self):
         """A tool added without a caller test would otherwise ship unasserted."""
         _mcp, _client, names = self._tools()
@@ -427,6 +488,8 @@ class TestRoutesExist:
             "/jlens/annotate",
             "/jlens/watchlists",
             "/jlens/cost-estimate",
+            "/jlens/artifacts/{slug}/interventions",
+            "/jlens/artifacts/{slug}/restore-superseded",
             "/jlens/reports/replication",
         ):
             assert any(expected in p for p in paths), f"{expected} is not routed"

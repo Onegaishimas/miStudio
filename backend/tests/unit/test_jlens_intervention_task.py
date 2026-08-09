@@ -54,7 +54,12 @@ class _Tok:
         return {"input_ids": torch.tensor([ids], dtype=torch.long)}
 
     def encode(self, s, add_special_tokens=False):
-        return [TARGET_ID] if s.strip() in ("Paris", "dog") else [7, 8]
+        # DISTINCT IDS. Mapping two token strings to the same id made a
+        # coordinate swap a swap of a direction with itself, which the primitive
+        # correctly refuses — a fixture that agreed by construction and hid the
+        # behaviour under test. Both are < D_MODEL so `torch.eye(VOCAB, D_MODEL)`
+        # gives them non-zero rows.
+        return {"Paris": [TARGET_ID], "dog": [2]}.get(s.strip(), [7, 8])
 
 
 class _Layer(torch.nn.Module):
@@ -559,3 +564,126 @@ class TestTheCardComesBack:
         # The failure happens before the model loads, so the release may not run
         # at all — what must NOT happen is a release that leaves it held.
         assert alive.get("at_release", False) is False
+
+
+class TestThePrimitiveThatRUNSIsThePrimitiveREQUESTED:
+    """The hook dispatched on two branches and defaulted the rest to additive.
+
+    So `coordinate_swap` ran an additive steer and the result carried
+    `"primitive": "coordinate_swap"` in its `steering_recipe` — which since
+    d88dc73 is written into `interventions.json`, the file built to travel with
+    the lens to a serving runtime. A label that survives the journey while the
+    experiment behind it did not is worse than no record.
+
+    MUTATION CONTROLS:
+      * restore the `else: apply_additive` fall-through -> "swap DIFFERS" fails
+      * accept a swap with one token                    -> "two tokens" fails
+      * let dynamic_topk_ablation fall through          -> "REFUSED" fails
+    """
+
+    def test_the_task_dispatches_to_the_SWAP_and_not_to_additive(self):
+        """Which primitive actually ran, asserted by call count on both.
+
+        An earlier version of this compared the SCORES of a swap run and a
+        steer run and asserted they differed. That was not the comparison it
+        claimed: a swap scores its partner token and a steer scores its own, so
+        the two arms measured different targets, and with a small fake model
+        both could sit at zero hits and agree for reasons having nothing to do
+        with the dispatch.
+
+        Both functions are spied and both counts are asserted. "coordinate_swap
+        was called" alone would still pass if additive ran as well, which is
+        precisely the fall-through being ruled out. What the swap DOES is
+        pinned separately by the unit tests in test_jlens_intervention.py.
+
+        MUTATION CONTROL: restore `else: apply_additive` and this fails on the
+        additive count.
+        """
+        from src.services import jlens_intervention as prim
+
+        real_swap = prim.apply_coordinate_swap
+        real_add = prim.apply_additive
+        calls = {"swap": 0, "additive": 0}
+
+        def spy_swap(*a, **kw):
+            calls["swap"] += 1
+            return real_swap(*a, **kw)
+
+        def spy_add(*a, **kw):
+            calls["additive"] += 1
+            return real_add(*a, **kw)
+
+        with patch.object(prim, "apply_coordinate_swap", spy_swap), patch.object(
+            prim, "apply_additive", spy_add
+        ):
+            out, _ = _run(
+                primitive="coordinate_swap",
+                direction_token="Paris",
+                target_token="dog",
+                prompts=["abcd", "efgh"],
+                layers=[0, 1],
+            )
+
+        assert out["primitive"] == "coordinate_swap"
+        # 2 trials x 2 layers x 1 position x TWO perturbed arms = 8.
+        #
+        # THE CONTROL RUNS THE SAME PRIMITIVE. A control that performs a
+        # different operation is not size-matched to anything — for a swap it
+        # must also be a swap, exchanging a RANDOM direction's coordinate with
+        # the same partner, so the only difference between the arms is which
+        # direction was chosen. The baseline arm passes no vector and registers
+        # no hook, which is why this is 8 and not 12.
+        assert calls["swap"] == 8, (
+            f"the swap ran {calls['swap']} times; expected one per "
+            "(trial, layer) on the intervened AND control arms"
+        )
+        assert calls["additive"] == 0, (
+            f"apply_additive ran {calls['additive']} times during a swap: the "
+            "hook is still falling through"
+        )
+
+    def test_a_STEER_dispatches_to_additive_and_not_to_the_swap(self):
+        """The mirror image, so neither branch can absorb the other."""
+        from src.services import jlens_intervention as prim
+
+        real_swap = prim.apply_coordinate_swap
+        real_add = prim.apply_additive
+        calls = {"swap": 0, "additive": 0}
+
+        def spy_swap(*a, **kw):
+            calls["swap"] += 1
+            return real_swap(*a, **kw)
+
+        def spy_add(*a, **kw):
+            calls["additive"] += 1
+            return real_add(*a, **kw)
+
+        with patch.object(prim, "apply_coordinate_swap", spy_swap), patch.object(
+            prim, "apply_additive", spy_add
+        ):
+            _run(primitive="additive", direction_token="Paris",
+                 prompts=["abcd", "efgh"], layers=[0, 1])
+
+        assert calls["additive"] == 8 and calls["swap"] == 0
+
+    def test_a_swap_with_ONE_token_is_refused(self):
+        """Two coordinates or it is not an exchange."""
+        with pytest.raises(ValueError, match="TWO different tokens"):
+            _run(primitive="coordinate_swap", direction_token="Paris")
+
+    def test_a_swap_with_the_SAME_token_twice_is_refused(self):
+        with pytest.raises(ValueError, match="TWO different tokens"):
+            _run(
+                primitive="coordinate_swap",
+                direction_token="Paris",
+                target_token="Paris",
+            )
+
+    def test_an_UNIMPLEMENTED_primitive_is_REFUSED_not_substituted(self):
+        """Being one enum member from a working primitive is not a licence.
+
+        MUTATION CONTROL: delete the refusal and this fails — the run would
+        succeed, reporting an additive result labelled dynamic_topk_ablation.
+        """
+        with pytest.raises(ValueError, match="not implemented"):
+            _run(primitive="dynamic_topk_ablation", direction_token="Paris")

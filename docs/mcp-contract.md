@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**111 tools across 14 categories.**
+**113 tools across 14 categories.**
 
 
 ## `admin` (2 tools)
@@ -80,7 +80,7 @@ require `MILLM_API_URL` and are never enabled by default.
 | `get_feature_groups` | `GET /extractions/{…}/feature-groups` | List feature groups (features sharing a top activating token with similar context). |
 | `get_grouping_status` | `GET /extractions/{…}/feature-groups/status` | State of the grouping index: none \| pending \| computing \| completed \| failed, with progress, params, and counts. |
 
-## `jlens` (14 tools)
+## `jlens` (16 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
@@ -90,12 +90,14 @@ require `MILLM_API_URL` and are never enabled by default.
 | `fit_jlens_artifact` | `POST /jlens/fit` | Queue a J-lens fit. |
 | `get_jlens_band_report` | `GET /jlens/artifacts/{…}/band-report` | This model's OWN sensory / workspace / motor boundaries, or null. |
 | `get_jlens_gate` | `GET /jlens/artifacts/{…}/gate` | The recorded Phase-0 GO / NO-GO / GO-AT-LARGER-SCALE decision, or null. |
+| `get_jlens_interventions` | `GET /jlens/artifacts/{…}/interventions` | What this lens has been MEASURED to do, recorded beside the weights. |
 | `get_jlens_readout` | `GET /jlens/readout/{…}` | Poll a queued readout. |
 | `get_jlens_replication_report` | `GET /jlens/reports/replication?slug={…}` | The recorded replication report, or null (BR-001). |
 | `jlens_cost_estimate` | `GET /jlens/cost-estimate` | Estimate an operation's cost BEFORE committing to it. |
 | `jlens_readout` | `POST /jlens/readout` | QUEUE a readout of what a model is poised to say per layer and position. |
 | `list_jlens_artifacts` | `GET /jlens/artifacts` | List J-lens artifacts present in the mounted registry. |
 | `record_jlens_gate` | `POST /jlens/gate` | Record the Phase-0 GO / NO-GO decision (BR-003). |
+| `restore_jlens_artifact` | `POST /jlens/artifacts/{…}/restore-superseded` | Promote the archived artifact back into service. |
 | `run_jlens_intervention` | `POST /jlens/interventions` | Run an intervention AND its size-matched control in one pass. |
 | `validate_jlens_artifact` | `POST /jlens/artifacts/{…}/validate` | Run the BR-030 validation suite against one artifact. |
 

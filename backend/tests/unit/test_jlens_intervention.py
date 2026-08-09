@@ -241,3 +241,123 @@ def test_all_four_primitives_exist():
         "dynamic_topk_ablation",
         "coordinate_swap",
     }
+
+
+# ---------------------------------------------------------------------------
+# A SWAP MUST SWAP.
+#
+# The perturbing hook had two branches — projective ablation, and
+# everything-else-is-additive — so a request for `coordinate_swap` ran an
+# ADDITIVE steer and the result was then labelled `coordinate_swap` in its
+# `steering_recipe`. That recipe is written into `interventions.json`, which is
+# built to travel with the lens, so the mislabelling would have become false
+# provenance in whatever consumed it. One run in the session that found this was
+# already mislabelled.
+#
+# MUTATION CONTROLS:
+#   * return `activation + a` (an additive push)  -> "EXCHANGES" fails
+#   * drop the near-parallel refusal              -> "same direction" fails
+#   * skip the normalisation                      -> "unnormalised" fails
+# ---------------------------------------------------------------------------
+
+
+class TestCoordinateSwapExchanges:
+    def _orthogonal(self):
+        a = torch.zeros(8)
+        a[0] = 1.0
+        b = torch.zeros(8)
+        b[1] = 1.0
+        return a, b
+
+    def test_it_EXCHANGES_the_two_components(self):
+        """The defining property, and the one additive does not have.
+
+        MUTATION CONTROL: return `activation + strength * a` and this fails.
+        """
+        from src.services.jlens_intervention import apply_coordinate_swap
+
+        a, b = self._orthogonal()
+        h = torch.zeros(8)
+        h[0] = 3.0   # component along a
+        h[1] = -7.0  # component along b
+        h[2] = 1.5   # untouched dimension
+
+        out = apply_coordinate_swap(h, a, b)
+
+        assert float(out @ a) == pytest.approx(-7.0), "a did not receive b's value"
+        assert float(out @ b) == pytest.approx(3.0), "b did not receive a's value"
+        assert float(out[2]) == pytest.approx(1.5), (
+            "a coordinate outside the swapped pair was modified"
+        )
+
+    def test_it_is_NOT_an_additive_push(self):
+        """Distinguishes the two primitives by their effect, not their name."""
+        from src.services.jlens_intervention import (
+            apply_additive,
+            apply_coordinate_swap,
+        )
+
+        a, b = self._orthogonal()
+        h = torch.zeros(8)
+        h[0], h[1] = 3.0, -7.0
+
+        swapped = apply_coordinate_swap(h, a, b)
+        pushed = apply_additive(h, a, 1.0)
+        assert not torch.allclose(swapped, pushed), (
+            "the swap produced the same activation as an additive steer — which "
+            "is exactly what the unimplemented version did"
+        )
+
+    def test_swapping_EQUAL_components_is_a_no_op(self):
+        """Nothing to exchange when the two already agree."""
+        from src.services.jlens_intervention import apply_coordinate_swap
+
+        a, b = self._orthogonal()
+        h = torch.zeros(8)
+        h[0] = h[1] = 4.0
+        assert torch.allclose(apply_coordinate_swap(h, a, b), h)
+
+    def test_two_directions_that_are_the_SAME_direction_are_refused(self):
+        """A swap that cannot move anything would report a null.
+
+        Reported as a null, it invites the reading that the concept does not
+        steer — a conclusion about the model drawn from a degenerate request.
+
+        MUTATION CONTROL: drop the cosine check and this fails.
+        """
+        from src.services.jlens_intervention import (
+            DirectionsTooSimilar,
+            apply_coordinate_swap,
+        )
+
+        a = torch.randn(8)
+        nearly = a * 1.0001
+        with pytest.raises(DirectionsTooSimilar, match="cosine"):
+            apply_coordinate_swap(torch.randn(8), a, nearly)
+
+    def test_an_UNNORMALISED_direction_does_not_scale_the_swap(self):
+        """Otherwise a long direction silently amplifies the exchange.
+
+        Same reasoning as `apply_projective_ablation`, which normalises inside
+        for this reason.
+
+        MUTATION CONTROL: use the raw directions and this fails.
+        """
+        from src.services.jlens_intervention import apply_coordinate_swap
+
+        a, b = self._orthogonal()
+        h = torch.zeros(8)
+        h[0], h[1] = 3.0, -7.0
+
+        tight = apply_coordinate_swap(h, a, b)
+        loose = apply_coordinate_swap(h, a * 50.0, b * 0.02)
+        assert torch.allclose(tight, loose, atol=1e-5), (
+            "the direction magnitudes changed the exchange"
+        )
+
+    def test_a_zero_direction_is_refused(self):
+        from src.services.jlens_intervention import apply_coordinate_swap
+
+        a, _ = self._orthogonal()
+        with pytest.raises(ValueError, match="zero direction"):
+            apply_coordinate_swap(torch.randn(8), a, torch.zeros(8))
