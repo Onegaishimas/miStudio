@@ -944,3 +944,131 @@ def test_restore_without_an_archive_is_an_error_not_a_silent_noop(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="no archived artifact"):
         service.restore_superseded("model")
+
+
+# ---------------------------------------------------------------------------
+# CAUSAL EVIDENCE TRAVELS WITH THE LENS.
+#
+# A lens is consumed by MOUNTING its directory. Published to HuggingFace and
+# pulled down by a serving runtime, it arrives as files and nothing else — so
+# evidence that lived only in a task result would not make the journey, and the
+# consumer would have a dictionary it can read with no idea which directions
+# actually move the model.
+# ---------------------------------------------------------------------------
+
+
+def _evidence(direction=" dog", layers=(9, 10), strength=1.0, separated=True):
+    return {
+        "steering_recipe": {
+            "primitive": "additive",
+            "direction_token": direction,
+            "target_token": direction,
+            "layers": list(layers),
+            "positions": [-1],
+            "strength": strength,
+            "hook_target": "layers_module[L] (resid_post)",
+        },
+        "evidence": {"separated_from_control": separated},
+        "evidence_rung": 2,
+    }
+
+
+def _published(tmp_path, layers=range(15)):
+    import torch
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    service.write_staged(
+        "org/model", {l: torch.randn(4, 4) for l in layers}, _quality("true", 500)
+    )
+    service.commit("org/model", _passing_report())
+    return service
+
+
+def test_causal_evidence_is_written_beside_the_lens(tmp_path):
+    """Next to the weights, not in a database the consumer never sees."""
+    from src.services.jlens_artifact_service import INTERVENTION_FILE
+
+    service = _published(tmp_path)
+    service.record_intervention_result("org/model", _evidence())
+
+    path = tmp_path / "model" / INTERVENTION_FILE
+    assert path.is_file(), "the evidence did not land in the artifact directory"
+
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 1
+    # THE RECIPE, not just the score: a consumer must be able to apply it.
+    recipe = records[0]["steering_recipe"]
+    assert recipe["direction_token"] == " dog"
+    assert recipe["layers"] == [9, 10]
+    assert recipe["hook_target"] == "layers_module[L] (resid_post)"
+
+
+def test_evidence_for_DIFFERENT_weights_is_dropped(tmp_path):
+    """A refit replaces the matrices; the old evidence describes a dead file.
+
+    Carrying it forward would attribute one lens's demonstrated behaviour to
+    another — worse than having no evidence at all.
+
+    MUTATION CONTROL: stop comparing `lens_sha256` on read and this fails.
+    """
+    service = _published(tmp_path)
+    service.record_intervention_result("org/model", _evidence())
+    assert len(service.intervention_results(service.find("org/model"))) == 1
+
+    lens = next((tmp_path / "model").glob("*_jacobian_lens.pt"))
+    lens.write_bytes(lens.read_bytes() + b"refitted")
+
+    assert service.intervention_results(service.find("org/model")) == [], (
+        "evidence describing the previous weights survived a change to the lens"
+    )
+
+
+def test_rerunning_the_SAME_experiment_replaces_its_record(tmp_path):
+    """Two runs of one experiment are not two findings.
+
+    MUTATION CONTROL: append unconditionally and this fails with 2 records.
+    """
+    service = _published(tmp_path)
+    service.record_intervention_result("org/model", _evidence(separated=False))
+    service.record_intervention_result("org/model", _evidence(separated=True))
+
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 1
+    assert records[0]["evidence"]["separated_from_control"] is True, (
+        "the later run did not supersede the earlier one"
+    )
+
+
+def test_a_DIFFERENT_experiment_is_kept_alongside(tmp_path):
+    """A lens can steer several concepts; each is its own finding.
+
+    MUTATION CONTROL: key the replacement on the slug alone and this fails —
+    every new direction would evict the last.
+    """
+    service = _published(tmp_path)
+    service.record_intervention_result("org/model", _evidence(direction=" dog"))
+    service.record_intervention_result("org/model", _evidence(direction=" cat"))
+    service.record_intervention_result("org/model", _evidence(direction=" dog", layers=(3,)))
+
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 3, [r["steering_recipe"] for r in records]
+
+
+def test_recording_against_an_unpublished_model_is_an_error(tmp_path):
+    """Silently doing nothing would read as "recorded" to the caller."""
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    service = JLensArtifactService(tmp_path)
+    with pytest.raises(FileNotFoundError, match="no published artifact"):
+        service.record_intervention_result("org/nothing", _evidence())
+
+
+def test_unreadable_evidence_does_not_break_the_listing(tmp_path):
+    """A corrupt sidecar must not make the artifact unusable."""
+    from src.services.jlens_artifact_service import INTERVENTION_FILE
+
+    service = _published(tmp_path)
+    (tmp_path / "model" / INTERVENTION_FILE).write_text("{not json")
+    assert service.intervention_results(service.find("org/model")) == []

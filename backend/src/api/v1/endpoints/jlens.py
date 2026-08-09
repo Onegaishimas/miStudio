@@ -89,6 +89,11 @@ class ArtifactSummary(BaseModel):
     #: COMPLETE fit covers 0..N-2, so a client comparing coverage against the
     #: model's layer count would render a full artifact as incomplete.
     target_layer: Optional[str] = None
+    #: How many intervention results are recorded beside this lens and still
+    #: describe its current weights. A COUNT, not the records: a listing should
+    #: not carry every experiment, and zero is a real answer meaning "nothing
+    #: has been demonstrated about this lens yet" — not "it does not work".
+    intervention_records: int = 0
 
 
 class CheckOutcome(BaseModel):
@@ -136,6 +141,7 @@ async def list_artifacts() -> List[ArtifactSummary]:
             layers=service.fitted_layers(ref),
             degenerate_layers=service.degenerate_layers(ref),
             target_layer=service.target_layer(ref),
+            intervention_records=len(service.intervention_results(ref)),
         )
         for ref in service.list_artifacts()
     ]
@@ -196,6 +202,52 @@ async def validate_artifact(
             )
             for r in report.results
         ],
+    )
+
+
+class InterventionRecordsResponse(BaseModel):
+    """Interventions that were run against this lens, and what they measured.
+
+    Separate from the artifact listing on purpose: the listing answers "what is
+    on disk", and a measurement of behaviour is not a property of a file. It is
+    also the shape a serving runtime wants — a list of recipes it could apply,
+    each with the evidence for applying it.
+    """
+
+    slug: str
+    lens_sha256: str
+    records: List[Dict[str, Any]]
+
+
+@router.get(
+    "/artifacts/{slug}/interventions",
+    response_model=InterventionRecordsResponse,
+    summary="Intervention results recorded beside this lens",
+)
+async def intervention_records(slug: str) -> InterventionRecordsResponse:
+    """Records that describe THIS lens file; others are dropped.
+
+    Each record carries a `steering_recipe` — primitive, direction, layers,
+    positions, strength and hook target — beside the rates that justify it. A
+    consumer can therefore pick a direction whose intervened rate separated from
+    its matched control and apply exactly what was tested, rather than inferring
+    a recipe from a score.
+
+    AN EMPTY LIST IS AN ANSWER. It means no intervention has been run against
+    this lens yet, which is different from one that was run and moved nothing —
+    the latter appears here with overlapping intervals.
+    """
+    service = _service()
+    ref = next((a for a in service.list_artifacts() if a.slug == slug), None)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No conformant J-lens artifact directory named {slug!r}",
+        )
+    return InterventionRecordsResponse(
+        slug=slug,
+        lens_sha256=service._lens_digest(ref.lens_path),  # noqa: SLF001
+        records=service.intervention_results(ref),
     )
 
 

@@ -188,6 +188,16 @@ RUNG_TWO_MACHINERY = {
     # F25/F26: the J-space equivalent — the only J-space module that produces a
     # causal claim, and whose docstring says so.
     "jlens_intervention.py",
+    # The worker that RUNS one: it perturbs the residual stream, continues the
+    # forward pass and scores the model's own output against a matched control.
+    # That is the rung-2 experiment itself, not a readout describing one.
+    #
+    # DELIBERATELY NARROW. `jlens_artifact_service.py` STORES these results and
+    # is NOT exempt: it is mostly rung-0 serving and validation, and exempting a
+    # whole file to quiet a few lines would blind the audit exactly where an
+    # overclaim would do most damage. Its wording says what was run and leaves
+    # the verdict to each record's own `evidence_rung`.
+    "jlens_intervention_tasks.py",
 }
 
 ALLOWED_CONTEXT = re.compile(
