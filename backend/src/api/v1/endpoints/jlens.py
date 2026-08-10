@@ -844,6 +844,16 @@ def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = No
 
 # The intermediate appears in NEITHER the prompt nor the expected output, so
 # recovering it cannot be explained by the artifact encoding nothing.
+#: The per-prompt character bound, shared by `prompt` and every entry of
+#: `prompts`. One bound, one place: they are the same thing to the worker, which
+#: runs a forward pass per arm per trial over whichever it is given.
+MAX_PROMPT_CHARS = 8000
+
+#: How many layers one intervention may hook. Each is a hook on every forward
+#: pass of every arm of every trial; the intervened arm additionally perturbs
+#: the output of the hook before it, so this is not merely a cost bound.
+MAX_INTERVENED_LAYERS = 64
+
 SEMANTIC_FIXTURE_PROMPT = "The number of legs on the animal that spins webs is"
 SEMANTIC_FIXTURE_ANSWER = "spider"
 
@@ -1338,13 +1348,21 @@ class InterventionRequest(BaseModel):
     """
 
     model_id: str
-    prompt: str = Field(..., min_length=1, max_length=8000)
+    prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     #: MORE PROMPTS FOR THE SAME EXPERIMENT — one TRIAL each. The source paper
     #: reports a fraction of trials (50 two-hop prompts, 192 swap trials), never
     #: a single number from a single prompt. One trial produces a Wilson
     #: interval spanning almost the whole range, which is the honest rendering
     #: of one observation.
-    prompts: Optional[List[str]] = Field(None, max_length=512)
+    #: BOUNDED PER ITEM, not only in count. `prompt` was capped at 8000 and
+    #: `prompts` only at 512 entries of unlimited length, so 512 x 400 000
+    #: characters passed validation from one unauthenticated POST — and the
+    #: worker budgets against `prompt`, which it then discards whenever
+    #: `prompts` is present. That is the whole single-GPU queue, for hours,
+    #: behind which every fit and readout blocks.
+    prompts: Optional[List[str]] = Field(
+        None, max_length=512, description="One trial each; each capped like `prompt`."
+    )
     #: The token whose RANK is scored in the model's output. Defaults to
     #: `direction_token`. A coordinate swap wants them different: push
     #: direction A, ask whether answer B arrives.
@@ -1410,6 +1428,47 @@ class InterventionRequest(BaseModel):
                 "path: it needs the lens coordinates at the intervened site, "
                 "which this measurement does not compute. Use additive, "
                 "projective_ablation or coordinate_swap."
+            )
+
+        # EVERY TRIAL PROMPT BOUNDED LIKE `prompt`. The worker runs one forward
+        # pass per trial per arm, so an unbounded list item is 3 x 512 passes
+        # over a text nothing measured.
+        for i, p in enumerate(self.prompts or []):
+            if not p.strip():
+                raise ValueError(f"prompts[{i}] is empty; a trial needs a prompt")
+            if len(p) > MAX_PROMPT_CHARS:
+                raise ValueError(
+                    f"prompts[{i}] is {len(p)} characters; the limit is "
+                    f"{MAX_PROMPT_CHARS}, the same bound `prompt` carries"
+                )
+
+        # LAYERS DISTINCT. The worker registers one forward hook per entry, and
+        # each hook reads the ALREADY-PERTURBED hidden state — so [9, 9, 9] at
+        # strength 1.0 applies 3.0 and records the recipe as strength 1.0 at
+        # layer 9. Reproducing that recipe cannot reproduce the result.
+        if len(set(self.layers)) != len(self.layers):
+            dupes = sorted({l for l in self.layers if self.layers.count(l) > 1})
+            raise ValueError(
+                f"layers {dupes} appear more than once. Each entry registers its "
+                "own hook and each hook perturbs the output of the one before, "
+                "so a repeat multiplies the strength while the recipe still "
+                "reports the nominal value."
+            )
+        if len(self.layers) > MAX_INTERVENED_LAYERS:
+            raise ValueError(
+                f"{len(self.layers)} layers requested; the limit is "
+                f"{MAX_INTERVENED_LAYERS}. Every layer is another hook on every "
+                "forward pass of every trial and every arm."
+            )
+
+        # POSITIONS DISTINCT, for the same reason: the hook loops over them and
+        # writes into the tensor it is reading.
+        if self.positions is not None and len(set(self.positions)) != len(
+            self.positions
+        ):
+            raise ValueError(
+                "positions repeat; each is perturbed in turn and a repeat "
+                "perturbs an already-perturbed activation"
             )
         return self
 

@@ -29,7 +29,15 @@ import pytest
 from src.api.v1.endpoints import jlens
 from src.api.v1.router import api_router
 
-EXPECTED = {"/jlens/readout", "/jlens/probe"}
+#: Every J-space POST surface a user or an agent can reach.
+#:
+#: `/jlens/interventions` was ABSENT from this set for the whole arc that built
+#: it. Deleting its `@router.post` decorator left the suite green: the only
+#: mention of the path anywhere in the tests was an assertion on a MagicMock
+#: client's URL string in the MCP file, which proves what a CALLER sends and
+#: nothing about what the server serves — two views sharing one blind spot,
+#: which is the anti-pattern this file exists to prevent.
+EXPECTED = {"/jlens/readout", "/jlens/probe", "/jlens/interventions"}
 
 
 def _reachable_paths() -> set:

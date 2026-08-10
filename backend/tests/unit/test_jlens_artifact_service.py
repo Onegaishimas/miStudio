@@ -1102,6 +1102,80 @@ def test_two_DIFFERENT_swaps_are_both_kept(tmp_path):
     assert len(records) == 2, [r["steering_recipe"]["target_token"] for r in records]
 
 
+def test_records_differing_only_in_POSITIONS_are_both_kept(tmp_path):
+    """Each field the key widened needs its OWN test, varied alone.
+
+    `test_two_DIFFERENT_swaps_are_both_kept` varies `target_token` and holds
+    `positions: [-1]` constant across both records, so the two fields agree by
+    construction and only half the widening is pinned: dropping `"positions"`
+    from `_recipe_key` left the whole suite green. Perturbing the last token is
+    a different experiment from perturbing the first, and the loser of that
+    collision is a completed GPU run deleted from the portability file.
+
+    MUTATION CONTROL: drop `"positions"` from `_recipe_key` and this fails at 1.
+    """
+    service = _published(tmp_path)
+    at = lambda pos: {  # noqa: E731
+        "steering_recipe": {
+            "primitive": "additive",
+            "direction_token": " Paris",
+            "target_token": " Paris",
+            "layers": [9],
+            "positions": pos,
+            "strength": 1.0,
+            "prompts_sha256": "abc",
+        },
+        "evidence": {"separated_from_control": True},
+    }
+    service.record_intervention_result("org/model", at([-1]))
+    service.record_intervention_result("org/model", at([0]))
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 2, [r["steering_recipe"]["positions"] for r in records]
+
+
+def test_a_ONE_TRIAL_click_does_not_evict_a_FIFTY_PROMPT_run(tmp_path):
+    """The trial set is the most obvious variable, and it was not in the key.
+
+    An agent runs 50 prompts on ' Paris' at L9 and files a record with
+    `separated_from_control: true`. The user then reads out a DIFFERENT prompt
+    in the panel and clicks Steer on the same token — same primitive, same
+    direction, same target, same layers, same positions, same strength. Same
+    key. The 50-prompt record is dropped, and the artifact now tells a miLLM
+    consumer that the direction moves nothing.
+
+    MUTATION CONTROL: drop `"prompts_sha256"` from `_recipe_key` and this fails
+    at 1, having kept only the one-trial record.
+    """
+    service = _published(tmp_path)
+    base = {
+        "primitive": "additive",
+        "direction_token": " Paris",
+        "target_token": " Paris",
+        "layers": [9],
+        "positions": [-1],
+        "strength": 1.0,
+    }
+    service.record_intervention_result(
+        "org/model",
+        {
+            "steering_recipe": {**base, "n_trials": 50, "prompts_sha256": "fifty"},
+            "evidence": {"separated_from_control": True, "n_trials": 50},
+        },
+    )
+    service.record_intervention_result(
+        "org/model",
+        {
+            "steering_recipe": {**base, "n_trials": 1, "prompts_sha256": "one"},
+            "evidence": {"separated_from_control": False, "n_trials": 1},
+        },
+    )
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 2, "the one-trial click evicted the fifty-prompt run"
+    # AND THE STRONGER ONE SURVIVED INTACT — not merely "two records exist".
+    trials = sorted(r["evidence"]["n_trials"] for r in records)
+    assert trials == [1, 50], trials
+
+
 def test_the_same_swap_twice_still_supersedes(tmp_path):
     """Widening the key must not turn every re-run into a duplicate."""
     service = _published(tmp_path)

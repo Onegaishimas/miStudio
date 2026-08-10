@@ -68,6 +68,16 @@ def wilson_interval(successes: int, n: int, z: float = Z_95) -> tuple:
     return (max(0.0, centre - half), min(1.0, centre + half))
 
 
+#: Fewest trials at which disjoint Wilson intervals are arithmetically possible.
+#:
+#: DERIVED, NOT CHOSEN: at n=3 a perfect 3/3 intervened arm gives [0.4385, 1.0]
+#: and a perfect 0/3 control gives [0.0, 0.5615], which overlap. At n=4 they are
+#: [0.5101, 1.0] and [0.0, 0.4899], which do not. Both UI paths sent a single
+#: prompt — one trial — so every Steer and every Swap reported "no effect was
+#: demonstrated" regardless of what the model did.
+MIN_TRIALS_FOR_SEPARATION = 4
+
+
 @dataclass(frozen=True)
 class Trial:
     """One prompt, scored three ways.
@@ -109,7 +119,10 @@ class CausalReport:
     target_token: str
     primitive: str
     layers: List[int]
-    strength: float
+    #: None for primitives that ignore it. An ablation and a swap take no
+    #: strength — recording the request's nominal value would put a number on
+    #: the evidence that nothing in the run consumed.
+    strength: Optional[float]
 
     def _rates(self, pick, within: int) -> Dict[str, float]:
         ranks = [pick(t) for t in self.trials]
@@ -151,7 +164,42 @@ class CausalReport:
             out["intervened_top5"]["rate"] - out["control_top5"]["rate"]
         )
         out["separated_from_control"] = self.separated_from_control()
+
+        # WHETHER THE QUESTION COULD HAVE BEEN ANSWERED AT ALL. Below four
+        # trials no outcome separates — a PERFECT intervened arm against a
+        # PERFECT null control still overlaps — so `separated_from_control:
+        # false` at n<4 says nothing about the intervention and everything
+        # about the sample size. Reported separately because the two readings
+        # are opposite: one is "no effect was demonstrated", the other is
+        # "nothing could have been demonstrated".
+        out["separation_attainable"] = self.separation_attainable()
+        out["min_trials_for_separation"] = MIN_TRIALS_FOR_SEPARATION
+        if not out["separation_attainable"]:
+            out["caveat"] = (
+                f"{len(self.trials)} trial(s): separation is not attainable "
+                f"below {MIN_TRIALS_FOR_SEPARATION}. Even a perfect intervened "
+                "arm against a perfect null control produces overlapping "
+                "Wilson intervals at this sample size, so the verdict "
+                "describes the sample and not the intervention. Add prompts."
+            )
         return out
+
+    def separation_attainable(self) -> bool:
+        """Could ANY outcome at this trial count separate the intervals?
+
+        The best case is every intervened trial a hit and every control trial a
+        miss. If those intervals still overlap, the experiment cannot produce a
+        positive result, and reporting its null as a finding about the
+        direction is a category error.
+
+        Verified numerically: attainable from four trials, never below.
+        """
+        n = len(self.trials)
+        if n == 0:
+            return False
+        best_low, _ = wilson_interval(n, n)
+        _, best_high = wilson_interval(0, n)
+        return best_low > best_high
 
     def separated_from_control(self) -> bool:
         """Whether the intervened and control top-1 intervals are disjoint.

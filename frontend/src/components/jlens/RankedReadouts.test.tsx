@@ -122,6 +122,15 @@ describe('RankedReadouts', () => {
       />,
     );
     expect(screen.getByText(/Showing the top 60 of 80 tokens/)).toBeInTheDocument();
+    // AND THE CAP IS ACTUALLY APPLIED. Pinning only the message let the cap be
+    // deleted while the caption kept claiming it had been applied — the
+    // O(tokens x layers) blowup returns and the line becomes a false
+    // statement, with the suite green.
+    //
+    // MUTATION CONTROL: render `rows` instead of `rows.slice(0, MAX_ROWS)` and
+    // this fails at 80.
+    const col = screen.getByTestId('ranked-JACOBIAN_LENS');
+    expect(within(col).getAllByRole('listitem')).toHaveLength(60);
   });
 
   it('counts only the SELECTED range', () => {
@@ -130,6 +139,56 @@ describe('RankedReadouts', () => {
     // At L10 only 'cat' appears; 'dog' lives at L8 and L9.
     expect(within(col).getByText('cat')).toBeInTheDocument();
     expect(within(col).queryByText('dog')).not.toBeInTheDocument();
+  });
+
+  it('states the NARROWED span, not the full axis, beside those counts', () => {
+    /**
+     * The counts honoured the range and the stated denominator did not, so a
+     * count over one layer was printed beside "over 3 layers, L8–L10" — three
+     * times too large, in a component whose own header insists a count is
+     * meaningless without its denominator. It also lit LayerStrip bars for
+     * layers excluded from the count.
+     *
+     * The two tests that touch this could not catch it between them: the one
+     * above asserts tokens and never the span, and the span test runs with
+     * `range: null`, where the filtered and unfiltered axes coincide — a
+     * fixture agreeing by construction.
+     *
+     * MUTATION CONTROL: pass `axis` instead of `layersInRange(axis, range)` and
+     * this fails.
+     */
+    render(<RankedReadouts {...base({ range: [10, 10] })} />);
+    const span = screen.getByTestId('ranked-span-JACOBIAN_LENS');
+    expect(span).toHaveTextContent('L10');
+    expect(span).not.toHaveTextContent('3 layers');
+  });
+
+  it('renders the token the SAME WAY the rest of the panel does', () => {
+    /**
+     * The grid, the rail and the pin chips all map a leading space to `·`
+     * (`displayToken`, "make whitespace visible without changing the token's
+     * identity"). This column rendered the raw string, so ' Paris' and 'Paris'
+     * — different unembedding rows, different counts — appeared as two adjacent
+     * identical rows. A user clicking Steer on one of them could not tell which
+     * direction they were about to act along.
+     *
+     * MUTATION CONTROL: render `{r.token}` instead of `{displayToken(r.token)}`
+     * and this fails.
+     */
+    const tokens = [tok(0, { JACOBIAN_LENS: [[' Paris', 'Paris']] })];
+    render(
+      <RankedReadouts
+        {...base({ axes: { JACOBIAN_LENS: [8] }, tokens, types: ['JACOBIAN_LENS'] })}
+      />,
+    );
+    const col = screen.getByTestId('ranked-JACOBIAN_LENS');
+    // THE TWO ARE DISTINGUISHABLE ON SCREEN. Asserting the middot alone would
+    // pass against a column that rendered both raw, since 'Paris' is a
+    // substring of ' Paris'.
+    expect(within(col).getByText('\u00b7Paris')).toBeInTheDocument();
+    expect(within(col).getByText('Paris')).toBeInTheDocument();
+    // And the raw form stays available for anyone who needs the exact bytes.
+    expect(within(col).getByTitle('" Paris"')).toBeInTheDocument();
   });
 
   it('says how many non-words it hid rather than hiding them silently', () => {
@@ -154,7 +213,10 @@ describe('RankedReadouts', () => {
     render(<RankedReadouts {...base({ onSteer, types: ['JACOBIAN_LENS'] })} />);
     const col = screen.getByTestId('ranked-JACOBIAN_LENS');
     await userEvent.click(within(col).getAllByTitle(/Steer along dog/)[0]);
-    expect(onSteer).toHaveBeenCalledWith('dog', [8, 9]);
+    // THE COLUMN'S LENS TYPE TRAVELS WITH THE CLICK. Without it the caller
+    // cannot tell which lens surfaced the token, and a logit-lens token was
+    // crediting the Jacobian artifact for a finding it played no part in.
+    expect(onSteer).toHaveBeenCalledWith('dog', [8, 9], 'JACOBIAN_LENS');
   });
 
   it('Swap is disabled WITH A STATED REASON, PER TOKEN', async () => {
@@ -190,7 +252,10 @@ describe('RankedReadouts', () => {
     render(<RankedReadouts {...base({ onSwap, types: ['JACOBIAN_LENS'] })} />);
     const col = screen.getByTestId('ranked-JACOBIAN_LENS');
     await userEvent.click(within(col).getAllByTitle(/Swap dog/)[0]);
-    expect(onSwap).toHaveBeenCalledWith('dog', [8, 9]);
+    // THE COLUMN'S LENS TYPE TRAVELS WITH THE CLICK. Without it the caller
+    // cannot tell which lens surfaced the token, and a logit-lens token was
+    // crediting the Jacobian artifact for a finding it played no part in.
+    expect(onSwap).toHaveBeenCalledWith('dog', [8, 9], 'JACOBIAN_LENS');
   });
 
   it('blocks ONLY the token that has no partner', async () => {
