@@ -493,3 +493,80 @@ class TestRoutesExist:
             "/jlens/reports/replication",
         ):
             assert any(expected in p for p in paths), f"{expected} is not routed"
+
+class TestTheToolSAYSWhatAnAgentCannotOtherwiseKnow:
+    """A description is the only documentation an agent ever reads.
+
+    These are not style assertions. Each names a rule an agent CANNOT infer from
+    the schema and gets wrong by default — and each was wrong or absent in the
+    tool while being correct in the code, which is the worst of both: the
+    behaviour is right and the caller is misled about it.
+
+    MUTATION CONTROLS:
+      * revert `artifact_id` to "Act in JACOBIAN lens space" -> "provenance" fails
+      * drop the four-trial threshold from `prompts`         -> "threshold" fails
+      * describe `strength` as a bare "Additive scale"       -> "units" fails
+    """
+
+    @staticmethod
+    def _schema(monkeypatch):
+        """The LIVE tool schema, as an MCP client receives it.
+
+        FROM `build_server`, not from the function's own annotations: what an
+        agent reads is what the registered tool advertises, and this file exists
+        because those two came apart once already.
+        """
+        from src.mcp_server.config import MCPSettings
+        from src.mcp_server.server import build_server
+
+        monkeypatch.setenv("MILLM_API_URL", "http://millm.test")
+        settings = MCPSettings(tool_categories="jlens", allow_anonymous=True)
+        mcp, _client = build_server(settings, stdio=True)
+        tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
+        tool = tools.get("run_jlens_intervention")
+        assert tool is not None, sorted(tools)
+        return tool.inputSchema["properties"]
+
+    def test_artifact_id_is_described_as_PROVENANCE_not_a_different_measurement(
+        self, monkeypatch
+    ):
+        """It said "Act in JACOBIAN lens space instead of the residual stream".
+
+        The perturbation is ALWAYS in the residual stream inside the running
+        model — the worker says so itself ("RESOLVED FOR PROVENANCE AND
+        VALIDATION, not for measurement"). An agent believing the old text would
+        name an artifact expecting a different experiment, and would file a
+        rung-2 record against a lens that played no part in it.
+        """
+        text = self._schema(monkeypatch)["artifact_id"]["description"]
+        assert "PROVENANCE" in text
+        assert "lens space instead of the residual stream" not in text
+
+    def test_prompts_states_the_FOUR_TRIAL_threshold(self, monkeypatch):
+        """"Tens of prompts is the useful scale" is advice. Four is arithmetic.
+
+        Below it NO outcome separates, so an agent running one prompt gets
+        `separated_from_control: false` and reads it as a fact about the
+        direction. The threshold and the field that reports it both belong here.
+        """
+        text = self._schema(monkeypatch)["prompts"]["description"]
+        assert "FOUR TRIALS" in text
+        assert "separation_attainable" in text
+
+    def test_strength_states_its_UNITS_and_where_it_is_ignored(self, monkeypatch):
+        """It said "Additive scale", which is true of the old convention too.
+
+        The direction is unit-norm now, so the number is an absolute
+        displacement and comparable across tokens; it was not before. And an
+        ablation and a swap ignore it entirely, which an agent sweeping strength
+        over a swap has no way to discover except by getting identical results.
+        """
+        text = self._schema(monkeypatch)["strength"]["description"]
+        assert "unit norm" in text
+        assert "IGNORED" in text
+
+    def test_layers_warns_about_REPEATS_and_the_budget(self, monkeypatch):
+        text = self._schema(monkeypatch)["layers"]["description"]
+        assert "DISTINCT" in text
+        assert "over_layer_budget" in text
+

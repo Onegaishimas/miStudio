@@ -257,16 +257,16 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         model_id: Annotated[str, Field(description="miStudio model id")],
         prompt: Annotated[str, Field(description="Text to intervene on")],
         primitive: Annotated[str, Field(description="additive (steer along a direction) | projective_ablation (remove a direction's component) | coordinate_swap (EXCHANGE two tokens' coordinates; needs target_token). dynamic_topk_ablation is REFUSED — it needs lens coordinates this path does not compute, and it used to run an additive steer under its own name")],
-        layers: Annotated[List[int], Field(description="Absolute layer indices to act at")],
+        layers: Annotated[List[int], Field(description="Absolute layer indices to act at. DISTINCT — a repeat registers a second hook that perturbs the output of the first, so [9,9,9] at strength 1.0 applies 3.0 while the recorded recipe still says 1.0. Above a quarter of the stack the result carries `over_layer_budget`: swaps and steers oversteer easily at that width on small models (BR-017 v0.2). It is a warning, not a refusal — a deliberate whole-stack intervention is a legitimate experiment")],
         control_seed: Annotated[int, Field(description="REQUIRED in practice. 'A random direction' is not a control; 'k random directions from seed s' is, and a control nobody can reconstruct is not one")],
-        prompts: Annotated[Optional[List[str]], Field(description="MORE PROMPTS, one TRIAL each. The result is a FRACTION of trials with a Wilson 95% interval; a single prompt yields an interval spanning nearly the whole range, which is the honest rendering of one observation but rarely a finding. Tens of prompts is the useful scale")] = None,
+        prompts: Annotated[Optional[List[str]], Field(description="MORE PROMPTS, one TRIAL each. BELOW FOUR TRIALS NO OUTCOME SEPARATES: a perfect intervened arm against a perfect null control still produces overlapping Wilson intervals, so a run this small can only report `separated_from_control: false` and that says nothing about the direction. The result carries `separation_attainable` and `min_trials_for_separation` so you can tell the two apart. Tens of prompts is the useful scale")] = None,
         target_token: Annotated[Optional[str], Field(description="The token whose RANK is scored in the model's output. Defaults to direction_token. REQUIRED and must DIFFER for coordinate_swap: a swap exchanges two coordinates, and one token would be an additive steer wearing a swap's name")] = None,
         direction: Annotated[Optional[List[float]], Field(description="Explicit d_model vector to act along")] = None,
         direction_token: Annotated[Optional[str], Field(description="Resolve the direction from a SINGLE token's unembedding row instead of passing d_model floats. Multi-token strings are REFUSED rather than truncated — a lens direction is defined for one token")] = None,
-        strength: Annotated[float, Field(description="Additive scale")] = 1.0,
+        strength: Annotated[float, Field(description="How far to move the residual, in ABSOLUTE units: the direction is scaled to unit norm at the point of use, so the same number means the same displacement for every token. It did not before — a raw unembedding row carries the token's own norm, which varies several-fold, so a sweep on two tokens was two different experiments wearing the same numbers, and the unit-norm control was not matched to it. IGNORED by projective_ablation and coordinate_swap, which take no strength; the result reports null for those rather than echoing your value")] = 1.0,
         k: Annotated[int, Field(description="Control size, matched to the intervention")] = 1,
         positions: Annotated[Optional[List[int]], Field(description="Token positions; defaults to the last")] = None,
-        artifact_id: Annotated[Optional[str], Field(description="Act in JACOBIAN lens space instead of the residual stream")] = None,
+        artifact_id: Annotated[Optional[str], Field(description="PROVENANCE, NOT A DIFFERENT MEASUREMENT. The perturbation always happens in the residual stream inside the running model; naming an artifact runs its publish gate (so an unvalidated lens cannot justify a finding) and FILES the result beside that lens in interventions.json, where it travels to HuggingFace and into a serving runtime. Name it only when the direction came from that lens — crediting it for a finding it played no part in is what the file exists to prevent")] = None,
     ) -> Any:
         """Run an intervention AND its size-matched control in one pass.
 
@@ -290,6 +290,20 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         to be DISJOINT — a bigger rate is not a finding, and 6/10 against 5/10
         is noise. The baseline arm matters as much: an intervention that
         "achieves" what the model already did has moved nothing.
+
+        CHECK `separation_attainable` BEFORE READING A NULL. It is false when no
+        outcome at that trial count COULD have separated the intervals — below
+        four trials, always. The two readings are opposite: `false` with
+        `separation_attainable: true` means no effect was demonstrated; `false`
+        with `separation_attainable: false` means nothing could have been, and
+        the answer is more prompts rather than a different direction.
+
+        THE CONTROL IS NORM-MATCHED BY CONSTRUCTION. Both arms move the residual
+        the same distance, because the named direction is scaled to unit norm
+        and the control directions already are. Records carrying
+        `direction_scaling: "unit"` were produced under that rule; older ones
+        without it were not, and their `strength` was multiplied by an
+        unembedding row norm that nobody wrote down.
 
         WHEN AN ARTIFACT IS NAMED the result is recorded beside the lens in
         `interventions.json`, with the steering recipe that produced it, so the
