@@ -186,6 +186,7 @@ export function JLensPanel() {
   );
   const [hideNonWords, setHideNonWords] = useState(true);
   const [interventionNote, setInterventionNote] = useState<string | null>(null);
+  const [interventionBusy, setInterventionBusy] = useState(false);
 
   /**
    * Launch an intervention from the token the reader is looking at.
@@ -224,10 +225,21 @@ export function JLensPanel() {
           `${label} done over ${r.n_trials ?? '?'} trial(s): intervened ` +
             `${fmtRate(r.intervened_top1)} vs control ${fmtRate(r.control_top1)}` +
             ` (baseline ${fmtRate(r.baseline_top1)}). ` +
-            (sep
-              ? 'The intervals are disjoint.'
-              : 'The intervals OVERLAP — no effect was demonstrated here, ' +
-                'which is not the same as none existing.'),
+            // THREE STATES, NOT TWO. `separation_attainable` is false when no
+            // outcome at this trial count could have separated the intervals
+            // — below four trials a perfect intervened arm against a perfect
+            // null control still overlaps. Rendering that as "no effect was
+            // demonstrated" reported a fact about the sample size as a finding
+            // about the direction, and since both UI paths send ONE prompt it
+            // was the only verdict either could ever produce.
+            (r.separation_attainable === false
+              ? `Only ${r.n_trials ?? 1} trial — separation is not attainable ` +
+                `below ${r.min_trials_for_separation ?? 4}. This says nothing ` +
+                'about the direction yet; use Intervene… to add prompts.'
+              : sep
+                ? 'The intervals are disjoint.'
+                : 'The intervals OVERLAP — no effect was demonstrated here, ' +
+                  'which is not the same as none existing.'),
         );
         return;
       }
@@ -235,13 +247,65 @@ export function JLensPanel() {
     setInterventionNote(`${label} is still running; check Active Operations.`);
   };
 
+  /**
+   * Who a swap would exchange `token` with.
+   *
+   * ONE DEFINITION, used by both the request and the button that offers it.
+   * When the two disagreed the tooltip described one experiment and the run
+   * performed another.
+   */
+  const swapPartnerFor = (token: string) => pinned.find((t) => t !== token);
+
+  /**
+   * How many of a token's layers to actually hook.
+   *
+   * A RANKED-LIST CLICK PASSES EVERY LAYER THE TOKEN APPEARED AT. On gemma-2-2b
+   * a common token like ' the' is in the top-k at all 26, so one click hooked
+   * the whole stack at strength 1 — guaranteed oversteering, and precisely what
+   * BR-017 v0.2 warns about for small models ("swaps oversteer easily and
+   * require selecting FEWER layers"). `default_swap_layers` derives the budget
+   * as a quarter of the stack; it existed with no production caller until now.
+   *
+   * The layers kept are the DEEPEST in the token's set: shallow hits are mostly
+   * the junk bands the non-word filter is there to declutter, and the readout
+   * that motivated the click is the one nearer the output.
+   */
+  const interventionLayers = (layers: number[]) => {
+    const stack = fullSpan
+      ? fullSpan[1] - fullSpan[0] + 1
+      : Object.values(meta?.layers_by_type ?? {}).flat().length;
+    const budget = Math.max(1, Math.floor((stack || layers.length) / 4));
+    if (layers.length <= budget) return layers;
+    return [...layers].sort((a, b) => a - b).slice(-budget);
+  };
+
   const runIntervention = async (
     primitive: 'additive' | 'coordinate_swap',
     token: string,
     layers: number[],
+    /**
+     * Which column the token was clicked in.
+     *
+     * ONLY A JACOBIAN CLICK CREDITS THE JACOBIAN ARTIFACT. The perturbation is
+     * the same either way — it happens in activation space, inside the model —
+     * so `artifact_id` is provenance, not measurement. Sending it for a
+     * logit-lens token filed an `evidence_rung: 2` record under
+     * `lens_type: JACOBIAN_LENS` into the artifact's `interventions.json`, the
+     * file that travels to HuggingFace and into a serving runtime, describing
+     * a finding the Jacobian played no part in.
+     */
+    lensType?: string,
   ) => {
+    // ONE AT A TIME. Every click is a GPU job on a single-GPU queue, and there
+    // is one status line for all of them: eight clicks down the ranked list
+    // queued eight jobs whose notes then overwrote each other, so a failure
+    // could be replaced by a later success and the panel would report a
+    // completed run that had been refused.
+    if (interventionBusy) return;
+    setInterventionBusy(true);
     setInterventionNote(null);
     try {
+      const targeted = interventionLayers(layers);
       const accepted = await jlensApi.intervene({
         model_id: modelId,
         // THE PROMPT THAT WAS READ OUT, not the draft in the box: the readout on
@@ -249,18 +313,19 @@ export function JLensPanel() {
         // scores a different forward pass than the one being looked at.
         prompt: readoutPrompt || prompt,
         primitive,
-        layers,
+        layers: targeted,
         direction_token: token,
         // A swap EXCHANGES two coordinates, so a partner is required and must
         // differ. The first pinned token that is not this one supplies it.
         target_token:
-          primitive === 'coordinate_swap'
-            ? pinned.find((t) => t !== token)
-            : undefined,
+          primitive === 'coordinate_swap' ? swapPartnerFor(token) : undefined,
         strength: 1,
         k: 4,
         control_seed: 20260809,
-        artifact_id: hasArtifact ? artifactSlugFor(modelRepoId) : undefined,
+        artifact_id:
+          hasArtifact && lensType === 'JACOBIAN_LENS'
+            ? artifactSlugFor(modelRepoId)
+            : undefined,
       });
       const label = primitive === 'coordinate_swap' ? 'Swap' : 'Steer';
       setInterventionNote(`${label} queued as ${accepted.task_id.slice(0, 8)}…`);
@@ -268,11 +333,14 @@ export function JLensPanel() {
       // success and failure indistinguishable: the row appears in Running Work
       // and then vanishes, and a refusal on the GPU looked exactly like a
       // finished run.
-      void pollIntervention(accepted.task_id, label);
+      void pollIntervention(accepted.task_id, label).finally(() =>
+        setInterventionBusy(false),
+      );
     } catch (err) {
       setInterventionNote(
         err instanceof Error ? err.message : 'The intervention was refused.',
       );
+      setInterventionBusy(false);
     }
   };
 
@@ -561,8 +629,9 @@ export function JLensPanel() {
           range={layerRange}
           hideNonWords={hideNonWords}
           onToggleNonWords={setHideNonWords}
-          onSteer={(t, l) => void runIntervention('additive', t, l)}
-          onSwap={(t, l) => void runIntervention('coordinate_swap', t, l)}
+          onSteer={(t, l, ty) => void runIntervention('additive', t, l, ty)}
+          onSwap={(t, l, ty) => void runIntervention('coordinate_swap', t, l, ty)}
+          swapPartnerFor={swapPartnerFor}
           swapDisabledFor={(token) =>
             // PER TOKEN. A swap needs a DIFFERENT token to exchange with, so
             // "something is pinned" is not the condition — with one token

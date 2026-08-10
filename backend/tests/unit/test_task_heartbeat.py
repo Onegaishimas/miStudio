@@ -789,18 +789,72 @@ class TestATaskOwnsItsOwnFailure:
     def test_every_jspace_task_is_decorated(self):
         """A task added later inherits this by construction, not by memory.
 
-        MUTATION CONTROL: drop the decorator from any one of them and this fails
-        by name.
-        """
-        import pathlib
-        import re
+        FROM THE LIVE REGISTRY, NOT FROM SOURCE. The first version of this
+        scraped the files with a regex that allowed at most one decorator line
+        between `@celery_app.task(...)` and `def`. A task carrying any second
+        decorator matched NOTHING, so it never entered the list this assertion
+        checks — the scan failed OPEN and the undecorated task shipped green.
+        That is the failure mode this whole class exists to prevent, reproduced
+        in its own guard.
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "src" / "workers"
-        missing = []
-        for path in sorted(root.glob("jlens_*_tasks.py")):
-            src = path.read_text()
-            tasks = re.findall(r"@celery_app\.task\((?:[^()]|\([^()]*\))*\)\n(@\w[\w.]*\n)?def (\w+)", src)
-            for decorator, name in tasks:
-                if "owns_its_failure" not in (decorator or ""):
-                    missing.append(f"{path.name}::{name}")
-        assert not missing, f"these tasks do not record their own failure: {missing}"
+        `celery_app.tasks` is what the worker will actually dispatch, and
+        `__wrapped__` is what `functools.wraps` leaves behind, so neither can be
+        fooled by how the decorators are laid out.
+
+        MUTATION CONTROL: drop @owns_its_failure from any J-Space task and this
+        fails, naming it.
+        """
+        import importlib
+        import pathlib as _pathlib
+
+        from src.core.celery_app import celery_app
+        from src.workers.jlens_progress import OWNERSHIP_MARKER
+
+        root = _pathlib.Path(__file__).resolve().parents[2] / "src" / "workers"
+        modules = sorted(p.stem for p in root.glob("jlens_*_tasks.py"))
+        assert modules, "no J-Space task modules found; the glob is wrong"
+        for name in modules:
+            importlib.import_module(f"src.workers.{name}")
+
+        registered = {
+            name: task
+            for name, task in celery_app.tasks.items()
+            if any(name.startswith(f"{m.replace('_tasks', '')}") for m in modules)
+            or "jlens" in name
+        }
+        assert registered, "no J-Space tasks are registered with Celery at all"
+
+        missing = [
+            name
+            for name, task in sorted(registered.items())
+            if not getattr(task.run, OWNERSHIP_MARKER, False)
+        ]
+        assert not missing, (
+            f"these registered J-Space tasks do not record their own failure: "
+            f"{missing}. A task that dies after its first progress report "
+            f"leaves a 'running' row the janitor will never close."
+        )
+
+    def test_the_guard_can_SEE_a_task_that_carries_other_decorators(self):
+        """The regex it replaced could not, and said everything was fine.
+
+        MUTATION CONTROL: revert the check to a source scrape and this fails.
+        """
+        import functools
+
+        from src.workers.jlens_progress import OWNERSHIP_MARKER, owns_its_failure
+
+        def extra(fn):
+            @functools.wraps(fn)
+            def w(*a, **k):
+                return fn(*a, **k)
+
+            return w
+
+        # DECORATED, then wrapped by something else — the layout the scrape
+        # missed. `functools.wraps` copies __dict__, so the marker survives.
+        decorated = extra(owns_its_failure(lambda self: None))
+        assert getattr(decorated, OWNERSHIP_MARKER, False) is True
+
+        # And an undecorated one is still seen as undecorated.
+        assert getattr(extra(lambda self: None), OWNERSHIP_MARKER, False) is False

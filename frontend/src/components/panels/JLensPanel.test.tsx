@@ -86,6 +86,7 @@ vi.mock('recharts', async () => {
 });
 
 import { jlensApi } from '../../api/jlens';
+import { getTaskStatus } from '../../api/models';
 import { useModelsStore } from '../../stores/modelsStore';
 
 const MODELS = [
@@ -1214,7 +1215,7 @@ describe('JLensPanel — ranked readouts and interventions', () => {
         kind: 'meta',
         model: 'org/m',
         types: ['LOGIT_LENS'],
-        layers_by_type: { LOGIT_LENS: [0, 1, 2, 3] },
+        layers_by_type: { LOGIT_LENS: [0, 1, 2, 3, 4, 5, 6, 7] },
         top_n: 1,
         prompt_len: 1,
       },
@@ -1229,8 +1230,32 @@ describe('JLensPanel — ranked readouts and interventions', () => {
             {
               type: 'LOGIT_LENS',
               // dog at L0 and L2 only; cat and pet fill the rest.
-              top_tokens: [['dog'], ['cat'], ['dog'], ['pet']],
-              top_probs: [[0.9], [0.9], [0.9], [0.9]],
+              //
+              // EIGHT LAYERS, so the layer BUDGET (a quarter of the stack, so
+              // two here) does not itself reduce the answer and confound what
+              // this test measures. Handing over the whole axis would send the
+              // deepest two of it, [6, 7] \u2014 still distinguishable from the
+              // token's own [0, 2], which is the property being pinned.
+              top_tokens: [
+                ['dog'],
+                ['cat'],
+                ['dog'],
+                ['pet'],
+                ['cat'],
+                ['pet'],
+                ['cat'],
+                ['pet'],
+              ],
+              top_probs: [
+                [0.9],
+                [0.9],
+                [0.9],
+                [0.9],
+                [0.9],
+                [0.9],
+                [0.9],
+                [0.9],
+              ],
             },
           ],
         },
@@ -1271,4 +1296,295 @@ describe('JLensPanel — ranked readouts and interventions', () => {
     expect(swaps.length).toBeGreaterThan(0);
     for (const b of swaps) expect(b).toBeDisabled();
   });
+  it('CAPS how many layers one click hooks, at a quarter of the stack', async () => {
+    /**
+     * A ranked-list click passes every layer the token appeared at. On
+     * gemma-2-2b a common token is in the top-k at ALL 26, so one click hooked
+     * the whole stack at strength 1 \u2014 guaranteed oversteering, and exactly
+     * what BR-017 v0.2 warns about for small models. `default_swap_layers`
+     * derived the budget as a quarter of the stack and had NO production
+     * caller until this.
+     *
+     * The DEEPEST are kept: the shallow hits are mostly the junk bands the
+     * non-word filter exists to declutter.
+     *
+     * MUTATION CONTROL: pass `layers` through unbudgeted and this fails with
+     * all eight.
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-5',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    render(<JLensPanel />);
+    // 'ubiquitous' at EVERY layer of an eight-layer stack \u2014 the shape that
+    // caused the oversteer.
+    seed({
+      meta: {
+        kind: 'meta',
+        model: 'org/m',
+        types: ['LOGIT_LENS'],
+        layers_by_type: { LOGIT_LENS: [0, 1, 2, 3, 4, 5, 6, 7] },
+        top_n: 1,
+        prompt_len: 1,
+      },
+      tokens: [
+        {
+          kind: 'token',
+          position: 0,
+          token: 'x',
+          id: 1,
+          is_generated: false,
+          results: [
+            {
+              type: 'LOGIT_LENS',
+              top_tokens: Array.from({ length: 8 }, () => ['ubiquitous']),
+              top_probs: Array.from({ length: 8 }, () => [0.9]),
+            },
+          ],
+        },
+      ],
+    } as unknown as ReadoutResponse);
+
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+    await user.click(screen.getByTitle('Steer along ubiquitous'));
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.layers).toEqual([6, 7]);
+  });
+
+  /**
+   * Set up a panel showing BOTH columns with a real artifact mounted.
+   *
+   * `listArtifacts` is mocked BEFORE render because the panel loads artifacts
+   * on mount and again when the model changes; a `setState` is overwritten by
+   * that load a tick later, and then `hasArtifact` is false and BOTH branches
+   * return undefined for the same reason. Two drafts of this test died there.
+   */
+  async function panelWithArtifact() {
+    (jlensApi.listArtifacts as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { slug: 'm', directory: '/d', lens_file: 'm.pt', size_bytes: 1 },
+    ]);
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-6',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['JACOBIAN_LENS', 'LOGIT_LENS'], 4));
+    act(() => {
+      useJLensStore.setState({ modelRepoId: 'org/m' });
+    });
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+    await waitFor(() =>
+      expect(useJLensStore.getState().artifacts).toHaveLength(1)
+    );
+  }
+
+  async function steerFrom(testId: string) {
+    const user = userEvent.setup();
+    const column = screen.getByTestId(testId);
+    await user.click(within(column).getAllByRole('button', { name: /Steer/ })[0]);
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    return (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  }
+
+  it('CREDITS the artifact when the click came from the Jacobian column', async () => {
+    /**
+     * The precondition for the test below. Without it that one is vacuous the
+     * moment anything stops sending an artifact_id at all.
+     */
+    await panelWithArtifact();
+    expect((await steerFrom('ranked-JACOBIAN_LENS')).artifact_id).toBe('m');
+  });
+
+  it('does NOT credit it when the click came from the logit column', async () => {
+    /**
+     * `artifact_id` is provenance, not measurement — the perturbation happens
+     * in activation space either way. Sending it for a LOGIT-lens token, which
+     * needs no artifact at all, filed an `evidence_rung: 2` record under
+     * `lens_type: JACOBIAN_LENS` into the artifact's `interventions.json`: the
+     * file built to travel to HuggingFace and into a serving runtime,
+     * describing a finding the Jacobian played no part in.
+     *
+     * SEPARATE TEST, ONE CLICK EACH. Both clicks in one body cannot work: the
+     * second is refused by the in-flight guard until the first run polls to a
+     * terminal state.
+     *
+     * MUTATION CONTROL: send `artifact_id` unconditionally and this fails.
+     */
+    await panelWithArtifact();
+    expect((await steerFrom('ranked-LOGIT_LENS')).artifact_id).toBeUndefined();
+  });
+
+  it('MOUNTS the layer-range picker \u2014 the only way a range is ever set', async () => {
+    /**
+     * REACHABILITY, not existence. `LayerRangePicker.test.tsx` renders the
+     * component itself and `jlensStore.range.test.ts` calls `setState`
+     * directly, so removing the element from this panel left BOTH green while
+     * no user could set a range at all. That is the shape of the 16 MCP tools
+     * that were fully implemented, fully tested and never registered.
+     *
+     * MUTATION CONTROL: change the panel\u2019s `all.length ? (` guard to
+     * `false && all.length ? (` and this fails.
+     */
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() =>
+      expect(screen.getByTestId('jlens-layer-range')).toBeInTheDocument()
+    );
+    // AND ITS BOUNDS COME FROM THE AXIS, so a picker that mounted with the
+    // wrong span would not pass either.
+    const picker = screen.getByTestId('jlens-layer-range');
+    expect(within(picker).getByText(/of 0\u20132/)).toBeInTheDocument();
+  });
+
+  it('sends the SWAP PARTNER, and names it on the button', async () => {
+    /**
+     * The partner is half the experiment: it supplies the second coordinate
+     * AND it is the token whose rank gets scored. Nothing exercised the
+     * enabled swap path, so stripping `target_token` from the payload left the
+     * suite green while every swap would be 422\u2019d by the backend
+     * validator added in this same arc.
+     *
+     * MUTATION CONTROLS:
+     *   * `target_token: undefined` on the swap path -> "sends" fails
+     *   * drop `swapPartnerFor` from RankedReadouts   -> "names it" fails
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-2',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+
+    // Pin a token so a partner exists. The pin chips carry the display form.
+    act(() => {
+      useJLensStore.setState({ pinned: ['France'] });
+    });
+
+    const column = screen.getByTestId('ranked-LOGIT_LENS');
+    const swap = within(column)
+      .getAllByRole('button', { name: /Swap/ })
+      .find((b) => !(b as HTMLButtonElement).disabled);
+    expect(swap, 'no enabled Swap button once a token was pinned').toBeTruthy();
+    // NAMED ON THE CONTROL, not merely sent. Re-pinning in a different order
+    // runs a different experiment under an identical-looking click.
+    expect(swap!.textContent).toMatch(/France/);
+
+    await user.click(swap!);
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.primitive).toBe('coordinate_swap');
+    expect(sent.target_token).toBe('France');
+    expect(sent.direction_token).not.toBe('France');
+    // THE REST OF THE PAYLOAD TOO. "was called" passes against a call sending
+    // the wrong arguments.
+    expect(sent.k).toBe(4);
+    expect(sent.strength).toBe(1);
+  });
+
+  it('reports OVERLAP as overlap and DISJOINT as disjoint', async () => {
+    /**
+     * `pollIntervention` had no coverage at all: `getTaskStatus` was mocked
+     * only to stop the poller hanging, and nothing asserted the note. The
+     * verdict could be inverted \u2014 telling the reader "the intervals are
+     * disjoint" for a run whose intervals overlap \u2014 with the suite green.
+     * That is a false causal claim, which is the one thing this string exists
+     * to prevent.
+     *
+     * MUTATION CONTROL: negate the `sep` branch and this fails.
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-3',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    // FOUR TRIALS, so separation is arithmetically attainable and the branch
+    // under test is reachable. At n<4 no outcome separates and the panel takes
+    // the not-attainable branch instead \u2014 which is what both UI paths
+    // actually did, and why this needed saying.
+    (getTaskStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-3',
+      state: 'SUCCESS',
+      result: {
+        n_trials: 4,
+        separation_attainable: true,
+        separated_from_control: false,
+        intervened_top1: { hits: 2, n: 4, rate: 0.5, ci95_low: 0.15, ci95_high: 0.85 },
+        control_top1: { hits: 1, n: 4, rate: 0.25, ci95_low: 0.05, ci95_high: 0.7 },
+        baseline_top1: { hits: 0, n: 4, rate: 0, ci95_low: 0, ci95_high: 0.49 },
+      },
+    });
+
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+    const column = screen.getByTestId('ranked-LOGIT_LENS');
+    await user.click(within(column).getAllByRole('button', { name: /Steer/ })[0]);
+
+    await waitFor(
+      () => expect(screen.getByText(/OVERLAP/)).toBeInTheDocument(),
+      { timeout: 8000 }
+    );
+    expect(screen.queryByText(/are disjoint/)).toBeNull();
+  }, 15000);
+
+  it('says a SINGLE TRIAL cannot separate, rather than reporting no effect', async () => {
+    /**
+     * Below four trials a PERFECT intervened arm against a PERFECT null
+     * control still overlaps \u2014 verified numerically in
+     * `MIN_TRIALS_FOR_SEPARATION`. Both UI paths send one prompt, so "no
+     * effect was demonstrated" was the only verdict either could ever produce,
+     * and it reported a fact about the sample size as a finding about the
+     * direction.
+     *
+     * MUTATION CONTROL: drop the `separation_attainable === false` branch and
+     * this fails, falling through to the OVERLAP wording.
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-4',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    (getTaskStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-4',
+      state: 'SUCCESS',
+      result: {
+        n_trials: 1,
+        separation_attainable: false,
+        min_trials_for_separation: 4,
+        separated_from_control: false,
+        intervened_top1: { hits: 1, n: 1, rate: 1, ci95_low: 0.2065, ci95_high: 1 },
+        control_top1: { hits: 0, n: 1, rate: 0, ci95_low: 0, ci95_high: 0.7935 },
+        baseline_top1: { hits: 0, n: 1, rate: 0, ci95_low: 0, ci95_high: 0.7935 },
+      },
+    });
+
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+    const column = screen.getByTestId('ranked-LOGIT_LENS');
+    await user.click(within(column).getAllByRole('button', { name: /Steer/ })[0]);
+
+    await waitFor(
+      () => expect(screen.getByText(/not attainable/)).toBeInTheDocument(),
+      { timeout: 8000 }
+    );
+    // AND IT MUST NOT ALSO SAY "no effect was demonstrated" \u2014 the whole
+    // point is that the two readings are opposite.
+    expect(screen.queryByText(/no effect was demonstrated/)).toBeNull();
+  }, 15000);
 });

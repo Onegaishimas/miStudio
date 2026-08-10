@@ -22,6 +22,7 @@ import {
   layersInRange,
   type RankedToken,
 } from './aggregate';
+import { displayToken } from './utils';
 
 interface RankedReadoutsProps {
   tokens: LensTokenMessage[];
@@ -32,10 +33,18 @@ interface RankedReadoutsProps {
   range: [number, number] | null;
   hideNonWords: boolean;
   onToggleNonWords: (next: boolean) => void;
-  /** Steer along this token. */
-  onSteer?: (token: string, layers: number[]) => void;
-  /** Exchange this token's coordinate with another. */
-  onSwap?: (token: string, layers: number[]) => void;
+  /**
+   * Steer along this token.
+   *
+   * The COLUMN's lens type travels with it. The two columns are two different
+   * lenses, and a token surfaced by the logit lens — which needs no artifact at
+   * all — was crediting the Jacobian artifact for a finding it played no part
+   * in, writing an `evidence_rung: 2` record into its `interventions.json`
+   * under `lens_type: JACOBIAN_LENS`.
+   */
+  onSteer?: (token: string, layers: number[], type: string) => void;
+  /** Exchange this token's coordinate with another. Carries its column too. */
+  onSwap?: (token: string, layers: number[], type: string) => void;
   /**
    * Why swap is unavailable FOR THIS TOKEN, or undefined when it is available.
    *
@@ -47,6 +56,16 @@ interface RankedReadoutsProps {
    * refused seconds later.
    */
   swapDisabledFor?: (token: string) => string | undefined;
+  /**
+   * WHO THIS TOKEN WOULD BE SWAPPED WITH.
+   *
+   * NAMED, not implied. The partner is half the experiment — it supplies the
+   * second coordinate and it is the token whose RANK gets scored — and it was
+   * chosen silently from pin order and never shown. Re-pinning in a different
+   * order ran a different experiment under an identical-looking click, and
+   * `interventions.json` recorded a `target_token` the user never saw.
+   */
+  swapPartnerFor?: (token: string) => string | undefined;
 }
 
 const LABELS: Record<string, string> = {
@@ -104,15 +123,17 @@ function Column({
   onSteer,
   onSwap,
   swapDisabledFor,
+  swapPartnerFor,
 }: {
   type: string;
   rows: RankedToken[];
   axis: number[];
   topN: number;
   hidden: number;
-  onSteer?: (token: string, layers: number[]) => void;
-  onSwap?: (token: string, layers: number[]) => void;
+  onSteer?: (token: string, layers: number[], type: string) => void;
+  onSwap?: (token: string, layers: number[], type: string) => void;
   swapDisabledFor?: (token: string) => string | undefined;
+  swapPartnerFor?: (token: string) => string | undefined;
 }) {
   return (
     <section
@@ -148,6 +169,7 @@ function Column({
         <ul className="max-h-80 space-y-[2px] overflow-y-auto">
           {rows.slice(0, MAX_ROWS).map((r) => {
             const swapBlocked = swapDisabledFor?.(r.token);
+            const partner = swapPartnerFor?.(r.token);
             return (
             <li
               key={r.token}
@@ -156,8 +178,19 @@ function Column({
               <span className="w-8 shrink-0 text-right font-mono text-[10px] tabular-nums text-slate-500 dark:text-slate-400">
                 {r.count}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-800 dark:text-slate-100">
-                {r.token}
+              {/* SAME RENDERING AS THE REST OF THE PANEL. The grid, the rail
+                  and the pin chips all map a leading space to `·`; this column
+                  did not, so ' Paris' and 'Paris' — different unembedding rows,
+                  different counts — appeared as two adjacent identical rows,
+                  in a component whose own header insists a count is meaningless
+                  without its denominator. Clicking Steer on one of them steered
+                  along a direction the user could not distinguish from the
+                  other. `title` carries the raw token for anyone who needs it. */}
+              <span
+                className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-800 dark:text-slate-100"
+                title={JSON.stringify(r.token)}
+              >
+                {displayToken(r.token)}
               </span>
               <LayerStrip layers={r.layers} axis={axis} />
               {/* REVEALED ON HOVER, not hidden behind a separate form. The
@@ -168,7 +201,7 @@ function Column({
               <span className="flex shrink-0 gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
                 <button
                   type="button"
-                  onClick={() => onSteer?.(r.token, r.layers)}
+                  onClick={() => onSteer?.(r.token, r.layers, type)}
                   title={`Steer along ${r.token}`}
                   className="inline-flex items-center gap-0.5 rounded border border-emerald-300 px-1 py-[1px] text-[9px] text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
                 >
@@ -177,13 +210,19 @@ function Column({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onSwap?.(r.token, r.layers)}
+                  onClick={() => onSwap?.(r.token, r.layers, type)}
                   disabled={Boolean(swapBlocked)}
-                  title={swapBlocked ?? `Swap ${r.token} with a pinned token`}
+                  title={
+                    swapBlocked ??
+                    (partner
+                      ? `Swap ${displayToken(r.token)} with ${displayToken(partner)} — ` +
+                        `${displayToken(partner)} is the token whose rank is scored`
+                      : `Swap ${displayToken(r.token)} with a pinned token`)
+                  }
                   className="inline-flex items-center gap-0.5 rounded border border-sky-300 px-1 py-[1px] text-[9px] text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-900/30"
                 >
                   <Repeat className="h-2.5 w-2.5" />
-                  Swap
+                  {partner ? `Swap ↔ ${displayToken(partner)}` : 'Swap'}
                 </button>
               </span>
             </li>
@@ -211,6 +250,7 @@ export function RankedReadouts({
   onSteer,
   onSwap,
   swapDisabledFor,
+  swapPartnerFor,
 }: RankedReadoutsProps) {
   const columns = useMemo(
     () =>
@@ -258,6 +298,7 @@ export function RankedReadouts({
             onSteer={onSteer}
             onSwap={onSwap}
             swapDisabledFor={swapDisabledFor}
+            swapPartnerFor={swapPartnerFor}
           />
         ))}
       </div>

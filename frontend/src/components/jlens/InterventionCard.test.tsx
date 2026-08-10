@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { InterventionCard } from './InterventionCard';
 
 vi.mock('../../api/jlens', () => ({ jlensApi: { intervene: vi.fn() } }));
@@ -83,6 +83,48 @@ describe('InterventionCard', () => {
     expect(
       screen.getByRole('button', { name: /intervene/i })
     ).toHaveAttribute('title', expect.stringMatching(/Pin a token first/));
+  });
+
+  it('shows the empty-list OPTION, not merely a disabled toggle', async () => {
+    /**
+     * The test above does NOT pin the branch its own comment claims. That
+     * `title` sits on the toggle, is pre-existing, and is untouched by the
+     * empty-select change — and with `pinned=[]` the toggle is disabled, so
+     * `open` stays false and the `<select>` is not in the DOM at all. Reverting
+     * the option branch left the suite green under a "MUTATION CONTROL" line
+     * saying it would not.
+     *
+     * Opened with a token pinned, then re-rendered empty, so the select is
+     * actually mounted when the assertion runs.
+     *
+     * MUTATION CONTROL: map over `pinned` unconditionally and this fails.
+     */
+    const { rerender } = render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[' Paris']}
+        layers={[1]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    rerender(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[]}
+        layers={[1]}
+        artifactId={null}
+      />
+    );
+    // SCOPED TO THE DIRECTION SELECT. The form carries a primitive select
+    // too, so an unscoped option query counts its members and passes for the
+    // wrong reason.
+    const direction = screen.getByRole('combobox', { name: /Direction/i });
+    const options = within(direction).getAllByRole('option');
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toMatch(/No pinned tokens/i);
   });
 
   it('intervenes on the PROMPT ON SCREEN, never an empty one', async () => {

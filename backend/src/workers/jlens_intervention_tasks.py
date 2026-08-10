@@ -6,17 +6,28 @@ UI — the four primitives, the control construction and the clamp were fully
 implemented and unit-tested while nothing in the product could run one. The
 suite was green because every test imported the module directly.
 
-THE CONTROL IS RUN HERE, NOT OPTIONALLY. `InterventionResult` takes
-`control_outcome` positionally with no default precisely so a caller who has not
-run the control cannot construct a result to report (BR-018). This task honours
-that structurally rather than by validation: both passes happen on the same
-prompt, the same layers and the same positions, and `excess_over_control` — the
-difference — is the finding. The raw intervened outcome is not one, and is
-returned only alongside the control it is meaningless without.
+THE CONTROL IS RUN HERE, NOT OPTIONALLY (BR-018). Both arms run on the same
+prompt, the same layers and the same positions, and the finding is the DIFFERENCE
+— `excess_top1_over_control`, with both sides visible. The raw intervened rate is
+not a finding and is never returned without the control it is meaningless
+without. The control's directions are unit-norm, so the intervened direction is
+scaled to unit norm too; otherwise the arms differ in magnitude and the
+comparison measures that instead.
+
+RUNG 2, AND THIS DOCSTRING ONCE SAID OTHERWISE. The first implementation applied
+a primitive to a captured activation, pushed the result through the Jacobian
+transport, and reported the mean displacement in lens space — rung 1, and a
+number that `jlens_causal.py` shows was independent of the prompt entirely. What
+runs now perturbs inside the model's own forward pass, lets it continue, and
+scores the target token's RANK in the model's real output over many trials with
+Wilson intervals, which is what the source paper measures. `InterventionResult`,
+`control_outcome` and `excess_over_control` are all from the old shape and none
+of them exist any more.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -138,7 +149,13 @@ def run_intervention_task(
         if out_of_range:
             raise ValueError(f"layers {out_of_range} outside range 0..{n_layers - 1}")
 
-        encoded = service.tokenizer(prompt, return_tensors="pt")
+        # BUDGETED AGAINST THE PROMPT THAT WILL ACTUALLY RUN. `prompt` is only
+        # the trial set when `prompts` is absent — otherwise it is discarded a
+        # few lines below, and checking it was checking a string this run never
+        # touches. The LONGEST is the bound, because every trial pays its own
+        # forward passes and one long entry costs what a long `prompt` would.
+        budgeted = max(list(prompts) if prompts else [prompt], key=len)
+        encoded = service.tokenizer(budgeted, return_tensors="pt")
         input_ids = encoded["input_ids"].to(service.capture_device)
         n_positions = int(input_ids.shape[-1])
         check_readout_budget(n_positions, len(layers), service.d_model)
@@ -178,6 +195,34 @@ def run_intervention_task(
             raise ValueError(f"{chosen.value} needs a direction to act along")
         else:
             named = None
+
+        # UNIT NORM, SO THE CONTROL IS ACTUALLY MATCHED (BR-018).
+        #
+        # `build_control` returns unit-norm random directions. An unembedding row
+        # does not have unit norm and the norms vary several-fold across tokens,
+        # so an additive run pushed `strength * ||W_U[t]||` while its control
+        # pushed `strength * 1`. The arms were then compared as though the only
+        # difference between them were semantic. On a token with a large row that
+        # separates the intervals on magnitude alone, and the report says
+        # "against a matched-norm random control" over the top of it.
+        #
+        # It also makes `strength` mean one thing. Before this, a sweep at
+        # 2/10/40 on ' Paris' and the same sweep on ' dog' were different
+        # experiments wearing the same numbers, and neither the recipe nor the
+        # UI said so.
+        #
+        # `projective_ablation` and `coordinate_swap` normalise internally, so
+        # this changes nothing for them; it is recorded for all of them anyway
+        # because the recipe has to describe what ran (BR-007).
+        direction_norm: Optional[float] = None
+        if named is not None:
+            direction_norm = float(torch.linalg.norm(named))
+            if direction_norm == 0.0:
+                raise ValueError(
+                    "the direction is the zero vector; it has no orientation to "
+                    "intervene along"
+                )
+            named = named / direction_norm
 
         # THE TARGET IS SCORED BY ID, resolved once. A multi-token target has no
         # single rank in a next-token distribution, so it is refused rather than
@@ -398,7 +443,9 @@ def run_intervention_task(
             target_token=target_token or direction_token or "<vector>",
             primitive=chosen.value,
             layers=list(layers),
-            strength=strength,
+            # Same rule as the recipe below: the evidence block and the recipe
+            # must not disagree about what was applied.
+            strength=strength if chosen is Primitive.ADDITIVE else None,
         ).summary()
 
         # ---------------------------------------------- record it beside the lens
@@ -425,8 +472,35 @@ def run_intervention_task(
                     "positions": (
                         list(positions) if positions is not None else "last-per-prompt"
                     ),
-                    "strength": strength,
+                    # STRENGTH ONLY WHERE STRENGTH DID SOMETHING. The hook passes
+                    # it to `apply_additive` alone; an ablation and a swap ignore
+                    # it entirely. Recording 40.0 on an ablation invites a
+                    # consumer to apply one at 40, and made two bit-identical
+                    # runs look like two experiments to `_recipe_key`.
+                    "strength": (
+                        strength if chosen is Primitive.ADDITIVE else None
+                    ),
+                    # WHAT `strength` IS MEASURED IN. The direction is unit-norm
+                    # at the point of use, so strength is an absolute
+                    # displacement and comparable across tokens. Its absence in a
+                    # record marks the older convention, where strength was
+                    # scaled by the unembedding row's own norm and was NOT
+                    # comparable across tokens or matched to the control.
+                    "direction_scaling": "unit",
+                    "direction_norm_before_scaling": direction_norm,
                     "hook_target": "layers_module[L] (resid_post)",
+                    # THE TRIAL SET IS PART OF THE EXPERIMENT. Without it, a
+                    # 50-prompt run and a one-click one-prompt run on the same
+                    # direction and layers were the same key, and the click
+                    # DELETED the 50-prompt record from the file whose whole
+                    # purpose is carrying evidence off this machine. A digest
+                    # rather than the prompts themselves: the record travels,
+                    # and a user's prompt text is not something to publish to
+                    # HuggingFace by default.
+                    "n_trials": len(trials),
+                    "prompts_sha256": hashlib.sha256(
+                        "\u0000".join(trial_prompts).encode("utf-8")
+                    ).hexdigest(),
                 },
                 "evidence": summary,
                 "evidence_rung": 2,
@@ -434,7 +508,10 @@ def run_intervention_task(
                 "control": {
                     "k": k,
                     "seed": control_seed,
+                    # MATCHED BECAUSE BOTH ARE UNIT (BR-018), not because the
+                    # word "matched" appears next to it.
                     "construction": "gaussian_unit_norm",
+                    "norm_matched_to_intervention": True,
                 },
             }
             try:

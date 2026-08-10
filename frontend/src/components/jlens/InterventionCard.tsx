@@ -45,13 +45,55 @@ interface InterventionCardProps {
   artifactId: string | null;
 }
 
+/**
+ * One arm's hit rate with its Wilson 95% interval.
+ *
+ * A RATE AND ITS INTERVAL, never a bare number. With twenty trials a ten-point
+ * gap is noise, and the interval is what says so.
+ */
+interface Rates {
+  hits: number;
+  n: number;
+  rate: number;
+  ci95_low: number;
+  ci95_high: number;
+}
+
+/**
+ * What the task returns — `CausalReport.summary()`, verbatim.
+ *
+ * THIS SHAPE IS THE RUNG-2 ONE. The card was written against the rung-1 result
+ * (`intervened_outcome` / `control_outcome` / `excess_over_control`, a lens-space
+ * displacement) and never updated when the measurement became a real forward-pass
+ * intervention. Every key it read had been gone since the rewrite, so the success
+ * path called `.toFixed` on `undefined` and took the panel down — on success, and
+ * only on success, which is why nothing noticed.
+ */
 interface Outcome {
-  intervened_outcome: number;
-  control_outcome: number;
-  excess_over_control: number;
+  target_token: string;
   primitive: string;
-  control: { k: number; seed: number };
-  caveat?: string;
+  layers: number[];
+  strength: number | null;
+  n_trials: number;
+  baseline_top1: Rates;
+  intervened_top1: Rates;
+  control_top1: Rates;
+  baseline_top5: Rates;
+  intervened_top5: Rates;
+  control_top5: Rates;
+  excess_top1_over_control: number;
+  excess_top5_over_control: number;
+  /** TRUE means the intervened and control intervals are DISJOINT. */
+  separated_from_control: boolean;
+}
+
+/** `12/24 = 0.500 [0.31, 0.69]` — the count, the rate and the interval. */
+function fmtRates(r: Rates | undefined): string {
+  if (!r) return 'n/a';
+  return (
+    `${r.hits}/${r.n} = ${r.rate.toFixed(3)} ` +
+    `[${r.ci95_low.toFixed(2)}, ${r.ci95_high.toFixed(2)}]`
+  );
 }
 
 export function InterventionCard({
@@ -135,7 +177,7 @@ export function InterventionCard({
           Intervention
         </span>
         <span className="text-[10px] text-slate-500 dark:text-slate-500">
-          rung 1 · displacement in lens space
+          rung 2 · real intervention, scored against a matched control
         </span>
         <button
           type="button"
@@ -267,22 +309,57 @@ export function InterventionCard({
           )}
 
           {result && (
-            <div className="rounded border border-slate-200 p-2 dark:border-slate-700">
-              <div className="flex flex-wrap items-baseline gap-3 font-mono text-[11px]">
-                <span className="text-emerald-700 dark:text-emerald-400">
-                  excess over control {result.excess_over_control.toFixed(4)}
-                </span>
-                {/* Both figures beside the finding, so the control is visibly
-                    present rather than asserted. */}
-                <span className="text-slate-500 dark:text-slate-500">
-                  intervened {result.intervened_outcome.toFixed(4)} · control{' '}
-                  {result.control_outcome.toFixed(4)} (k={result.control.k}, seed=
-                  {result.control.seed})
-                </span>
-              </div>
-              {result.caveat && (
-                <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-500">
-                  {result.caveat}
+            <div
+              className="rounded border border-slate-200 p-2 dark:border-slate-700"
+              data-testid="intervention-result"
+            >
+              {/* THE VERDICT FIRST, in the terms the measurement supports:
+                  disjoint intervals or not. Overlap is "not demonstrated
+                  here", never "demonstrated absent" — the asymmetry is the
+                  whole reason the control exists. */}
+              <p
+                className={`text-[11px] font-medium ${
+                  result.separated_from_control
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-amber-700 dark:text-amber-400'
+                }`}
+              >
+                {result.separated_from_control
+                  ? 'The intervals are DISJOINT — an effect over the matched control was demonstrated.'
+                  : 'The intervals OVERLAP — no effect was demonstrated here, which is not the same as none existing.'}
+              </p>
+
+              {/* ALL THREE ARMS. The baseline is not decoration: an
+                  intervention that "achieves" top-1 on prompts where the model
+                  already answered that way has moved nothing, and without the
+                  baseline any prompt set can manufacture a result. */}
+              <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[10px]">
+                <dt className="text-slate-500 dark:text-slate-400">baseline</dt>
+                <dd className="text-slate-700 dark:text-slate-200">
+                  {fmtRates(result.baseline_top1)}
+                </dd>
+                <dt className="text-slate-500 dark:text-slate-400">intervened</dt>
+                <dd className="text-slate-700 dark:text-slate-200">
+                  {fmtRates(result.intervened_top1)}
+                </dd>
+                <dt className="text-slate-500 dark:text-slate-400">control</dt>
+                <dd className="text-slate-700 dark:text-slate-200">
+                  {fmtRates(result.control_top1)}
+                </dd>
+              </dl>
+
+              <p className="mt-1 font-mono text-[10px] text-slate-500 dark:text-slate-500">
+                excess top-1 over control{' '}
+                {result.excess_top1_over_control.toFixed(4)} · {result.n_trials}{' '}
+                trial{result.n_trials === 1 ? '' : 's'}
+              </p>
+              {result.n_trials === 1 && (
+                // ONE TRIAL IS ONE OBSERVATION. Its Wilson interval spans
+                // almost the whole range, and a reader seeing "1/1 = 1.000"
+                // without this reads a certainty the arithmetic does not carry.
+                <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-400">
+                  One trial. The interval spans nearly the whole range — add
+                  prompts before reading anything into this.
                 </p>
               )}
             </div>

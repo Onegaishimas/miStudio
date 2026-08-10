@@ -53,6 +53,16 @@ STAGING_SUFFIX = ".staging"
 #: accumulate silently. Excluded from discovery like staging is.
 SUPERSEDED_SUFFIX = ".superseded"
 
+#: The scratch name `restore_superseded` parks a displaced artifact under for
+#: the duration of its three-way rename.
+#:
+#: EXCLUDED FROM DISCOVERY, like the other two. It briefly holds the only copy
+#: of a live lens under a name the listing would serve — the method's own
+#: docstring says parking a displaced artifact under any other name "would
+#: publish it as a second, differently-slugged lens for the same model", and
+#: then it did exactly that.
+SWAP_SUFFIX = ".swap"
+
 #: Verdict recorded beside the artifact at publish time. Named so it cannot be
 #: mistaken for part of the conformance layout — a consumer reading the upstream
 #: format ignores it, and `_ref_for` does not require it.
@@ -113,6 +123,15 @@ class ArtifactCoverageLoss(RuntimeError):
     """Raised rather than destroying layers the replacement does not cover."""
 
 
+class ArtifactConflict(RuntimeError):
+    """Raised rather than clearing a path that may hold the only copy of a lens.
+
+    The registry is the filesystem (PADR IDL-46), so debris from an interrupted
+    rename is not a stale row to be tidied — it is data. Refusing costs a manual
+    step; clearing cost the artifact.
+    """
+
+
 class ArtifactQualityRegression(RuntimeError):
     """Raised rather than replacing stronger evidence with weaker.
 
@@ -142,7 +161,9 @@ class JLensArtifactService:
             return []
         found: List[ArtifactRef] = []
         for directory in sorted(p for p in self.root.iterdir() if p.is_dir()):
-            if directory.name.endswith((STAGING_SUFFIX, SUPERSEDED_SUFFIX)):
+            if directory.name.endswith(
+                (STAGING_SUFFIX, SUPERSEDED_SUFFIX, SWAP_SUFFIX)
+            ):
                 continue
             ref = self._ref_for(directory)
             if ref is not None:
@@ -674,6 +695,12 @@ class JLensArtifactService:
                 "layers",
                 "positions",
                 "strength",
+                # AND THE TRIAL SET. It is the most obvious variable in the
+                # experiment and was the one missing: a 50-prompt run and a
+                # one-prompt click agreed on every other field, so the click
+                # evicted the 50-prompt record and left the artifact telling a
+                # consumer the direction moves nothing.
+                "prompts_sha256",
             )
         )
 
@@ -723,9 +750,17 @@ class JLensArtifactService:
             displaced_recipe = (
                 self._recipe_summary(displaced_ref) if displaced_ref else {}
             )
-            swap = self.root / f"{slug}.swap"
+            swap = self.root / f"{slug}{SWAP_SUFFIX}"
+            # REFUSED, NOT CLEARED. A leftover swap directory is the debris of
+            # an interrupted rename, which means it may be the ONLY copy of a
+            # lens. `rmtree` here made the recovery operation the thing that
+            # destroyed what was being recovered.
             if swap.exists():
-                shutil.rmtree(swap)
+                raise ArtifactConflict(
+                    f"{swap.name} already exists. That is the debris of an "
+                    "interrupted restore and may hold the only copy of a lens; "
+                    "inspect it and move it aside by hand before retrying."
+                )
             current_dir.rename(swap)
             archived_dir.rename(current_dir)
             swap.rename(archived_dir)

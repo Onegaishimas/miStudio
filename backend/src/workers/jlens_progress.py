@@ -136,6 +136,17 @@ def fail_row(task_id: str, exc: BaseException) -> None:
     update_row(task_id, status="failed", error_message=f"{type(exc).__name__}: {exc}")
 
 
+#: Attribute stamped on a wrapped task so the guard can ASK rather than guess.
+#:
+#: The first version of that guard scraped the source with a regex allowing at
+#: most one decorator between `@celery_app.task(...)` and `def`. A task carrying
+#: any second decorator matched nothing at all, so it never entered the list the
+#: assertion checked — the scan failed OPEN, and an undecorated task would have
+#: shipped green. `functools.wraps` copies `__dict__`, so this marker survives
+#: any number of further wrappers.
+OWNERSHIP_MARKER = "__jlens_owns_its_failure__"
+
+
 def owns_its_failure(fn):
     """Decorator: a J-space task records its own failure before re-raising.
 
@@ -156,4 +167,5 @@ def owns_its_failure(fn):
                 fail_row(request_id, exc)
             raise
 
+    setattr(wrapper, OWNERSHIP_MARKER, True)
     return wrapper
