@@ -80,6 +80,25 @@ interface JLensState {
   provenance: ReadoutProvenance | null;
 
   lensMode: LensMode;
+  /**
+   * Inclusive ABSOLUTE layer bounds to read out and rank over, or null for all.
+   *
+   * ABSOLUTE, not indices into the axis. The axis differs per lens type and per
+   * artifact, so an index means a different layer depending on which lens is
+   * being read — and a range that silently moves when the mode changes is worse
+   * than none. `layersInRange` filters each axis by these numbers.
+   */
+  layerRange: [number, number] | null;
+  /**
+   * The model's FULL layer span, learned from an unnarrowed readout.
+   *
+   * SEPARATE FROM `meta.layers_by_type` ON PURPOSE. A narrowed re-read returns
+   * only the layers it was asked for, so bounding the picker by the response
+   * ratchets it down: after reading L10-L15 the model appears to offer only
+   * those, the clamp refuses anything wider, and widening needs a full-stack
+   * read that the control can no longer express.
+   */
+  fullSpan: [number, number] | null;
   selPos: number;
   selLayerIdx: number;
   pinned: string[];
@@ -110,6 +129,7 @@ interface JLensState {
   fetchArtifacts: () => Promise<void>;
   setPrompt: (p: string) => void;
   setLensMode: (m: LensMode) => void;
+  setLayerRange: (r: [number, number] | null) => void;
   setSelPos: (p: number) => void;
   setSelLayerIdx: (i: number) => void;
   setHover: (h: { pos: number; layerIdx: number } | null) => void;
@@ -139,6 +159,8 @@ const INITIAL = {
   bandReport: null,
   provenance: null,
   lensMode: 'LOGIT_LENS' as LensMode,
+  layerRange: null as [number, number] | null,
+  fullSpan: null as [number, number] | null,
   selPos: 0,
   selLayerIdx: 0,
   pinned: [] as string[],
@@ -185,6 +207,7 @@ export const useJLensStore = create<JLensState>()(
 
       setPrompt: (prompt) => set({ prompt }),
       setLensMode: (lensMode) => set({ lensMode }),
+      setLayerRange: (layerRange) => set({ layerRange }),
       setSelPos: (selPos) => set({ selPos }),
       setSelLayerIdx: (selLayerIdx) => set({ selLayerIdx }),
       setHover: (hover) => set({ hover }),
@@ -230,10 +253,29 @@ export const useJLensStore = create<JLensState>()(
             ? get().artifacts.find((a) => a.slug === slug)
             : undefined;
 
+          // THE RANGE IS SENT, not applied after the fact. `check_readout_budget`
+          // bounds positions x layers BEFORE capture, so narrowing here makes a
+          // long prompt cheaper rather than merely tidier — and reading every
+          // layer to then hide most of them would pay the whole cost anyway.
+          //
+          // Expanded to an explicit list because that is what the endpoint
+          // takes; it has no notion of a range, and inventing one on the wire
+          // would be a miStudio-shaped field in a format that is not ours
+          // (BR-029).
+          const { layerRange } = get();
+          const requested =
+            layerRange && layerRange[1] >= layerRange[0]
+              ? Array.from(
+                  { length: layerRange[1] - layerRange[0] + 1 },
+                  (_, i) => layerRange[0] + i,
+                )
+              : null;
+
           const accepted = await jlensApi.readout({
             model_id: modelId,
             prompt,
             types: artifact ? ['JACOBIAN_LENS', 'LOGIT_LENS'] : ['LOGIT_LENS'],
+            ...(requested ? { layers: requested } : {}),
             ...(artifact ? { artifact_id: artifact.slug } : {}),
           });
 
@@ -272,7 +314,18 @@ export const useJLensStore = create<JLensState>()(
               isLoading: false,
               stage: null,
               error: null,
-              selPos: clampPosition(state.selPos, response.tokens),
+              // Learned ONLY from an unnarrowed read, for the reason above.
+            fullSpan: requested
+              ? state.fullSpan
+              : (() => {
+                  const all = Object.values(
+                    response.meta.layers_by_type,
+                  ).flat();
+                  return all.length
+                    ? ([Math.min(...all), Math.max(...all)] as [number, number])
+                    : state.fullSpan;
+                })(),
+            selPos: clampPosition(state.selPos, response.tokens),
               selLayerIdx: clamp(state.selLayerIdx, axis.length),
               lensMode,
               hover: null,
@@ -340,6 +393,7 @@ export const useJLensStore = create<JLensState>()(
             modelId: state.modelId,
             modelRepoId: state.modelRepoId,
             prompt: state.prompt,
+            layerRange: state.layerRange,
             lensMode: state.lensMode,
             pinned: state.pinned,
             selPos: state.selPos,

@@ -31,6 +31,7 @@ import { ProvenanceStrip } from '../jlens/ProvenanceStrip';
 import { ReadoutGrid } from '../jlens/ReadoutGrid';
 import { getTaskStatus } from '../../api/models';
 import { jlensApi } from '../../api/jlens';
+import { LayerRangePicker } from '../jlens/LayerRangePicker';
 import { RankedReadouts } from '../jlens/RankedReadouts';
 import { RunningWork } from '../jlens/RunningWork';
 import { TrajectoryChart } from '../jlens/TrajectoryChart';
@@ -73,6 +74,8 @@ export function JLensPanel() {
     artifacts,
     modelRepoId,
     readoutPrompt,
+    layerRange,
+    setLayerRange,
     restored,
     setModelId,
     setPrompt,
@@ -519,12 +522,30 @@ export function JLensPanel() {
         </section>
       ) : (
         <>
+        {(() => {
+          // THE SPAN THE MODEL OFFERS, across every lens the readout carries —
+          // not one axis, because a partial Jacobian artifact covers fewer
+          // layers than the logit lens beside it and either alone would bound
+          // the picker wrongly.
+          const all = Object.values(meta.layers_by_type).flat();
+          return all.length ? (
+            <div className="mb-3">
+              <LayerRangePicker
+                min={Math.min(...all)}
+                max={Math.max(...all)}
+                value={layerRange}
+                onChange={setLayerRange}
+                onApply={() => void useJLensStore.getState().fetchReadout()}
+              />
+            </div>
+          ) : null;
+        })()}
         <RankedReadouts
           tokens={tokens}
           axes={meta.layers_by_type}
           types={meta.types}
           topN={meta.top_n}
-          range={null}
+          range={layerRange}
           hideNonWords={hideNonWords}
           onToggleNonWords={setHideNonWords}
           onSteer={(t, l) => void runIntervention('additive', t, l)}

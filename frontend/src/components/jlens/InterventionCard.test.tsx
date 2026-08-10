@@ -60,6 +60,31 @@ describe('InterventionCard', () => {
     expect(sent.layers).toEqual([10, 11]);
   });
 
+  it('EXPLAINS an empty direction list instead of showing a blank select', async () => {
+    /**
+     * OBSERVED IN THE PRODUCT. With nothing pinned this rendered as a blank
+     * dropdown beside three fields that DO accept typing, which reads as a
+     * broken control rather than a missing prerequisite — the caption "a pinned
+     * token" only means something once you already know what pinning is.
+     *
+     * MUTATION CONTROL: map over `pinned` unconditionally and this fails.
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[]}
+        layers={[1]}
+        artifactId={null}
+      />
+    );
+    // The toggle is disabled with nothing pinned, so the reason has to be
+    // reachable from the toggle itself as well as from inside the form.
+    expect(
+      screen.getByRole('button', { name: /intervene/i })
+    ).toHaveAttribute('title', expect.stringMatching(/Pin a token first/));
+  });
+
   it('intervenes on the PROMPT ON SCREEN, never an empty one', async () => {
     /**
      * This sent `prompt: ''` — an empty string — so every intervention launched

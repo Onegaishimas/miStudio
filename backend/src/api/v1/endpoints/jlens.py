@@ -15,7 +15,7 @@ import logging
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1349,7 +1349,18 @@ class InterventionRequest(BaseModel):
     #: `direction_token`. A coordinate swap wants them different: push
     #: direction A, ask whether answer B arrives.
     target_token: Optional[str] = None
-    primitive: str
+    primitive: str = Field(
+        ...,
+        description=(
+            "additive | projective_ablation | coordinate_swap. A "
+            "coordinate_swap needs TWO different tokens — `direction_token` is "
+            "the coordinate to move and `target_token` the one to exchange it "
+            "with; one token would run an additive steer under a swap's name. "
+            "dynamic_topk_ablation is not implemented on this path: it needs "
+            "the lens coordinates at the intervened site, which this "
+            "measurement does not compute."
+        ),
+    )
     layers: List[int] = Field(..., min_length=1)
     #: A raw d_model vector. Usable from a script; NOT usable from a browser,
     #: which has no access to the unembedding or to SAE decoder weights — which
@@ -1367,6 +1378,34 @@ class InterventionRequest(BaseModel):
     control_seed: int = 0
     positions: Optional[List[int]] = None
     artifact_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _swap_needs_two_tokens(self) -> "InterventionRequest":
+        """Refuse a swap with one token HERE, not in the worker.
+
+        The worker already refuses it — but it does so after this endpoint has
+        returned 202 with a task id. The caller is told the request was
+        accepted, the job takes a slot on a single-GPU queue, and the refusal
+        arrives a minute later behind a poll. Whether two tokens were supplied
+        is knowable at request time and needs no model, so the honest answer is
+        a 400 before anything is queued.
+        """
+        if self.primitive == "coordinate_swap":
+            if not self.target_token or self.target_token == self.direction_token:
+                raise ValueError(
+                    "coordinate_swap needs TWO different tokens: "
+                    "`direction_token` is the coordinate to move and "
+                    "`target_token` the one to exchange it with. One token "
+                    "would run an additive steer under a swap's name."
+                )
+        if self.primitive == "dynamic_topk_ablation":
+            raise ValueError(
+                "dynamic_topk_ablation is not implemented for the forward-pass "
+                "path: it needs the lens coordinates at the intervened site, "
+                "which this measurement does not compute. Use additive, "
+                "projective_ablation or coordinate_swap."
+            )
+        return self
 
 
 @router.post(

@@ -368,3 +368,57 @@ class TestCausalEvidenceIsReachable:
                 if getattr(route, "path", None) == self.PATH:
                     methods |= set(getattr(route, "methods", set()))
         assert "GET" in methods, f"causal route methods: {methods or 'none'}"
+
+
+class TestAMalformedSwapIsRefusedSYNCHRONOUSLY:
+    """Knowable at request time, so it must not cost a queue slot.
+
+    The worker already refuses a swap with one token — but only after this
+    endpoint has returned 202 with a task id. The caller is told the request was
+    accepted, the job takes a slot on a single-GPU queue, and the refusal
+    arrives a minute later behind a poll.
+
+    OBSERVED IN PRODUCTION while probing what had deployed: a swap with one
+    token came back `{"task_id": ...}` and failed a minute later. It also made
+    the deploy probe read "not landed" for a guard that had landed, because the
+    probe looked at the HTTP response and the guard lived a layer deeper.
+
+    MUTATION CONTROLS:
+      * drop the validator                     -> "refused before queueing" fails
+      * allow target_token == direction_token  -> "the SAME token twice" fails
+      * let dynamic_topk_ablation through      -> "unimplemented" fails
+    """
+
+    def _request(self, **over):
+        from src.api.v1.endpoints.jlens import InterventionRequest
+
+        body = dict(
+            model_id="m_1",
+            prompt="hello",
+            primitive="coordinate_swap",
+            layers=[9],
+            direction_token=" dog",
+        )
+        body.update(over)
+        return InterventionRequest(**body)
+
+    def test_a_swap_with_one_token_is_refused_BEFORE_queueing(self):
+        with pytest.raises(ValueError, match="TWO different tokens"):
+            self._request()
+
+    def test_a_swap_with_the_SAME_token_twice_is_refused(self):
+        with pytest.raises(ValueError, match="TWO different tokens"):
+            self._request(target_token=" dog")
+
+    def test_a_swap_with_two_DIFFERENT_tokens_is_accepted(self):
+        """The guard must not block the thing it exists to enable."""
+        req = self._request(target_token=" cat")
+        assert req.target_token == " cat"
+
+    def test_an_unimplemented_primitive_is_refused_here_too(self):
+        with pytest.raises(ValueError, match="not implemented"):
+            self._request(primitive="dynamic_topk_ablation", target_token=" cat")
+
+    def test_the_other_primitives_are_untouched(self):
+        for primitive in ("additive", "projective_ablation"):
+            assert self._request(primitive=primitive).primitive == primitive

@@ -594,3 +594,112 @@ class TestTheRowCarriesItsOwnClock:
     def test_a_queued_row_has_neither(self):
         row, _ = self._row_after([])
         assert row.started_at is None and row.completed_at is None
+
+
+class TestAQueuedRowIsAlsoSwept:
+    """A row that never reached RUNNING was invisible to the sweep.
+
+    `update_row(status="running")` fires on a task's FIRST progress report, so a
+    task rejected before it reports one leaves its row at "queued" — and no
+    J-space task writes a failed status at all.
+
+    OBSERVED IN THE PRODUCT: five interventions refused at validation showed as
+    "5 queued, 0%" indefinitely on an idle GPU, while every Celery task behind
+    them had reported FAILURE. The janitor written to clear ghost rows filtered
+    on `status == "running"` and could not see one of them.
+
+    MUTATION CONTROLS:
+      * filter on "running" only        -> "a queued row is swept" fails
+      * sweep queued rows by AGE        -> "waiting work is not condemned" fails
+    """
+
+    def _sweep(self, rows_and_states):
+        from contextlib import contextmanager
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import MagicMock, patch
+
+        import src.workers.cleanup_orphaned_tasks as janitor
+
+        rows = []
+        results = {}
+        for i, (status, state) in enumerate(rows_and_states):
+            row = MagicMock()
+            row.status = status
+            row.task_id = f"t-{i}"
+            row.error_message = None
+            row.updated_at = datetime.now(timezone.utc) - timedelta(hours=3)
+            row.created_at = row.updated_at
+            rows.append(row)
+            results[f"t-{i}"] = MagicMock(state=state, info=None)
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = rows
+
+        @contextmanager
+        def fake_db():
+            yield db
+
+        with patch("src.core.database.get_sync_db", fake_db), patch(
+            "celery.result.AsyncResult", side_effect=lambda tid, app=None: results[tid]
+        ):
+            out = janitor.cleanup_orphaned_tasks_task.run()
+
+        # Kept so a test can inspect WHAT WAS ASKED FOR: a MagicMock returns its
+        # rows whatever the filter said, so the outcome alone cannot show that
+        # the query changed.
+        self._first_filter_arg = db.query.return_value.filter.call_args[0][0]
+        return out, rows
+
+    def test_the_sweep_ASKS_FOR_queued_rows_as_well_as_running(self):
+        """Asserted on the QUERY, because the outcome cannot see the filter.
+
+        The first version of this checked only that a queued row came back
+        swept — but the mock returns whatever rows it is given regardless of
+        what was filtered, so narrowing the query back to `status == "running"`
+        left it green. The filter is the thing under test, so the filter is what
+        has to be inspected.
+
+        MUTATION CONTROL: filter on "running" only and this fails.
+        """
+        from src.models.task_queue import TaskQueue  # noqa: F401
+
+        _out, _rows = self._sweep([("queued", "FAILURE")])
+        # The criterion handed to the FIRST .filter() call, rendered with its
+        # literal values so the statuses are visible.
+        import src.workers.cleanup_orphaned_tasks as janitor  # noqa: F401
+
+        criterion = self._first_filter_arg
+        rendered = str(
+            criterion.compile(compile_kwargs={"literal_binds": True})
+        ).lower()
+        assert "queued" in rendered, f"the sweep never asks for queued rows: {rendered}"
+        assert "running" in rendered, f"the sweep stopped asking for running rows: {rendered}"
+
+    def test_a_QUEUED_row_whose_task_FAILED_is_swept(self):
+        """The exact shape that sat at "0% queued" on an idle GPU."""
+        out, rows = self._sweep([("queued", "FAILURE")])
+        assert out["closed"] == 1
+        assert rows[0].status == "failed"
+        assert "rejected before it started" in (rows[0].error_message or "")
+
+    def test_work_WAITING_on_the_queue_is_never_condemned(self):
+        """A job behind a long fit is PENDING and legitimately hours old.
+
+        Judging a queued row by AGE would fail the entire queue on a
+        single-GPU box, which is the normal state of the world here.
+
+        MUTATION CONTROL: sweep queued rows on row age and this fails.
+        """
+        out, rows = self._sweep([("queued", "PENDING")])
+        assert out["closed"] == 0
+        assert rows[0].status == "queued"
+
+    def test_a_revoked_queued_row_is_swept_too(self):
+        out, rows = self._sweep([("queued", "REVOKED")])
+        assert out["closed"] == 1
+
+    def test_a_running_row_still_uses_the_HEARTBEAT_rule(self):
+        """Widening the filter must not change how running rows are judged."""
+        out, rows = self._sweep([("running", "PENDING")])
+        assert out["closed"] == 1
+        assert "stopped reporting" in (rows[0].error_message or "")
