@@ -50,33 +50,53 @@ def cleanup_orphaned_tasks_task(self):
     with get_sync_db() as db:
         rows = (
             db.query(TaskQueue)
-            .filter(TaskQueue.status == "running")
+            # QUEUED TOO, not only RUNNING. A row is moved to "running" by the
+            # task's first PROGRESS report, so a task that fails before it ever
+            # reports one leaves its row at "queued" — and this sweep, filtering
+            # on "running", could never see it.
+            #
+            # Observed: five J-space interventions rejected at validation showed
+            # as "5 queued, 0%" indefinitely, on an idle GPU, while the Celery
+            # tasks behind them had all reported FAILURE. Not one J-space task
+            # writes a failed status, so the rows had nothing else to move them.
+            .filter(TaskQueue.status.in_(("running", "queued")))
             .filter(TaskQueue.task_id.isnot(None))
             .all()
         )
         for row in rows:
             try:
                 result = AsyncResult(row.task_id, app=celery_app)
-                # `looks_abandoned`, not `looks_orphaned`: the row this
-                # janitor was written to clear reports PENDING with no info,
-                # which the heartbeat rule alone cannot see.
-                if not looks_abandoned(
+                if row.status == "queued":
+                    # A QUEUED ROW IS JUDGED ONLY ON A TERMINAL CELERY STATE,
+                    # never on age. Work waiting behind a long job on a
+                    # single-GPU queue is PENDING and legitimately old, and
+                    # condemning it by age would fail the whole queue.
+                    if result.state not in ("FAILURE", "REVOKED"):
+                        continue
+                    reason = (
+                        "the task was rejected before it started reporting "
+                        f"({result.state}). Its row never left 'queued' because "
+                        "nothing moves a row on failure."
+                    )
+                elif looks_abandoned(
                     result.state,
                     result.info,
                     seconds_since_row_update(row),
                 ):
+                    reason = (
+                        "the worker running this stopped reporting for more "
+                        f"than {STALE_AFTER_SECONDS // 60} minutes and is "
+                        "presumed gone (a deploy, an eviction or a crash). Any "
+                        "work it completed was not saved. Re-run it."
+                    )
+                else:
                     continue
             except Exception as exc:  # noqa: BLE001 - one bad row must not stop the sweep
                 logger.warning("Could not check %s: %s", row.task_id, exc)
                 continue
 
             row.status = "failed"
-            row.error_message = (
-                "the worker running this stopped reporting for more than "
-                f"{STALE_AFTER_SECONDS // 60} minutes and is presumed gone "
-                "(a deploy, an eviction or a crash). Any work it completed was "
-                "not saved. Re-run it."
-            )
+            row.error_message = reason
             closed += 1
         if closed:
             db.commit()

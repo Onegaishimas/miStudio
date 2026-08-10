@@ -163,13 +163,25 @@ export function InterventionCard({
               <select
                 value={chosen}
                 onChange={(e) => setToken(e.target.value)}
-                className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                disabled={pinned.length === 0}
+                className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
               >
-                {pinned.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {/* AN EMPTY LIST MUST EXPLAIN ITSELF. With nothing pinned this
+                    rendered as a blank select beside three fields that DO
+                    accept typing, which reads as a broken control rather than
+                    as a missing prerequisite — and the caption "a pinned token"
+                    only makes sense once you already know what pinning is. */}
+                {pinned.length === 0 ? (
+                  <option value="">
+                    No pinned tokens — click one in the readout below to pin it
                   </option>
-                ))}
+                ) : (
+                  pinned.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))
+                )}
               </select>
             </label>
             <label className="flex flex-col gap-1">
