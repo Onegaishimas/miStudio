@@ -167,10 +167,49 @@ confirmed landed. One equivalent mutant recorded and not chased (`>=` for `>` in
 - `d65994c` — both headline fixes were untested; the card kept the old verdict (round 3)
 - `1344e36` — MCP parity: four tool descriptions that were no longer true
 
-## Outstanding
+## Hardware acceptance — PASSED (2026-08-10, k8s, LFM2.5-1.2B + gemma-2-2b)
 
-- **Hardware acceptance:** a real Swap on k8s writing `primitive: coordinate_swap`
-  into `interventions.json` for a run that actually swapped. Not yet done.
+**All five request guards refused at the door, none queued a GPU job:**
+
+| Probe | Result |
+|---|---|
+| repeated layers `[9,9,9]` | 422 — "appear more than once. Each entry registers its own hook…" |
+| repeated positions `[-1,-1]` | 422 — "positions repeat; each is perturbed in turn…" |
+| 8001-char trial prompt | 422 — "prompts[0] is 8001 characters; the limit is 8000" |
+| swap with one token | 422 — "coordinate_swap needs TWO different tokens" |
+| `primitive: "aditive"` | 422 — schema enum |
+
+Checking each rather than assuming mattered: a 202 there would have meant both a
+missing guard *and* a job on the single-GPU queue.
+
+**A real 6-trial coordinate_swap was recorded as one** (` Paris` ↔ ` Rome`,
+L10–12): `primitive: coordinate_swap`, `evidence_rung: 2`, `strength: null` with
+`requested_strength: 1.0` (all three sites agree), `direction_scaling: "unit"`,
+`direction_norm_before_scaling: 0.7398` — *not* 1.0, so the scaling did real
+work — `control.norm_matched_to_intervention: true`, `prompts_sha256` present,
+`n_trials: 6`, `separation_attainable: true`. Records went 4 → 5: nothing was
+evicted, and the four older records still read `direction_scaling: null`, so the
+old convention remains identifiable exactly as designed. The seven diagnostic
+runs carried no `artifact_id` and filed nothing — the "a run without an artifact
+files nothing" rule holds on hardware.
+
+**The swap's null is a real null.** All three arms were identical (1/6), which is
+also the signature of a perturbation that never lands, so it was checked: an
+additive steer along ` Rome` gives **intervened 6/6, control 0/6,
+separated: true** — the first positive rung-2 result the product has produced.
+The hook reaches, the control is genuinely a control, and a unit-magnitude
+coordinate swap at those layers is simply too weak on this model to move the
+output. It separates at `strength: 1`, so the UI's default is fine.
+
+**The GPU release works.** "Released the intervention model" appears once per run
+(7/7), and resident memory was constant at 2570 MiB across all of them — a
+per-run leak would accumulate. To rule out one permanently-resident model,
+gemma-2-2b (roughly twice LFM2's size) was run: the floor moved only to
+3076 MiB, where a retained model would have exceeded 5 GB. The 2.5 GB is the
+CUDA context and kernel images, growing modestly as a second architecture's
+kernels load.
+
+## Outstanding
 - `linearisation_residual_mean/max` in `config.yaml` is populated by a
   source-position spread, not by `linearisation_residual()`, which has zero
   callers. Pre-existing; recorded, not fixed.
