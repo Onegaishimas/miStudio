@@ -703,3 +703,104 @@ class TestAQueuedRowIsAlsoSwept:
         out, rows = self._sweep([("running", "PENDING")])
         assert out["closed"] == 1
         assert "stopped reporting" in (rows[0].error_message or "")
+
+
+class TestATaskOwnsItsOwnFailure:
+    """The janitor could only ever close half of these.
+
+    A task that fails BEFORE its first progress report leaves a `queued` row —
+    now swept. A task that fails AFTER one leaves a `running` row, and the sweep
+    deliberately never closes those: `looks_abandoned` returns False for a
+    TERMINAL Celery state, because a finished task is not an orphan. So a fit
+    that OOMs at prompt 800 sat at "running 42%" on an idle GPU permanently, and
+    the fix for the easier half read as complete.
+
+    Routing failures through the janitor also discards the REASON. The user gets
+    prose about the bookkeeping defect instead of "swap partner is 2 tokens".
+
+    MUTATION CONTROLS:
+      * remove @owns_its_failure from a task -> "records its own failure" fails
+      * swallow the exception in the wrapper -> "still raises" fails
+      * write a generic reason               -> "carries the real reason" fails
+    """
+
+    def _run_failing(self):
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock, patch
+
+        from src.workers import jlens_progress
+
+        recorded = {}
+
+        def spy(task_id, status=None, progress=None, error_message=None):
+            recorded["status"] = status
+            recorded["error"] = error_message
+
+        import src.workers.jlens_intervention_tasks as task_mod
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = None
+
+        @contextmanager
+        def fake_db():
+            yield db
+
+        # A REQUEST ID, because the wrapper needs one. Outside a worker
+        # `self.request.id` is None, so without this the decorator correctly
+        # declines to write a row and the test measures the harness.
+        task_mod.run_intervention_task.push_request(id="t-fail")
+        with patch.object(jlens_progress, "update_row", spy), patch(
+            "src.core.database.get_sync_db", fake_db
+        ), patch.object(task_mod.run_intervention_task, "update_state", MagicMock()):
+            try:
+                task_mod.run_intervention_task.run(
+                    model_id="m_missing",
+                    prompt="x",
+                    primitive="additive",
+                    layers=[0],
+                    direction_token="Paris",
+                )
+                raised = None
+            except Exception as exc:  # noqa: BLE001
+                raised = exc
+            finally:
+                task_mod.run_intervention_task.pop_request()
+        return recorded, raised
+
+    def test_a_failing_task_RECORDS_ITS_OWN_FAILURE(self):
+        recorded, _ = self._run_failing()
+        assert recorded.get("status") == "failed", (
+            "the task left its row for the janitor, which cannot close a row "
+            "whose Celery state is terminal"
+        )
+
+    def test_it_carries_THE_REAL_REASON_not_the_bookkeeping_one(self):
+        """"No model with id 'm_missing'" is actionable. "nothing moves a row on
+        failure" is not."""
+        recorded, _ = self._run_failing()
+        assert "m_missing" in (recorded.get("error") or ""), recorded.get("error")
+
+    def test_the_exception_STILL_RAISES(self):
+        """Celery must see the FAILURE. Swallowing it to record a row would
+        trade one silent state for another."""
+        _recorded, raised = self._run_failing()
+        assert raised is not None
+
+    def test_every_jspace_task_is_decorated(self):
+        """A task added later inherits this by construction, not by memory.
+
+        MUTATION CONTROL: drop the decorator from any one of them and this fails
+        by name.
+        """
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[2] / "src" / "workers"
+        missing = []
+        for path in sorted(root.glob("jlens_*_tasks.py")):
+            src = path.read_text()
+            tasks = re.findall(r"@celery_app\.task\((?:[^()]|\([^()]*\))*\)\n(@\w[\w.]*\n)?def (\w+)", src)
+            for decorator, name in tasks:
+                if "owns_its_failure" not in (decorator or ""):
+                    missing.append(f"{path.name}::{name}")
+        assert not missing, f"these tasks do not record their own failure: {missing}"

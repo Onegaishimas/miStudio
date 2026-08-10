@@ -31,6 +31,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
+from . import jlens_progress
 from .task_heartbeat import beat
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=0,
 )
+@jlens_progress.owns_its_failure
 def compute_readout(
     self,
     model_id: str,

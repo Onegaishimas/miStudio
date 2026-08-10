@@ -599,7 +599,19 @@ class JLensArtifactService:
         key = self._recipe_key(record)
         kept = [r for r in existing if self._recipe_key(r) != key]
         kept.append(record)
-        (ref.directory / INTERVENTION_FILE).write_text(json.dumps(kept, indent=2))
+        # ATOMIC. `write_text` truncates first, so an eviction mid-write leaves
+        # invalid JSON — and `_read_interventions` fails to `[]`, so the next
+        # successful record writes a one-element list over the wreckage. Total,
+        # permanent, invisible loss.
+        #
+        # `validation.json` shares the non-atomic write and does not need this:
+        # a verdict is idempotently regenerable, and a corrupt one triggers
+        # revalidation by design. An intervention record is a GPU run. It is not
+        # regenerable by anything.
+        target = ref.directory / INTERVENTION_FILE
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(kept, indent=2))
+        tmp.replace(target)
         logger.info(
             "Recorded an intervention result for %s (%s), %d record(s) total",
             ref.slug,
@@ -647,9 +659,22 @@ class JLensArtifactService:
         the later one is informative.
         """
         recipe = record.get("steering_recipe") or {}
+        # TARGET AND POSITIONS ARE PART OF THE EXPERIMENT. A coordinate_swap IS
+        # the pair — swapping dog with cat is not the run that swapped dog with
+        # pet — and the panel picks the partner from whatever is pinned, so two
+        # genuinely different swaps shared a key and the earlier one, a completed
+        # GPU measurement, was deleted from the file whose whole purpose is
+        # carrying evidence off this machine.
         return "|".join(
             str(recipe.get(field))
-            for field in ("primitive", "direction_token", "layers", "strength")
+            for field in (
+                "primitive",
+                "direction_token",
+                "target_token",
+                "layers",
+                "positions",
+                "strength",
+            )
         )
 
     def restore_superseded(self, slug: str) -> Dict[str, Any]:

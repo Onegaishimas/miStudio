@@ -1349,7 +1349,13 @@ class InterventionRequest(BaseModel):
     #: `direction_token`. A coordinate swap wants them different: push
     #: direction A, ask whether answer B arrives.
     target_token: Optional[str] = None
-    primitive: str = Field(
+    #: CONSTRAINED, not free text. A typo — "aditive" from a script or an agent
+    #: — used to pass the schema, return 202 with a task id, take a slot on the
+    #: single-GPU queue behind a possible 45-minute fit, and fail before its
+    #: first progress report. The enum makes the unknown case a 422 at the door.
+    primitive: Literal[
+        "additive", "projective_ablation", "coordinate_swap", "dynamic_topk_ablation"
+    ] = Field(
         ...,
         description=(
             "additive | projective_ablation | coordinate_swap. A "

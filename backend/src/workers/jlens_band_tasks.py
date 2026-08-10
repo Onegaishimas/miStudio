@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=0,
 )
+@jlens_progress.owns_its_failure
 def compute_band_report_task(
     self,
     model_id: str,
@@ -177,6 +178,7 @@ def compute_band_report_task(
     bind=True,
     max_retries=0,
 )
+@jlens_progress.owns_its_failure
 def record_gate_task(
     self,
     model_id: str,

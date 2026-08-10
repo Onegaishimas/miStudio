@@ -422,3 +422,45 @@ class TestAMalformedSwapIsRefusedSYNCHRONOUSLY:
     def test_the_other_primitives_are_untouched(self):
         for primitive in ("additive", "projective_ablation"):
             assert self._request(primitive=primitive).primitive == primitive
+
+
+class TestAnUnknownPrimitiveIsRefusedAtTheDoor:
+    """A typo used to cost a slot on the single-GPU queue.
+
+    `primitive` was a free `str`, so "aditive" passed the schema, returned 202
+    with a task id, queued behind a possible 45-minute fit, and failed before its
+    first progress report — landing in exactly the "queued 0%" state, reported
+    with the janitor's prose about bookkeeping rather than the enum the worker
+    had built.
+
+    MUTATION CONTROL: widen `primitive` back to `str` and this fails.
+    """
+
+    def test_a_typo_is_refused(self):
+        from src.api.v1.endpoints.jlens import InterventionRequest
+
+        with pytest.raises(ValueError):
+            InterventionRequest(
+                model_id="m_1", prompt="x", primitive="aditive", layers=[1],
+                direction_token=" dog",
+            )
+
+    def test_every_real_primitive_is_still_accepted_by_the_schema(self):
+        """The enum must not exclude a primitive the system implements."""
+        from src.api.v1.endpoints.jlens import InterventionRequest
+        from src.services.jlens_intervention import Primitive
+
+        for p in Primitive:
+            kwargs = dict(
+                model_id="m_1", prompt="x", primitive=p.value, layers=[1],
+                direction_token=" dog",
+            )
+            if p is Primitive.COORDINATE_SWAP:
+                kwargs["target_token"] = " cat"
+            if p is Primitive.DYNAMIC_TOPK_ABLATION:
+                # Accepted by the enum, refused by the validator with a reason —
+                # a different thing from being unspellable.
+                with pytest.raises(ValueError, match="not implemented"):
+                    InterventionRequest(**kwargs)
+                continue
+            assert InterventionRequest(**kwargs).primitive == p.value

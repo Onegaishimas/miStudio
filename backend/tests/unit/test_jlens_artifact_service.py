@@ -1072,3 +1072,77 @@ def test_unreadable_evidence_does_not_break_the_listing(tmp_path):
     service = _published(tmp_path)
     (tmp_path / "model" / INTERVENTION_FILE).write_text("{not json")
     assert service.intervention_results(service.find("org/model")) == []
+
+
+def test_two_DIFFERENT_swaps_are_both_kept(tmp_path):
+    """A swap IS the pair; the partner is part of the experiment.
+
+    The recipe key omitted `target_token` and `positions`, so swapping dog with
+    cat and swapping dog with pet shared a key — and recording the second
+    DELETED the first from the file whose whole purpose is carrying evidence off
+    this machine. Each record is a completed GPU run.
+
+    MUTATION CONTROL: drop target_token from `_recipe_key` and this fails at 1.
+    """
+    service = _published(tmp_path)
+    swap = lambda partner: {  # noqa: E731
+        "steering_recipe": {
+            "primitive": "coordinate_swap",
+            "direction_token": " dog",
+            "target_token": partner,
+            "layers": [9],
+            "positions": [-1],
+            "strength": 1.0,
+        },
+        "evidence": {"separated_from_control": True},
+    }
+    service.record_intervention_result("org/model", swap(" cat"))
+    service.record_intervention_result("org/model", swap(" pet"))
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 2, [r["steering_recipe"]["target_token"] for r in records]
+
+
+def test_the_same_swap_twice_still_supersedes(tmp_path):
+    """Widening the key must not turn every re-run into a duplicate."""
+    service = _published(tmp_path)
+    rec = {
+        "steering_recipe": {
+            "primitive": "coordinate_swap",
+            "direction_token": " dog",
+            "target_token": " cat",
+            "layers": [9],
+            "positions": [-1],
+            "strength": 1.0,
+        },
+        "evidence": {"separated_from_control": False},
+    }
+    service.record_intervention_result("org/model", rec)
+    service.record_intervention_result("org/model", {**rec, "evidence": {"separated_from_control": True}})
+    records = service.intervention_results(service.find("org/model"))
+    assert len(records) == 1
+    assert records[0]["evidence"]["separated_from_control"] is True
+
+
+def test_the_record_file_is_written_ATOMICALLY(tmp_path):
+    """A truncate-then-write loses every record if the pod dies mid-write.
+
+    `_read_interventions` fails to `[]` on invalid JSON, so the next successful
+    write puts a one-element list over the wreckage — total, permanent, invisible
+    loss of measurements that cost GPU time and cannot be regenerated.
+
+    MUTATION CONTROL: use `write_text` directly and this fails.
+    """
+    import inspect
+
+    from src.services.jlens_artifact_service import JLensArtifactService
+
+    src = inspect.getsource(JLensArtifactService.record_intervention_result)
+    assert ".replace(" in src, (
+        "the record file is written non-atomically; an eviction mid-write "
+        "destroys every record in it"
+    )
+    # And it works end to end, leaving no temp file behind.
+    service = _published(tmp_path)
+    service.record_intervention_result("org/model", _evidence())
+    assert service.intervention_results(service.find("org/model"))
+    assert not list((tmp_path / "model").glob("*.tmp")), "a temp file was left behind"

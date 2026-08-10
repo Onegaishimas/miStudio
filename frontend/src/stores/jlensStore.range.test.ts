@@ -168,3 +168,52 @@ describe('the range belongs to the model it was chosen for', () => {
     expect(useJLensStore.getState().fullSpan).toEqual([4, 6]);
   });
 });
+
+describe('what survives a reload', () => {
+  /**
+   * `fullSpan` is the only record of what the model OFFERS. `layerRange` is
+   * what was asked for, and the meta axis of a narrowed read is what came
+   * back — neither of them can widen.
+   *
+   * So persisting the range without the span it bounds is a RATCHET: reload
+   * with [5,5] saved, fullSpan gone, and the picker rebuilds its bounds from
+   * the narrowed axis. L5-L5 becomes the whole model. Every widening is then
+   * clamped straight back to 5, and the only escape is clearing storage —
+   * which reads as a bug in the picker, not in what was saved.
+   *
+   * MUTATION CONTROL: drop `fullSpan: state.fullSpan` from `partialize` and
+   * "carries the FULL SPAN" fails. It survived a round without this test.
+   */
+  const persisted = () => {
+    const raw = localStorage.getItem('miStudio-jlens');
+    return raw ? JSON.parse(raw).state : null;
+  };
+
+  it('carries the FULL SPAN, not only the narrowed range', () => {
+    useJLensStore.setState({
+      modelId: 'm_1',
+      prompt: 'hello',
+      fullSpan: [0, 25],
+      layerRange: [5, 5],
+    });
+
+    const saved = persisted();
+    expect(saved).not.toBeNull();
+    // THE RANGE ALONE IS NOT ENOUGH. Both assertions matter: the first is the
+    // fix, the second proves the fixture would have noticed either going
+    // missing rather than passing on an empty object.
+    expect(saved.fullSpan).toEqual([0, 25]);
+    expect(saved.layerRange).toEqual([5, 5]);
+  });
+
+  it('does NOT persist a span that a narrowed read invented', async () => {
+    /**
+     * Belt and braces on the same defect from the other side: if a narrowed
+     * read ever wrote fullSpan, persisting it would make the ratchet
+     * permanent instead of merely per-session.
+     */
+    useJLensStore.setState({ modelId: 'm_1', prompt: 'hello', layerRange: null, fullSpan: null });
+    await useJLensStore.getState().fetchReadout();
+    expect(persisted().fullSpan).toEqual([4, 6]);
+  });
+});
