@@ -128,3 +128,36 @@ See `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`.
 
 ---
 *Update this context when working on system design and architecture*
+
+
+## Findings — J-Lens enhancement arc (2026-08-10)
+
+Full record: `.claude/context/sessions/review_jlens_enhancements_2026-08-10.md`
+
+**What this lens caught (round 1, 6 findings):** a task that failed *after* its
+first progress report left a `running` row the janitor deliberately never closes
+— `looks_abandoned` returns False for a terminal Celery state, because a
+finished task is not an orphan. The previous round had swept `queued` rows and
+read as complete. Also `_recipe_key` collisions that DELETED completed GPU
+measurements, and a non-atomic write of the file built to travel to HuggingFace.
+
+**Priority for the next review:**
+
+1. **Half-fixes.** Every finding here that was fixed at one call site had
+   siblings: the three-state verdict reached the panel and not the card; the
+   layer budget reached the browser and not the worker; `strength` was nulled at
+   two of three sites. When a fix lands, grep for the other sites *before*
+   marking it done.
+2. **Boundary conditions that make a statistic meaningless.**
+   `separated_from_control` cannot be true below four trials, so the product's
+   only reachable verdict was a guaranteed null presented as a finding. Ask of
+   any reported statistic: at the sizes this system actually produces, can it
+   take both values?
+3. **Structures that must not disagree.** The recipe, the evidence block and the
+   returned parameters describe the same run three times. A dict spreading
+   `**summary` and then setting a literal key silently overwrote the derived
+   one.
+
+**Standing debt:** `bandReport` is dead state and every band branch unreachable;
+nine backend routes have no client function; `linearisation_residual()` has zero
+callers while a field named after it is populated by something else.

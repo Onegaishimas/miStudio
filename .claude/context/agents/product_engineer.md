@@ -92,3 +92,37 @@ Recent comprehensive architecture review shows excellent user-facing progress tr
 
 ---
 *Update this context when working on product/requirements analysis*
+
+
+## Findings — J-Lens enhancement arc (2026-08-10)
+
+Full record: `.claude/context/sessions/review_jlens_enhancements_2026-08-10.md`
+
+**8 findings, all claim-versus-behaviour.** The pattern: the code was often
+right and the thing the user or agent READS about it was wrong.
+
+- A **rung-1 badge** over a rung-2 measurement, with a module docstring still
+  describing the lens-space displacement deleted in the rewrite.
+- **`artifact_id` documented as "act in JACOBIAN lens space"** when the
+  perturbation is always in the residual stream — it is provenance, not a
+  different experiment. An agent believing it files a rung-2 record against a
+  lens that played no part in the finding.
+- **The user's stated goal was unreachable from the product.** "Experiment with
+  them to determine how they can be used in causal influence" cannot produce a
+  positive result when every UI path sends one prompt and separation needs four.
+  Then the fix's own remedy — "add prompts" — pointed at a card with no such
+  control.
+- **The swap partner**, half the experiment and the token whose rank is scored,
+  was picked silently from pin order and never shown, while being written into
+  the exported recipe.
+
+**Priority for the next review:**
+
+1. **Walk the user's stated goal end to end and check it is reachable.** Not
+   "does the feature exist" — can the user get the outcome they described?
+2. **Every remedy string names a control that exists.** "Use X to do Y" is a
+   testable claim.
+3. **BR-002 remains clean** — no band constant anywhere in the new frontend.
+   Keep checking; it is the rule most likely to be re-introduced by a port.
+4. **What travels.** `interventions.json` goes to HuggingFace and into miLLM. A
+   field that is wrong there is wrong in production for someone else.

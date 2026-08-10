@@ -123,3 +123,49 @@ When complex issues arise, this agent can work with the hardcore-debugger agent:
 
 ---
 *Update this context when working on testing and quality assurance*
+
+
+## Findings — J-Lens enhancement arc (2026-08-10)
+
+Full record: `.claude/context/sessions/review_jlens_enhancements_2026-08-10.md`
+
+**9 findings in round 2, all found by mutating rather than reading — plus round
+3, which found that BOTH of round 2's headline fixes were themselves
+unprotected.**
+
+The single most valuable output remains: *break line X, run the suite, it stays
+green.*
+
+**Failure modes that actually occurred here:**
+
+1. **A regression test inheriting the trap it was written to catch.** The
+   unit-norm fix could be deleted with 63 tests green, because the fixture's
+   `W_U` was `torch.eye(...)` — already unit-norm, so both behaviours are
+   identical on it. When writing a regression test, first ask what fixture makes
+   the two behaviours *differ*.
+2. **Source-scrape guards that fail OPEN.** A regex allowing one decorator
+   between `@celery_app.task` and `def` matched NOTHING for a two-decorator
+   task, so it never entered the checked list. `".replace(" in
+   inspect.getsource(...)` passes on any unrelated `.replace(` and fails on
+   `shutil.move`. Read the live registry; kill the operation and assert what
+   survived.
+3. **Reachability that only the panel can prove.** The layer-range picker could
+   be unmounted with 143/143 green: its own test renders it directly, and the
+   store test calls `setState`. The same shape as the 16 unregistered MCP tools.
+4. **Mocked values pinning a rendering, not a computation.** Frontend tests
+   appeared to cover `separation_attainable`; they mock it.
+5. **MUTATION CONTROL comments that are false as written.** Three this round.
+   The comment is a claim and must be executed, not asserted.
+
+**Discipline reinforced:**
+
+- **Confirm the edit LANDED** before concluding a mutation survived. Several
+  candidates here silently did not apply.
+- **Never mutate while another agent is reading the tree.** One reviewer
+  reported an in-flight mutation as a committed defect.
+- **Record equivalent mutants** rather than chasing them: `>=` for `>` in
+  `separation_attainable` survives because the two Wilson bounds are never
+  exactly equal at any n. That is not a test gap.
+
+**Priority for the next review:** mutate the round-3 fixes. Every round so far
+has found that the previous round's fix was under-tested.
