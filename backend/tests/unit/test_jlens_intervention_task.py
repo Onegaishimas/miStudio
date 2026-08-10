@@ -687,3 +687,279 @@ class TestThePrimitiveThatRUNSIsThePrimitiveREQUESTED:
         """
         with pytest.raises(ValueError, match="not implemented"):
             _run(primitive="dynamic_topk_ablation", direction_token="Paris")
+
+class TestTheDirectionIsScaledSoTheControlIsActuallyMatched:
+    """BR-018 says matched-norm. It was not, and no test could see it.
+
+    `build_control` returns UNIT-norm random directions. The intervened arm used
+    a raw unembedding row, whose norm varies several-fold across tokens on a
+    real model. So an additive run pushed `strength * ||W_U[t]||` against a
+    control pushing `strength * 1`, and the two were compared as though the only
+    difference between them were semantic — under a report reading "against a
+    matched-norm random control".
+
+    THE EXISTING FIXTURE COULD NOT DETECT IT. `W_U` is `torch.eye(VOCAB,
+    D_MODEL)`, every row of which ALREADY has unit norm, so normalising and not
+    normalising are the same operation on it. Deleting the scaling left all 63
+    tests green. This file therefore builds its own W_U with rows of DIFFERENT,
+    non-unit norms — the only shape on which the two behaviours differ.
+
+    MUTATION CONTROLS:
+      * `named = named` instead of `named / direction_norm` -> "displacement is
+        the strength" fails, and "records what it divided by" fails
+      * normalise but do not record the original norm        -> "records" fails
+      * scale the CONTROL up to match instead                -> "both arms move
+        the same distance" fails
+    """
+
+    #: The norm of the row for `direction_token="Paris"`, which `_Tok.encode`
+    #: maps to TARGET_ID. Not 1, and not shared with any other row, so nothing
+    #: can pass by coincidence. Asserted in `_service` rather than trusted.
+    NAMED_NORM = float(TARGET_ID + 1)
+
+    @classmethod
+    def _service(cls):
+        tok = _Tok()
+        svc = MagicMock()
+        svc.tokenizer = tok
+        svc.capture_device = "cpu"
+        svc.d_model = D_MODEL
+        # ROWS OF DIFFERENT NORMS. Row i has norm (i + 1), so the target row's
+        # is NAMED_NORM and no two rows agree.
+        rows = torch.eye(VOCAB, D_MODEL)
+        for i in range(VOCAB):
+            rows[i] = rows[i] * (i + 1)
+        assert abs(float(torch.linalg.norm(rows[TARGET_ID])) - cls.NAMED_NORM) < 1e-6
+        svc.W_U = rows
+        return svc
+
+    @classmethod
+    def _run(cls, **overrides):
+        from src.workers.jlens_intervention_tasks import run_intervention_task
+
+        service = cls._service()
+        layers = [_Layer(), _Layer()]
+        kwargs = dict(
+            model_id="m_1",
+            prompt="hello",
+            primitive="additive",
+            layers=[0],
+            direction_token="Paris",
+            strength=1.0,
+            k=4,
+            control_seed=11,
+        )
+        kwargs.update(overrides)
+        with _patched(service, layers):
+            return run_intervention_task.run(**kwargs)
+
+    @staticmethod
+    def _displacements(monkeyable):
+        """Every vector actually handed to `apply_additive`, with its strength."""
+        seen = []
+        import src.workers.jlens_intervention_tasks as mod
+        from src.services import jlens_intervention as prim
+
+        real = prim.apply_additive
+
+        def spy(activation, direction, strength):
+            seen.append(float(torch.linalg.norm(direction * strength)))
+            return real(activation, direction, strength)
+
+        return seen, spy
+
+    def test_the_DISPLACEMENT_is_the_strength_not_the_row_norm(self):
+        """At strength 1 the residual moves by 1, whatever the token's row norm.
+
+        Without the scaling it moves by 5 for this token and by something else
+        for the next one, so a strength sweep on two tokens is two different
+        experiments wearing the same numbers.
+        """
+        from src.services import jlens_intervention as prim
+
+        seen, spy = self._displacements(None)
+        with patch.object(prim, "apply_additive", spy):
+            self._run(strength=1.0)
+
+        assert seen, "apply_additive was never called; the fixture is not exercising it"
+        # EVERY call, not the first: the intervened arm and the control arm both
+        # go through this, and the point is that they agree.
+        for magnitude in seen:
+            assert abs(magnitude - 1.0) < 1e-5, seen
+
+    def test_BOTH_ARMS_move_the_same_distance(self):
+        """The definition of a matched-norm control, asserted directly."""
+        from src.services import jlens_intervention as prim
+
+        seen, spy = self._displacements(None)
+        with patch.object(prim, "apply_additive", spy):
+            self._run(strength=2.5)
+
+        assert len(seen) >= 2, seen
+        assert max(seen) - min(seen) < 1e-5, seen
+        assert abs(seen[0] - 2.5) < 1e-5, seen
+
+    def test_it_RECORDS_what_it_divided_by(self):
+        """So an older record is identifiable, and a run is reproducible.
+
+        Scaling silently changes what `strength` means. A record carrying no
+        `direction_scaling` was produced under the old convention, where the
+        number was multiplied by a row norm nobody wrote down.
+        """
+        service = self._service()
+        layers = [_Layer(), _Layer()]
+        recorded = {}
+
+        from src.workers.jlens_intervention_tasks import run_intervention_task
+
+        class _Svc:
+            def __init__(self, *a, **k):
+                pass
+
+            def record_intervention_result(self, name, record):
+                recorded.update(record)
+
+        with _patched(service, layers), patch(
+            "src.services.jlens_artifact_service.JLensArtifactService", _Svc
+        ), patch(
+            "src.api.v1.endpoints.jlens._jacobian_transport",
+            return_value=types.SimpleNamespace(lens_type="JACOBIAN_LENS"),
+        ):
+            run_intervention_task.run(
+                model_id="m_1",
+                prompt="hello",
+                primitive="additive",
+                layers=[0],
+                direction_token="Paris",
+                strength=1.0,
+                k=4,
+                control_seed=11,
+                # The slug for "org/model", which is what `_patched` loads.
+                artifact_id="model",
+            )
+
+        recipe = recorded.get("steering_recipe", {})
+        assert recipe.get("direction_scaling") == "unit", recipe
+        assert (
+            abs(recipe.get("direction_norm_before_scaling", 0) - self.NAMED_NORM) < 1e-5
+        ), recipe
+        # AND THE CLAIM BESIDE THE CONTROL IS EARNED, not decorative.
+        assert recorded.get("control", {}).get("norm_matched_to_intervention") is True
+
+    def test_a_ZERO_direction_is_refused_rather_than_dividing_by_zero(self):
+        """Row 0 of the fixture is scaled by 1 and is fine; a genuinely zero
+        row would otherwise produce NaN and score three arms of noise."""
+        service = self._service()
+        service.W_U = torch.zeros(VOCAB, D_MODEL)
+        layers = [_Layer(), _Layer()]
+
+        from src.workers.jlens_intervention_tasks import run_intervention_task
+
+        with _patched(service, layers):
+            with pytest.raises(ValueError, match="zero vector"):
+                run_intervention_task.run(
+                    model_id="m_1",
+                    prompt="hello",
+                    primitive="additive",
+                    layers=[0],
+                    direction_token="Paris",
+                    strength=1.0,
+                    k=4,
+                    control_seed=11,
+                )
+
+class TestTheReturnedPayloadDoesNotCONTRADICTItself:
+    """Three sites reported the same facts and two of them disagreed.
+
+    MUTATION CONTROLS:
+      * put the literal caveat back after `**summary` -> "carries the sample-size
+        caveat" fails
+      * report the nominal strength in `parameters`   -> "agrees about strength"
+        fails
+    """
+
+    def test_it_carries_the_SAMPLE_SIZE_caveat_not_only_the_generic_one(self):
+        """The literal sat AFTER `**summary` in the same dict.
+
+        So `summary()`'s derived text — "the verdict describes the sample and
+        not the intervention. Add prompts." — was silently overwritten, and a
+        one-trial run returned the generic "overlapping intervals mean no effect
+        was demonstrated here": exactly the reading the sample-size caveat was
+        added to prevent. It survived only in the on-disk record, and only when
+        an artifact_id was supplied.
+        """
+        out, _model = _run(prompt="hello")
+        assert out["n_trials"] == 1, "this test needs the single-trial case"
+        assert out["separation_attainable"] is False
+        assert "not attainable" in out["caveat"], out["caveat"]
+        # AND THE GENERAL ONE SURVIVES TOO — they are both true and the
+        # specific one does not replace the standing warning.
+        assert "never that none exists" in out["caveat"]
+
+    def test_an_ATTAINABLE_run_carries_only_the_general_caveat(self):
+        out, _model = _run(prompts=["abcd", "efgh", "ijkl", "mnop"])
+        assert out["n_trials"] == 4
+        assert out["separation_attainable"] is True
+        assert "not attainable" not in out["caveat"]
+        assert "never that none exists" in out["caveat"]
+
+    def test_the_payload_AGREES_WITH_ITSELF_about_strength(self):
+        """`parameters.strength` was the third site and was left behind.
+
+        The evidence block and the recipe were both nulled for primitives that
+        ignore strength, under a comment saying the two "must not disagree about
+        what was applied". An agent reading `parameters.strength == 40.0` beside
+        `strength: null` in the same payload either reports 40 as applied or
+        treats the response as corrupt.
+        """
+        out, _model = _run(
+            primitive="coordinate_swap",
+            direction_token="Paris",
+            target_token="dog",
+            strength=40.0,
+        )
+        assert out["primitive"] == "coordinate_swap"
+        assert out["strength"] is None
+        assert out["parameters"]["strength"] is None, out["parameters"]
+        # WHAT WAS ASKED FOR IS STILL VISIBLE, so the caller can see their own
+        # request was ignored rather than silently dropped.
+        assert out["parameters"]["requested_strength"] == 40.0
+
+    def test_an_ADDITIVE_run_still_reports_the_strength_it_used(self):
+        """The nulling must not swallow the case where strength is real."""
+        out, _model = _run(primitive="additive", strength=2.5)
+        assert out["strength"] == 2.5
+        assert out["parameters"]["strength"] == 2.5
+
+
+class TestTheLayerBudgetIsEnforcedWhereTheMODELIs:
+    """The browser capped clicks; nothing capped an MCP agent.
+
+    `MAX_INTERVENED_LAYERS` is a flat 64 and never binds on any model this
+    project runs, and the quarter-of-the-stack rule lived only in TypeScript —
+    so `default_swap_layers` had no production caller in either language while
+    two places re-derived it.
+
+    MUTATION CONTROL: drop the `default_swap_layers` check and "flags" fails.
+    """
+
+    def test_a_WHOLE_STACK_intervention_is_flagged(self):
+        """Both layers of a 2-layer stack; the budget is max(1, 2 // 4) = 1."""
+        out, _model = _run(layers=[0, 1])
+        flag = out["parameters"]["over_layer_budget"]
+        assert flag == {"requested": 2, "budget": 1}, flag
+
+    def test_a_WITHIN_BUDGET_intervention_is_not(self):
+        """Otherwise the flag would be on every run and mean nothing."""
+        out, _model = _run(layers=[1])
+        assert out["parameters"]["over_layer_budget"] is None
+
+    def test_it_WARNS_rather_than_refusing(self):
+        """A deliberate whole-stack intervention is a legitimate experiment.
+
+        Only the caller knows which it is, so the run completes and says so.
+        """
+        out, _model = _run(layers=[0, 1])
+        assert out["evidence_rung"] == 2
+        assert out["n_trials"] >= 1
+

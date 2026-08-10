@@ -88,6 +88,7 @@ def run_intervention_task(
         apply_coordinate_swap,
         apply_projective_ablation,
         build_control,
+        default_swap_layers,
     )
     from ..services.jlens_model_registry import ModelNotAvailable, load_for_readout
     from ..services.jlens_readout_service import (
@@ -148,6 +149,34 @@ def run_intervention_task(
         out_of_range = [l for l in layers if l < 0 or l >= n_layers]
         if out_of_range:
             raise ValueError(f"layers {out_of_range} outside range 0..{n_layers - 1}")
+
+        # THE SCALE-DERIVED BUDGET, ENFORCED WHERE THE MODEL IS. `MAX_INTERVENED_LAYERS`
+        # is a flat 64 and never binds on anything this project runs, and the
+        # browser's quarter-of-the-stack cap protects only clicks — an MCP agent
+        # calling with every layer of a 26-layer model hooked the whole stack at
+        # strength 1, which is the oversteer BR-017 v0.2 exists to prevent.
+        #
+        # `default_swap_layers` is the derivation, and it had no production
+        # caller in EITHER language until this: the browser re-derived the same
+        # quarter in TypeScript, so the rule lived in two places that could
+        # disagree and in neither place that a non-browser caller reaches.
+        #
+        # A WARNING, NOT A REFUSAL. A deliberate whole-stack intervention is a
+        # legitimate experiment; an accidental one is the common case, and the
+        # difference is only knowable to the caller.
+        budget = default_swap_layers(n_layers)
+        if len(layers) > budget:
+            logger.warning(
+                "Intervening at %d of %d layers, above the scale-derived budget "
+                "of %d (a quarter of the stack). Swaps and steers oversteer "
+                "easily at this width on small models.",
+                len(layers),
+                n_layers,
+                budget,
+            )
+            over_budget = {"requested": len(layers), "budget": budget}
+        else:
+            over_budget = None
 
         # BUDGETED AGAINST THE PROMPT THAT WILL ACTUALLY RUN. `prompt` is only
         # the trial set when `prompts` is absent — otherwise it is discarded a
@@ -489,6 +518,10 @@ def run_intervention_task(
                     "direction_scaling": "unit",
                     "direction_norm_before_scaling": direction_norm,
                     "hook_target": "layers_module[L] (resid_post)",
+                    # RECORDED WHEN IT APPLIES. A consumer reading a recipe that
+                    # hooks most of the stack should be able to see that it was
+                    # above the scale-derived budget without recomputing it.
+                    "over_layer_budget": over_budget,
                     # THE TRIAL SET IS PART OF THE EXPERIMENT. Without it, a
                     # 50-prompt run and a one-click one-prompt run on the same
                     # direction and layers were the same key, and the click
@@ -528,13 +561,21 @@ def run_intervention_task(
             "model": loaded.name,
             "primitive": chosen.value,
             "parameters": {
-                "strength": strength,
+                # THE THIRD SITE. The evidence block and the recipe were both
+                # nulled for primitives that ignore strength, under a comment
+                # saying the two "must not disagree about what was applied" —
+                # and this one was left reporting the nominal value, so a swap
+                # at strength 40 returned `parameters.strength: 40.0` beside
+                # `strength: null` in the same payload.
+                "strength": strength if chosen is Primitive.ADDITIVE else None,
+                "requested_strength": strength,
                 "k": k,
                 "artifact_id": artifact_id,
                 "lens_type": transport.lens_type,
                 "positions": (
                     list(positions) if positions is not None else "last-per-prompt"
                 ),
+                "over_layer_budget": over_budget,
             },
             "control": {
                 "k": k,
@@ -560,12 +601,28 @@ def run_intervention_task(
                 "rates with Wilson 95% intervals, against a matched-norm random "
                 "control run on the same prompts."
             ),
-            "caveat": (
-                "The FINDING is the separation between the intervened and control "
-                "rates, not the intervened rate alone. Overlapping intervals mean "
-                "no effect was demonstrated here — never that none exists. A "
-                "baseline rate near the intervened rate means the prompts were "
-                "already answering that way and the intervention moved nothing."
+            # THE GENERAL CAVEAT, AND THEN THE SPECIFIC ONE IF THERE IS ONE.
+            #
+            # This key sits AFTER `**summary` in the same dict, so a literal
+            # here silently overwrote whatever `summary()` derived. A 1-trial
+            # run therefore returned the generic "overlapping intervals mean no
+            # effect was demonstrated here" — precisely the reading the
+            # sample-size caveat exists to prevent — while the derived text
+            # survived only in the on-disk record, and only when an artifact_id
+            # was supplied.
+            "caveat": " ".join(
+                filter(
+                    None,
+                    [
+                        "The FINDING is the separation between the intervened "
+                        "and control rates, not the intervened rate alone. "
+                        "Overlapping intervals mean no effect was demonstrated "
+                        "here — never that none exists. A baseline rate near "
+                        "the intervened rate means the prompts were already "
+                        "answering that way and the intervention moved nothing.",
+                        summary.get("caveat"),
+                    ],
+                )
             ),
         }
 

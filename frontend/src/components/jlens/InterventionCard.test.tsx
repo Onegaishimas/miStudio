@@ -14,6 +14,7 @@ vi.mock('../../api/jlens', () => ({ jlensApi: { intervene: vi.fn() } }));
 vi.mock('../../api/models', () => ({ getTaskStatus: vi.fn() }));
 
 import { jlensApi } from '../../api/jlens';
+import { getTaskStatus } from '../../api/models';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -162,4 +163,160 @@ describe('InterventionCard', () => {
     const sent = vi.mocked(jlensApi.intervene).mock.calls[0][0];
     expect(sent.prompt).toBe('the animal that spins webs');
   });
+
+  it('SENDS the extra trial prompts, de-duplicated, with the screen prompt first', async () => {
+    /**
+     * Below four trials NO outcome separates the intervened and control
+     * intervals, and every surface sent exactly one prompt — so "no effect was
+     * demonstrated" was the only verdict the product could ever produce, and
+     * the panel's remedy pointed at this card, which had no such control.
+     * `JLensRequest.prompts` existed and nothing populated it.
+     *
+     * MUTATION CONTROLS:
+     *   * stop sending `prompts`            -> "sends" fails
+     *   * drop the de-duplication           -> "de-duplicated" fails
+     *   * put the screen prompt last        -> "first" fails
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByTestId('intervention-prompts'), {
+      // A BLANK LINE, A DUPLICATE OF THE SCREEN PROMPT, AND A REPEAT. Two
+      // identical trials are one observation counted twice, which narrows the
+      // Wilson interval on evidence that does not exist.
+      target: {
+        value:
+          'the capital of Italy is\n\nthe animal that spins webs\nthe capital of Italy is\n  the capital of Japan is  ',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.prompts).toEqual([
+      'the animal that spins webs',
+      'the capital of Italy is',
+      'the capital of Japan is',
+    ]);
+  });
+
+  it('does NOT send a prompts list when there is only the one on screen', async () => {
+    /**
+     * Otherwise every request carries a one-element list, and the worker's
+     * "prompt alone is accepted and reported as n=1" path is never exercised.
+     *
+     * MUTATION CONTROL: always send `prompts` and this fails.
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    expect(
+      (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0].prompts
+    ).toBeUndefined();
+  });
+
+  it('WARNS that too few trials cannot separate, BEFORE the GPU job', async () => {
+    /**
+     * Learning this from the result costs a GPU job on a single-GPU queue,
+     * behind a possible 45-minute fit.
+     *
+     * MUTATION CONTROL: drop the `< MIN_TRIALS` branch and this fails.
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    const count = screen.getByTestId('intervention-trial-count');
+    expect(count).toHaveTextContent('1 trial');
+    expect(count).toHaveTextContent(/not attainable below 4/);
+
+    // AND THE WARNING CLEARS once there are enough — or it would be permanent
+    // decoration and the assertion above would pass against a static string.
+    fireEvent.change(screen.getByTestId('intervention-prompts'), {
+      target: { value: 'a\nb\nc' },
+    });
+    expect(screen.getByTestId('intervention-trial-count')).toHaveTextContent(
+      '4 trials'
+    );
+    expect(
+      screen.getByTestId('intervention-trial-count')
+    ).not.toHaveTextContent(/not attainable/);
+  });
+
+  it('reports NOT ATTAINABLE rather than "no effect" on a one-trial run', async () => {
+    /**
+     * The panel grew this three-state verdict and the card did not, so the card
+     * kept printing the exact sentence the change exists to remove — and it is
+     * the only surface from which a projective_ablation can be run at all.
+     *
+     * MUTATION CONTROL: drop the `separation_attainable === false` branch and
+     * this fails, falling through to the OVERLAP wording.
+     */
+    (getTaskStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 't1',
+      state: 'SUCCESS',
+      result: {
+        n_trials: 1,
+        separation_attainable: false,
+        min_trials_for_separation: 4,
+        separated_from_control: false,
+        excess_top1_over_control: 1,
+        baseline_top1: { hits: 0, n: 1, rate: 0, ci95_low: 0, ci95_high: 0.79 },
+        intervened_top1: { hits: 1, n: 1, rate: 1, ci95_low: 0.21, ci95_high: 1 },
+        control_top1: { hits: 0, n: 1, rate: 0, ci95_low: 0, ci95_high: 0.79 },
+      },
+    });
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="the animal that spins webs"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+
+    await waitFor(
+      () => expect(screen.getByTestId('intervention-result')).toBeInTheDocument(),
+      { timeout: 8000 }
+    );
+    // SCOPED TO THE RESULT. The pre-run trial counter carries the same phrase,
+    // so an unscoped query matches two elements and would also pass against a
+    // result block that said nothing at all.
+    const out = screen.getByTestId('intervention-result');
+    expect(within(out).getByText(/not attainable below 4/)).toBeInTheDocument();
+    expect(within(out).queryByText(/no effect was demonstrated/)).toBeNull();
+    // AND THE ARMS ARE STILL SHOWN — the run happened and its numbers are real,
+    // they just cannot answer this question.
+    expect(screen.getByText('1/1 = 1.000 [0.21, 1.00]')).toBeInTheDocument();
+  }, 15000);
+
 });
