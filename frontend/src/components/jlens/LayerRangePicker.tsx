@@ -22,6 +22,8 @@ interface LayerRangePickerProps {
   onChange: (next: [number, number] | null) => void;
   /** Re-read with the new range; the range is a REQUEST parameter, not a filter. */
   onApply?: () => void;
+  /** A readout is in flight; a second click is a second GPU job. */
+  busy?: boolean;
 }
 
 export function LayerRangePicker({
@@ -30,6 +32,7 @@ export function LayerRangePicker({
   value,
   onChange,
   onApply,
+  busy = false,
 }: LayerRangePickerProps) {
   const loId = useId();
   const hiId = useId();
@@ -93,9 +96,10 @@ export function LayerRangePicker({
         <button
           type="button"
           onClick={onApply}
-          className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700"
+          disabled={busy}
+          className="rounded disabled:cursor-not-allowed disabled:opacity-50 bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700"
         >
-          Re-read
+          {busy ? 'Reading…' : 'Re-read'}
         </button>
       )}
 
@@ -104,7 +108,8 @@ export function LayerRangePicker({
           and changing these without re-reading narrows the ranked lists over
           data that was captured under the old range. */}
       <span className="basis-full text-[10px] text-slate-500 dark:text-slate-500">
-        Narrowing filters what is shown; re-read to capture only these layers.
+        Narrowing filters the ranked lists only — the grid, rail and trajectory
+        keep showing every layer that was read. Re-read to capture only these.
       </span>
     </div>
   );

@@ -105,3 +105,66 @@ describe('the layer range reaches the server', () => {
     expect(persisted.state.layerRange).toEqual([3, 9]);
   });
 });
+
+describe('the range belongs to the model it was chosen for', () => {
+  it('is CLEARED when the model changes', () => {
+    /**
+     * A persisted range of 20-25 carried onto a 16-layer model makes the server
+     * refuse every readout — and with `meta` null the picker is not mounted, so
+     * its own "All layers" reset is unreachable and the panel is stuck with no
+     * visible way out.
+     *
+     * MUTATION CONTROL: leave layerRange alone in setModelId and this fails.
+     */
+    useJLensStore.setState({
+      modelId: 'm_big',
+      layerRange: [20, 25],
+      fullSpan: [0, 25],
+    });
+    useJLensStore.getState().setModelId('m_small', 'org/small');
+    expect(useJLensStore.getState().layerRange).toBeNull();
+    expect(useJLensStore.getState().fullSpan).toBeNull();
+  });
+
+  it('is KEPT when the same model is re-selected', () => {
+    /** Re-picking the model you are already on is not a change. */
+    useJLensStore.setState({ modelId: 'm_a', layerRange: [2, 5] });
+    useJLensStore.getState().setModelId('m_a', 'org/a');
+    expect(useJLensStore.getState().layerRange).toEqual([2, 5]);
+  });
+
+  it('learns the FULL span only from an unnarrowed read', async () => {
+    /**
+     * A narrowed re-read returns only the layers it asked for. Learning the
+     * span from it ratchets the picker down: after reading L4-L5 the model
+     * appears to offer only those and the clamp refuses anything wider.
+     *
+     * MUTATION CONTROL: set fullSpan from every response and this fails.
+     */
+    useJLensStore.setState({ modelId: 'm_1', prompt: 'hello', layerRange: null });
+    await useJLensStore.getState().fetchReadout();
+    expect(useJLensStore.getState().fullSpan).toEqual([4, 6]);
+
+    // THE NARROWED READ MUST RETURN A NARROWER AXIS, or learning from every
+    // response gives the same answer as learning from unnarrowed ones and the
+    // mutation survives — the fixture agreeing with both behaviours.
+    vi.mocked(jlensApi.readoutResult).mockResolvedValue({
+      task_id: 't1',
+      status: 'SUCCESS',
+      readout: {
+        meta: {
+          kind: 'meta',
+          model: 'org/m',
+          types: ['LOGIT_LENS'],
+          layers_by_type: { LOGIT_LENS: [5] },
+          top_n: 4,
+          prompt_len: 1,
+        },
+        tokens: [],
+      },
+    } as never);
+    useJLensStore.setState({ layerRange: [5, 5] });
+    await useJLensStore.getState().fetchReadout();
+    expect(useJLensStore.getState().fullSpan).toEqual([4, 6]);
+  });
+});

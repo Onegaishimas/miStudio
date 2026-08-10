@@ -76,6 +76,7 @@ export function JLensPanel() {
     readoutPrompt,
     layerRange,
     setLayerRange,
+    fullSpan,
     restored,
     setModelId,
     setPrompt,
@@ -527,7 +528,12 @@ export function JLensPanel() {
           // not one axis, because a partial Jacobian artifact covers fewer
           // layers than the logit lens beside it and either alone would bound
           // the picker wrongly.
-          const all = Object.values(meta.layers_by_type).flat();
+          // FROM THE FULL SPAN, not the response. A narrowed re-read returns
+          // only the layers it asked for, so bounding the picker by `meta`
+          // ratchets it down: after reading L10-L15 the model appears to offer
+          // only those and the clamp refuses anything wider, leaving no way to
+          // widen from the control that narrowed it.
+          const all = fullSpan ?? Object.values(meta.layers_by_type).flat();
           return all.length ? (
             <div className="mb-3">
               <LayerRangePicker
@@ -535,7 +541,14 @@ export function JLensPanel() {
                 max={Math.max(...all)}
                 value={layerRange}
                 onChange={setLayerRange}
-                onApply={() => void useJLensStore.getState().fetchReadout()}
+                // submit() flushes the prompt draft first; calling
+                // fetchReadout() directly re-reads the STORE's prompt, so
+                // editing the box and hitting Re-read silently re-read the old
+                // one. Disabled while a readout is in flight — the request
+                // sequence guard discards stale responses but does not stop the
+                // server doing the work, and each click is a GPU-bound job.
+                onApply={submit}
+                busy={isLoading}
               />
             </div>
           ) : null;
