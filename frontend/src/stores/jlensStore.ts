@@ -182,6 +182,13 @@ export const useJLensStore = create<JLensState>()(
             ? { modelId, modelRepoId: repoId ?? state.modelRepoId }
             : {
                 modelRepoId: repoId ?? '',
+                // THE RANGE AND THE SPAN BELONG TO THE MODEL THEY WERE CHOSEN
+                // FOR. A persisted range of 20-25 carried onto a 16-layer model
+                // makes the server refuse every readout — and with `meta` null
+                // the picker is not mounted, so its own "All layers" reset is
+                // unreachable and the panel is stuck with no visible way out.
+                layerRange: null,
+                fullSpan: null,
                 // Pins are token strings from ANOTHER model's vocabulary.
                 // Carrying them across draws empty trajectory lines that look
                 // like "this concept is absent" rather than "this pin does not

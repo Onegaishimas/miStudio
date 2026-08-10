@@ -79,6 +79,36 @@ describe('LayerRangePicker', () => {
     expect(screen.queryByRole('button', { name: /All layers/ })).toBeNull();
   });
 
+  it('does not offer Re-read while a readout is IN FLIGHT', async () => {
+    /**
+     * Each click is a GPU-bound job. The request-sequence guard discards stale
+     * responses but does not stop the server doing the work, so repeated clicks
+     * during a minute-long model load queue several concurrent readouts.
+     *
+     * MUTATION CONTROL: drop `disabled={busy}` and this fails.
+     */
+    const onApply = vi.fn();
+    render(
+      <LayerRangePicker min={0} max={9} value={[1, 4]} onChange={vi.fn()} onApply={onApply} busy />,
+    );
+    const btn = screen.getByRole('button', { name: /Reading/ });
+    expect(btn).toBeDisabled();
+    await userEvent.click(btn);
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  it('says WHICH views the narrowing affects', () => {
+    /**
+     * "Narrowing filters what is shown" was true only of the ranked columns —
+     * the grid, rail and trajectory keep rendering the full axis, so the panel
+     * shows a 6-layer and a 26-layer view of one readout at the same time.
+     *
+     * MUTATION CONTROL: revert to the unqualified wording and this fails.
+     */
+    setup();
+    expect(screen.getByText(/ranked lists only/i)).toBeInTheDocument();
+  });
+
   it('says the range is a REQUEST parameter, not just a filter', () => {
     /**
      * The numbers on screen came from whatever range was READ. Narrowing
@@ -90,7 +120,7 @@ describe('LayerRangePicker', () => {
      */
     setup();
     expect(
-      screen.getByText(/re-read to capture only these layers/i),
+      screen.getByText(/Re-read to capture only these/i),
     ).toBeInTheDocument();
   });
 
