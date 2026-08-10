@@ -116,3 +116,44 @@ def update_row(
             db.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not update task_queue row for %s: %s", task_id, exc)
+
+
+def fail_row(task_id: str, exc: BaseException) -> None:
+    """Record a task's OWN failure, with its OWN reason.
+
+    THE TASK OWNS ITS TERMINAL STATE. Leaving this to the orphan janitor costs
+    three things: up to five minutes of "queued 0%" on an idle GPU while the
+    sweep waits for its next beat; the real reason — "unknown primitive
+    'aditive'", "swap partner is 2 tokens", the near-parallel refusal — replaced
+    by the janitor's prose about the BOOKKEEPING defect, which tells the caller
+    nothing about their request; and a blind spot for anything that fails AFTER
+    its first progress report, which the sweep's `looks_abandoned` rule
+    deliberately never closes because a terminal Celery state is not an orphan.
+
+    The janitor remains the backstop for a worker that dies without running any
+    Python at all — an eviction, an OOM kill, a pod roll.
+    """
+    update_row(task_id, status="failed", error_message=f"{type(exc).__name__}: {exc}")
+
+
+def owns_its_failure(fn):
+    """Decorator: a J-space task records its own failure before re-raising.
+
+    Applied at the task rather than duplicated in five bodies, so a task added
+    later inherits it by construction instead of by anyone remembering. The
+    exception still propagates — Celery must see the FAILURE, and swallowing it
+    here would trade one silent state for another.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return fn(self, *args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 - recorded, then re-raised
+            request_id = getattr(getattr(self, "request", None), "id", None)
+            if request_id:
+                fail_row(request_id, exc)
+            raise
+
+    return wrapper

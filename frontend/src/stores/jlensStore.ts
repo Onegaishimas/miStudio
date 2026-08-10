@@ -401,6 +401,12 @@ export const useJLensStore = create<JLensState>()(
             modelRepoId: state.modelRepoId,
             prompt: state.prompt,
             layerRange: state.layerRange,
+            // PERSISTED WITH THE RANGE IT BOUNDS. Without it, a reload with a
+            // narrowed range falls back to the NARROWED meta axis, the picker
+            // is bounded to what was last read, and the clamp refuses anything
+            // wider — the exact ratchet fullSpan exists to prevent, restored on
+            // every reload.
+            fullSpan: state.fullSpan,
             lensMode: state.lensMode,
             pinned: state.pinned,
             selPos: state.selPos,

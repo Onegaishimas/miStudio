@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=0,
 )
+@jlens_progress.owns_its_failure
 def run_intervention_task(
     self,
     model_id: str,
