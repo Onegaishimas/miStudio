@@ -1,4 +1,4 @@
 kustomize:
   images:
   - hitsai/mistudio-backend=docker.io/hitsai/mistudio-backend:latest@sha256:da2d109f0da285fc7f176c025a617aec9375f16c69ea37f4574626403d9d778c
-  - hitsai/mistudio-frontend=docker.io/hitsai/mistudio-frontend:latest@sha256:1f2b51fae7013774739e23683d3316d44c36bb0dd6e13c0b1c59abbaf33cd9ae
+  - hitsai/mistudio-frontend=docker.io/hitsai/mistudio-frontend:latest@sha256:b75619d884d8891b11da8b6b2893765101570de59fb3ace6b3e3c53e5dcfeb1c
