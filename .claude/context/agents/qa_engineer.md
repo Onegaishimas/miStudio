@@ -143,3 +143,38 @@ See `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md` fo
 
 ---
 *Update this context during code reviews and quality assessments*
+
+
+## Findings — J-Lens enhancement arc (2026-08-10)
+
+Full record: `.claude/context/sessions/review_jlens_enhancements_2026-08-10.md`
+
+**Strongest lens on this arc — 8 findings, several severe.** Highlights:
+
+- **The matched-norm control was not matched (BR-018).** `build_control` returns
+  unit-norm directions; the intervened arm used a raw unembedding row whose norm
+  varies several-fold across tokens. The arms differed in *magnitude* and were
+  compared as though they differed only semantically, under a report saying
+  "against a matched-norm random control". Recorded evidence was wrong, not
+  merely missing.
+- **`prompts` unbounded per item**, and the worker budgeted against `prompt`,
+  which it discards whenever `prompts` is present: 512 × 400 000 characters from
+  one unauthenticated POST, and the single GPU queue for hours.
+- **Duplicate `layers` registered duplicate hooks**, each perturbing the output
+  of the one before, so `[9,9,9]` at strength 1.0 applied 3.0 and recorded 1.0.
+- **`restore_superseded` `rmtree`'d the path holding the only copy of a lens** —
+  the recovery operation destroyed what it was recovering.
+- **`InterventionCard` crashed on its own SUCCESS path** — it read three keys
+  deleted in the rung-2 rewrite. Only on success, which is why nothing noticed.
+
+**Priority for the next review:**
+
+1. **Claim-versus-behaviour on anything carrying a guarantee word.** "matched",
+   "atomic", "validated", "reachable" — check the implementation, not the noun.
+2. **Every entry point, not the one reported.** REST, MCP and a directly-called
+   Celery task are three doors; a bound on one is not a bound.
+3. **Success paths.** Two defects this round lived exclusively on the path where
+   everything worked.
+4. **Destructive recovery.** Any `rmtree`/`unlink`/truncate on a path that might
+   hold the only copy of something — the filesystem IS the registry here
+   (PADR IDL-46), so debris is data.
