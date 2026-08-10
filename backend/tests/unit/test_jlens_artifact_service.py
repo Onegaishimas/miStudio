@@ -19,7 +19,10 @@ MUTATION CONTROLS (each must turn this file red):
 from __future__ import annotations
 
 import inspect
+import json
+import pathlib
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -1206,17 +1209,113 @@ def test_the_record_file_is_written_ATOMICALLY(tmp_path):
 
     MUTATION CONTROL: use `write_text` directly and this fails.
     """
-    import inspect
+    # BEHAVIOUR, NOT A SUBSTRING. The first version asserted `".replace(" in
+    # inspect.getsource(...)`, which any unrelated `.replace(` in the method
+    # satisfies — and which `shutil.move`, equally atomic, would fail. That is
+    # the same source-scrape failure mode removed from the `owns_its_failure`
+    # guard in this very arc: it fails open.
+    #
+    # THE TEST INSTEAD KILLS THE WRITE. A non-atomic implementation truncates
+    # the real file first, so the existing records are already gone when the
+    # write fails; an atomic one is still writing to a temp path and the real
+    # file is untouched.
+    service = _published(tmp_path)
+    service.record_intervention_result("org/model", _evidence())
+    ref = service.find("org/model")
+    target = ref.directory / "interventions.json"
+    before = target.read_text()
+    assert json.loads(before), "nothing was recorded; the fixture is not exercising it"
 
-    from src.services.jlens_artifact_service import JLensArtifactService
+    real_write = pathlib.Path.write_text
 
-    src = inspect.getsource(JLensArtifactService.record_intervention_result)
-    assert ".replace(" in src, (
-        "the record file is written non-atomically; an eviction mid-write "
-        "destroys every record in it"
+    def die_mid_write(self, *args, **kwargs):
+        real_write(self, *args, **kwargs)
+        raise OSError("the pod was evicted")
+
+    with patch.object(pathlib.Path, "write_text", die_mid_write):
+        with pytest.raises(OSError):
+            service.record_intervention_result(
+                "org/model",
+                {
+                    "steering_recipe": {
+                        "primitive": "additive",
+                        "direction_token": " other",
+                        "layers": [1],
+                    },
+                    "evidence": {"separated_from_control": True},
+                },
+            )
+
+    assert target.read_text() == before, (
+        "the interrupted write destroyed the existing records; a truncating "
+        "write loses every measurement in the file, and _read_interventions "
+        "then fails to [] so the next success writes over the wreckage"
     )
-    # And it works end to end, leaving no temp file behind.
+
+    # And a normal write still works end to end, leaving no temp file behind.
     service = _published(tmp_path)
     service.record_intervention_result("org/model", _evidence())
     assert service.intervention_results(service.find("org/model"))
     assert not list((tmp_path / "model").glob("*.tmp")), "a temp file was left behind"
+
+def test_a_leftover_SWAP_directory_is_invisible_to_discovery(tmp_path):
+    """It briefly holds the only copy of a live lens, under a servable name.
+
+    `restore_superseded` parks the displaced artifact under `<slug>.swap` for
+    the duration of a three-way rename. Discovery skipped `.staging` and
+    `.superseded` and not this one — so a pod evicted mid-rename left the
+    displaced lens discoverable as a SECOND, differently-slugged artifact for
+    the same model, which is exactly what the method's own docstring says must
+    never happen.
+
+    MUTATION CONTROL: drop SWAP_SUFFIX from the discovery skip tuple and this
+    fails at 2.
+    """
+    from src.services.jlens_artifact_service import SWAP_SUFFIX
+
+    service = _published(tmp_path)
+    debris = tmp_path / f"model{SWAP_SUFFIX}"
+    debris.mkdir()
+    # A CONFORMANT directory, or discovery would skip it for the wrong reason
+    # and the test would pass without the suffix rule existing.
+    (debris / "model_jacobian_lens.pt").write_bytes(b"x")
+
+    slugs = [a.slug for a in service.list_artifacts()]
+    assert slugs == ["model"], slugs
+
+
+def test_restore_REFUSES_rather_than_clearing_a_leftover_swap(tmp_path):
+    """`rmtree` here made the recovery operation destroy what it recovered.
+
+    Debris from an interrupted rename is not a stale row to be tidied — the
+    filesystem IS the registry (PADR IDL-46), so it is data, and it may be the
+    only copy of a lens.
+
+    MUTATION CONTROL: restore the `shutil.rmtree(swap)` and this fails.
+    """
+    from src.services.jlens_artifact_service import (
+        SWAP_SUFFIX,
+        ArtifactConflict,
+        JLensArtifactService,
+    )
+
+    # BUILT THROUGH THE REAL PUBLISH PATH, so the archive carries a verdict
+    # matching its own weights. A hand-made directory is refused earlier, for a
+    # different reason, and the swap guard is never reached.
+    service = JLensArtifactService(tmp_path)
+    _stage(service, range(15), _quality("true", 1097))
+    service.commit("org/model", _passing_report())
+    _stage(service, range(15), _quality("false", 400))
+    service.commit("org/model", _passing_report(), allow_quality_regression=True)
+
+    debris = tmp_path / f"model{SWAP_SUFFIX}"
+    debris.mkdir()
+    only_copy = debris / "model_jacobian_lens.pt"
+    only_copy.write_bytes(b"the only copy")
+
+    with pytest.raises(ArtifactConflict, match="by hand"):
+        service.restore_superseded("model")
+
+    # NOT MERELY REFUSED — STILL THERE, byte for byte.
+    assert only_copy.read_bytes() == b"the only copy"
+

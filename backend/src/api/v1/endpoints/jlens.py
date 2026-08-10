@@ -30,6 +30,7 @@ from ....schemas.jlens import (
     ReadoutRequest,
 )
 from ....services.jlens_artifact_service import (
+    ArtifactConflict,
     ArtifactNotValidated,
     JLensArtifactService,
 )
@@ -38,6 +39,16 @@ from ....services.jlens_model_registry import ModelNotAvailable, load_for_readou
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/jlens", tags=["jlens"])
+
+#: The per-prompt character bound, shared by `prompt` and every entry of
+#: `prompts`. One bound, one place: they are the same thing to the worker, which
+#: runs a forward pass per arm per trial over whichever it is given.
+MAX_PROMPT_CHARS = 8000
+
+#: How many layers one intervention may hook. Each is a hook on every forward
+#: pass of every arm of every trial; the intervened arm additionally perturbs
+#: the output of the hook before it, so this is not merely a cost bound.
+MAX_INTERVENED_LAYERS = 64
 
 
 def _service() -> JLensArtifactService:
@@ -291,6 +302,16 @@ async def restore_superseded(slug: str) -> RestoreResponse:
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ArtifactConflict as exc:
+        # 409 FOR THE SAME REASON THE CLAUSE BELOW IS ONE: the request is
+        # well-formed and the conflict is with the state on disk. As a bare
+        # RuntimeError it matched neither handler and left as an opaque 500 —
+        # so the actionable text the refusal was written to deliver ("inspect
+        # it and move it aside by hand") never reached the operator retrying
+        # the recovery.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
     except ArtifactNotValidated as exc:
         # 409, not 400: the request is well-formed and the CONFLICT is with the
@@ -844,16 +865,6 @@ def _semantic_check(loaded: Any, ref: Any, present: Optional[Sequence[int]] = No
 
 # The intermediate appears in NEITHER the prompt nor the expected output, so
 # recovering it cannot be explained by the artifact encoding nothing.
-#: The per-prompt character bound, shared by `prompt` and every entry of
-#: `prompts`. One bound, one place: they are the same thing to the worker, which
-#: runs a forward pass per arm per trial over whichever it is given.
-MAX_PROMPT_CHARS = 8000
-
-#: How many layers one intervention may hook. Each is a hook on every forward
-#: pass of every arm of every trial; the intervened arm additionally perturbs
-#: the output of the hook before it, so this is not merely a cost bound.
-MAX_INTERVENED_LAYERS = 64
-
 SEMANTIC_FIXTURE_PROMPT = "The number of legs on the animal that spins webs is"
 SEMANTIC_FIXTURE_ANSWER = "spider"
 

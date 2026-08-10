@@ -8,13 +8,24 @@
  * on screen. So the affordance is "intervene along this pinned token".
  *
  * THE CONTROL IS NOT OPTIONAL (BR-018). There is no checkbox to skip it: `k`
- * and `control_seed` are always sent, and the result reports the intervened
- * outcome, the control outcome and their difference — so a reader can see the
- * control actually ran rather than taking it on trust. `excess_over_control` is
- * the finding; the intervened outcome alone is not one.
+ * and `control_seed` are always sent, and the result reports all three arms —
+ * baseline, intervened and control — so a reader can see the control actually
+ * ran rather than taking it on trust. The SEPARATION is the finding; the
+ * intervened rate alone is not one.
  *
- * RUNG 1, NOT 2. This measures displacement in lens space. That is evidence
- * about the coordinate and is not causal proof the model used it.
+ * RUNG 2, AND THIS DOCSTRING ONCE SAID OTHERWISE. It described a lens-space
+ * displacement, which is what this measured before the causal rewrite —
+ * `intervened_outcome`, `control_outcome` and `excess_over_control` are all
+ * from that shape and none of them exist any more. What runs now perturbs
+ * inside the model's own forward pass, lets it continue, and scores the target
+ * token's RANK in the model's real output.
+ *
+ * MANY PROMPTS, NOT ONE. Below four trials NO outcome separates the intervened
+ * and control intervals — a perfect intervened arm against a perfect null
+ * control still overlaps — so a one-prompt run can only ever report "no effect
+ * demonstrated", which reads as a fact about the direction and is a fact about
+ * the sample size. This card is the only surface that can supply more, which
+ * is why it has a trial-prompt list.
  */
 
 import { useRef, useState } from 'react';
@@ -23,6 +34,17 @@ import { jlensApi } from '../../api/jlens';
 import { getTaskStatus } from '../../api/models';
 
 const POLL_MS = 4000;
+
+/**
+ * Fewest trials at which disjoint Wilson intervals are arithmetically possible.
+ *
+ * MIRRORS `MIN_TRIALS_FOR_SEPARATION` in `services/jlens_causal.py`, where it is
+ * derived rather than chosen. Duplicated here only to warn BEFORE a GPU job is
+ * queued; the authority is the server, which reports
+ * `min_trials_for_separation` with every result and is what the verdict above
+ * renders.
+ */
+const MIN_TRIALS = 4;
 
 /** The four primitives (BR-017). Recorded with every result. */
 export const PRIMITIVES = [
@@ -85,6 +107,18 @@ interface Outcome {
   excess_top5_over_control: number;
   /** TRUE means the intervened and control intervals are DISJOINT. */
   separated_from_control: boolean;
+  /**
+   * FALSE when no outcome at this trial count COULD have separated them.
+   *
+   * A different question from `separated_from_control`, and the answers read
+   * oppositely: one is "no effect was demonstrated", the other is "nothing
+   * could have been demonstrated". The panel grew this branch and this card
+   * did not, so the card kept printing the sentence the change exists to
+   * remove — and it is the only surface from which a projective_ablation can
+   * be run at all.
+   */
+  separation_attainable?: boolean;
+  min_trials_for_separation?: number;
 }
 
 /** `12/24 = 0.500 [0.31, 0.69]` — the count, the rate and the interval. */
@@ -107,6 +141,16 @@ export function InterventionCard({
   const [token, setToken] = useState('');
   const [primitive, setPrimitive] = useState<string>('additive');
   const [strength, setStrength] = useState(1);
+  /**
+   * Extra trial prompts, one per line.
+   *
+   * THE ONLY WAY TO REACH A SEPARABLE RESULT. Below four trials no outcome
+   * separates the intervened and control intervals, and every surface sent a
+   * single prompt — so "no effect was demonstrated" was the only verdict the
+   * product could produce, and the panel's remedy pointed here at a card that
+   * had no such control.
+   */
+  const [extraPrompts, setExtraPrompts] = useState('');
   const [k, setK] = useState(4);
   const [seed, setSeed] = useState(20260802);
   const [state, setState] = useState<'idle' | 'running'>('idle');
@@ -115,6 +159,18 @@ export function InterventionCard({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chosen = token || pinned[0] || '';
+
+  /**
+   * The prompts this run will score, `prompt` first.
+   *
+   * DE-DUPLICATED AND TRIMMED HERE, not on the server: two identical trials are
+   * one observation counted twice, which narrows the Wilson interval on
+   * evidence that does not exist.
+   */
+  const trialPrompts = [
+    prompt,
+    ...extraPrompts.split('\n').map((p) => p.trim()),
+  ].filter((p, i, all) => p.length > 0 && all.indexOf(p) === i);
   const canRun = state === 'idle' && !!modelId && !!chosen && layers.length > 0;
 
   const poll = (taskId: string) => {
@@ -153,6 +209,9 @@ export function InterventionCard({
         // result named a layer and a direction and measured neither in the
         // context the reader was looking at.
         prompt,
+        // ONE TRIAL EACH. The paper reports a FRACTION of trials — 50 two-hop
+        // prompts, 192 swap trials — never one number from one prompt.
+        prompts: trialPrompts.length > 1 ? trialPrompts : undefined,
         primitive,
         layers,
         direction_token: chosen,
@@ -287,6 +346,40 @@ export function InterventionCard({
             seed s&rdquo; is, and one nobody can reconstruct is not one either.
           </p>
 
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-600 dark:text-slate-400">
+              More trial prompts — one per line
+            </span>
+            <textarea
+              value={extraPrompts}
+              onChange={(e) => setExtraPrompts(e.target.value)}
+              rows={4}
+              placeholder={'The capital of Italy is\nThe capital of Japan is'}
+              className="rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+              data-testid="intervention-prompts"
+            />
+          </label>
+          {/* THE COUNT AND WHAT IT BUYS, before the run rather than after it.
+              Below four trials NO outcome separates the intervened and control
+              intervals — a perfect intervened arm against a perfect null
+              control still overlaps — so a run at this size can only report
+              "no effect demonstrated", which reads as a fact about the
+              direction and is a fact about the sample. Saying so afterwards
+              costs a GPU job to learn. */}
+          <p
+            className={`text-[10px] ${
+              trialPrompts.length < MIN_TRIALS
+                ? 'text-amber-700 dark:text-amber-400'
+                : 'text-slate-500 dark:text-slate-500'
+            }`}
+            data-testid="intervention-trial-count"
+          >
+            {trialPrompts.length} trial{trialPrompts.length === 1 ? '' : 's'}
+            {trialPrompts.length < MIN_TRIALS
+              ? ` — separation is not attainable below ${MIN_TRIALS}. This will run, and its verdict will describe the sample rather than the direction.`
+              : ' — enough for the intervals to separate if there is an effect.'}
+          </p>
+
           <button
             type="button"
             onClick={run}
@@ -324,9 +417,15 @@ export function InterventionCard({
                     : 'text-amber-700 dark:text-amber-400'
                 }`}
               >
-                {result.separated_from_control
-                  ? 'The intervals are DISJOINT — an effect over the matched control was demonstrated.'
-                  : 'The intervals OVERLAP — no effect was demonstrated here, which is not the same as none existing.'}
+                {result.separation_attainable === false
+                  ? `Only ${result.n_trials} trial${
+                      result.n_trials === 1 ? '' : 's'
+                    } — separation is not attainable below ${
+                      result.min_trials_for_separation ?? 4
+                    }. This says nothing about the direction yet; add prompts below.`
+                  : result.separated_from_control
+                    ? 'The intervals are DISJOINT — an effect over the matched control was demonstrated.'
+                    : 'The intervals OVERLAP — no effect was demonstrated here, which is not the same as none existing.'}
               </p>
 
               {/* ALL THREE ARMS. The baseline is not decoration: an
@@ -353,15 +452,7 @@ export function InterventionCard({
                 {result.excess_top1_over_control.toFixed(4)} · {result.n_trials}{' '}
                 trial{result.n_trials === 1 ? '' : 's'}
               </p>
-              {result.n_trials === 1 && (
-                // ONE TRIAL IS ONE OBSERVATION. Its Wilson interval spans
-                // almost the whole range, and a reader seeing "1/1 = 1.000"
-                // without this reads a certainty the arithmetic does not carry.
-                <p className="mt-1 text-[10px] text-amber-700 dark:text-amber-400">
-                  One trial. The interval spans nearly the whole range — add
-                  prompts before reading anything into this.
-                </p>
-              )}
+
             </div>
           )}
         </div>

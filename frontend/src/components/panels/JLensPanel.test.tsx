@@ -1422,6 +1422,72 @@ describe('JLensPanel — ranked readouts and interventions', () => {
     expect((await steerFrom('ranked-LOGIT_LENS')).artifact_id).toBeUndefined();
   });
 
+  it('counts the STACK ONCE when two lenses share it', async () => {
+    /**
+     * The budget fallback used `Object.values(layers_by_type).flat().length`,
+     * which CONCATENATES every lens type's axis — so a 4-layer model carrying
+     * both a Jacobian and a logit lens counted as 8 and the budget doubled,
+     * hooking twice as much of the stack as BR-017's derivation allows.
+     *
+     * The fallback is reachable: `fullSpan` is only learned from an unnarrowed
+     * read, and a reload from storage written before it was persisted has a
+     * `layerRange` and no `fullSpan`, with no migration between them.
+     *
+     * MUTATION CONTROL: use `.flat().length` instead of `new Set(...).size` and
+     * this fails with four layers instead of two.
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-7',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    render(<JLensPanel />);
+    seed({
+      meta: {
+        kind: 'meta',
+        model: 'org/m',
+        types: ['JACOBIAN_LENS', 'LOGIT_LENS'],
+        // THE SAME EIGHT LAYERS UNDER BOTH TYPES. Concatenating gives 16 and a
+        // budget of 4; the distinct count gives 8 and a budget of 2.
+        layers_by_type: {
+          JACOBIAN_LENS: [0, 1, 2, 3, 4, 5, 6, 7],
+          LOGIT_LENS: [0, 1, 2, 3, 4, 5, 6, 7],
+        },
+        top_n: 1,
+        prompt_len: 1,
+      },
+      tokens: [
+        {
+          kind: 'token',
+          position: 0,
+          token: 'x',
+          id: 1,
+          is_generated: false,
+          results: ['JACOBIAN_LENS', 'LOGIT_LENS'].map((type) => ({
+            type,
+            top_tokens: Array.from({ length: 8 }, () => ['ubiquitous']),
+            top_probs: Array.from({ length: 8 }, () => [0.9]),
+          })),
+        },
+      ],
+    } as unknown as ReadoutResponse);
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+
+    // NO fullSpan, so the fallback is the path under test. `seed` does not set
+    // it and no unnarrowed fetch has run.
+    expect(useJLensStore.getState().fullSpan).toBeNull();
+
+    const col = screen.getByTestId('ranked-JACOBIAN_LENS');
+    await user.click(within(col).getAllByRole('button', { name: /Steer/ })[0]);
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    expect(
+      (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0].layers,
+    ).toEqual([6, 7]);
+  });
+
   it('MOUNTS the layer-range picker \u2014 the only way a range is ever set', async () => {
     /**
      * REACHABILITY, not existence. `LayerRangePicker.test.tsx` renders the

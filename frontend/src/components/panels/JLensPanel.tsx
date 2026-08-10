@@ -235,7 +235,8 @@ export function JLensPanel() {
             (r.separation_attainable === false
               ? `Only ${r.n_trials ?? 1} trial — separation is not attainable ` +
                 `below ${r.min_trials_for_separation ?? 4}. This says nothing ` +
-                'about the direction yet; use Intervene… to add prompts.'
+                'about the direction yet; open Intervene… and add trial ' +
+                'prompts, one per line.'
               : sep
                 ? 'The intervals are disjoint.'
                 : 'The intervals OVERLAP — no effect was demonstrated here, ' +
@@ -271,9 +272,14 @@ export function JLensPanel() {
    * that motivated the click is the one nearer the output.
    */
   const interventionLayers = (layers: number[]) => {
+    // DISTINCT LAYER NUMBERS ACROSS LENS TYPES. `Object.values(...).flat()`
+    // concatenates every type's axis, so with both JACOBIAN and LOGIT present
+    // it counted a 26-layer model as 52 and doubled the budget — reachable on
+    // any reload from storage written before `fullSpan` was persisted, since
+    // there is no migration for it.
     const stack = fullSpan
       ? fullSpan[1] - fullSpan[0] + 1
-      : Object.values(meta?.layers_by_type ?? {}).flat().length;
+      : new Set(Object.values(meta?.layers_by_type ?? {}).flat()).size;
     const budget = Math.max(1, Math.floor((stack || layers.length) / 4));
     if (layers.length <= budget) return layers;
     return [...layers].sort((a, b) => a - b).slice(-budget);

@@ -158,3 +158,98 @@ class TestTheReportIsTheComparison:
         width = r["intervened_top1"]["ci95_high"] - r["intervened_top1"]["ci95_low"]
         assert width > 0.7, f"a single trial reported a {width:.2f}-wide interval"
         assert r["separated_from_control"] is False
+
+class TestSeparationMustBeATTAINABLEBeforeItIsReported:
+    """Below four trials no outcome separates. That is a fact about the sample.
+
+    Both UI paths sent a single prompt, so `separated_from_control: false` was
+    the only verdict either could ever produce — and it reads as a finding about
+    the direction. The distinction is the whole point, and it shipped with no
+    test: replacing the body with `return True` left the suite green.
+
+    MUTATION CONTROLS:
+      * `return True`            -> "one trial cannot" fails
+      * `return False`           -> "four trials can" fails
+      * `>=` instead of `>`      -> "three trials cannot" fails
+      * drop the caveat          -> "says WHY" fails
+    """
+
+    @staticmethod
+    def _report(n: int, *, intervened: int = 0, control: int = 9):
+        from src.services.jlens_causal import CausalReport, Trial
+
+        return CausalReport(
+            trials=[
+                Trial(
+                    prompt=f"p{i}",
+                    baseline_rank=9,
+                    intervened_rank=intervened,
+                    control_rank=control,
+                )
+                for i in range(n)
+            ],
+            target_token=" Paris",
+            primitive="additive",
+            layers=[9],
+            strength=1.0,
+        )
+
+    def test_ONE_trial_cannot_separate_however_perfect_the_arms(self):
+        """The best case: every intervened trial a hit, every control a miss."""
+        r = self._report(1)
+        assert r.separation_attainable() is False
+        # AND THE BEST CASE REALLY IS PERFECT, so this is not passing because
+        # the fixture happened to be weak.
+        s = r.summary()
+        assert s["intervened_top1"]["rate"] == 1.0
+        assert s["control_top1"]["rate"] == 0.0
+        assert s["separated_from_control"] is False
+
+    def test_THREE_trials_cannot_either(self):
+        """The boundary from below. 3/3 gives [0.4385, 1.0]; 0/3 [0.0, 0.5615]."""
+        assert self._report(3).separation_attainable() is False
+
+    def test_FOUR_trials_can(self):
+        """The boundary from above. [0.5101, 1.0] against [0.0, 0.4899]."""
+        r = self._report(4)
+        assert r.separation_attainable() is True
+        # And at four the perfect case DOES separate, so the constant is the
+        # real threshold rather than one short of it.
+        assert r.summary()["separated_from_control"] is True
+
+    def test_ZERO_trials_cannot(self):
+        """`wilson_interval` returns (0, 1) for n=0 — maximal uncertainty."""
+        assert self._report(0).separation_attainable() is False
+
+    def test_the_summary_says_WHY_not_merely_that_it_did_not_separate(self):
+        s = self._report(1).summary()
+        assert s["separation_attainable"] is False
+        assert s["min_trials_for_separation"] == 4
+        assert "not attainable" in s["caveat"]
+        # THE REMEDY, NAMED. "add prompts" is the action; without it the reader
+        # is told the result is uninformative and not what to do about it.
+        assert "prompts" in s["caveat"]
+
+    def test_an_ATTAINABLE_run_carries_no_sample_size_caveat(self):
+        """Otherwise every run would carry it and it would stop meaning anything."""
+        s = self._report(8).summary()
+        assert s["separation_attainable"] is True
+        assert "not attainable" not in (s.get("caveat") or "")
+
+    def test_the_constant_is_DERIVED_and_still_matches_the_arithmetic(self):
+        """The docstring states 3 overlaps and 4 does not. Recomputed here.
+
+        A constant whose justification lives only in prose drifts silently the
+        moment the interval changes — a different z, a different estimator.
+        """
+        from src.services.jlens_causal import (
+            MIN_TRIALS_FOR_SEPARATION,
+            wilson_interval,
+        )
+
+        def attainable(n: int) -> bool:
+            return wilson_interval(n, n)[0] > wilson_interval(0, n)[1]
+
+        assert not attainable(MIN_TRIALS_FOR_SEPARATION - 1)
+        assert attainable(MIN_TRIALS_FOR_SEPARATION)
+

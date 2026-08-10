@@ -472,3 +472,91 @@ class TestAnUnknownPrimitiveIsRefusedAtTheDoor:
                     InterventionRequest(**kwargs)
                 continue
             assert InterventionRequest(**kwargs).primitive == p.value
+
+class TestTheRequestGUARDSAreRealAndNotDecorative:
+    """Every rule added to `InterventionRequest` shipped with no test.
+
+    Each one refuses a request that would otherwise take a slot on a single-GPU
+    queue — behind a possible 45-minute fit — and fail, or worse, succeed while
+    measuring something other than what the recipe records.
+
+    MUTATION CONTROLS (each must redden the named test):
+      * drop the duplicate-layers check  -> "repeated layers"
+      * drop the layer-count cap         -> "too many layers"
+      * drop the per-prompt length bound -> "an overlong trial prompt"
+      * drop the empty-prompt check      -> "a blank trial prompt"
+      * drop the positions check         -> "repeated positions"
+    """
+
+    @staticmethod
+    def _body(**over):
+        body = dict(
+            model_id="m_1",
+            prompt="hello",
+            primitive="additive",
+            layers=[0, 1],
+            direction_token=" Paris",
+        )
+        body.update(over)
+        return body
+
+    def _refused(self, **over):
+        from pydantic import ValidationError
+
+        from src.api.v1.endpoints.jlens import InterventionRequest
+
+        with pytest.raises(ValidationError) as exc:
+            InterventionRequest(**self._body(**over))
+        return str(exc.value)
+
+    def test_the_BASELINE_request_is_accepted(self):
+        """Or every assertion below passes for the wrong reason."""
+        from src.api.v1.endpoints.jlens import InterventionRequest
+
+        assert InterventionRequest(**self._body()).layers == [0, 1]
+
+    def test_REPEATED_LAYERS_are_refused(self):
+        """Each entry registers its own hook, and each hook perturbs the output
+        of the one before — so [9,9,9] at strength 1.0 applies 3.0 and records
+        the recipe as 1.0. Reproducing that recipe cannot reproduce the result.
+        """
+        assert "more than once" in self._refused(layers=[9, 9, 9])
+
+    def test_TOO_MANY_LAYERS_are_refused(self):
+        from src.api.v1.endpoints.jlens import MAX_INTERVENED_LAYERS
+
+        msg = self._refused(layers=list(range(MAX_INTERVENED_LAYERS + 1)))
+        assert str(MAX_INTERVENED_LAYERS) in msg
+        # AND THE BOUND ITSELF IS ACCEPTED, so the comparison is not off by one.
+        from src.api.v1.endpoints.jlens import InterventionRequest
+
+        assert InterventionRequest(
+            **self._body(layers=list(range(MAX_INTERVENED_LAYERS)))
+        )
+
+    def test_an_OVERLONG_trial_prompt_is_refused(self):
+        """`prompt` was capped at 8000 and `prompts` entries at nothing, so
+        512 x 400 000 characters passed validation from one POST."""
+        from src.api.v1.endpoints.jlens import MAX_PROMPT_CHARS
+
+        msg = self._refused(prompts=["ok", "x" * (MAX_PROMPT_CHARS + 1)])
+        assert "prompts[1]" in msg
+        assert str(MAX_PROMPT_CHARS) in msg
+
+    def test_a_prompt_AT_the_bound_is_accepted(self):
+        from src.api.v1.endpoints.jlens import (
+            MAX_PROMPT_CHARS,
+            InterventionRequest,
+        )
+
+        assert InterventionRequest(**self._body(prompts=["x" * MAX_PROMPT_CHARS]))
+
+    def test_a_BLANK_trial_prompt_is_refused(self):
+        """A whitespace-only trial scores three forward passes over nothing and
+        contributes its result to the rate as though it were an observation."""
+        assert "prompts[0]" in self._refused(prompts=["   ", "real"])
+
+    def test_REPEATED_POSITIONS_are_refused(self):
+        """The hook loops over them and writes into the tensor it is reading."""
+        assert "positions repeat" in self._refused(positions=[-1, -1])
+
