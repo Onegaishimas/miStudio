@@ -657,3 +657,111 @@ class TestATypedTokenCanBeCheckedWithoutLoadingWeights:
             "megabytes of JSON and this runs on every keystroke's blur"
         )
 
+class TestTheTokenizerIsFOUNDTheSameWayTheWeightsAre:
+    """Every check above stubs `tokenizer_for`, so none exercised THIS.
+
+    The first version read `name` — the DISPLAY name, "LFM2.5-1.2B-Instruct" —
+    where `load_for_readout` reads `repo_id`, "LiquidAI/LFM2.5-1.2B-Instruct".
+    `from_pretrained` then looked for a snapshot that does not exist and the
+    endpoint 500'd on every real call, with a green suite: the tests mocked the
+    one function whose job was to get this right.
+
+    Two views of the same fact drifted because each derived it separately, which
+    is why `locate_weights` is now the single definition.
+
+    MUTATION CONTROLS:
+      * read `name` instead of `repo_id`  -> "uses the repo id" fails
+      * return the row's id on a missing repo_id -> "refuses without one" fails
+      * drop the exists() check           -> "refuses when not downloaded" fails
+    """
+
+    @staticmethod
+    def _row(**over):
+        import types
+
+        base = dict(
+            id="m_1",
+            repo_id="LiquidAI/LFM2.5-1.2B-Instruct",
+            name="LFM2.5-1.2B-Instruct",
+            file_path="/models/raw/m_1",
+        )
+        base.update(over)
+        return types.SimpleNamespace(**base)
+
+    def test_it_uses_the_REPO_ID_not_the_display_name(self, tmp_path):
+        from unittest.mock import patch
+
+        from src.services.jlens_model_registry import locate_weights
+
+        with patch("src.services.jlens_model_registry.settings") as st:
+            st.resolve_data_path.return_value = tmp_path
+            repo_id, resolved = locate_weights(self._row())
+
+        assert repo_id == "LiquidAI/LFM2.5-1.2B-Instruct", (
+            "the display name was used; from_pretrained cannot resolve it and "
+            "the endpoint 500s on every real call"
+        )
+        assert "/" in repo_id, "a repo id has an owner; a display name does not"
+        assert resolved == tmp_path
+
+    def test_it_REFUSES_a_row_without_a_repo_id(self):
+        from src.services.jlens_model_registry import (
+            ModelNotAvailable,
+            locate_weights,
+        )
+
+        with pytest.raises(ModelNotAvailable, match="no repo_id"):
+            locate_weights(self._row(repo_id=None))
+
+    def test_it_REFUSES_when_the_weights_are_not_downloaded(self, tmp_path):
+        from unittest.mock import patch
+
+        from src.services.jlens_model_registry import (
+            ModelNotAvailable,
+            locate_weights,
+        )
+
+        with patch("src.services.jlens_model_registry.settings") as st:
+            st.resolve_data_path.return_value = tmp_path / "absent"
+            with pytest.raises(ModelNotAvailable, match="not downloaded"):
+                locate_weights(self._row())
+
+    def test_load_for_readout_reads_THE_SAME_FIELD(self):
+        """The two derivations drifted once; this is what notices next time.
+
+        Asserted against the SOURCE of the other path deliberately: the point is
+        that both read `repo_id`, and a test that called `load_for_readout`
+        would need a model on disk.
+        """
+        import inspect
+
+        from src.services import jlens_model_registry as reg
+
+        src = inspect.getsource(reg.load_for_readout)
+        assert 'getattr(model_record, "repo_id"' in src
+        # AND NOT the display name, which is the mistake being pinned.
+        assert 'getattr(model_record, "name"' not in src
+
+    def test_a_tokenizer_failure_is_ModelNotAvailable_not_a_bare_OSError(
+        self, tmp_path
+    ):
+        """The endpoint turns that into a 409; an OSError escaped as a 500.
+
+        MUTATION CONTROL: remove the try/except around `from_pretrained` and
+        this fails with OSError.
+        """
+        from unittest.mock import patch
+
+        from src.services.jlens_model_registry import (
+            ModelNotAvailable,
+            tokenizer_for,
+        )
+
+        with patch("src.services.jlens_model_registry.settings") as st, patch(
+            "transformers.AutoTokenizer.from_pretrained",
+            side_effect=OSError("no snapshot"),
+        ):
+            st.resolve_data_path.return_value = tmp_path
+            with pytest.raises(ModelNotAvailable, match="no snapshot"):
+                tokenizer_for(self._row(repo_id="org/never-cached"))
+
