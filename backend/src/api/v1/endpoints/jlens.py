@@ -1484,6 +1484,96 @@ class InterventionRequest(BaseModel):
         return self
 
 
+class TokenCheckRequest(BaseModel):
+    """Is this string a single token in THIS model's vocabulary?"""
+
+    model_id: str
+    #: Bounded: this exists to check a handful of hand-typed strings, not to
+    #: tokenise a corpus. `/datasets/tokenize-preview` is the endpoint for that.
+    tokens: List[str] = Field(..., min_length=1, max_length=32)
+
+
+class TokenCheck(BaseModel):
+    token: str
+    #: The ids it encodes to. Present even when there is more than one, because
+    #: seeing "[ 4874, 883 ]" is what makes "this is two tokens" concrete.
+    ids: List[int]
+    n_tokens: int
+    #: Usable as a lens direction. A direction is `W_U[id]`, which is defined for
+    #: exactly one id.
+    usable: bool
+    detail: str
+
+
+@router.post(
+    "/token-check",
+    response_model=List[TokenCheck],
+    summary="Is a string a single token in this model's vocabulary?",
+)
+async def token_check(
+    request: TokenCheckRequest, db: AsyncSession = Depends(get_db)
+) -> List[TokenCheck]:
+    """Resolve hand-typed tokens against the model's OWN tokenizer.
+
+    WHY THIS EXISTS. A lens direction is an unembedding row, so ANY single token
+    has one — including tokens the readout never surfaced, which are precisely
+    the interesting swap targets ("does ' Rome' arrive if I put ' Paris' where
+    it was?"). Restricting the UI to tokens already on screen was a limit the
+    server never had.
+
+    But whether a string is ONE token is a property of the model's vocabulary,
+    not of the string: `' Rome'` is single on one model and two on another, and
+    a leading space usually decides it. The worker refuses a multi-token
+    direction — correctly, since it has no single row — but only after a 202 and
+    a slot on a single-GPU queue that may be behind a 45-minute fit. That is
+    knowable here, from the tokenizer alone, without loading any weights.
+    """
+    from ....models.model import Model
+    from ....services.jlens_model_registry import tokenizer_for
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    try:
+        tok = tokenizer_for(record)
+    except ModelNotAvailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    out: List[TokenCheck] = []
+    for raw in request.tokens:
+        ids = tok.encode(raw, add_special_tokens=False)
+        n = len(ids)
+        if n == 1:
+            detail = "One token — usable as a direction."
+        elif n == 0:
+            detail = "Encodes to nothing; there is no direction to act along."
+        else:
+            # THE LEADING-SPACE HINT, because it is the cause almost every time
+            # and it is invisible in a text box.
+            alt = tok.encode(f" {raw.strip()}", add_special_tokens=False)
+            detail = (
+                f"{n} tokens. A lens direction is defined for a SINGLE token."
+                + (
+                    f" Try ' {raw.strip()}' with a leading space — that is one token."
+                    if len(alt) == 1
+                    else ""
+                )
+            )
+        out.append(
+            TokenCheck(
+                token=raw, ids=ids, n_tokens=n, usable=(n == 1), detail=detail
+            )
+        )
+    return out
+
+
 @router.post(
     "/interventions",
     response_model=BandTaskAccepted,

@@ -12,6 +12,7 @@ import type {
   JLensAnnotateRequest,
   JLensAnnotation,
   JLensInterventionRequest,
+  JLensTokenCheck,
   JLensWatchlistRequest,
   JLensWatchlistResponse,
   JLensArtifactSummary,
@@ -60,6 +61,21 @@ export const jlensApi = {
         `?d_model=${dims.d_model}&n_layers=${dims.n_layers}&n_vocab=${dims.n_vocab}`,
       { method: 'POST' }
     ),
+
+  /**
+   * Is a hand-typed string a single token in THIS model's vocabulary?
+   *
+   * A direction is `W_U[id]`, so any single token has one — including tokens
+   * the readout never surfaced, which are the interesting swap targets. But
+   * whether a string is ONE token belongs to the model's vocabulary, and the
+   * worker's refusal of a multi-token direction arrives only after a 202 and a
+   * slot on a single-GPU queue. Weights are not loaded.
+   */
+  checkTokens: (modelId: string, tokens: string[]) =>
+    fetchAPI<JLensTokenCheck[]>('/jlens/token-check', {
+      method: 'POST',
+      body: JSON.stringify({ model_id: modelId, tokens }),
+    }),
 
   /** Queue an intervention AND its matched control. Poll the task id. */
   intervene: (request: JLensInterventionRequest) =>

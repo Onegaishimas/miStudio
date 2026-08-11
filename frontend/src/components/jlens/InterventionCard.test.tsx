@@ -10,7 +10,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { InterventionCard } from './InterventionCard';
 
-vi.mock('../../api/jlens', () => ({ jlensApi: { intervene: vi.fn() } }));
+vi.mock('../../api/jlens', () => ({
+  jlensApi: { intervene: vi.fn(), checkTokens: vi.fn() },
+}));
 vi.mock('../../api/models', () => ({ getTaskStatus: vi.fn() }));
 
 import { jlensApi } from '../../api/jlens';
@@ -419,7 +421,9 @@ describe('InterventionCard', () => {
     });
     const run = screen.getByRole('button', { name: /Run with control/i });
     expect(run).toBeDisabled();
-    expect(run).toHaveAttribute('title', expect.stringMatching(/second pinned token/));
+    // The wording names BOTH ways out — pinning is no longer the only one.
+    expect(run).toHaveAttribute('title', expect.stringMatching(/second token/));
+    expect(run).toHaveAttribute('title', expect.stringMatching(/or type it/));
     // AND THE PARTNER SELECT EXPLAINS ITSELF rather than sitting blank.
     expect(screen.getByTestId('intervention-partner')).toHaveTextContent(
       /Pin a second token/
@@ -459,6 +463,178 @@ describe('InterventionCard', () => {
     });
     expect(screen.getByRole('spinbutton', { name: /Strength/i })).toBeDisabled();
     expect(screen.getByText(/ignored by coordinate swap/i)).toBeInTheDocument();
+  });
+
+
+  it('SWAPS WITH A TYPED TOKEN that never appeared in the readout', async () => {
+    /**
+     * A direction is `W_U[id]`, so any single token has one. The pinned set is
+     * only what the readout SURFACED, and a swap target is usually a token that
+     * is not in the top-k yet — asking whether it arrives is the experiment.
+     * Restricting this form to what was on screen was a limit the server never
+     * had.
+     *
+     * MUTATION CONTROLS:
+     *   * ignore `typedPartner` in `chosenPartner` -> "swaps with a typed token" fails
+     *   * ignore `typedDirection` in `chosen`      -> "the typed direction wins" fails
+     */
+    (jlensApi.checkTokens as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { token: ' Rome', ids: [4874], n_tokens: 1, usable: true, detail: 'One token — usable as a direction.' },
+    ]);
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        // ONE pinned token, so the partner CANNOT have come from the pinned set.
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /Primitive/i }), {
+      target: { value: 'coordinate_swap' },
+    });
+    fireEvent.change(screen.getByTestId('intervention-partner-typed'), {
+      target: { value: ' Rome' },
+    });
+    fireEvent.blur(screen.getByTestId('intervention-partner-typed'));
+    await waitFor(() =>
+      expect(screen.getByTestId('token-verdict')).toHaveTextContent(/id 4874/)
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.direction_token).toBe(' Paris');
+    expect(sent.target_token).toBe(' Rome');
+  });
+
+  it('BLOCKS a token the vocabulary says is more than one, before the GPU', async () => {
+    /**
+     * The worker refuses a multi-token direction correctly — but only after a
+     * 202 and a slot on a single-GPU queue that may sit behind a 45-minute fit.
+     * The tokenizer answers it with no weights loaded.
+     *
+     * MUTATION CONTROL: drop the `rejected(chosen)` clause from `blocked` and
+     * this fails — the button becomes enabled.
+     */
+    (jlensApi.checkTokens as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        token: 'Rome',
+        ids: [4874, 883],
+        n_tokens: 2,
+        usable: false,
+        detail: "2 tokens. A lens direction is defined for a SINGLE token. Try ' Rome' with a leading space — that is one token.",
+      },
+    ]);
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByTestId('intervention-direction-typed'), {
+      target: { value: 'Rome' },
+    });
+    fireEvent.blur(screen.getByTestId('intervention-direction-typed'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('token-verdict')).toHaveTextContent(/SINGLE token/)
+    );
+    // THE HINT REACHES THE USER, not just the verdict. The leading space is the
+    // cause almost every time and is invisible in a text box.
+    expect(screen.getByTestId('token-verdict')).toHaveTextContent(/leading space/);
+    expect(
+      screen.getByRole('button', { name: /Run with control/i })
+    ).toBeDisabled();
+    expect(jlensApi.intervene as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('does NOT block when the check itself fails', async () => {
+    /**
+     * The endpoint being unreachable must not strand the form: the worker
+     * refuses a bad direction anyway, so this is an early warning and not a
+     * gate.
+     *
+     * MUTATION CONTROL: let the catch set a blocking state and this fails.
+     */
+    (jlensApi.checkTokens as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('offline')
+    );
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByTestId('intervention-direction-typed'), {
+      target: { value: ' Rome' },
+    });
+    fireEvent.blur(screen.getByTestId('intervention-direction-typed'));
+    await waitFor(() =>
+      expect(jlensApi.checkTokens as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    expect(screen.getByRole('button', { name: /Run with control/i })).toBeEnabled();
+  });
+
+
+  it('sends the typed token VERBATIM, leading space and all', async () => {
+    /**
+     * The leading space is the character that makes ' Rome' a single token and
+     * 'Rome' two. An implementation that trimmed the input sent 'Rome' to the
+     * worker — the multi-token form the worker must refuse — immediately after
+     * the verdict had approved ' Rome'. The check and the run would have been
+     * examining different strings.
+     *
+     * MUTATION CONTROL: `.trim()` the typed token anywhere on the path and this
+     * fails.
+     */
+    (jlensApi.checkTokens as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { token: ' Rome', ids: [4874], n_tokens: 1, usable: true, detail: 'One token.' },
+    ]);
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByTestId('intervention-direction-typed'), {
+      target: { value: ' Rome' },
+    });
+    fireEvent.blur(screen.getByTestId('intervention-direction-typed'));
+    await waitFor(() =>
+      expect(jlensApi.checkTokens as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    // CHECKED VERBATIM...
+    expect(
+      (jlensApi.checkTokens as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    ).toEqual([' Rome']);
+
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    // ...AND RUN VERBATIM. The two must be the same string or the verdict
+    // describes something other than what was sent.
+    expect(
+      (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0]
+        .direction_token
+    ).toBe(' Rome');
   });
 
 });

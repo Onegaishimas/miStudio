@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 
@@ -105,9 +105,50 @@ def _release_memory() -> None:
 _CACHE = _SingleEntryCache()
 
 
+_TOKENIZER_CACHE: Dict[str, Any] = {}
+
+
+def tokenizer_for(model_record: Any) -> Any:
+    """The model's OWN tokenizer, without loading its weights.
+
+    THE SAME TOKENIZER THE INTERVENTION WILL USE. A direction is resolved by
+    `service.tokenizer.encode(...)`, and whether a string is one token is a
+    property of THAT vocabulary — ' Rome' is a single token on one model and two
+    on another. Checking against any other tokenizer would answer a different
+    question and would be wrong exactly where it matters, on the unusual strings
+    a user types by hand.
+
+    Weights are NOT loaded: a tokenizer is a few megabytes of JSON and a
+    single-token check must not cost a model load on a single-GPU box, behind a
+    possible 45-minute fit.
+    """
+    from transformers import AutoTokenizer
+
+    repo_id = getattr(model_record, "name", None) or getattr(model_record, "id", "")
+    if repo_id in _TOKENIZER_CACHE:
+        return _TOKENIZER_CACHE[repo_id]
+
+    raw_path = getattr(model_record, "file_path", None)
+    resolved = settings.resolve_data_path(raw_path) if raw_path else None
+    if not (resolved and resolved.exists()):
+        raise ModelNotAvailable(
+            f"{repo_id} is not downloaded locally, so its vocabulary is not "
+            "available to check a token against."
+        )
+    tok = AutoTokenizer.from_pretrained(
+        repo_id, cache_dir=resolved, local_files_only=True
+    )
+    _TOKENIZER_CACHE[repo_id] = tok
+    return tok
+
+
 def clear_cache() -> None:
     """Drop the resident model. Called by tests and by an explicit unload."""
     _CACHE.clear()
+    # THE VOCABULARY GOES WITH IT. A model re-downloaded under the same name can
+    # carry a different tokenizer, and a stale one would answer "is this a
+    # single token" for weights that are no longer there.
+    _TOKENIZER_CACHE.clear()
 
 
 def loaded_model_key() -> Optional[str]:

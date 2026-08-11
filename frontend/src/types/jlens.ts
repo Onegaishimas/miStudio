@@ -340,3 +340,16 @@ export interface JLensWatchlistResponse {
   scoring_definition: string;
   concept_count: number;
 }
+
+/** One hand-typed token, resolved against the model's own vocabulary. */
+export interface JLensTokenCheck {
+  token: string;
+  /** The ids it encodes to — shown, because "[4874, 883]" is what makes
+   *  "this is two tokens" concrete. */
+  ids: number[];
+  n_tokens: number;
+  /** Usable as a lens direction, which is defined for exactly one id. */
+  usable: boolean;
+  detail: string;
+}
+
