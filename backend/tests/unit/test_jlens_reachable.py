@@ -37,7 +37,12 @@ from src.api.v1.router import api_router
 #: client's URL string in the MCP file, which proves what a CALLER sends and
 #: nothing about what the server serves — two views sharing one blind spot,
 #: which is the anti-pattern this file exists to prevent.
-EXPECTED = {"/jlens/readout", "/jlens/probe", "/jlens/interventions"}
+EXPECTED = {
+    "/jlens/readout",
+    "/jlens/probe",
+    "/jlens/interventions",
+    "/jlens/token-check",
+}
 
 
 def _reachable_paths() -> set:
@@ -559,4 +564,96 @@ class TestTheRequestGUARDSAreRealAndNotDecorative:
     def test_REPEATED_POSITIONS_are_refused(self):
         """The hook loops over them and writes into the tensor it is reading."""
         assert "positions repeat" in self._refused(positions=[-1, -1])
+
+class TestATypedTokenCanBeCheckedWithoutLoadingWeights:
+    """A direction is `W_U[id]`, so ANY single token has one.
+
+    Restricting the UI to tokens the readout surfaced was a limit the server
+    never had — and the interesting swap targets are exactly the ones NOT on
+    screen yet ("does ' Rome' arrive if I put ' Paris' where it was?").
+
+    But whether a string is one token belongs to the model's vocabulary, not to
+    the string. The worker refuses a multi-token direction correctly, and only
+    after a 202 and a slot on a single-GPU queue that may sit behind a
+    45-minute fit.
+
+    MUTATION CONTROLS:
+      * return usable=True for n != 1     -> "two tokens are refused" fails
+      * drop the leading-space hint       -> "suggests the leading space" fails
+      * load the model instead of the tokenizer -> "loads NO weights" fails
+    """
+
+    @staticmethod
+    def _check(tokens, encoder):
+        """Drive the endpoint with a stub tokenizer and a stub model row."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from src.api.v1.endpoints.jlens import TokenCheckRequest, token_check
+
+        tok = MagicMock()
+        tok.encode = lambda s, add_special_tokens=False: encoder(s)
+
+        db = MagicMock()
+        res = MagicMock()
+        res.scalar_one_or_none.return_value = object()
+
+        async def execute(_q):
+            return res
+
+        db.execute = execute
+
+        with patch(
+            "src.services.jlens_model_registry.tokenizer_for", return_value=tok
+        ) as loader, patch(
+            "src.services.jlens_model_registry.load_for_readout"
+        ) as weights:
+            out = asyncio.run(
+                token_check(
+                    TokenCheckRequest(model_id="m_1", tokens=list(tokens)), db=db
+                )
+            )
+        return out, loader, weights
+
+    def test_a_SINGLE_token_is_usable(self):
+        out, _l, _w = self._check([" Rome"], lambda s: [4874])
+        assert out[0].usable is True
+        assert out[0].ids == [4874]
+        assert out[0].n_tokens == 1
+
+    def test_TWO_tokens_are_refused_with_the_ids_shown(self):
+        """"[4874, 883]" is what makes "this is two tokens" concrete."""
+        out, _l, _w = self._check(["Rome"], lambda s: [4874, 883] if s == "Rome" else [1])
+        assert out[0].usable is False
+        assert out[0].ids == [4874, 883]
+        assert "SINGLE token" in out[0].detail
+
+    def test_it_SUGGESTS_THE_LEADING_SPACE_when_that_is_the_fix(self):
+        """The cause almost every time, and invisible in a text box."""
+        out, _l, _w = self._check(
+            ["Rome"], lambda s: [4874] if s == " Rome" else [4874, 883]
+        )
+        assert "leading space" in out[0].detail, out[0].detail
+
+    def test_it_does_NOT_suggest_a_space_that_does_not_help(self):
+        """Otherwise the hint is noise on every failure and stops being read."""
+        out, _l, _w = self._check(["zzz"], lambda s: [1, 2, 3])
+        assert "leading space" not in out[0].detail
+
+    def test_a_token_that_encodes_to_NOTHING_is_refused(self):
+        out, _l, _w = self._check([" "], lambda s: [])
+        assert out[0].usable is False
+        assert out[0].n_tokens == 0
+
+    def test_it_loads_NO_WEIGHTS(self):
+        """A single-token check must not cost a model load on a single-GPU box.
+
+        MUTATION CONTROL: call `load_for_readout` here and this fails.
+        """
+        _out, loader, weights = self._check([" Rome"], lambda s: [1])
+        assert loader.called, "the tokenizer was never consulted"
+        assert not weights.called, (
+            "the check loaded the model's WEIGHTS; a tokenizer is a few "
+            "megabytes of JSON and this runs on every keystroke's blur"
+        )
 

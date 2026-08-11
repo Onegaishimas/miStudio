@@ -31,6 +31,7 @@
 import { useRef, useState } from 'react';
 import { Loader2, Zap } from 'lucide-react';
 import { jlensApi } from '../../api/jlens';
+import type { JLensTokenCheck } from '../../types/jlens';
 import { getTaskStatus } from '../../api/models';
 
 const POLL_MS = 4000;
@@ -75,6 +76,43 @@ export const PRIMITIVES = [
 
 /** Primitives that consume `strength`. The others ignore it entirely. */
 const USES_STRENGTH = new Set(['additive']);
+
+/**
+ * What the model's vocabulary says about a hand-typed token.
+ *
+ * SHOWN EVEN WHEN IT PASSES. A silent success is indistinguishable from a check
+ * that never ran, and the whole reason this control exists is that "is this one
+ * token" is not answerable by looking at the string.
+ */
+function TokenVerdict({
+  check,
+  busy,
+}: {
+  check?: JLensTokenCheck;
+  busy: boolean;
+}) {
+  if (busy && !check) {
+    return (
+      <span className="text-[10px] text-slate-500 dark:text-slate-500">
+        checking the model's vocabulary…
+      </span>
+    );
+  }
+  if (!check) return null;
+  return (
+    <span
+      data-testid="token-verdict"
+      className={`text-[10px] ${
+        check.usable
+          ? 'text-emerald-700 dark:text-emerald-400'
+          : 'text-amber-700 dark:text-amber-400'
+      }`}
+    >
+      {check.usable ? `id ${check.ids[0]} — ` : ''}
+      {check.detail}
+    </span>
+  );
+}
 
 interface InterventionCardProps {
   modelId: string;
@@ -180,6 +218,20 @@ export function InterventionCard({
    * list chose from pin order without ever showing which.
    */
   const [partner, setPartner] = useState('');
+  /**
+   * Tokens typed by hand rather than picked from the pinned set.
+   *
+   * A direction is `W_U[id]`, so ANY single token has one — including tokens
+   * the readout never surfaced, which are exactly the interesting swap targets:
+   * "does ' Rome' arrive if I put ' Paris' where it was?" is a question about a
+   * token that is, by hypothesis, NOT in the top-k yet. Restricting this form
+   * to what is on screen was a limit the server never had.
+   */
+  const [typedDirection, setTypedDirection] = useState('');
+  const [typedPartner, setTypedPartner] = useState('');
+  /** Verdicts from the model's own vocabulary, keyed by the string checked. */
+  const [tokenChecks, setTokenChecks] = useState<Record<string, JLensTokenCheck>>({});
+  const [checking, setChecking] = useState(false);
   const [k, setK] = useState(4);
   const [seed, setSeed] = useState(20260802);
   const [state, setState] = useState<'idle' | 'running'>('idle');
@@ -187,16 +239,54 @@ export function InterventionCard({
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const chosen = token || pinned[0] || '';
+  // NOT TRIMMED. The leading space is the character that makes ' Rome' a
+  // single token and 'Rome' two — trimming it away silently converts a valid
+  // direction into one the worker must refuse, and does it to the exact input
+  // the verdict just approved. Emptiness is tested separately.
+  const chosen = typedDirection || token || pinned[0] || '';
   const isSwap = primitive === 'coordinate_swap';
   // THE FIRST PINNED TOKEN THAT IS NOT THE DIRECTION. A swap with one token is
   // an additive steer wearing a swap's name, which the server refuses — so the
   // default must differ, and when nothing can differ the run is blocked here
   // rather than 422'd after a round trip.
   const chosenPartner =
-    partner && partner !== chosen
+    typedPartner ||
+    (partner && partner !== chosen
       ? partner
-      : pinned.find((t) => t !== chosen) || '';
+      : pinned.find((t) => t !== chosen) || '');
+
+  /**
+   * Check a hand-typed token against the model's vocabulary, on blur.
+   *
+   * ON BLUR, NOT ON EVERY KEYSTROKE: mid-word text is almost always multi-token
+   * and an error that appears while you are still typing trains you to ignore
+   * it. And the verdict is CACHED by string, so re-checking the same token is
+   * free.
+   */
+  const checkToken = async (raw: string) => {
+    // KEYED AND SENT VERBATIM, whitespace included, because that is what will
+    // be tokenised. `.trim()` here would check a different string than the one
+    // the run uses.
+    const t = raw;
+    if (!t.trim() || !modelId || tokenChecks[t]) return;
+    setChecking(true);
+    try {
+      const [verdict] = await jlensApi.checkTokens(modelId, [t]);
+      if (verdict) setTokenChecks((prev) => ({ ...prev, [t]: verdict }));
+    } catch {
+      // A FAILED CHECK MUST NOT BLOCK THE RUN. The worker refuses a
+      // multi-token direction anyway; this is an early warning, not a gate
+      // that can strand the form when the endpoint is unreachable.
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  /** A verdict that says NO. Undefined when unchecked or fine. */
+  const rejected = (t: string) => {
+    const v = tokenChecks[t];
+    return v && !v.usable ? v : undefined;
+  };
 
   /**
    * The prompts this run will score, `prompt` first.
@@ -227,8 +317,12 @@ export function InterventionCard({
           : layers.length === 0
             ? 'The readout covers no layers.'
             : isSwap && !chosenPartner
-              ? 'A swap EXCHANGES two coordinates, so it needs a second pinned token. Pin another one.'
-              : undefined;
+              ? 'A swap EXCHANGES two coordinates, so it needs a second token. Pin one, or type it.'
+              : rejected(chosen)
+                ? `Direction: ${rejected(chosen)!.detail}`
+                : isSwap && rejected(chosenPartner)
+                  ? `Exchange with: ${rejected(chosenPartner)!.detail}`
+                  : undefined;
   const canRun = !blocked;
 
   const poll = (taskId: string) => {
@@ -349,6 +443,20 @@ export function InterventionCard({
                   ))
                 )}
               </select>
+              {/* OR TYPE ONE. The pinned set is what the readout surfaced; the
+                  vocabulary is much larger, and a swap target is usually a
+                  token that is NOT in the top-k yet — that is the point of
+                  asking whether it arrives. */}
+              <input
+                type="text"
+                value={typedDirection}
+                onChange={(e) => setTypedDirection(e.target.value)}
+                onBlur={(e) => void checkToken(e.target.value)}
+                placeholder="…or type any token, e.g. ' Paris'"
+                data-testid="intervention-direction-typed"
+                className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-[11px] text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+              />
+              <TokenVerdict check={tokenChecks[chosen]} busy={checking} />
             </label>
 
             {/* THE SECOND COORDINATE, NAMED. Only for a swap — the other
@@ -382,6 +490,16 @@ export function InterventionCard({
                       ))
                   )}
                 </select>
+                <input
+                  type="text"
+                  value={typedPartner}
+                  onChange={(e) => setTypedPartner(e.target.value)}
+                  onBlur={(e) => void checkToken(e.target.value)}
+                  placeholder="…or type any token, e.g. ' Rome'"
+                  data-testid="intervention-partner-typed"
+                  className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-[11px] text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <TokenVerdict check={tokenChecks[chosenPartner]} busy={checking} />
               </label>
             )}
             <label className="flex flex-col gap-1">
