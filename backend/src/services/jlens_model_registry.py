@@ -124,10 +124,40 @@ def tokenizer_for(model_record: Any) -> Any:
     """
     from transformers import AutoTokenizer
 
-    repo_id = getattr(model_record, "name", None) or getattr(model_record, "id", "")
+    # `repo_id`, THE SAME FIELD `load_for_readout` USES. The first version read
+    # `name`, which is the DISPLAY name — "LFM2.5-1.2B-Instruct" rather than
+    # "LiquidAI/LFM2.5-1.2B-Instruct" — so `from_pretrained` looked for a
+    # snapshot that does not exist and the endpoint 500'd on every call. Every
+    # test stubbed this function whole, so nothing exercised the derivation.
+    repo_id, resolved = locate_weights(model_record)
     if repo_id in _TOKENIZER_CACHE:
         return _TOKENIZER_CACHE[repo_id]
 
+    try:
+        tok = AutoTokenizer.from_pretrained(
+            repo_id, cache_dir=resolved, local_files_only=True
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, never a 500
+        raise ModelNotAvailable(
+            f"Could not load the tokenizer for {repo_id}: {exc}"
+        ) from exc
+    _TOKENIZER_CACHE[repo_id] = tok
+    return tok
+
+
+def locate_weights(model_record: Any) -> Tuple[str, Any]:
+    """The repo id and local cache directory for a Model row.
+
+    ONE DEFINITION, because two drifted. `load_for_readout` reads `repo_id` and
+    resolves `file_path`; the tokenizer path re-derived both and got the field
+    wrong, which is invisible until something actually tries to load.
+    """
+    repo_id = getattr(model_record, "repo_id", None)
+    if not repo_id:
+        raise ModelNotAvailable(
+            f"Model {getattr(model_record, 'id', '?')} has no repo_id, so its "
+            "weights cannot be located."
+        )
     raw_path = getattr(model_record, "file_path", None)
     resolved = settings.resolve_data_path(raw_path) if raw_path else None
     if not (resolved and resolved.exists()):
@@ -135,11 +165,7 @@ def tokenizer_for(model_record: Any) -> Any:
             f"{repo_id} is not downloaded locally, so its vocabulary is not "
             "available to check a token against."
         )
-    tok = AutoTokenizer.from_pretrained(
-        repo_id, cache_dir=resolved, local_files_only=True
-    )
-    _TOKENIZER_CACHE[repo_id] = tok
-    return tok
+    return str(repo_id), resolved
 
 
 def clear_cache() -> None:

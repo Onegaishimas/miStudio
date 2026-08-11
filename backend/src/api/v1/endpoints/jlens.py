@@ -1545,6 +1545,14 @@ async def token_check(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
+    except Exception as exc:  # noqa: BLE001 - a 500 tells the caller nothing
+        # NEVER A BARE 500. This endpoint exists to save a caller a wasted GPU
+        # slot; an opaque error here just moves the confusion earlier.
+        logger.exception("Tokenizer check failed for %s", request.model_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Could not read the vocabulary for {request.model_id}: {exc}",
+        ) from exc
 
     out: List[TokenCheck] = []
     for raw in request.tokens:
