@@ -46,7 +46,19 @@ const POLL_MS = 4000;
  */
 const MIN_TRIALS = 4;
 
-/** The four primitives (BR-017). Recorded with every result. */
+/**
+ * The primitives runnable from here (BR-017). Recorded with every result.
+ *
+ * `coordinate_swap` BELONGS HERE and was missing, which made a swap runnable
+ * but not demonstrable anywhere in the product: the ranked list can launch one
+ * because it has a pinned partner to hand, but it sends a single prompt — and
+ * below four trials no outcome separates, so that path can only ever report
+ * "not attainable". This card is the only surface that can supply trials, and
+ * it offered neither the swap nor a way to name its partner.
+ *
+ * `dynamic_topk_ablation` is deliberately absent: the server refuses it, and
+ * offering a control that always 422s is worse than not offering it.
+ */
 export const PRIMITIVES = [
   { id: 'additive', label: 'Additive', hint: 'Steer along the direction' },
   {
@@ -54,7 +66,15 @@ export const PRIMITIVES = [
     label: 'Projective ablation',
     hint: "Remove the activation's component along it",
   },
+  {
+    id: 'coordinate_swap',
+    label: 'Coordinate swap',
+    hint: "Exchange this token's coordinate with another pinned token's",
+  },
 ] as const;
+
+/** Primitives that consume `strength`. The others ignore it entirely. */
+const USES_STRENGTH = new Set(['additive']);
 
 interface InterventionCardProps {
   modelId: string;
@@ -151,6 +171,15 @@ export function InterventionCard({
    * had no such control.
    */
   const [extraPrompts, setExtraPrompts] = useState('');
+  /**
+   * The token a swap exchanges with — the SECOND coordinate.
+   *
+   * It is also the token whose RANK is scored, which is why it is a visible
+   * control rather than a silent pick: "swap A with B and see whether B
+   * arrives" is a different experiment from "swap A with C", and the ranked
+   * list chose from pin order without ever showing which.
+   */
+  const [partner, setPartner] = useState('');
   const [k, setK] = useState(4);
   const [seed, setSeed] = useState(20260802);
   const [state, setState] = useState<'idle' | 'running'>('idle');
@@ -159,6 +188,15 @@ export function InterventionCard({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chosen = token || pinned[0] || '';
+  const isSwap = primitive === 'coordinate_swap';
+  // THE FIRST PINNED TOKEN THAT IS NOT THE DIRECTION. A swap with one token is
+  // an additive steer wearing a swap's name, which the server refuses — so the
+  // default must differ, and when nothing can differ the run is blocked here
+  // rather than 422'd after a round trip.
+  const chosenPartner =
+    partner && partner !== chosen
+      ? partner
+      : pinned.find((t) => t !== chosen) || '';
 
   /**
    * The prompts this run will score, `prompt` first.
@@ -171,7 +209,27 @@ export function InterventionCard({
     prompt,
     ...extraPrompts.split('\n').map((p) => p.trim()),
   ].filter((p, i, all) => p.length > 0 && all.indexOf(p) === i);
-  const canRun = state === 'idle' && !!modelId && !!chosen && layers.length > 0;
+  /**
+   * Why the run is blocked, or undefined when it is not.
+   *
+   * A REASON, not a bare disabled button. A swap needs two distinct
+   * coordinates; with one token pinned the control is dead and nothing on
+   * screen says why, which reads as a broken form rather than a missing
+   * prerequisite — the same defect the empty direction list had.
+   */
+  const blocked =
+    state === 'running'
+      ? 'A run is already in flight.'
+      : !modelId
+        ? 'Pick a model first.'
+        : !chosen
+          ? 'Pin a token — it supplies the direction to act along.'
+          : layers.length === 0
+            ? 'The readout covers no layers.'
+            : isSwap && !chosenPartner
+              ? 'A swap EXCHANGES two coordinates, so it needs a second pinned token. Pin another one.'
+              : undefined;
+  const canRun = !blocked;
 
   const poll = (taskId: string) => {
     timer.current = setTimeout(async () => {
@@ -215,6 +273,13 @@ export function InterventionCard({
         primitive,
         layers,
         direction_token: chosen,
+        // THE PARTNER, for a swap only. Sending it for an additive steer would
+        // silently change what gets SCORED — target_token defaults to
+        // direction_token, and overriding it turns "does Paris arrive" into
+        // "does Rome arrive" under an unchanged label.
+        target_token: isSwap ? chosenPartner : undefined,
+        // IGNORED BY THE OTHERS, and the server records null for them. Sent as
+        // given so the request says what was asked for.
         strength,
         // Always sent. An intervention without a size-matched control is not a
         // weaker finding — it is not a finding.
@@ -285,6 +350,40 @@ export function InterventionCard({
                 )}
               </select>
             </label>
+
+            {/* THE SECOND COORDINATE, NAMED. Only for a swap — the other
+                primitives take one direction, and an always-visible partner
+                would imply they use it. It is also the token whose RANK is
+                scored, which the caption says outright: a reader who thinks it
+                is merely "the other one" will misread every result. */}
+            {isSwap && (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-slate-600 dark:text-slate-400">
+                  Exchange with — and this is what gets scored
+                </span>
+                <select
+                  value={chosenPartner}
+                  onChange={(e) => setPartner(e.target.value)}
+                  disabled={pinned.filter((t) => t !== chosen).length === 0}
+                  data-testid="intervention-partner"
+                  className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  {pinned.filter((t) => t !== chosen).length === 0 ? (
+                    <option value="">
+                      Pin a second token — a swap needs two coordinates
+                    </option>
+                  ) : (
+                    pinned
+                      .filter((t) => t !== chosen)
+                      .map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))
+                  )}
+                </select>
+              </label>
+            )}
             <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-600 dark:text-slate-400">
                 Primitive
@@ -307,13 +406,24 @@ export function InterventionCard({
             <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-600 dark:text-slate-400">
                 Strength
+                {/* SAID, NOT IMPLIED. An ablation and a swap take no strength —
+                    the hook passes it to `apply_additive` alone and the server
+                    records null for the others. An editable box beside a
+                    primitive that ignores it invites a strength sweep that
+                    returns bit-identical results at every value. */}
+                {!USES_STRENGTH.has(primitive) && (
+                  <span className="ml-1 text-[10px] font-normal text-amber-700 dark:text-amber-400">
+                    — ignored by {primitive.replace('_', ' ')}
+                  </span>
+                )}
               </span>
               <input
                 type="number"
                 step="0.1"
                 value={strength}
+                disabled={!USES_STRENGTH.has(primitive)}
                 onChange={(e) => setStrength(Number(e.target.value))}
-                className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
               />
             </label>
             <label className="flex flex-col gap-1">
@@ -384,6 +494,7 @@ export function InterventionCard({
             type="button"
             onClick={run}
             disabled={!canRun}
+            title={blocked}
             className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
           >
             {state === 'running' ? (

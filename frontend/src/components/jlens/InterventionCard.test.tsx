@@ -319,4 +319,146 @@ describe('InterventionCard', () => {
     expect(screen.getByText('1/1 = 1.000 [0.21, 1.00]')).toBeInTheDocument();
   }, 15000);
 
+
+  it('can RUN A SWAP, sending the partner it named on screen', async () => {
+    /**
+     * A swap was runnable and not demonstrable anywhere in the product. The
+     * ranked list can launch one — it has a pinned partner to hand — but sends
+     * a single prompt, and below four trials no outcome separates, so that path
+     * can only ever report "not attainable". This card is the only surface that
+     * can supply trials, and it offered neither `coordinate_swap` nor a way to
+     * name its partner, so it could not run one at all.
+     *
+     * MUTATION CONTROLS:
+     *   * drop coordinate_swap from PRIMITIVES  -> "can run a swap" fails
+     *   * stop sending target_token             -> "sending the partner" fails
+     *   * send target_token for additive too    -> "only for a swap" fails
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris', ' Rome']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /Primitive/i }), {
+      target: { value: 'coordinate_swap' },
+    });
+    // FOUR TRIALS, or the run is a guaranteed null and the surface is still
+    // unable to demonstrate anything — which is the whole point of the fix.
+    fireEvent.change(screen.getByTestId('intervention-prompts'), {
+      target: {
+        value:
+          'The capital of Italy is\nThe capital of Japan is\nThe capital of Spain is',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.primitive).toBe('coordinate_swap');
+    expect(sent.direction_token).toBe(' Paris');
+    expect(sent.target_token).toBe(' Rome');
+    expect(sent.target_token).not.toBe(sent.direction_token);
+    expect(sent.prompts).toHaveLength(4);
+  });
+
+  it('sends NO partner for a primitive that takes one direction', async () => {
+    /**
+     * `target_token` defaults to `direction_token` on the server, so sending a
+     * partner for an additive steer silently changes what gets SCORED — "does
+     * Paris arrive" becomes "does Rome arrive" under an unchanged label.
+     *
+     * MUTATION CONTROL: send `target_token` unconditionally and this fails.
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris', ' Rome']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Run with control/i }));
+    await waitFor(() =>
+      expect(jlensApi.intervene as ReturnType<typeof vi.fn>).toHaveBeenCalled()
+    );
+    const sent = (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sent.primitive).toBe('additive');
+    expect(sent.target_token).toBeUndefined();
+  });
+
+  it('BLOCKS a swap with one pinned token, and says why', async () => {
+    /**
+     * The server refuses it, but only after a 202 and a slot on the single-GPU
+     * queue behind a possible 45-minute fit. Whether two tokens were pinned is
+     * knowable here and needs no model.
+     *
+     * MUTATION CONTROL: drop the `isSwap && !chosenPartner` clause and this
+     * fails — the button becomes enabled.
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: /Primitive/i }), {
+      target: { value: 'coordinate_swap' },
+    });
+    const run = screen.getByRole('button', { name: /Run with control/i });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAttribute('title', expect.stringMatching(/second pinned token/));
+    // AND THE PARTNER SELECT EXPLAINS ITSELF rather than sitting blank.
+    expect(screen.getByTestId('intervention-partner')).toHaveTextContent(
+      /Pin a second token/
+    );
+
+    // THE SAME FORM RUNS once the prerequisite is met — or "disabled" could be
+    // permanent and the assertion above would pass against a dead control.
+    fireEvent.change(screen.getByRole('combobox', { name: /Primitive/i }), {
+      target: { value: 'additive' },
+    });
+    expect(screen.getByRole('button', { name: /Run with control/i })).toBeEnabled();
+  });
+
+  it('DISABLES strength for a primitive that ignores it', async () => {
+    /**
+     * The hook passes strength to `apply_additive` alone; an ablation and a
+     * swap ignore it, and the server records null. An editable box invites a
+     * strength sweep that returns bit-identical results at every value.
+     *
+     * MUTATION CONTROL: drop the USES_STRENGTH guard and this fails.
+     */
+    render(
+      <InterventionCard
+        modelId="m_1"
+        prompt="The capital of France is"
+        pinned={[' Paris', ' Rome']}
+        layers={[10, 11]}
+        artifactId={null}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /intervene/i }));
+    const strength = screen.getByRole('spinbutton', { name: /Strength/i });
+    expect(strength).toBeEnabled();
+
+    fireEvent.change(screen.getByRole('combobox', { name: /Primitive/i }), {
+      target: { value: 'coordinate_swap' },
+    });
+    expect(screen.getByRole('spinbutton', { name: /Strength/i })).toBeDisabled();
+    expect(screen.getByText(/ignored by coordinate swap/i)).toBeInTheDocument();
+  });
+
 });
