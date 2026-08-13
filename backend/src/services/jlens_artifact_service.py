@@ -144,6 +144,100 @@ class ArtifactQualityRegression(RuntimeError):
     """
 
 
+class PayloadShapeError(ValueError):
+    """The checkpoint is not a shape this project knows how to read."""
+
+
+def normalise_payload(obj: Any) -> Dict[int, torch.Tensor]:
+    """Both on-disk shapes to `{layer: matrix}`. Refuses anything else BY NAME.
+
+    TWO SHAPES EXIST AND BOTH ARE REAL.
+
+    The conformance spec (`0xcc/brds/neuronpedia-jlens-conformance.md` §2.2) —
+    which the reference implementation and every lens published to HuggingFace
+    follow — is a WRAPPER::
+
+        {"J": {layer: Tensor}, "source_layers": [...], "n_prompts": int, "d_model": int}
+
+    while every artifact this project has written so far is the bare map
+    `{layer: Tensor}` (`write_staged`). Reading only the wrapper would strand the
+    existing registry; reading only the bare map is what made a published lens
+    fail with `ValueError: invalid literal for int() with base 10: 'J'`.
+
+    IT REFUSES RATHER THAN GUESSES. A wrong unwrap yields a dict of square
+    matrices that passes STRUCTURAL, ENVELOPE and NAMING and reads out plausible
+    nonsense — the failure the whole validation suite exists to catch, arriving
+    through the one door that suite does not watch. Every refusal names the keys
+    it actually found, because "unrecognised checkpoint" sends a reader to the
+    wrong file.
+    """
+    if not isinstance(obj, dict):
+        raise PayloadShapeError(
+            f"checkpoint is a {type(obj).__name__}, not a dict; expected either "
+            f'{{"J": {{layer: matrix}}}} or {{layer: matrix}}'
+        )
+    if not obj:
+        raise PayloadShapeError("checkpoint is an empty dict; there are no layers in it")
+
+    def _int_like(k: Any) -> bool:
+        try:
+            int(k)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    has_wrapper = "J" in obj
+    int_keys = [k for k in obj if _int_like(k)]
+
+    # AMBIGUOUS IS A REFUSAL. A file carrying both a "J" block and loose layer
+    # keys has two candidate lenses in it, and picking either one is a guess
+    # about which the publisher meant.
+    if has_wrapper and int_keys:
+        raise PayloadShapeError(
+            f'checkpoint has BOTH a "J" block and loose layer keys {sorted(int_keys)[:8]}; '
+            "which of the two is the lens is not knowable from the file"
+        )
+
+    if has_wrapper:
+        inner = obj["J"]
+        if not isinstance(inner, dict) or not inner:
+            raise PayloadShapeError(
+                f'"J" is a {type(inner).__name__}, not a non-empty dict of layer matrices'
+            )
+        try:
+            layers = {int(k): v for k, v in inner.items()}
+        except (TypeError, ValueError) as exc:
+            raise PayloadShapeError(
+                f'"J" has keys that are not layer indices: {sorted(map(str, inner))[:8]}'
+            ) from exc
+
+        # A1: `source_layers`, when present, must EQUAL the key set. A
+        # disagreement means the file was assembled from parts and one of the
+        # two is stale — and the stale one might be the matrices.
+        declared = obj.get("source_layers")
+        if declared is not None:
+            try:
+                declared_set = {int(x) for x in declared}
+            except (TypeError, ValueError) as exc:
+                raise PayloadShapeError(
+                    f"source_layers is not a list of layer indices: {declared!r}"
+                ) from exc
+            if declared_set != set(layers):
+                raise PayloadShapeError(
+                    f"source_layers {sorted(declared_set)} does not match the layers "
+                    f"actually present {sorted(layers)}"
+                )
+        return layers
+
+    if len(int_keys) != len(obj):
+        stray = sorted(str(k) for k in obj if not _int_like(k))
+        raise PayloadShapeError(
+            f"checkpoint keys are not layer indices: {stray[:8]}"
+            + (f" (+{len(stray) - 8} more)" if len(stray) > 8 else "")
+        )
+    return {int(k): obj[k] for k in obj}
+
+
 class JLensArtifactService:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
@@ -250,16 +344,30 @@ class JLensArtifactService:
         return ValidationReport(results)
 
     def _load_payload(self, ref: ArtifactRef) -> Optional[Dict[Any, Any]]:
-        """Weights-only deserialisation.
+        """Weights-only deserialisation, NORMALISED to `{layer: matrix}`.
 
         `weights_only=True` is not a nicety: an artifact is an untrusted file on
         disk that this process is about to load, and the unrestricted loader
         executes pickled code.
+
+        NORMALISED HERE BECAUSE THIS IS THE ONLY DESERIALISATION POINT. Six
+        readers sit downstream of it — `validate`, `check_structural`,
+        `_coverage_delta`, `load_for_readout`, both semantic-check sites and the
+        endpoint's `sorted(int(k) for k in payload)`. Teaching the wrapper shape
+        to one of them and not the others is how a file that is on disk and
+        published still raises `ValueError('J')` somewhere. Same argument
+        `slug_for` makes for itself: the one place it is defined is the one place
+        it can drift.
         """
         try:
-            return torch.load(ref.lens_path, map_location="cpu", weights_only=True)
+            raw = torch.load(ref.lens_path, map_location="cpu", weights_only=True)
         except Exception as exc:  # noqa: BLE001 - reported as a FAIL, not swallowed
             logger.warning("J-lens artifact %s failed to load: %s", ref.lens_path, exc)
+            return None
+        try:
+            return normalise_payload(raw)
+        except PayloadShapeError as exc:
+            logger.warning("J-lens artifact %s has an unusable shape: %s", ref.lens_path, exc)
             return None
 
     # ------------------------------------------------------------ publish
