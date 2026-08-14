@@ -57,6 +57,30 @@ class CheckStatus(str, Enum):
     # and collapsing the two either blocks a good artifact or — far worse —
     # counts an unrun check as a pass.
     NOT_RUN = "not_run"
+    #: Not run, KNOWN not to be runnable here, and publishable anyway.
+    #:
+    #: NOT A PASS, AND THIS DISTINCTION WAS BEING ROUTED AROUND. `_local_pass`
+    #: stamped the two consumer-interop classes with `PASS` and a detail string
+    #: reading "deferred: …". `_write_report` then serialised
+    #: `{"check": "cross_implementation", "status": "pass"}` into
+    #: `validation.json` — the file whose entire purpose is to TRAVEL WITH THE
+    #: ARTIFACT to a consumer that pulled it off HuggingFace. That consumer sees
+    #: a green six-class pass and can only learn otherwise by reading English
+    #: prose in a neighbouring field.
+    #:
+    #: The comment above `NOT_RUN` says counting an unrun check as a pass is
+    #: "far worse" than blocking a good artifact. The value was carefully
+    #: protected and then bypassed under a different name.
+    DEFERRED = "deferred"
+
+
+#: The only classes that may be DEFERRED, and the reason the valve cannot widen.
+#:
+#: Both need a live external consumer to run at all, so requiring them before
+#: publishing would make the Jacobian path permanently unreachable. The four
+#: LOCAL classes must never appear here: they are what `serviceable` gates on,
+#: and deferring one of those would let an unvalidated artifact serve.
+DEFERRABLE = frozenset({CheckClass.CROSS_IMPLEMENTATION, CheckClass.ROUND_TRIP})
 
 
 @dataclass
@@ -77,11 +101,38 @@ class ValidationReport:
 
     @property
     def passed(self) -> bool:
-        """FAIL-CLOSED: every class must have run and passed.
+        """FAIL-CLOSED: every class must have run and passed, or be DEFERRABLE.
 
         A missing class is not a pass. The whole point of the suite is that the
         consumer's failure is silence, so "we did not check" and "we checked and
         it was fine" must never produce the same verdict.
+
+        A DEFERRED result counts here ONLY for a class in `DEFERRABLE`. That is
+        the same publishing behaviour `_local_pass` produced by stamping those
+        two with `PASS` — the difference is that the recorded status is now
+        truthful, so `validation.json` no longer tells a downstream consumer
+        that an interop check succeeded when nothing ran. `NOT_RUN` is still
+        never a pass, for any class.
+        """
+        seen = {r.check for r in self.results}
+        if seen != set(CheckClass):
+            return False
+        return all(
+            r.passed
+            or (r.status is CheckStatus.DEFERRED and r.check in DEFERRABLE)
+            for r in self.results
+        )
+
+    @property
+    def cleared_for_handover(self) -> bool:
+        """Every class LITERALLY passed — nothing deferred.
+
+        The real BR-030 gate, and today it is False everywhere, which is the
+        correct reading: no A5/A6 harness exists yet, so no artifact this
+        project has produced has been checked against a live consumer. `passed`
+        answers "may we publish locally"; this answers "has this been proven
+        interoperable", and conflating them is what made the two consumer
+        classes look green.
         """
         seen = {r.check for r in self.results}
         if seen != set(CheckClass):
@@ -158,6 +209,39 @@ def container_allowance(required_bytes: int) -> int:
     allowance is noise.
     """
     return max(4096, min(CONTAINER_OVERHEAD_BYTES, required_bytes // 2))
+
+
+def defer_consumer_checks(report: "ValidationReport") -> "ValidationReport":
+    """Mark the consumer-interop classes DEFERRED so the artifact can publish.
+
+    ONE IMPLEMENTATION, SHARED. This began life as `_local_pass`, private to the
+    fit worker — so the acquisition path would have had to either import a
+    private helper or grow a second copy of the same judgement. A second copy is
+    how two workers come to disagree about what "publishable" means.
+
+    The caller supplies its OWN wording for `detail`, because the reason differs:
+    a local fit defers because no external consumer is running, and an acquired
+    artifact defers for the same reason but must not claim a fit was performed.
+    Copying the fitter's sentence onto an acquisition would put a false
+    provenance statement in the file that travels with the lens.
+    """
+    results = [r for r in report.results if r.check not in DEFERRABLE]
+    for check in sorted(DEFERRABLE, key=lambda c: c.value):
+        existing = next((r for r in report.results if r.check == check), None)
+        # AN ALREADY-RUN CHECK IS LEFT ALONE. When an A5/A6 harness finally runs
+        # these for real, deferring over the top would erase the only evidence
+        # this project has ever had for them.
+        if existing is not None and existing.status is not CheckStatus.NOT_RUN:
+            results.append(existing)
+            continue
+        results.append(
+            CheckResult(
+                check,
+                CheckStatus.DEFERRED,
+                "requires a live external consumer; not run here",
+            )
+        )
+    return ValidationReport(results)
 
 
 def check_naming(directory: Path) -> CheckResult:
