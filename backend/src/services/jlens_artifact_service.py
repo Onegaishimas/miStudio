@@ -375,17 +375,76 @@ class JLensArtifactService:
     def staging_dir(self, repo_id: str) -> Path:
         return self.root / f"{slug_for(repo_id)}{STAGING_SUFFIX}"
 
-    def write_staged(
-        self, repo_id: str, jacobians: Dict[int, torch.Tensor], config_yaml: str
-    ) -> ArtifactRef:
-        """Write a fit into staging, where nothing will serve it."""
+    def _fresh_staging(self, repo_id: str) -> Tuple[str, Path, Path]:
+        """A cleared staging directory, its slug, and the lens path to write.
+
+        THE LAYOUT INVARIANT, IN ONE PLACE. `check_naming` FAILs a directory
+        that does not hold exactly one `<slug>_jacobian_lens.pt`, and the slug
+        must be the one `slug_for` produces for the model — a second
+        implementation of that rule, sitting next to the check whose job is to
+        catch violations of it, is the shape this project keeps writing
+        post-mortems about.
+
+        THE NAME COMES FROM THE MODEL, NEVER FROM AN UPSTREAM FILE. `slug_for`
+        lowercases and `LENS_FILENAME` is anchored lowercase, while a published
+        lens preserves the HuggingFace case — so `Qwen/Qwen3-8B` is published as
+        `Qwen3-8B_jacobian_lens.pt`, which fails NAMING. Keeping the upstream
+        stem would break on exactly the models whose ids carry capitals, and
+        pass on every lowercase one that gets tested first.
+        """
         slug = slug_for(repo_id)
         staging = self.staging_dir(repo_id)
         if staging.exists():
             shutil.rmtree(staging)
         staging.mkdir(parents=True)
+        return slug, staging, staging / f"{slug}_jacobian_lens.pt"
 
-        lens_path = staging / f"{slug}_jacobian_lens.pt"
+    def stage_from_file(
+        self,
+        repo_id: str,
+        lens_source: Path,
+        config_yaml: str,
+        sidecars: Optional[Dict[str, Path]] = None,
+    ) -> ArtifactRef:
+        """Stage bytes that ALREADY EXIST, without deserialising them.
+
+        For an acquired artifact the file is the evidence: copying it verbatim
+        means `local_sha256 == upstream_sha256` is a fact a third party can
+        check against the source repo. Re-saving the tensors would destroy the
+        only cryptographic identity an acquired lens has and replace it with
+        "trust us, these are the same numbers" — a poor trade in a system whose
+        existing weight-identity check is a string comparison that never opens
+        the file.
+
+        `sidecars` maps target filename to source path, for things like the
+        convergence trace. A `.pt` sidecar is REFUSED: `check_naming` fails a
+        directory with a second `.pt`, and a consumer globbing
+        `*_jacobian_lens.pt` picks among multiple matches silently.
+        """
+        _slug, staging, lens_path = self._fresh_staging(repo_id)
+        shutil.copyfile(lens_source, lens_path)
+        (staging / "config.yaml").write_text(config_yaml)
+
+        for name, source in (sidecars or {}).items():
+            if name.endswith(".pt"):
+                raise ValueError(
+                    f"{name!r} is a second .pt in the artifact directory; NAMING "
+                    "fails on that and a consumer would pick between them silently"
+                )
+            shutil.copyfile(source, staging / name)
+
+        ref = self._ref_for(staging)
+        if ref is None:
+            raise RuntimeError(
+                f"staged {staging} is not conformant after copying {lens_source}"
+            )
+        return ref
+
+    def write_staged(
+        self, repo_id: str, jacobians: Dict[int, torch.Tensor], config_yaml: str
+    ) -> ArtifactRef:
+        """Write a fit into staging, where nothing will serve it."""
+        slug, staging, lens_path = self._fresh_staging(repo_id)
         # SAVE ON CPU, ALWAYS. `torch.save` records each tensor's device, and a
         # fit runs on the GPU — so an artifact written straight from a fit is
         # tagged cuda:0 and raises "Attempting to deserialize object on a CUDA
