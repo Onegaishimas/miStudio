@@ -157,6 +157,7 @@ def _fit_and_publish(
         ArtifactCoverageLoss,
         JLensArtifactService,
     )
+    from ..services.jlens_validation import defer_consumer_checks
 
     # None means the fitter's default. Passed explicitly rather than defaulted
     # in the signature so the value that was ACTUALLY used is the one written
@@ -258,7 +259,7 @@ def _fit_and_publish(
         try:
             service.commit(
                 repo_id,
-                _local_pass(report),
+                defer_consumer_checks(report),
                 allow_coverage_loss=allow_coverage_loss,
                 allow_quality_regression=allow_quality_regression,
             )
@@ -461,33 +462,6 @@ def _run_semantic_check(service, ref, loaded, probe: Dict[str, Any], fitted_laye
     )
 
 
-def _local_pass(report):
-    """A report whose consumer-interop classes are marked as deferred.
-
-    `commit` requires `passed`, and `passed` requires all six. The two
-    consumer-interop classes cannot run without a live external consumer, so
-    they are recorded here as an explicit DEFERRED pass rather than being
-    silently dropped — the artifact is publishable LOCALLY and is not yet
-    cleared for handover, and the report says which.
-    """
-    from ..services.jlens_validation import (
-        CheckClass,
-        CheckResult,
-        CheckStatus,
-        ValidationReport,
-    )
-
-    deferred = {CheckClass.CROSS_IMPLEMENTATION, CheckClass.ROUND_TRIP}
-    results = [r for r in report.results if r.check not in deferred]
-    for check in sorted(deferred, key=lambda c: c.value):
-        results.append(
-            CheckResult(
-                check,
-                CheckStatus.PASS,
-                "deferred: requires a live external consumer; run before handover",
-            )
-        )
-    return ValidationReport(results)
 
 
 def _config_yaml(

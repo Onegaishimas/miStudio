@@ -14,7 +14,7 @@
  */
 
 import { useState } from 'react';
-import { CheckCircle2, CircleSlash, Loader2, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleSlash, Clock, Loader2, XCircle } from 'lucide-react';
 import { jlensApi } from '../../api/jlens';
 import { LayerCoverage, missingLayers } from './LayerCoverage';
 import type {
@@ -40,6 +40,19 @@ function statusIcon(status: string) {
   }
   if (status === 'fail') {
     return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+  }
+  if (status === 'deferred') {
+    // DISTINCT FROM not_run, WHICH IS THE WHOLE POINT. Deferred means "known
+    // to be unrunnable here, and published anyway"; not_run means "we do not
+    // know". They used to render identically because `deferred` did not exist
+    // as a status at all — the two consumer-interop checks were stamped `pass`,
+    // so this row showed a green tick for something nothing had run.
+    return (
+      <Clock
+        className="h-3.5 w-3.5 text-amber-500"
+        aria-label="deferred — not run here"
+      />
+    );
   }
   return <CircleSlash className="h-3.5 w-3.5 text-slate-400" />;
 }
