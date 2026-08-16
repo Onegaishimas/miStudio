@@ -569,11 +569,14 @@ export function JLensPanel() {
           hasArtifact={artifacts.some(
             (a) => a.slug === artifactSlugFor(modelRepoId),
           )}
-          // The note is the only surface a queued job has here; Running Work
-          // polls the queue independently and shows it by task type.
-          onQueued={(_taskId, label) =>
-            setInterventionNote(`${label} queued — see Running Work`)
-          }
+          // NOT `interventionNote`. That line is owned by `runIntervention`,
+          // which blanks it on every click — and it holds the ONLY copy of a
+          // completed rung-2 verdict ("intervened 6/6 vs control 0/6 … the
+          // intervals are disjoint"). Writing an acquire acknowledgement over it
+          // destroyed the product's headline result, and clicking Steer
+          // afterwards erased the acquire's only acknowledgement in return. The
+          // card shows its own note; nothing needs to be echoed here.
+          onQueued={undefined}
         />
       </div>
 

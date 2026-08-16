@@ -12,7 +12,7 @@
  * that was inspected is the file that arrives.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Eye, EyeOff, Loader2, Upload } from 'lucide-react';
 
 import { jlensApi } from '../../api/jlens';
@@ -36,8 +36,18 @@ interface AcquireLensCardProps {
   weightsPresent: boolean;
   /** Whether a validated artifact already exists, i.e. whether publish is live. */
   hasArtifact: boolean;
+  /**
+   * Optional hook for a parent that wants to know a job was queued.
+   *
+   * The card shows its OWN note, so a parent echoing this into a shared status
+   * line is a hazard rather than a service: the panel's line is owned by the
+   * intervention poller and holds the only copy of a completed rung-2 verdict.
+   */
   onQueued?: (taskId: string, label: string) => void;
 }
+
+/** The server's own constraint on the corpus path segment (`PublishRequest`). */
+const DATASET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function formatBytes(n: number | null): string {
   if (!n) return '—';
@@ -61,13 +71,45 @@ export function AcquireLensCard({
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'acquire' | 'publish'>('acquire');
   const [repoId, setRepoId] = useState('neuronpedia/jacobian-lens');
-  const [token, setToken] = useState('');
+  /**
+   * SEPARATE TOKENS PER MODE.
+   *
+   * One shared field silently reused a READ token as the publish credential —
+   * masked, so the only signal was a label. The endpoint's pre-flight only
+   * tests that *a* token exists, so the request 202s and fails inside the worker
+   * after taking a slot on the single-GPU queue.
+   */
+  const [readToken, setReadToken] = useState('');
+  const [writeToken, setWriteToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [preview, setPreview] = useState<JLensAcquirePreview | null>(null);
   const [selected, setSelected] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A job is already queued from this card.
+   *
+   * `busy` releases at the 202, not at the job's terminal state, and nothing
+   * else about the form changes — so a second click queued a second download of
+   * the same multi-gigabyte file, which the worker then refuses on the staging
+   * guard AFTER paying the bandwidth twice. Cleared deliberately, so starting
+   * another is a decision rather than a double-click.
+   */
+  const [queued, setQueued] = useState<string | null>(null);
+
+  // A PREVIEW BELONGS TO THE MODEL IT WAS COMPUTED FOR. Every `fits_envelope`
+  // verdict came from that model's dimensions, so a list left on screen after
+  // the model changes shows badges computed for other weights — and the
+  // selection would send a lens for one model against another, which the
+  // endpoint cannot catch and the worker only discovers after downloading it.
+  useEffect(() => {
+    setPreview(null);
+    setSelected('');
+    setQueued(null);
+    setNote(null);
+    setError(null);
+  }, [modelId]);
 
   // Publish-side state.
   const [targetRepo, setTargetRepo] = useState('');
@@ -77,13 +119,14 @@ export function AcquireLensCard({
   const runPreview = async () => {
     setBusy(true);
     setError(null);
+    setNote(null);
     setPreview(null);
     setSelected('');
     try {
       const out = await jlensApi.previewRepo({
         repo_id: repoId.trim(),
         model_id: modelId || undefined,
-        access_token: token || undefined,
+        access_token: readToken || undefined,
       });
       setPreview(out);
       if (!out.candidates.length) {
@@ -100,6 +143,7 @@ export function AcquireLensCard({
     if (!selected || !preview) return;
     setBusy(true);
     setError(null);
+    setNote(null);
     try {
       const accepted = await jlensApi.acquire({
         model_id: modelId,
@@ -108,9 +152,10 @@ export function AcquireLensCard({
         // THE RESOLVED SHA, not the branch the preview started from. `main`
         // moves, and an acquisition pinned to it is not reproducible.
         revision: preview.revision,
-        access_token: token || undefined,
+        access_token: readToken || undefined,
       });
       setNote(`Acquiring — queued as ${accepted.task_id.slice(0, 8)}…`);
+      setQueued(accepted.task_id);
       onQueued?.(accepted.task_id, 'Acquire');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The acquisition was refused.');
@@ -122,15 +167,17 @@ export function AcquireLensCard({
   const runPublish = async () => {
     setBusy(true);
     setError(null);
+    setNote(null);
     try {
       const accepted = await jlensApi.publish({
         model_id: modelId,
         target_repo: targetRepo.trim(),
-        access_token: token || undefined,
+        access_token: writeToken || undefined,
         dataset: dataset.trim(),
         create_repo: createRepo,
       });
       setNote(`Publishing — queued as ${accepted.task_id.slice(0, 8)}…`);
+      setQueued(accepted.task_id);
       onQueued?.(accepted.task_id, 'Publish');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The upload was refused.');
@@ -231,8 +278,12 @@ export function AcquireLensCard({
             <div className="flex gap-1">
               <input
                 type={showToken ? 'text' : 'password'}
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
+                value={mode === 'acquire' ? readToken : writeToken}
+                onChange={(e) =>
+                  mode === 'acquire'
+                    ? setReadToken(e.target.value)
+                    : setWriteToken(e.target.value)
+                }
                 placeholder="falls back to the configured token"
                 data-testid="jlens-acquire-token"
                 className="flex-1 rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
@@ -332,10 +383,32 @@ export function AcquireLensCard({
                 </p>
               )}
 
+              {!modelId && (
+                <p
+                  className="text-[11px] text-amber-700 dark:text-amber-400"
+                  data-testid="jlens-acquire-no-model"
+                >
+                  Choose a model above first — a lens is adopted FOR one, and
+                  without it the request is refused with a 404 naming an empty id.
+                </p>
+              )}
+              {queued && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-500">
+                  A job is already queued from this card. Watch Running Work, or{' '}
+                  <button
+                    type="button"
+                    onClick={() => setQueued(null)}
+                    className="underline"
+                  >
+                    start another
+                  </button>
+                  .
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => void runAcquire()}
-                disabled={busy || !selected}
+                disabled={busy || !selected || !modelId || Boolean(queued)}
                 data-testid="jlens-acquire-run"
                 className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
               >
@@ -356,6 +429,19 @@ export function AcquireLensCard({
                     data-testid="jlens-publish-dataset"
                     className="rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                   />
+                  {/* MIRRORED FROM THE SERVER. It is a path segment, so the
+                      endpoint constrains it — and the obvious value to type is
+                      the corpus's own name, `wikitext/wikitext-103`, whose
+                      slash 422s with a regex the form gives no hint about. */}
+                  {!DATASET_PATTERN.test(dataset.trim()) && (
+                    <span
+                      className="text-[10px] text-amber-700 dark:text-amber-400"
+                      data-testid="jlens-publish-dataset-invalid"
+                    >
+                      Letters, digits, dot, dash and underscore only — it is a
+                      path segment, not a dataset id.
+                    </span>
+                  )}
                 </label>
                 <label className="mt-5 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
                   <input
@@ -383,6 +469,22 @@ export function AcquireLensCard({
                 never been run.
               </p>
 
+              {/* THE OTHER GATE, NAMED. `hasArtifact` is slug presence only;
+                  the endpoint ALSO refuses an artifact whose stored verdict no
+                  longer matches its current weights, and the listing
+                  deliberately carries no validity field — "an artifact's
+                  validity is the outcome of running the suite, not a property
+                  of the file". So this cannot be checked here, and saying that
+                  a present artifact is the only requirement would be a claim
+                  the card cannot keep. */}
+              {hasArtifact && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-500">
+                  Publishing also requires a validation verdict matching the
+                  lens's current weights. If the model was re-downloaded since
+                  it was validated, this will be refused and the reason will say
+                  so.
+                </p>
+              )}
               {!hasArtifact && (
                 <p
                   className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
@@ -397,7 +499,13 @@ export function AcquireLensCard({
               <button
                 type="button"
                 onClick={() => void runPublish()}
-                disabled={busy || !targetRepo.trim() || !hasArtifact}
+                disabled={
+                  busy ||
+                  !targetRepo.trim() ||
+                  !hasArtifact ||
+                  !DATASET_PATTERN.test(dataset.trim()) ||
+                  Boolean(queued)
+                }
                 data-testid="jlens-publish-run"
                 className="flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
               >
