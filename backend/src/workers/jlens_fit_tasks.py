@@ -219,7 +219,12 @@ def _fit_and_publish(
         freeze_norms=freeze_norms,
         target_layer=target_layer,
     )
-    ref = service.write_staged(repo_id, result.jacobians, config_yaml)
+    #  TRAVELS IN THE CHECKPOINT, not only in config.yaml. A
+    # consumer that mounts the directory reads the .pt; a community repo that
+    # republishes just the .pt carries this and nothing else.
+    ref = service.write_staged(
+        repo_id, result.jacobians, config_yaml, n_prompts=result.prompts_seen
+    )
 
     self.update_state(state="PROGRESS", meta={"stage": "validating"})
     # SEMANTIC runs HERE or nowhere. The check needs a loaded model, and this

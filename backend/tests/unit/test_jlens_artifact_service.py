@@ -461,7 +461,13 @@ def test_a_superseded_artifact_is_ARCHIVED_not_deleted(tmp_path):
     recovered = torch.load(
         next(archive.glob("*_jacobian_lens.pt")), weights_only=True
     )
-    assert sorted(int(k) for k in recovered) == list(range(16))
+    # THROUGH THE NORMALISER, like every reader in the system. This asserted
+    # layer indices at the TOP LEVEL, which coupled a test about ARCHIVAL to the
+    # emitted on-disk layout — and that layout changed deliberately, so the
+    # published form is loadable by a conformant consumer.
+    from src.services.jlens_artifact_service import normalise_payload
+
+    assert sorted(normalise_payload(recovered)) == list(range(16))
 
 
 def test_the_archive_is_hidden_from_discovery(tmp_path):

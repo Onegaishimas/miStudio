@@ -476,6 +476,41 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         return await client.post("/jlens/acquire/preview", json=body)
 
     @mcp.tool()
+    async def publish_jlens_artifact(
+        model_id: Annotated[str, Field(description="miStudio model whose PUBLISHED lens to upload. A staged artifact is not published and is refused")],
+        target_repo: Annotated[str, Field(description="HuggingFace repo to publish into, e.g. 'you/jacobian-lenses'")],
+        access_token: Annotated[Optional[str], Field(description="A token with WRITE access. Required — the read path may run anonymously, an upload cannot, and it is refused rather than attempted with an empty credential")] = None,
+        dataset: Annotated[str, Field(description="Corpus segment of the published path, per the conformance layout <model>/jlens/<dataset>/. Name the corpus the fit was drawn from; 'mistudio' is the honest default for an ad-hoc one")] = "mistudio",
+        create_repo: Annotated[bool, Field(description="Create the repo if it does not exist")] = False,
+        private: Annotated[bool, Field(description="Make a newly created repo private")] = False,
+    ) -> Any:
+        """Publish a validated lens so others can mount it. Poll get_task_status.
+
+        WHAT TRAVELS: the checkpoint in the conformant wrapper shape, its
+        `config.yaml`, and a README stating the recipe and what was checked.
+
+        WHAT DOES NOT: `validation.json` and `acquisition.json`. The first is
+        this installation's verdict on its own copy — including two classes
+        recorded as DEFERRED because they need a live external consumer and have
+        never been run anywhere — and shipping it invites a reader to take a
+        local verdict for the lens's own. The README says so in words instead.
+
+        Band boundaries are never included and must not be inferred from
+        anything here: the published figures were measured on one specific model
+        and porting them is the error this project forbids by construction.
+        """
+        body: dict[str, Any] = {
+            "model_id": model_id,
+            "target_repo": target_repo,
+            "dataset": dataset,
+            "create_repo": create_repo,
+            "private": private,
+        }
+        if access_token:
+            body["access_token"] = access_token
+        return await client.post("/jlens/publish", json=body)
+
+    @mcp.tool()
     async def acquire_jlens_artifact(
         model_id: Annotated[str, Field(description="miStudio model to attach the lens to. Its WEIGHTS MUST BE DOWNLOADED — validating an acquired lens means reading out through it, which runs a real forward pass. Refused synchronously otherwise")],
         repo_id: Annotated[str, Field(description="HuggingFace repo to take it from")],

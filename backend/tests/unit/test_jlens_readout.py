@@ -891,7 +891,14 @@ def test_a_written_artifact_is_moved_to_cpu_before_it_is_saved(tmp_path):
     # And the file must still load the way an EXTERNAL consumer would: with no
     # map_location, because they have no reason to pass one.
     payload = torch.load(ref.lens_path, weights_only=True)
-    assert set(payload) == {24, 25}
+    # AND IN THE CONFORMANT WRAPPER, which is what makes it loadable by anyone
+    # other than us: the reference consumer reads `payload["J"]` and raises
+    # without it. This test is about DEVICE placement, so it goes through the
+    # normaliser for the layer set rather than pinning the container shape.
+    from src.services.jlens_artifact_service import normalise_payload
+
+    assert "J" in payload, sorted(payload)
+    assert set(normalise_payload(payload)) == {24, 25}
 
 
 # ---------------------------------------------------------------------------

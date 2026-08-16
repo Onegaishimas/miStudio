@@ -36,6 +36,7 @@ INTERVENTION = "jlens_intervention"
 READOUT = "jlens_readout"
 PROBE = "jlens_probe"
 ACQUIRE = "jlens_acquire"
+PUBLISH = "jlens_publish"
 
 #: Statuses after which a task will never report again. `completed_at` is
 #: stamped on entering any of them, so a finished row carries a real duration

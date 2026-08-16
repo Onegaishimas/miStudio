@@ -503,6 +503,7 @@ class JLensArtifactService:
         jacobians: Dict[int, torch.Tensor],
         config_yaml: str,
         replace_staged: bool = True,
+        n_prompts: int = 0,
     ) -> ArtifactRef:
         """Write a fit into staging, where nothing will serve it.
 
@@ -526,8 +527,36 @@ class JLensArtifactService:
         # file that only loads on the machine that produced it is not one.
         #
         # Our own loader passes map_location="cpu" and would never have noticed.
+        # THE CONFORMANT WRAPPER, NOT A BARE MAP.
+        #
+        # Spec §2.2 is explicit that a consumer reads `payload["J"]` and that
+        # "absence of `J` raises with the offending key list". This project wrote
+        # the bare `{layer: matrix}` form, so EVERY artifact it has ever produced
+        # would fail to load for anyone who downloaded it — which made publishing
+        # them pointless and was invisible locally, because our own reader
+        # accepted the bare form and nothing else ever read one.
+        #
+        # Safe to change only because `normalise_payload` now accepts both: every
+        # artifact already on disk keeps working, and new ones are portable.
+        #
+        # `d_model` is the one other field a consumer reads without a fallback.
+        # `source_layers` must EQUAL the key set or A1 fails, so it is derived
+        # here rather than passed in.
+        layers = {int(k): v.detach().to("cpu") for k, v in jacobians.items()}
+        widths = {int(t.shape[0]) for t in layers.values()}
+        if len(widths) != 1:
+            raise ValueError(
+                f"matrices have differing widths {sorted(widths)}; a lens has one "
+                "d_model and a consumer reads it without a fallback"
+            )
         torch.save(
-            {int(k): v.detach().to("cpu") for k, v in jacobians.items()}, lens_path
+            {
+                "J": layers,
+                "d_model": widths.pop(),
+                "source_layers": sorted(layers),
+                "n_prompts": int(n_prompts),
+            },
+            lens_path,
         )
         (staging / "config.yaml").write_text(config_yaml)
 

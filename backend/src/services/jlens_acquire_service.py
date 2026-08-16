@@ -38,6 +38,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import tempfile
+import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -862,5 +864,190 @@ def sibling_paths(lens_path: str) -> Dict[str, str]:
     return {
         "config": join("config.yaml"),
         "convergence": join(f"{stem}_convergence.csv"),
+    }
+
+# ------------------------------------------------------------------ publishing
+
+
+#: Files that travel when a lens is published, in the layout spec §2.1 defines.
+#:
+#: `validation.json` and `acquisition.json` are DELIBERATELY EXCLUDED. The first
+#: is miStudio's verdict on its own copy — including two classes recorded as
+#: DEFERRED, which is a statement about this installation and not about the
+#: artifact — and the second describes a transfer that has nothing to do with a
+#: downstream consumer. A reader of the conformance format ignores both, and
+#: shipping them invites someone to read our local verdict as the lens's own.
+PUBLISHED_FILES = ("config.yaml",)
+
+
+def published_path(repo_id: str, dataset: str = "mistudio") -> str:
+    """Where a lens for `repo_id` goes inside a repo.
+
+    Mirrors spec §2.1 — `<model>/jlens/<dataset>/` — so a consumer that already
+    resolves published lenses finds ours without being told anything new. The
+    dataset segment names the corpus the fit was drawn from; `mistudio` is the
+    honest default for a fit whose corpus was supplied ad hoc rather than being
+    a named public dataset.
+    """
+    from .jlens_artifact_service import slug_for
+
+    return f"{slug_for(repo_id)}/jlens/{dataset}"
+
+
+def model_card(
+    repo_id: str,
+    recipe: Dict[str, Any],
+    validation: Optional[Dict[str, Any]] = None,
+) -> str:
+    """The README that travels with a published lens.
+
+    STATES WHAT WAS AND WAS NOT CHECKED. A lens published from here carries two
+    consumer-interop classes recorded as DEFERRED — nothing has ever run them,
+    because doing so needs a live external consumer — and a reader who assumes
+    a green suite means interoperability proven would be reading something this
+    project has never measured.
+    """
+    lines = [
+        "---",
+        "library_name: jacobian-lens",
+        "tags:",
+        "- jacobian_lens",
+        "- interpretability",
+        "---",
+        "",
+        f"# Jacobian lens for `{repo_id}`",
+        "",
+        "A training-free dictionary that reads what this model is *poised to say*",
+        "at each layer and token position. Fitted with MechInterp Studio.",
+        "",
+        "## Layout",
+        "",
+        "```",
+        f"{published_path(repo_id)}/",
+        f"    {slug_of(repo_id)}_jacobian_lens.pt",
+        "    config.yaml",
+        "```",
+        "",
+        "The checkpoint is a `torch.save` dict loadable with `weights_only=True`:",
+        "",
+        "```python",
+        '{"J": {layer: Tensor[d_model, d_model]}, "d_model": int,',
+        ' "source_layers": [int], "n_prompts": int}',
+        "```",
+        "",
+        "## Recipe",
+        "",
+    ]
+    for key in (
+        "n_prompts",
+        "converged",
+        "target_layer",
+        "fitted_layers",
+        "d_model",
+        "n_layers",
+        "dtype",
+    ):
+        if recipe.get(key) is not None:
+            lines.append(f"- **{key}**: {recipe[key]}")
+
+    lines += [
+        "",
+        "## What has been checked",
+        "",
+    ]
+    if validation:
+        for row in validation.get("results", []):
+            lines.append(
+                f"- `{row.get('check')}`: **{row.get('status')}** — {row.get('detail')}"
+            )
+        lines += [
+            "",
+            "`deferred` means the check needs a live external consumer and was "
+            "not run here. It is not a pass.",
+        ]
+    else:
+        lines.append("- no validation report travelled with this artifact")
+
+    lines += [
+        "",
+        "## Caveat",
+        "",
+        "Band boundaries are NOT included and must not be inferred: the published",
+        "sensory/workspace/motor figures were measured on one specific model, and",
+        "porting them is exactly the error this project forbids by construction.",
+        "Measure them for the model in front of you.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def slug_of(repo_id: str) -> str:
+    from .jlens_artifact_service import slug_for
+
+    return slug_for(repo_id)
+
+
+def publish_artifact(
+    directory: Path,
+    repo_id: str,
+    target_repo: str,
+    token: str,
+    *,
+    dataset: str = "mistudio",
+    create: bool = False,
+    private: bool = False,
+    recipe: Optional[Dict[str, Any]] = None,
+    validation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Upload a validated lens to HuggingFace, in the conformant layout.
+
+    RETURNS THE COMMIT SHA. The SAE uploader this follows returns
+    `commit_hash: None` with a comment saying it "would need to get [it] from
+    the API response" — `upload_folder` returns a `CommitInfo` carrying `oid`,
+    and for an artifact whose entire purpose is portable evidence, "published at
+    X" without a revision names a moving target.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=token)
+    if create:
+        api.create_repo(
+            repo_id=target_repo, repo_type="model", private=private, exist_ok=True
+        )
+
+    path_in_repo = published_path(repo_id, dataset)
+    lens_files = list(directory.glob("*_jacobian_lens.pt"))
+    if len(lens_files) != 1:
+        raise AcquisitionRefused(
+            f"{directory} holds {len(lens_files)} lens files; exactly one is "
+            "required and a consumer globs for it"
+        )
+
+    with tempfile.TemporaryDirectory() as staging:
+        outbox = Path(staging)
+        shutil.copyfile(lens_files[0], outbox / lens_files[0].name)
+        for name in PUBLISHED_FILES:
+            source = directory / name
+            if source.is_file():
+                shutil.copyfile(source, outbox / name)
+        (outbox / "README.md").write_text(
+            model_card(repo_id, recipe or {}, validation), encoding="utf-8"
+        )
+
+        info = api.upload_folder(
+            folder_path=str(outbox),
+            repo_id=target_repo,
+            path_in_repo=path_in_repo,
+            commit_message=f"Add Jacobian lens for {repo_id}",
+        )
+
+    revision = getattr(info, "oid", None) or getattr(info, "commit_id", None)
+    return {
+        "repo": target_repo,
+        "path_in_repo": path_in_repo,
+        "revision": revision,
+        "url": f"https://huggingface.co/{target_repo}/tree/{revision or 'main'}/{path_in_repo}",
+        "files": sorted(p.name for p in directory.glob("*") if p.name in PUBLISHED_FILES)
+        + [lens_files[0].name, "README.md"],
     }
 
