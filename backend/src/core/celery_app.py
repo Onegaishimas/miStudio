@@ -155,6 +155,13 @@ celery_app.conf.update(
         },
         # J-space interventions: a forward pass plus its matched control, so
         # model-bound like the rest.
+        # ENUMERATED, LIKE ITS FOUR SIBLINGS. There is no `jlens_*` glob here —
+        # a new module needs an entry in THIS list and another in
+        # `autodiscover_tasks` below, and the right task name is necessary but
+        # not sufficient for either.
+        "src.workers.jlens_acquire_tasks.*": {
+            "queue": "extraction",
+        },
         "src.workers.jlens_intervention_tasks.*": {
             "queue": "extraction",
         },
@@ -488,6 +495,7 @@ celery_app.autodiscover_tasks(
         "src.workers.jlens_readout_tasks",
         "src.workers.jlens_probe_tasks",
         "src.workers.jlens_band_tasks",
+        "src.workers.jlens_acquire_tasks",
         "src.workers.jlens_intervention_tasks",
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup

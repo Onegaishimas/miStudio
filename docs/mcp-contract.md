@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**113 tools across 14 categories.**
+**115 tools across 14 categories.**
 
 
 ## `admin` (2 tools)
@@ -80,10 +80,11 @@ require `MILLM_API_URL` and are never enabled by default.
 | `get_feature_groups` | `GET /extractions/{…}/feature-groups` | List feature groups (features sharing a top activating token with similar context). |
 | `get_grouping_status` | `GET /extractions/{…}/feature-groups/status` | State of the grouping index: none \| pending \| computing \| completed \| failed, with progress, params, and counts. |
 
-## `jlens` (16 tools)
+## `jlens` (18 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
+| `acquire_jlens_artifact` | `POST /jlens/acquire` | Adopt a lens someone else fitted. |
 | `annotate_jlens_feature` | `POST /jlens/annotate` | Describe an SAE feature in J-space: what it pushes TOWARD. |
 | `compute_jlens_band_report` | `POST /jlens/band-report` | Measure this model's band profile and derive ITS OWN boundaries. |
 | `create_jlens_watchlist` | `POST /jlens/watchlists` | Author a watchlist for miLLM to evaluate per token at inference. |
@@ -96,6 +97,7 @@ require `MILLM_API_URL` and are never enabled by default.
 | `jlens_cost_estimate` | `GET /jlens/cost-estimate` | Estimate an operation's cost BEFORE committing to it. |
 | `jlens_readout` | `POST /jlens/readout` | QUEUE a readout of what a model is poised to say per layer and position. |
 | `list_jlens_artifacts` | `GET /jlens/artifacts` | List J-lens artifacts present in the mounted registry. |
+| `preview_jlens_repo` | `POST /jlens/acquire/preview` | List the files in a repo that could be a J-lens, with sizes. |
 | `record_jlens_gate` | `POST /jlens/gate` | Record the Phase-0 GO / NO-GO decision (BR-003). |
 | `restore_jlens_artifact` | `POST /jlens/artifacts/{…}/restore-superseded` | Promote the archived artifact back into service. |
 | `run_jlens_intervention` | `POST /jlens/interventions` | Run an intervention AND its size-matched control in one pass. |

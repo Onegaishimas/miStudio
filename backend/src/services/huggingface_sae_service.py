@@ -26,6 +26,48 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
+def resolve_hf_token(explicit: Optional[str] = None) -> Optional[str]:
+    """A HuggingFace token from the request, the environment, or the DB.
+
+    ONE COPY. This block was written out twice in this file, and a third caller
+    (the J-lens acquisition path) would have made it three — at which point the
+    three would start to differ, and the one that forgets the
+    `.lower() == "none"` guard passes the literal string "none" to `HfApi` and
+    gets a 401 that reads like a bad token rather than a missing one.
+
+    Precedence is deliberate: an explicit token belongs to THIS request, the
+    environment belongs to the deployment, and the encrypted setting belongs to
+    the installation. Later tiers are fallbacks, never overrides.
+
+    Returns None rather than an empty string, because `HfApi(token=None)` means
+    "anonymous" while `HfApi(token="")` is a malformed credential.
+    """
+    token = explicit or settings.hf_token
+    if not token or not token.strip() or token.strip().lower() == "none":
+        try:
+            from ..core.database import SyncSessionLocal
+            from ..core.encryption import decrypt_value
+            from ..models.app_setting import AppSetting
+
+            with SyncSessionLocal() as db_session:
+                db_setting = (
+                    db_session.query(AppSetting)
+                    .filter(AppSetting.key == "hf_token")
+                    .first()
+                )
+                if db_setting:
+                    token = (
+                        decrypt_value(db_setting.value, setting_key="hf_token")
+                        if db_setting.is_sensitive
+                        else db_setting.value
+                    )
+        except Exception:  # noqa: BLE001 - an unreachable DB means anonymous
+            logger.debug("Could not read the stored HuggingFace token", exc_info=True)
+    if not token or not token.strip() or token.strip().lower() == "none":
+        return None
+    return token
+
+
 class HuggingFaceSAEService:
     """Service class for HuggingFace SAE operations."""
 
@@ -64,21 +106,7 @@ class HuggingFaceSAEService:
         Returns:
             Repository preview with file list and detected SAE paths
         """
-        # Use provided token, or DB settings token, or env settings token
-        token = access_token or settings.hf_token
-        if not token or not token.strip() or token.strip().lower() == "none":
-            try:
-                from ..models.app_setting import AppSetting
-                from ..core.encryption import decrypt_value
-                from ..core.database import SyncSessionLocal
-                with SyncSessionLocal() as db_session:
-                    db_setting = db_session.query(AppSetting).filter(AppSetting.key == "hf_token").first()
-                    if db_setting:
-                        token = decrypt_value(db_setting.value, setting_key="hf_token") if db_setting.is_sensitive else db_setting.value
-            except Exception:
-                pass
-        if not token or not token.strip() or token.strip().lower() == "none":
-            token = None
+        token = resolve_hf_token(access_token)
 
         def _preview() -> HFRepoPreviewResponse:
             api = HfApi(token=token)
@@ -253,21 +281,7 @@ class HuggingFaceSAEService:
         Returns:
             Dict with download info including local_path, file_size, metadata
         """
-        # Use provided token, or DB settings token, or env settings token
-        token = access_token or settings.hf_token
-        if not token or not token.strip() or token.strip().lower() == "none":
-            try:
-                from ..models.app_setting import AppSetting
-                from ..core.encryption import decrypt_value
-                from ..core.database import SyncSessionLocal
-                with SyncSessionLocal() as db_session:
-                    db_setting = db_session.query(AppSetting).filter(AppSetting.key == "hf_token").first()
-                    if db_setting:
-                        token = decrypt_value(db_setting.value, setting_key="hf_token") if db_setting.is_sensitive else db_setting.value
-            except Exception:
-                pass
-        if not token or not token.strip() or token.strip().lower() == "none":
-            token = None
+        token = resolve_hf_token(access_token)
         local_dir.mkdir(parents=True, exist_ok=True)
 
         def _download() -> Dict[str, Any]:

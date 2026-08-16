@@ -447,3 +447,187 @@ def dtype_of(payload: Dict[int, torch.Tensor]) -> str:
     return {"float16": "fp16", "bfloat16": "bf16", "float32": "fp32"}.get(
         next(iter(dtypes)), next(iter(dtypes))
     )
+
+# ---------------------------------------------------------------- the source
+
+
+#: Free space that must remain AFTER a download, on every volume it touches.
+#:
+#: Mirrors `circuit_capture_service.MIN_FREE_DISK_BYTES`, the only such guard
+#: this repo had. No download path checked disk at all — and a J-lens for a 70B
+#: model is multiple GB, on a volume already at 83%.
+MIN_FREE_DISK_BYTES = 5 * 2**30
+
+#: Extensions that could hold a lens. NOT `*_jacobian_lens.pt`: that glob is the
+#: conformant naming, and community repos publish `qwen3_8b_lens.pt`,
+#: `gemma2_9b_jlens.pt` and worse. Listing only conformant names would make the
+#: generic path useless for exactly the repos it exists to reach.
+CANDIDATE_SUFFIXES = (".pt", ".pth", ".safetensors", ".bin")
+
+
+@dataclass
+class RemoteFile:
+    path: str
+    size_bytes: Optional[int]
+    sha256: Optional[str]
+    #: Sits beside a `config.yaml` — i.e. probably a self-describing artifact
+    #: whose weight identity can be checked rather than asserted.
+    has_config: bool
+    #: Sits beside a `*_convergence.csv`.
+    has_convergence: bool
+
+
+@dataclass
+class RepoPreview:
+    repo_id: str
+    revision: str
+    candidates: List[RemoteFile]
+
+
+def preview_repo(
+    repo_id: str, revision: Optional[str] = None, token: Optional[str] = None
+) -> RepoPreview:
+    """List the files in a repo that could be a lens, with sizes.
+
+    READ-ONLY, AND THE POINT IS TO SPEND A REQUEST INSTEAD OF A DOWNLOAD. A
+    mistyped path would otherwise cost a multi-GB fetch and a slot on the
+    single-GPU queue before anything noticed.
+
+    THE REVISION IS RESOLVED HERE. `hf_hub_download` without one takes `main`,
+    which moves — so "acquired from <repo>" would not be a reproducible
+    statement. The caller passes the resolved sha back when it downloads, so the
+    file that was previewed is the file that arrives.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=token)
+    info = api.repo_info(repo_id=repo_id, revision=revision, repo_type="model", files_metadata=True)
+    resolved = info.sha or revision or "main"
+
+    siblings = list(getattr(info, "siblings", None) or [])
+    all_paths = {s.rfilename for s in siblings}
+    dirs_with_config = {
+        p.rsplit("/", 1)[0] if "/" in p else "" for p in all_paths if p.endswith("config.yaml")
+    }
+    dirs_with_csv = {
+        p.rsplit("/", 1)[0] if "/" in p else ""
+        for p in all_paths
+        if p.endswith("_convergence.csv")
+    }
+
+    candidates: List[RemoteFile] = []
+    for sibling in siblings:
+        name = sibling.rfilename
+        if not name.endswith(CANDIDATE_SUFFIXES):
+            continue
+        parent = name.rsplit("/", 1)[0] if "/" in name else ""
+        lfs = getattr(sibling, "lfs", None)
+        candidates.append(
+            RemoteFile(
+                path=name,
+                # LFS carries the real size; `size` is the pointer file's.
+                size_bytes=(getattr(lfs, "size", None) if lfs else None)
+                or getattr(sibling, "size", None),
+                sha256=getattr(lfs, "sha256", None) if lfs else None,
+                has_config=parent in dirs_with_config,
+                has_convergence=parent in dirs_with_csv,
+            )
+        )
+    candidates.sort(key=lambda c: (not c.has_config, c.path))
+    return RepoPreview(repo_id=repo_id, revision=resolved, candidates=candidates)
+
+
+def check_free_space(*paths: Path, needed_bytes: int) -> None:
+    """Refuse a download that would not fit, BEFORE fetching a byte.
+
+    EVERY VOLUME IT TOUCHES. The HuggingFace cache and the artifact registry can
+    be different mounts, and the file lands on both — once as a cached blob and
+    once as the staged artifact. Checking only the destination passes and then
+    fills the cache volume instead.
+    """
+    import shutil as _shutil
+
+    for path in paths:
+        probe = path
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        free = _shutil.disk_usage(probe).free
+        if free < needed_bytes + MIN_FREE_DISK_BYTES:
+            raise AcquisitionRefused(
+                f"{path} has {free / 2**30:.1f} GiB free; this needs "
+                f"{needed_bytes / 2**30:.1f} GiB plus a "
+                f"{MIN_FREE_DISK_BYTES / 2**30:.0f} GiB floor"
+            )
+
+
+def fetch_file(
+    repo_id: str,
+    path_in_repo: str,
+    revision: str,
+    token: Optional[str] = None,
+    cache_dir: Optional[Path] = None,
+) -> Path:
+    """Download one file at a PINNED revision, into the HF cache.
+
+    NOT INTO THE ARTIFACT REGISTRY. `list_artifacts` excludes only `.staging`,
+    `.superseded` and `.swap` — a scratch directory anywhere else under the root
+    holding a conformant `*_jacobian_lens.pt` would be discovered and SERVED as
+    a second artifact under a bogus slug. The registry is the filesystem, so
+    anything written there is published.
+
+    The cache also gives resume, dedup and etag validation for free.
+    """
+    from huggingface_hub import hf_hub_download
+
+    return Path(
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=path_in_repo,
+            revision=revision,
+            token=token,
+            cache_dir=str(cache_dir) if cache_dir else None,
+        )
+    )
+
+
+def fetch_optional(
+    repo_id: str,
+    path_in_repo: str,
+    revision: str,
+    token: Optional[str] = None,
+    cache_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """A sibling file that may not exist. Absence is a real state, not an error.
+
+    Community repos ship a bare `.pt` with no config and no convergence trace,
+    and that is a lens miStudio can still adopt — as UNVERIFIED, which is the
+    honest record.
+    """
+    try:
+        return fetch_file(repo_id, path_in_repo, revision, token, cache_dir)
+    except Exception as exc:  # noqa: BLE001 - absence is expected, not a failure
+        logger.info("No %s in %s@%s (%s)", path_in_repo, repo_id, revision[:8], exc)
+        return None
+
+
+def sibling_paths(lens_path: str) -> Dict[str, str]:
+    """Where the config and convergence trace sit relative to a lens file.
+
+    Spec §2.1 puts all three in one directory, so this is a directory join
+    rather than a search. The convergence file's stem follows the LENS file's,
+    not the directory's — `gpt2-small/` holds `gpt2_convergence.csv` — because
+    upstream derives both from the HuggingFace id while the directory carries
+    the publisher's own model name.
+    """
+    parent = lens_path.rsplit("/", 1)[0] if "/" in lens_path else ""
+    stem = lens_path.rsplit("/", 1)[-1]
+    for suffix in ("_jacobian_lens.pt", ".pt", ".pth", ".safetensors", ".bin"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    join = (lambda name: f"{parent}/{name}") if parent else (lambda name: name)
+    return {
+        "config": join("config.yaml"),
+        "convergence": join(f"{stem}_convergence.csv"),
+    }
+
