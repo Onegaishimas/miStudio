@@ -39,6 +39,8 @@ EXPECTED_TOOLS = {
     # what is already downloadable.
     "acquire_jlens_artifact",
     "preview_jlens_repo",
+    # The other half of the round trip, asserted before it was written.
+    "publish_jlens_artifact",
     # The evidence read surface and the recovery action. Both were added with
     # this assertion, not after it — the harness refusing an unasserted tool is
     # the guard working, not an obstacle to route around.

@@ -44,6 +44,7 @@ EXPECTED = {
     "/jlens/token-check",
     "/jlens/acquire",
     "/jlens/acquire/preview",
+    "/jlens/publish",
 }
 
 

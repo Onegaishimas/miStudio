@@ -438,3 +438,105 @@ def acquire_jlens_artifact(
             checkpoint = None  # noqa: F841 - the undivided original
             clear_cache()
             logger.info("Released the acquisition model from GPU memory")
+
+@celery_app.task(
+    name="src.workers.jlens_acquire_tasks.publish_jlens_artifact",
+    bind=True,
+    max_retries=0,
+)
+@jlens_progress.owns_its_failure
+def publish_jlens_artifact_task(
+    self,
+    model_id: str,
+    target_repo: str,
+    access_token: Optional[str] = None,
+    dataset: str = "mistudio",
+    create_repo: bool = False,
+    private: bool = False,
+) -> Dict[str, Any]:
+    """Upload this model's published lens to HuggingFace.
+
+    ON THE SAME QUEUE AS ITS SIBLINGS AND NOT BECAUSE IT NEEDS A GPU — it does
+    not. It is here because it reads the artifact directory, which the fit and
+    acquire tasks write, and putting a writer of that directory on a different
+    worker would make the interleaving something to reason about rather than
+    something the queue already serialises.
+
+    ONLY A VALIDATED, PUBLISHED ARTIFACT. `load_for_readout` gates local serving
+    on `serviceable`; publishing to a third party is a stronger act than serving
+    it here, so a staged or unvalidated artifact is refused outright.
+    """
+    from ..core.config import settings
+    from ..core.database import get_sync_db
+    from ..models.model import Model
+    from ..services.huggingface_sae_service import resolve_hf_token
+    from ..services.jlens_acquire_service import AcquisitionRefused, publish_artifact
+    from ..services.jlens_artifact_service import JLensArtifactService
+
+    jlens_progress.update_row(self.request.id, status="running", progress=5.0)
+
+    with get_sync_db() as db:
+        record = db.query(Model).filter(Model.id == model_id).first()
+        if record is None:
+            raise ValueError(f"No model with id {model_id!r}")
+        repo_of_model = getattr(record, "repo_id", None)
+        if not repo_of_model:
+            raise ValueError(f"Model {model_id!r} has no repo_id")
+
+    service = JLensArtifactService(settings.jlens_artifacts_dir)
+    ref = service.find(repo_of_model)
+    if ref is None:
+        raise AcquisitionRefused(
+            f"no published J-lens artifact for {repo_of_model}. Fit or acquire "
+            "one first — a staged artifact is not published and is not shipped."
+        )
+
+    report = service.stored_report(ref)
+    if report is None:
+        raise AcquisitionRefused(
+            f"the artifact for {repo_of_model} carries no validation verdict "
+            "matching its current weights, so there is nothing to publish it on."
+        )
+
+    # A WRITE TOKEN IS NOT OPTIONAL AND HAS NO SAFE FALLBACK. The read path
+    # degrades to anonymous; an upload cannot, and an empty string reaches the
+    # Hub as a malformed credential rather than as "no credential".
+    token = resolve_hf_token(access_token)
+    if not token:
+        raise AcquisitionRefused(
+            "publishing needs a HuggingFace token with write access; none was "
+            "supplied and none is configured"
+        )
+
+    self.update_state(state="PROGRESS", meta=beat({"stage": "uploading"}))
+    jlens_progress.update_row(self.request.id, progress=30.0)
+
+    outcome = publish_artifact(
+        ref.directory,
+        repo_of_model,
+        target_repo,
+        token,
+        dataset=dataset,
+        create=create_repo,
+        private=private,
+        recipe=service._recipe_summary(ref),  # noqa: SLF001 - same package concern
+        validation=report,
+    )
+
+    jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
+    return {
+        "model": repo_of_model,
+        **outcome,
+        # WHAT THE READER OF THAT REPO IS AND IS NOT BEING TOLD. The two
+        # consumer-interop classes travel as DEFERRED, so nobody downstream can
+        # mistake this project's local verdict for proven interoperability.
+        "cleared_for_handover": all(
+            r.get("status") == "pass" for r in (report.get("results") or [])
+        ),
+        "caveat": (
+            "Published with the validation report this installation produced. "
+            "The two consumer-interop classes are DEFERRED — they need a live "
+            "external consumer and have never been run here."
+        ),
+    }
+

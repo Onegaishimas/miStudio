@@ -1794,6 +1794,87 @@ async def acquire_artifact(
     return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
 
 
+class PublishRequest(BaseModel):
+    """Upload this model's published lens to a HuggingFace repo."""
+
+    model_id: str
+    target_repo: str = Field(..., min_length=3, max_length=200)
+    #: REQUIRED IN PRACTICE. The read path may run anonymously; a write cannot,
+    #: and the worker refuses rather than sending an empty credential.
+    access_token: Optional[str] = Field(None, max_length=500)
+    #: The corpus segment of the published path, per spec §2.1.
+    dataset: str = Field("mistudio", min_length=1, max_length=100)
+    create_repo: bool = False
+    private: bool = False
+
+
+@router.post(
+    "/publish",
+    response_model=BandTaskAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Publish a validated J-lens to HuggingFace",
+)
+async def publish_artifact_endpoint(
+    request: PublishRequest, db: AsyncSession = Depends(get_db)
+) -> BandTaskAccepted:
+    """Queue an upload, refusing here what is knowable here.
+
+    A STAGED ARTIFACT IS NOT PUBLISHED AND IS NOT SHIPPED. Publishing to a third
+    party is a stronger act than serving locally, and `find` returns only what
+    has been committed — so this refuses before spending a task slot on a model
+    whose lens was never validated.
+    """
+    from ....models.model import Model
+    from ....services.jlens_acquire_service import AcquisitionRefused
+    from ....services.jlens_artifact_service import JLensArtifactService
+    from ....workers import jlens_progress
+    from ....workers.jlens_acquire_tasks import publish_jlens_artifact_task
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+    repo_of_model = getattr(record, "repo_id", None)
+    if not repo_of_model:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Model {request.model_id!r} has no repo_id",
+        )
+
+    service = JLensArtifactService(settings.jlens_artifacts_dir)
+    ref = service.find(repo_of_model)
+    if ref is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"No published J-lens artifact for {repo_of_model}. Fit or "
+                "acquire one first; a staged artifact is not published."
+            ),
+        )
+    if service.stored_report(ref) is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The artifact carries no validation verdict matching its current "
+                "weights, so there is nothing to publish it on."
+            ),
+        )
+
+    task = publish_jlens_artifact_task.delay(
+        model_id=request.model_id,
+        target_repo=request.target_repo,
+        access_token=request.access_token,
+        dataset=request.dataset,
+        create_repo=request.create_repo,
+        private=request.private,
+    )
+    jlens_progress.open_row(jlens_progress.PUBLISH, request.model_id, task.id)
+    return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
+
+
 @router.post(
     "/interventions",
     response_model=BandTaskAccepted,
