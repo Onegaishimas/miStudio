@@ -254,3 +254,149 @@ describe('the token field', () => {
     expect(sent.access_token).toBeUndefined();
   });
 });
+
+describe('review round 1 findings', () => {
+  it('DISCARDS a preview when the model changes', async () => {
+    /**
+     * Every `fits_envelope` verdict in the list was computed server-side for
+     * ONE model's dimensions. A list left on screen after the model changes
+     * shows badges computed for other weights — and the selection would send a
+     * lens for one model against another, which the endpoint cannot catch and
+     * the worker only discovers after downloading the whole file.
+     *
+     * MUTATION CONTROL: drop the `useEffect` on `modelId` and this fails.
+     */
+    const { rerender } = mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+
+    rerender(
+      <AcquireLensCard
+        modelId="m_OTHER"
+        modelRepoId="org/other"
+        weightsPresent
+        hasArtifact
+      />,
+    );
+    // The card stays OPEN across the rerender — only the preview is discarded.
+    expect(screen.queryByText(/2 candidates/)).toBeNull();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+  });
+
+  it('REFUSES to acquire with no model chosen', () => {
+    /**
+     * The store initialises `modelId: ''`, so a fresh session renders the
+     * prerequisite warning naming no model at all, and the button was enabled —
+     * POSTing `model_id: ""` for a 404 the user reads as a mystery.
+     *
+     * MUTATION CONTROL: drop `!modelId` from the disabled expression -> fails.
+     */
+    mount({ modelId: '' });
+    open();
+    expect(screen.getByTestId('jlens-acquire-no-model')).toBeInTheDocument();
+    expect(screen.getByTestId('jlens-acquire-run')).toBeDisabled();
+  });
+
+  it('does not let a queued job be queued AGAIN', async () => {
+    /**
+     * `busy` releases at the 202, not at the job's terminal state, and nothing
+     * else about the form changed — so a second click re-downloaded the same
+     * multi-gigabyte file, which the worker then refused on the staging guard
+     * after paying the bandwidth twice.
+     *
+     * MUTATION CONTROL: drop `Boolean(queued)` from the disabled expression.
+     */
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.click(screen.getByTestId('jlens-acquire-run'));
+    await waitFor(() =>
+      expect(jlensApi.acquire as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getByTestId('jlens-acquire-run')).toBeDisabled();
+
+    // AND STARTING ANOTHER IS A DECISION, not a double-click.
+    fireEvent.click(screen.getByRole('button', { name: /start another/ }));
+    expect(screen.getByTestId('jlens-acquire-run')).toBeEnabled();
+  });
+
+  it('keeps the READ and WRITE tokens apart', async () => {
+    /**
+     * One shared field silently reused a read-scope token as the publish
+     * credential — masked, so the only signal was a label. The endpoint's
+     * pre-flight only tests that A token exists, so it 202s and fails inside
+     * the worker after taking a slot on the single-GPU queue.
+     *
+     * MUTATION CONTROL: share one `token` state and this fails.
+     */
+    mount();
+    open();
+    fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
+      target: { value: 'hf_READ_ONLY' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    expect(screen.getByTestId('jlens-acquire-token')).toHaveValue('');
+  });
+
+  it('mirrors the server constraint on the corpus segment', () => {
+    /**
+     * It is a path segment, and the obvious value to type is the corpus's own
+     * id — `wikitext/wikitext-103` — whose slash 422s against a regex the form
+     * gave no hint about.
+     *
+     * MUTATION CONTROL: drop DATASET_PATTERN from the disabled expression.
+     */
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    fireEvent.change(screen.getByTestId('jlens-acquire-repo'), {
+      target: { value: 'you/lenses' },
+    });
+    fireEvent.change(screen.getByTestId('jlens-publish-dataset'), {
+      target: { value: 'wikitext/wikitext-103' },
+    });
+    expect(screen.getByTestId('jlens-publish-dataset-invalid')).toBeInTheDocument();
+    expect(screen.getByTestId('jlens-publish-run')).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('jlens-publish-dataset'), {
+      target: { value: 'wikitext-103' },
+    });
+    expect(screen.queryByTestId('jlens-publish-dataset-invalid')).toBeNull();
+    expect(screen.getByTestId('jlens-publish-run')).toBeEnabled();
+  });
+
+  it('names the OTHER publish gate it cannot check', () => {
+    /**
+     * `hasArtifact` is slug presence only. The endpoint also refuses an
+     * artifact whose stored verdict no longer matches its current weights, and
+     * the listing deliberately carries no validity field — so the card cannot
+     * check it and must not imply a present artifact is sufficient.
+     *
+     * MUTATION CONTROL: delete the note and this fails.
+     */
+    mount({ hasArtifact: true });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    expect(screen.getByText(/validation verdict matching/)).toBeInTheDocument();
+  });
+
+  it('clears a stale note when a new request starts', () => {
+    /**
+     * `note` was cleared nowhere, so a red error rendered directly below a
+     * still-green "queued" note and a refused request read as a queued one.
+     *
+     * MUTATION CONTROL: drop `setNote(null)` from the request starts.
+     */
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    // The note surface starts empty and a failed preview must not leave a
+    // success message behind it.
+    expect(screen.queryByText(/queued as/)).toBeNull();
+  });
+});
+

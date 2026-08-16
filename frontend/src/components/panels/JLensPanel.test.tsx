@@ -44,6 +44,9 @@ vi.mock('../../api/jlens', () => ({
     readoutResult: vi.fn(),
     listArtifacts: vi.fn().mockResolvedValue([]),
     intervene: vi.fn(),
+    previewRepo: vi.fn(),
+    acquire: vi.fn(),
+    publish: vi.fn(),
   },
 }));
 
@@ -1487,6 +1490,78 @@ describe('JLensPanel — ranked readouts and interventions', () => {
       (jlensApi.intervene as ReturnType<typeof vi.fn>).mock.calls[0][0].layers,
     ).toEqual([6, 7]);
   });
+
+  it('an acquisition does NOT overwrite a completed intervention verdict', async () => {
+    /**
+     * `interventionNote` is owned by `runIntervention`, which blanks it on
+     * every click — and it holds the ONLY copy of a completed rung-2 verdict.
+     * Echoing an acquire acknowledgement into it destroyed the product's
+     * headline result ("intervened 6/6 vs control 0/6 … the intervals are
+     * disjoint"), and clicking Steer afterwards erased the acquire's only
+     * acknowledgement in return. The card shows its own note.
+     *
+     * MUTATION CONTROL: pass an `onQueued` that writes `interventionNote` and
+     * this fails.
+     */
+    const user = userEvent.setup();
+    (jlensApi.intervene as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-9',
+      model_id: 'm_lfm2',
+      queue: 'extraction',
+    });
+    (getTaskStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'iv-9',
+      state: 'SUCCESS',
+      result: {
+        n_trials: 6,
+        separation_attainable: true,
+        separated_from_control: true,
+        intervened_top1: { hits: 6, n: 6, rate: 1, ci95_low: 0.61, ci95_high: 1 },
+        control_top1: { hits: 0, n: 6, rate: 0, ci95_low: 0, ci95_high: 0.39 },
+        baseline_top1: { hits: 0, n: 6, rate: 0, ci95_low: 0, ci95_high: 0.39 },
+      },
+    });
+    (jlensApi.previewRepo as ReturnType<typeof vi.fn>).mockResolvedValue({
+      repo_id: 'org/lenses',
+      revision: 'sha123456',
+      candidates: [
+        {
+          path: 'a_jacobian_lens.pt',
+          size_bytes: 100,
+          has_config: true,
+          has_convergence: false,
+          fits_envelope: true,
+          envelope_detail: null,
+        },
+      ],
+    });
+    (jlensApi.acquire as ReturnType<typeof vi.fn>).mockResolvedValue({
+      task_id: 'acq-9',
+    });
+
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-ranked')).toBeTruthy());
+
+    const column = screen.getByTestId('ranked-LOGIT_LENS');
+    await user.click(within(column).getAllByRole('button', { name: /Steer/ })[0]);
+    await waitFor(() => expect(screen.getByText(/are disjoint/)).toBeInTheDocument(), {
+      timeout: 8000,
+    });
+
+    // Now queue an acquisition from the card in the same panel.
+    await user.click(screen.getByRole('button', { name: /Browse/ }));
+    await user.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/1 candidate/));
+    await user.click(screen.getAllByRole('radio')[0]);
+    await user.click(screen.getByTestId('jlens-acquire-run'));
+    await waitFor(() =>
+      expect(jlensApi.acquire as ReturnType<typeof vi.fn>).toHaveBeenCalled(),
+    );
+
+    // THE VERDICT SURVIVES. It is the only place that result exists in the UI.
+    expect(screen.getByText(/are disjoint/)).toBeInTheDocument();
+  }, 20000);
 
   it('MOUNTS the acquire card \u2014 the only way to reach a published lens', async () => {
     /**
