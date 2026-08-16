@@ -20,8 +20,12 @@ MUTATION CONTROLS (each must turn this file red):
   * ship validation.json                 -> "our LOCAL VERDICT does not travel"
   * drop the deferred wording from the
     model card                           -> "the card says what was NOT checked"
-  * publish a staged artifact            -> "an UNPUBLISHED artifact is refused"
   * return no revision                   -> "the commit sha is recorded"
+
+The staged-artifact refusal and the temp-dir space check are NOT covered here —
+they live in the worker and the endpoint, and are asserted in
+test_jlens_acquire_worker.py. Two earlier entries in this block claimed controls
+that were never written, which is a review record overstating its own coverage.
 """
 
 from __future__ import annotations
@@ -428,4 +432,146 @@ class TestPublishReviewRound1:
         from src.workers.jlens_progress import update_row
 
         assert update_row("no-such-task-id", status="running") is False
+
+class TestPublishReviewRounds2And3:
+    """Findings the second and third rounds raised against the first's fixes.
+
+    MUTATION CONTROLS:
+      * skip the digest rebinding        -> "the evidence still BINDS"
+      * drop **preserved                 -> "fields the publisher put there"
+      * remove the expansion ceiling     -> "a bomb is refused before torch.load"
+    """
+
+    @staticmethod
+    def _capture():
+        captured = {}
+
+        def fake_upload(folder_path, repo_id, path_in_repo, commit_message):
+            import json as _json
+            import pathlib as _p
+
+            out = _p.Path(folder_path)
+            lens = next(out.glob("*_jacobian_lens.pt"))
+            captured["payload"] = torch.load(
+                lens, map_location="cpu", weights_only=True
+            )
+            captured["digest"] = __import__(
+                "hashlib"
+            ).sha256(lens.read_bytes()).hexdigest()
+            evidence = out / "interventions.json"
+            captured["records"] = (
+                _json.loads(evidence.read_text()) if evidence.is_file() else None
+            )
+            return types.SimpleNamespace(oid="sha")
+
+        api = MagicMock()
+        api.upload_folder = fake_upload
+        return api, captured
+
+    def test_the_evidence_still_BINDS_to_the_file_that_ships(self, tmp_path):
+        """Re-saving changes the container's bytes, so every `lens_sha256` in
+        `interventions.json` would name a file that is not at the destination —
+        and miStudio's own rule DROPS a record whose digest does not match. The
+        evidence would arrive and self-invalidate, on exactly the old-format
+        artifacts the re-save exists to fix.
+        """
+        import hashlib
+        import json as _json
+
+        directory = tmp_path / "m"
+        directory.mkdir()
+        lens = directory / "m_jacobian_lens.pt"
+        # OLD FORMAT, so the re-save genuinely changes the bytes.
+        torch.save({l: torch.zeros(4, 4, dtype=torch.float16) for l in range(3)}, lens)
+        local = hashlib.sha256(lens.read_bytes()).hexdigest()
+        (directory / "config.yaml").write_text("model: org/m\n")
+        (directory / "interventions.json").write_text(
+            _json.dumps([{"lens_sha256": local, "evidence": {"n_trials": 6}}])
+        )
+
+        api, captured = self._capture()
+        with patch("huggingface_hub.HfApi", return_value=api):
+            publish_artifact(directory, "org/m", "you/lenses", "tok")
+
+        assert captured["digest"] != local, (
+            "the fixture must be old-format, or this cannot detect the hazard"
+        )
+        record = captured["records"][0]
+        assert record["lens_sha256"] == captured["digest"], (
+            "the published evidence names a file that is not there; a consumer "
+            "applying miStudio's own rule keeps 0 of 1 records"
+        )
+        # AND IT SAYS IT MOVED, so a reader can tell a rebound digest from an
+        # original one.
+        assert record["rebound_from"] == local
+        assert "matrices are" in record["rebound_reason"]
+
+    def test_fields_the_publisher_put_there_SURVIVE(self, tmp_path):
+        """Rebuilding only the four spec fields dropped everything else —
+        `layer_convention` and `target_layer` most of all, which are what a
+        consumer needs to know whether the lens targets penultimate or final.
+        For a repo republishing just the `.pt`, the checkpoint is the only place
+        they can travel.
+        """
+        directory = tmp_path / "m"
+        directory.mkdir()
+        torch.save(
+            {
+                "J": {l: torch.zeros(4, 4, dtype=torch.float16) for l in range(3)},
+                "d_model": 4,
+                "source_layers": [0, 1, 2],
+                "n_prompts": 500,
+                "target_layer": "penultimate",
+                "layer_convention": "zero_based_resid_post",
+            },
+            directory / "m_jacobian_lens.pt",
+        )
+        (directory / "config.yaml").write_text("model: org/m\n")
+
+        api, captured = self._capture()
+        with patch("huggingface_hub.HfApi", return_value=api):
+            publish_artifact(directory, "org/m", "you/lenses", "tok")
+
+        payload = captured["payload"]
+        assert payload["target_layer"] == "penultimate", sorted(payload)
+        assert payload["layer_convention"] == "zero_based_resid_post"
+        # And the four rebuilt ones are still right.
+        assert payload["d_model"] == 4
+        assert payload["source_layers"] == [0, 1, 2]
+
+    def test_a_BOMB_is_refused_before_torch_load(self, tmp_path):
+        """`check_free_space` covers disk and runs AFTER `torch.load` has
+        already committed the memory. The acquisition path guards this with
+        `check_expansion`; publish deserialised without a ceiling."""
+        import zipfile
+
+        from src.services.jlens_acquire_service import AcquisitionRefused
+
+        directory = tmp_path / "m"
+        directory.mkdir()
+        lens = directory / "m_jacobian_lens.pt"
+        torch.save(
+            {l: torch.zeros(256, 256, dtype=torch.float16) for l in range(8)}, lens
+        )
+        # Recompressed so the file on disk is tiny and the expansion is not.
+        source = zipfile.ZipFile(lens)
+        names = source.namelist()
+        blobs = {n: source.read(n) for n in names}
+        source.close()
+        with zipfile.ZipFile(lens, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as out:
+            for name in names:
+                out.writestr(name, blobs[name])
+        (directory / "config.yaml").write_text("model: org/m\n")
+
+        api, _captured = self._capture()
+        with patch("huggingface_hub.HfApi", return_value=api):
+            with pytest.raises(AcquisitionRefused, match="expands to"):
+                publish_artifact(
+                    directory,
+                    "org/m",
+                    "you/lenses",
+                    "tok",
+                    # A tiny model: the expansion is far past what it could need.
+                    recipe={"d_model": 8, "n_layers": 4, "n_vocab": 100},
+                )
 

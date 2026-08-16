@@ -99,7 +99,7 @@ def acquire_jlens_artifact(
     from ..services.jlens_validation import defer_consumer_checks
     from ..services.huggingface_sae_service import resolve_hf_token
 
-    jlens_progress.update_row(self.request.id, status="running", progress=1.0)
+    jlens_progress.mark_running(self.request.id, progress=1.0)
 
     with get_sync_db() as db:
         record = db.query(Model).filter(Model.id == model_id).first()
@@ -497,12 +497,7 @@ def publish_jlens_artifact_task(
     # returns silently, and the row lands as "queued 0%" and never moves.
     # Retried briefly rather than assumed: the work is the point and the row is
     # the narration, so this must never raise.
-    for _attempt in range(10):
-        if jlens_progress.update_row(
-            self.request.id, status="running", progress=5.0
-        ):
-            break
-        time.sleep(0.1)
+    jlens_progress.mark_running(self.request.id, progress=5.0)
 
     with get_sync_db() as db:
         record = db.query(Model).filter(Model.id == model_id).first()
@@ -552,9 +547,16 @@ def publish_jlens_artifact_task(
 
     def _heartbeat() -> None:
         while not done.wait(30.0):
-            self.update_state(
-                state="PROGRESS", meta=beat({"stage": "uploading"})
-            )
+            try:
+                self.update_state(
+                    state="PROGRESS", meta=beat({"stage": "uploading"})
+                )
+            except Exception:  # noqa: BLE001 - a blip must not stop the pulse
+                # UNGUARDED, THIS THREAD DIES SILENTLY. One backend hiccup ends
+                # the loop, heartbeats stop mid-upload, and the janitor marks a
+                # still-running publish failed — restoring by transient exactly
+                # the bug this thread exists to prevent.
+                logger.debug("Heartbeat write failed; continuing", exc_info=True)
 
     self.update_state(state="PROGRESS", meta=beat({"stage": "uploading"}))
     pulse = threading.Thread(target=_heartbeat, daemon=True)
@@ -573,7 +575,16 @@ def publish_jlens_artifact_task(
         )
     finally:
         done.set()
-        pulse.join(timeout=5.0)
+        # JOINED WITHOUT A TIMEOUT ESCAPE. A pulse still in flight when the task
+        # stores SUCCESS would write PROGRESS over it, leaving a completed
+        # publish reported as running forever. The loop only ever sleeps or
+        # writes, so it cannot outlive `done` by more than one write.
+        pulse.join(timeout=60.0)
+        if pulse.is_alive():
+            logger.warning(
+                "The upload heartbeat did not stop; a late PROGRESS write may "
+                "land after the terminal state"
+            )
 
     jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
     return {

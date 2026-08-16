@@ -995,6 +995,33 @@ def slug_of(repo_id: str) -> str:
     return slug_for(repo_id)
 
 
+def _rebind_intervention_digests(path: Path, old: str, new: str) -> None:
+    """Point recorded evidence at the republished lens, and SAY that it moved.
+
+    `record_intervention_result` binds each record to the lens's digest so a
+    measurement cannot be read against a different artifact. Republishing
+    rewrites the container — the same matrices in the conformant wrapper — so
+    the binding must follow or every record is dropped on arrival by the rule
+    that protects it.
+    """
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:  # noqa: BLE001 - reported
+        logger.warning("Could not rebind %s: %s", path, exc)
+        return
+    if not isinstance(records, list):
+        return
+    for record in records:
+        if isinstance(record, dict) and record.get("lens_sha256") == old:
+            record["lens_sha256"] = new
+            record["rebound_from"] = old
+            record["rebound_reason"] = (
+                "republished in the conformant wrapper; the matrices are "
+                "unchanged and only the container differs"
+            )
+    path.write_text(json.dumps(records, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def publish_artifact(
     directory: Path,
     repo_id: str,
@@ -1038,7 +1065,23 @@ def publish_artifact(
     # the upload proceeds. The consumer then reads `payload["J"]`, raises, and
     # is holding a README that describes the wrapper. Publishing is the one
     # moment the on-disk vintage stops being a local detail.
-    from .jlens_artifact_service import normalise_payload
+    from .jlens_artifact_service import INTERVENTION_FILE, normalise_payload
+
+    # BOUNDED BEFORE IT IS OPENED, like the acquisition path. `check_free_space`
+    # covers disk and runs AFTER `torch.load` has already committed the memory —
+    # a 70B lens is ~10.7 GB resident in the worker that is head-of-line for
+    # every fit on the single-GPU queue.
+    if recipe and recipe.get("d_model") and recipe.get("n_layers"):
+        check_expansion(
+            lens_files[0],
+            full_fit_ceiling(
+                {
+                    "d_model": int(recipe["d_model"]),
+                    "n_layers": int(recipe["n_layers"]),
+                    "n_vocab": int(recipe.get("n_vocab") or 0) or 1,
+                }
+            ),
+        )
 
     raw = torch.load(lens_files[0], map_location="cpu", weights_only=True)
     layers = normalise_payload(raw)
@@ -1061,19 +1104,53 @@ def publish_artifact(
         outbox = Path(staging)
         check_free_space(outbox, needed_bytes=needed)
 
+        # EVERY OTHER FIELD THE ORIGINAL CARRIED SURVIVES. Rebuilding only the
+        # four spec fields silently dropped anything else the publisher had put
+        # there — `layer_convention` and `target_layer` most importantly, which
+        # are exactly what a consumer needs to know whether the lens targets the
+        # penultimate block or the final one. The checkpoint is the only place
+        # those can travel for a repo that republishes just the `.pt`.
+        preserved = {
+            k: v
+            for k, v in (raw.items() if isinstance(raw, dict) else [])
+            if k not in {"J", "d_model", "source_layers", "n_prompts"}
+            and not isinstance(k, int)
+        }
+        published_lens = outbox / lens_files[0].name
         torch.save(
             {
+                **preserved,
                 "J": layers,
                 "d_model": widths.pop(),
                 "source_layers": sorted(layers),
                 "n_prompts": int(n_prompts),
             },
-            outbox / lens_files[0].name,
+            published_lens,
         )
+        # THE EVIDENCE IS REBOUND TO THE FILE THAT SHIPS.
+        #
+        # Re-saving changes the container's bytes, so every `lens_sha256` in
+        # `interventions.json` would name a file that is not at the destination
+        # — and miStudio's own rule drops a record whose digest does not match
+        # the current lens. The evidence would arrive and self-invalidate, for
+        # exactly the old-format artifacts the re-save exists to fix.
+        #
+        # Rebinding is honest because the TENSORS are identical: `normalise_payload`
+        # reshapes the container and touches no matrix. Each record says so, so a
+        # reader can tell a rebound digest from an original one.
+        local_digest = file_digest(lens_files[0])
+        shipped_digest = file_digest(published_lens)
         for name in PUBLISHED_FILES:
             source = directory / name
-            if source.is_file():
+            if not source.is_file():
+                continue
+            if name == INTERVENTION_FILE and shipped_digest != local_digest:
                 shutil.copyfile(source, outbox / name)
+                _rebind_intervention_digests(
+                    outbox / name, local_digest, shipped_digest
+                )
+                continue
+            shutil.copyfile(source, outbox / name)
         # The convergence trace rides along per spec §2.1 — it is the
         # publisher's own record of whether the fit plateaued, and it is what
         # miStudio itself reads off an acquired artifact.
