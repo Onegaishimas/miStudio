@@ -1582,6 +1582,242 @@ async def token_check(
     return out
 
 
+def _model_dims(record: Any) -> Optional[Dict[str, int]]:
+    """`d_model`, `n_layers`, `n_vocab` from the Model row, or None.
+
+    FROM `architecture_config`, WITHOUT LOADING WEIGHTS. The row records what
+    the config.json said at download time, which is enough to bound a file size
+    — and loading a model to decide whether to download a file is the cost this
+    whole preview exists to avoid.
+
+    NONE WHEN ANY OF THE THREE IS MISSING, and the caller then reports no
+    envelope verdict rather than a guessed one. `check_envelope`'s docstring is
+    explicit that its bounds are "derived, never constants"; feeding it a
+    defaulted dimension would produce a bound derived from nothing, which passes
+    on one model and misses a real materialisation on another.
+    """
+    config = getattr(record, "architecture_config", None) or {}
+    if not isinstance(config, dict):
+        return None
+    d_model = config.get("hidden_size") or config.get("d_model")
+    n_layers = config.get("num_hidden_layers") or config.get("n_layer")
+    n_vocab = config.get("vocab_size")
+    try:
+        dims = {
+            "d_model": int(d_model),
+            "n_layers": int(n_layers),
+            "n_vocab": int(n_vocab),
+        }
+    except (TypeError, ValueError):
+        return None
+    return dims if all(v > 0 for v in dims.values()) else None
+
+
+class AcquirePreviewRequest(BaseModel):
+    """Look before fetching. Read-only, and that is the point."""
+
+    repo_id: str = Field(..., min_length=1, max_length=200)
+    revision: Optional[str] = Field(None, max_length=100)
+    #: Which model this would be attached to. Optional, and when given the
+    #: response carries a per-file envelope verdict for THAT model's dimensions
+    #: — which is what makes a generic any-repo flow usable rather than a guess.
+    model_id: Optional[str] = None
+    access_token: Optional[str] = Field(None, max_length=500)
+
+
+class AcquireCandidate(BaseModel):
+    path: str
+    size_bytes: Optional[int] = None
+    #: Beside a `config.yaml`, so weight identity can be CHECKED rather than
+    #: asserted by the caller.
+    has_config: bool = False
+    has_convergence: bool = False
+    #: None when no model was named. Otherwise whether this file's size is
+    #: plausible for that model's dimensions — BR-006's guard, applied
+    #: pre-flight and for free.
+    fits_envelope: Optional[bool] = None
+    envelope_detail: Optional[str] = None
+
+
+class AcquirePreviewResponse(BaseModel):
+    repo_id: str
+    #: The RESOLVED commit. `main` moves, so an acquisition pinned to it is not
+    #: a reproducible statement.
+    revision: str
+    candidates: List[AcquireCandidate]
+
+
+@router.post(
+    "/acquire/preview",
+    response_model=AcquirePreviewResponse,
+    summary="List downloadable lens candidates in a HuggingFace repo",
+)
+async def acquire_preview(
+    request: AcquirePreviewRequest, db: AsyncSession = Depends(get_db)
+) -> AcquirePreviewResponse:
+    """What is in this repo that could be a lens, and would it fit this model?
+
+    POST RATHER THAN GET because it carries a token, and a token in a query
+    string lands in access logs and browser history.
+
+    It lists every `*.pt`/`*.safetensors`, not just conformant
+    `*_jacobian_lens.pt` names: community repos publish `qwen3_8b_lens.pt` and
+    `gemma2_9b_jlens.pt`, and filtering to the conformant name would make this
+    useless for exactly the repos it exists to reach.
+    """
+    from ....models.model import Model
+    from ....services.huggingface_sae_service import resolve_hf_token
+    from ....services.jlens_acquire_service import AcquisitionRefused, preview_repo
+    from ....services.jlens_validation import CheckStatus, check_envelope
+
+    dims = None
+    if request.model_id:
+        result = await db.execute(select(Model).where(Model.id == request.model_id))
+        record = result.scalar_one_or_none()
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No model with id {request.model_id!r}",
+            )
+        dims = _model_dims(record)
+
+    try:
+        preview = preview_repo(
+            request.repo_id,
+            revision=request.revision,
+            token=resolve_hf_token(request.access_token),
+        )
+    except AcquisitionRefused as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - a bad repo id is a 404, not a 500
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Could not read {request.repo_id!r}: {exc}",
+        ) from exc
+
+    candidates: List[AcquireCandidate] = []
+    for c in preview.candidates:
+        fits: Optional[bool] = None
+        detail: Optional[str] = None
+        if dims and c.size_bytes:
+            # THE SAME BOUND THE VALIDATOR WILL APPLY, spent here for a request
+            # instead of a multi-gigabyte download. `n_layers` is unknown before
+            # opening the file, so the model's own count is the bound — an
+            # artifact larger than a FULL fit for these weights is out either
+            # way, and a partial one is smaller and passes.
+            verdict = check_envelope(
+                c.size_bytes,
+                d_model=dims["d_model"],
+                n_layers=dims["n_layers"],
+                n_vocab=dims["n_vocab"],
+            )
+            fits = verdict.status is not CheckStatus.FAIL
+            detail = verdict.detail
+        candidates.append(
+            AcquireCandidate(
+                path=c.path,
+                size_bytes=c.size_bytes,
+                has_config=c.has_config,
+                has_convergence=c.has_convergence,
+                fits_envelope=fits,
+                envelope_detail=detail,
+            )
+        )
+    return AcquirePreviewResponse(
+        repo_id=preview.repo_id, revision=preview.revision, candidates=candidates
+    )
+
+
+class AcquireRequest(BaseModel):
+    """Adopt one published lens for one local model."""
+
+    model_id: str
+    repo_id: str = Field(..., min_length=1, max_length=200)
+    path_in_repo: str = Field(..., min_length=1, max_length=500)
+    #: Pinned when given. When absent the preview resolves `main` to a sha and
+    #: the worker uses THAT, so the acquisition is reproducible either way.
+    revision: Optional[str] = Field(None, max_length=100)
+    access_token: Optional[str] = Field(None, max_length=500)
+    #: The incumbent covers layers this one does not. Refused by default.
+    allow_coverage_loss: bool = False
+    #: The incumbent is a stronger fit. Refused by default.
+    allow_quality_regression: bool = False
+
+
+@router.post(
+    "/acquire",
+    response_model=BandTaskAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Download a published J-lens and validate it for a local model",
+)
+async def acquire_artifact(
+    request: AcquireRequest, db: AsyncSession = Depends(get_db)
+) -> BandTaskAccepted:
+    """Queue an acquisition, after refusing everything refusable from here.
+
+    THREE SYNCHRONOUS REFUSALS, and they are the point of this endpoint rather
+    than a nicety. Everything below is knowable without the GPU, and a request
+    that gets a 202 takes a slot on the single-GPU queue — possibly behind a
+    45-minute fit — before it can discover it was doomed. This project has a
+    written doctrine about it after a production incident.
+    """
+    from ....models.model import Model
+    from ....services.jlens_acquire_service import (
+        MIN_FREE_DISK_BYTES,
+        check_free_space,
+        AcquisitionRefused,
+    )
+    from ....services.jlens_model_registry import ModelNotAvailable, locate_weights
+    from ....workers import jlens_progress
+    from ....workers.jlens_acquire_tasks import acquire_jlens_artifact
+
+    result = await db.execute(select(Model).where(Model.id == request.model_id))
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No model with id {request.model_id!r}",
+        )
+
+    # 1. THE WEIGHTS MUST BE HERE. A lens is unusable without them: the readout
+    #    runs a real forward pass and needs the unembedding, and the validation
+    #    this acquisition performs IS a readout. Discovering that after a
+    #    265 MB download is the expensive way to learn it.
+    try:
+        locate_weights(record)
+    except ModelNotAvailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    # 2. IT MUST FIT ON DISK. No download path in this project checked, and the
+    #    data volume also holds every model, dataset and checkpoint.
+    try:
+        check_free_space(
+            settings.jlens_artifacts_dir, settings.data_dir, needed_bytes=0
+        )
+    except AcquisitionRefused as exc:
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc)
+        ) from exc
+
+    task = acquire_jlens_artifact.delay(
+        model_id=request.model_id,
+        repo_id=request.repo_id,
+        path_in_repo=request.path_in_repo,
+        revision=request.revision,
+        access_token=request.access_token,
+        allow_coverage_loss=request.allow_coverage_loss,
+        allow_quality_regression=request.allow_quality_regression,
+    )
+    # VISIBLE WHILE IT RUNS, like every other J-space task. Opened here rather
+    # than in the worker so a job that never gets picked up still appears.
+    jlens_progress.open_row(jlens_progress.ACQUIRE, request.model_id, task.id)
+    return BandTaskAccepted(task_id=task.id, model_id=request.model_id)
+
+
 @router.post(
     "/interventions",
     response_model=BandTaskAccepted,

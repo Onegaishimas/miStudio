@@ -444,6 +444,85 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         )
 
     @mcp.tool()
+    async def preview_jlens_repo(
+        repo_id: Annotated[str, Field(description="HuggingFace repo holding one or more lenses, e.g. 'neuronpedia/jacobian-lens'")],
+        model_id: Annotated[Optional[str], Field(description="miStudio model this would be attached to. Supply it: the response then carries a per-file envelope verdict for THAT model's dimensions, which is the difference between choosing a path and guessing one")] = None,
+        revision: Annotated[Optional[str], Field(description="Commit, branch or tag. Omit and the response reports the sha `main` currently resolves to — pass THAT to acquire, or the acquisition names a moving target")] = None,
+        access_token: Annotated[Optional[str], Field(description="For a private repo. Falls back to the configured token, then the stored one")] = None,
+    ) -> Any:
+        """List the files in a repo that could be a J-lens, with sizes.
+
+        READ-ONLY, AND SPENDING A REQUEST INSTEAD OF A DOWNLOAD. A mistyped path
+        otherwise costs a multi-gigabyte fetch and a slot on the single-GPU
+        queue before anything notices.
+
+        It lists every `*.pt` / `*.safetensors`, not only conformant
+        `*_jacobian_lens.pt` names: community repos publish `qwen3_8b_lens.pt`
+        and `gemma2_9b_jlens.pt`, and filtering to the conformant name would
+        hide exactly the repos this exists to reach.
+
+        `has_config` is the field to read first. A file beside a `config.yaml`
+        declares which weights it was fitted for, so its weight identity can be
+        CHECKED; one without leaves the pairing resting on your assertion, and
+        the artifact records that it does.
+        """
+        body: dict[str, Any] = {"repo_id": repo_id}
+        if model_id:
+            body["model_id"] = model_id
+        if revision:
+            body["revision"] = revision
+        if access_token:
+            body["access_token"] = access_token
+        return await client.post("/jlens/acquire/preview", json=body)
+
+    @mcp.tool()
+    async def acquire_jlens_artifact(
+        model_id: Annotated[str, Field(description="miStudio model to attach the lens to. Its WEIGHTS MUST BE DOWNLOADED — validating an acquired lens means reading out through it, which runs a real forward pass. Refused synchronously otherwise")],
+        repo_id: Annotated[str, Field(description="HuggingFace repo to take it from")],
+        path_in_repo: Annotated[str, Field(description="Exact file path inside the repo. Use preview_jlens_repo to find it rather than guessing — a wrong path costs a multi-gigabyte download")],
+        revision: Annotated[Optional[str], Field(description="Commit to pin. Omit and the resolved sha of `main` is used AND RECORDED, so the acquisition stays reproducible either way")] = None,
+        access_token: Annotated[Optional[str], Field(description="For a private repo. Falls back to the configured token, then the stored one")] = None,
+        allow_coverage_loss: Annotated[bool, Field(description="Publish even though the artifact this REPLACES covers layers the downloaded one does not. Off by default")] = False,
+        allow_quality_regression: Annotated[bool, Field(description="Publish even when this lens is weaker evidence than the one it replaces. Off by default — and note the gate cannot fire when the downloaded lens declares no prompt count, so read `displaced` in the result rather than trusting silence")] = False,
+    ) -> Any:
+        """Adopt a lens someone else fitted. GPU-bound; poll get_task_status.
+
+        FITTING REMAINS THE PRIMARY PATH — published lenses exist for a limited
+        model set, and most models this workbench runs are not in it. This is
+        the cheaper route when one does exist: minutes and a download instead of
+        a GPU hour.
+
+        WHAT IS AND IS NOT CHECKED. The artifact is validated exactly as a local
+        fit is, including a real SEMANTIC readout on the same fixture, so it can
+        only publish if it actually discriminates. Beyond that:
+
+        * `weight_identity` is `verified` when the publisher's own config names
+          these weights, `unverified` when they named none, and a MISMATCH is
+          refused outright — a lens fitted for different weights produces a
+          complete, plausible readout that is wrong.
+        * `bytes_identical` says whether what we serve is bit-for-bit what they
+          published.
+        * the layer indexing convention and the target layer are read OFF THE
+          TENSORS, because a semantic check scans every fitted layer and so
+          cannot catch a foreign convention.
+
+        It does NOT reproduce the fit. `n_prompts` and `converged` in the
+        resulting recipe are the publisher's figures, marked as such.
+        """
+        body: dict[str, Any] = {
+            "model_id": model_id,
+            "repo_id": repo_id,
+            "path_in_repo": path_in_repo,
+            "allow_coverage_loss": allow_coverage_loss,
+            "allow_quality_regression": allow_quality_regression,
+        }
+        if revision:
+            body["revision"] = revision
+        if access_token:
+            body["access_token"] = access_token
+        return await client.post("/jlens/acquire", json=body)
+
+    @mcp.tool()
     async def fit_jlens_artifact(
         model_id: Annotated[str, Field(description="miStudio model id to fit a lens for")],
         prompts: Annotated[List[str], Field(description="Fitting corpus. The fitter REFUSES fewer than 100 — an under-fitted lens is indistinguishable from a fitted one by inspection")],

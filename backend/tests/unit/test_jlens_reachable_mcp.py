@@ -34,6 +34,11 @@ from src.mcp_server.config import DEFAULT_CATEGORIES, VALID_CATEGORIES
 from src.mcp_server.tools import CATEGORY_MODULES
 
 EXPECTED_TOOLS = {
+    # Acquisition, asserted BEFORE the tools were written. An agent that can fit
+    # a lens but cannot adopt a published one has to spend a GPU hour to get
+    # what is already downloadable.
+    "acquire_jlens_artifact",
+    "preview_jlens_repo",
     # The evidence read surface and the recovery action. Both were added with
     # this assertion, not after it — the harness refusing an unasserted tool is
     # the guard working, not an obstacle to route around.

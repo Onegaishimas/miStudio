@@ -42,6 +42,8 @@ EXPECTED = {
     "/jlens/probe",
     "/jlens/interventions",
     "/jlens/token-check",
+    "/jlens/acquire",
+    "/jlens/acquire/preview",
 }
 
 
@@ -764,4 +766,225 @@ class TestTheTokenizerIsFOUNDTheSameWayTheWeightsAre:
             st.resolve_data_path.return_value = tmp_path
             with pytest.raises(ModelNotAvailable, match="no snapshot"):
                 tokenizer_for(self._row(repo_id="org/never-cached"))
+
+class TestAcquisitionIsWiredEndToEnd:
+    """Registration in one list is not registration.
+
+    `celery_app` holds FIVE ENUMERATED route entries and FIVE ENUMERATED
+    autodiscover entries for J-space modules — there is no `jlens_*` glob. Get
+    the task name right and miss the autodiscover entry, and the worker never
+    imports the module: the task is absent from the registry and `.delay()`
+    publishes a message nothing will ever consume. Get the autodiscover entry
+    right and miss the route, and it runs on the default queue, which is
+    `datasets` — no GPU, so the semantic check fails and nothing publishes.
+
+    MUTATION CONTROLS:
+      * drop the autodiscover entry -> "registered with celery"
+      * drop the task_routes entry  -> "routes to extraction"
+      * shorten the task name       -> both
+    """
+
+    TASK = "src.workers.jlens_acquire_tasks.acquire_jlens_artifact"
+
+    def test_the_acquire_task_is_REGISTERED_with_celery(self):
+        """From the live registry, not from an import in this test file.
+
+        Importing the module here would make the assertion pass regardless of
+        whether the WORKER ever imports it — which is the whole failure mode.
+        """
+        from src.core.celery_app import celery_app
+
+        assert self.TASK in celery_app.tasks, (
+            "the acquire task is not in the registry; a worker started from "
+            "this configuration would never consume its messages"
+        )
+
+    def test_the_module_is_in_the_AUTODISCOVER_list(self):
+        """The half that the registry check cannot distinguish on its own.
+
+        This test file imports plenty; a task can be present because something
+        else pulled the module in. Autodiscovery is what guarantees the WORKER
+        does.
+        """
+        import inspect
+
+        from src.core import celery_app as module
+
+        source = inspect.getsource(module)
+        assert '"src.workers.jlens_acquire_tasks"' in source, (
+            "jlens_acquire_tasks is missing from autodiscover_tasks; the worker "
+            "will not import it"
+        )
+
+    def test_the_acquire_task_ROUTES_TO_EXTRACTION(self):
+        """The single-GPU queue, because the semantic check needs the model."""
+        import fnmatch
+
+        from src.core.celery_app import celery_app
+
+        queue = None
+        for pattern, config in (celery_app.conf.task_routes or {}).items():
+            if fnmatch.fnmatch(self.TASK, pattern):
+                queue = config.get("queue")
+        assert queue == "extraction", (
+            f"the acquire task routes to {queue!r}; the default queue has no GPU "
+            "and the semantic check would fail there"
+        )
+
+    def test_it_owns_its_own_failure(self):
+        """Auto-enrolled by the glob in test_task_heartbeat, asserted here too
+        because a task that dies mid-download otherwise sits at 'running'."""
+        from src.core.celery_app import celery_app
+        from src.workers.jlens_progress import OWNERSHIP_MARKER
+
+        task = celery_app.tasks[self.TASK]
+        assert getattr(task.run, OWNERSHIP_MARKER, False) is True
+
+    def test_ACQUIRE_is_a_declared_task_type(self):
+        from src.workers import jlens_progress
+
+        assert jlens_progress.ACQUIRE == "jlens_acquire"
+
+
+class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
+    """Three refusals that must happen before `.delay`.
+
+    A 202 puts the job on the single-GPU queue, possibly behind a 45-minute
+    fit, before it can discover it was doomed. Everything below is knowable
+    from the request and the database.
+
+    MUTATION CONTROLS:
+      * move the weights check into the worker -> "model is not downloaded"
+      * drop the disk guard                    -> "free disk"
+      * skip the model lookup                  -> "unknown model"
+    """
+
+    @staticmethod
+    def _call(record, monkeypatch, **over):
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from src.api.v1.endpoints.jlens import AcquireRequest, acquire_artifact
+
+        db = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = record
+
+        async def execute(_q):
+            return result
+
+        db.execute = execute
+
+        body = dict(
+            model_id="m_1",
+            repo_id="org/lenses",
+            path_in_repo="a/b_jacobian_lens.pt",
+        )
+        body.update(over)
+
+        task = MagicMock()
+        task.delay.return_value = MagicMock(id="t-1")
+        with patch(
+            "src.workers.jlens_acquire_tasks.acquire_jlens_artifact", task
+        ), patch("src.workers.jlens_progress.open_row") as open_row:
+            try:
+                out = asyncio.run(
+                    acquire_artifact(AcquireRequest(**body), db=db)
+                )
+            except Exception as exc:  # noqa: BLE001 - the refusal is the result
+                return None, exc, task, open_row
+        return out, None, task, open_row
+
+    def test_an_UNKNOWN_MODEL_is_404_and_queues_nothing(self, monkeypatch):
+        _out, exc, task, _row = self._call(None, monkeypatch)
+        assert exc is not None and getattr(exc, "status_code", None) == 404
+        assert task.delay.call_count == 0
+
+    def test_a_model_whose_WEIGHTS_ARE_ABSENT_is_409_and_queues_nothing(
+        self, monkeypatch
+    ):
+        """A lens is unusable without its weights, and validating one MEANS
+        reading out through it. Learning that after a 265 MB download is the
+        expensive way.
+
+        MUTATION CONTROL: move `locate_weights` into the worker and this fails.
+        """
+        import types
+        from unittest.mock import patch
+
+        from src.services.jlens_model_registry import ModelNotAvailable
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path=None)
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            side_effect=ModelNotAvailable("org/m is not downloaded locally"),
+        ):
+            _out, exc, task, _row = self._call(record, monkeypatch)
+        assert exc is not None and getattr(exc, "status_code", None) == 409
+        assert "not downloaded" in str(getattr(exc, "detail", ""))
+        assert task.delay.call_count == 0, "a doomed job took a GPU slot"
+
+    def test_INSUFFICIENT_DISK_is_507_and_queues_nothing(self, monkeypatch):
+        """No download path in this project checked disk. The data volume also
+        holds every model, dataset and checkpoint."""
+        import types
+        from unittest.mock import patch
+
+        from src.services.jlens_acquire_service import AcquisitionRefused
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path="/x")
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            return_value=("org/m", "/x"),
+        ), patch(
+            "src.services.jlens_acquire_service.check_free_space",
+            side_effect=AcquisitionRefused("0.2 GiB free"),
+        ):
+            _out, exc, task, _row = self._call(record, monkeypatch)
+        assert exc is not None and getattr(exc, "status_code", None) == 507
+        assert task.delay.call_count == 0
+
+    def test_a_GOOD_request_queues_with_the_arguments_it_was_given(
+        self, monkeypatch
+    ):
+        """"Was called" passes against a call sending the wrong arguments."""
+        import types
+        from unittest.mock import patch
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path="/x")
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            return_value=("org/m", "/x"),
+        ), patch("src.services.jlens_acquire_service.check_free_space"):
+            out, exc, task, open_row = self._call(
+                record, monkeypatch, revision="abc123", allow_coverage_loss=True
+            )
+        assert exc is None, exc
+        assert task.delay.call_count == 1
+        sent = task.delay.call_args.kwargs
+        assert sent["repo_id"] == "org/lenses"
+        assert sent["path_in_repo"] == "a/b_jacobian_lens.pt"
+        assert sent["revision"] == "abc123"
+        assert sent["allow_coverage_loss"] is True
+        assert sent["allow_quality_regression"] is False
+        assert out.task_id == "t-1"
+
+    def test_the_endpoint_OPENS_A_TASK_QUEUE_ROW(self, monkeypatch):
+        """Without it the job never appears in Running Work, and a download that
+        stalls is indistinguishable from one that was never queued.
+
+        MUTATION CONTROL: drop the `open_row` call and this fails.
+        """
+        import types
+        from unittest.mock import patch
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path="/x")
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            return_value=("org/m", "/x"),
+        ), patch("src.services.jlens_acquire_service.check_free_space"):
+            _out, _exc, _task, open_row = self._call(record, monkeypatch)
+        assert open_row.call_count == 1
+        args = open_row.call_args.args
+        assert args[0] == "jlens_acquire", args
 
