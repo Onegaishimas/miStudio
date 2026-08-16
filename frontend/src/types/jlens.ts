@@ -357,11 +357,25 @@ export interface JLensTokenCheck {
 export interface JLensAcquireCandidate {
   path: string;
   size_bytes: number | null;
-  /** Sits beside a `config.yaml`, so weight identity can be CHECKED rather than
-   *  asserted by the operator. The field to read first. */
+  /**
+   * A `config.yaml` sits beside this file.
+   *
+   * PRESENCE, NOT A VERDICT. `check_weight_identity` still returns UNVERIFIED
+   * when that config names no model, and REFUSES outright when it names a
+   * different one — so this says identity CAN be looked for, not that it will
+   * check out. The badge said "identity checkable" until a review pointed out
+   * the same overclaim.
+   */
   has_config: boolean;
   has_convergence: boolean;
-  /** Null when no model was named — no verdict rather than a guessed one. */
+  /**
+   * Null when NO VERDICT WAS COMPUTED — which has three causes, not one.
+   *
+   * The endpoint computes one only `if dims and c.size_bytes`: no model named,
+   * OR the Hub reported no size, OR the model row lacks the dimensions to
+   * derive a bound. Treating null as "fine" permits exactly the download the
+   * preview exists to prevent.
+   */
   fits_envelope: boolean | null;
   envelope_detail: string | null;
 }
