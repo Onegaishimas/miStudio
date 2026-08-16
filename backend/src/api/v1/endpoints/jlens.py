@@ -1757,6 +1757,7 @@ async def acquire_artifact(
         check_free_space,
         AcquisitionRefused,
     )
+    from ....services.jlens_artifact_service import JLensArtifactService
     from ....services.jlens_model_registry import ModelNotAvailable, locate_weights
     from ....workers import jlens_progress
     from ....workers.jlens_acquire_tasks import acquire_jlens_artifact
@@ -1773,6 +1774,7 @@ async def acquire_artifact(
     #    runs a real forward pass and needs the unembedding, and the validation
     #    this acquisition performs IS a readout. Discovering that after a
     #    265 MB download is the expensive way to learn it.
+    repo_of_model = getattr(record, "repo_id", None) or ""
     try:
         locate_weights(record)
     except ModelNotAvailable as exc:
@@ -1796,6 +1798,24 @@ async def acquire_artifact(
         raise HTTPException(
             status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc)
         ) from exc
+
+    # 3. STAGING MUST BE FREE. Verified on hardware: leftover debris from an
+    #    interrupted fit refused this acquisition — correctly, it was a
+    #    converged 549-prompt artifact — but only after the worker had already
+    #    downloaded 265 MB, because `stage_from_file` runs after the fetch.
+    #    Whether a conformant artifact is sitting in staging is a `stat` away.
+    service = JLensArtifactService(settings.jlens_artifacts_dir)
+    if not request.replace_staged:
+        staging = service.staging_dir(repo_of_model)
+        if staging.is_dir() and service._ref_for(staging) is not None:  # noqa: SLF001
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"{staging.name} already holds a staged artifact for this "
+                    "model. It may be completed work a gate refused; inspect it, "
+                    "or pass replace_staged to overwrite it deliberately."
+                ),
+            )
 
     task = _queue_without_leaking_token(
         acquire_jlens_artifact,
