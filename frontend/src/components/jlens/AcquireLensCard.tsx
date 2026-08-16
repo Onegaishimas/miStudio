@@ -47,7 +47,7 @@ interface AcquireLensCardProps {
 }
 
 /** The server's own constraint on the corpus path segment (`PublishRequest`). */
-const DATASET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const DATASET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 function formatBytes(n: number | null): string {
   if (!n) return '—';
@@ -237,7 +237,12 @@ export function AcquireLensCard({
               lens means reading out through it, which needs the weights. The
               server refuses at the door; discovering that after a 265 MB
               download is the expensive way to learn it. */}
-          {mode === 'acquire' && !weightsPresent && (
+          {/* SUPPRESSED WHEN THERE IS NO MODEL TO NAME. On a fresh session
+              `modelId` is '' and this rendered "**  ** is not downloaded",
+              naming nothing — round 1 fixed the button and left the misleading
+              string beside it. The no-model note below is the right message for
+              that state. */}
+          {mode === 'acquire' && Boolean(modelId) && !weightsPresent && (
             <p
               className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
               data-testid="jlens-acquire-weights-missing"
@@ -408,6 +413,21 @@ export function AcquireLensCard({
                 </p>
               )}
 
+              {/* NULL IS NOT "FINE". The endpoint computes a verdict only
+                  `if dims and c.size_bytes`, so null also means the Hub
+                  reported no size, or the model row lacks the dimensions to
+                  derive a bound. In both the check never ran — and permitting
+                  silently is the case the preview exists for. */}
+              {chosen && chosen.fits_envelope === null && (
+                <p
+                  className="text-[10px] text-amber-700 dark:text-amber-400"
+                  data-testid="jlens-acquire-envelope-unknown"
+                >
+                  The size check did not run for this file — either the source
+                  reported no size, or this model&rsquo;s recorded dimensions are
+                  incomplete. It may still be refused after the download.
+                </p>
+              )}
               {chosen?.fits_envelope === false && (
                 <p
                   className="text-[11px] text-amber-700 dark:text-amber-400"
@@ -458,7 +478,14 @@ export function AcquireLensCard({
                     onChange={(e) => setDataset(e.target.value)}
                     data-testid="jlens-publish-dataset"
                     aria-invalid={!DATASET_PATTERN.test(dataset.trim())}
-                    aria-describedby="jlens-dataset-help"
+                    // REFERENCED ONLY WHEN IT EXISTS. The helper renders only on
+                    // an invalid value, so an unconditional reference dangles in
+                    // the default state — `mistudio` is valid.
+                    aria-describedby={
+                      DATASET_PATTERN.test(dataset.trim())
+                        ? undefined
+                        : 'jlens-dataset-help'
+                    }
                     className="rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                   />
                   {/* MIRRORED FROM THE SERVER. It is a path segment, so the
@@ -530,7 +557,7 @@ export function AcquireLensCard({
                   so.
                 </p>
               )}
-              {!hasArtifact && (
+              {!hasArtifact && Boolean(modelRepoId) && (
                 <p
                   className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
                   data-testid="jlens-publish-no-artifact"

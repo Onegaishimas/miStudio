@@ -1563,6 +1563,31 @@ describe('JLensPanel — ranked readouts and interventions', () => {
     expect(screen.getByText(/are disjoint/)).toBeInTheDocument();
   }, 20000);
 
+  it('tells the card the weights ARE PRESENT for a healthy model', async () => {
+    /**
+     * The positive control. The default panel fixture carries no `file_path`,
+     * so `weightsPresent` was already false everywhere and the prop could be
+     * stuck at `false` — a permanent, untrue "is not downloaded … this will be
+     * refused" banner on a fully downloaded model, with a green suite.
+     *
+     * MUTATION CONTROL: `return false;` in the predicate and this fails.
+     */
+    (useModelsStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (sel: (s: unknown) => unknown) =>
+        sel({
+          models: [
+            { id: 'm_lfm2', status: 'ready', file_path: '/data/models/raw/m_lfm2' },
+          ],
+          fetchModels: vi.fn(),
+        }),
+    );
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-acquire')).toBeTruthy());
+    await userEvent.setup().click(screen.getByRole('button', { name: /Browse/ }));
+    expect(screen.queryByTestId('jlens-acquire-weights-missing')).toBeNull();
+  });
+
   it('tells the card the WEIGHTS ARE MISSING when the row has no file_path', async () => {
     /**
      * The endpoint refuses via `locate_weights`: a `file_path` that is set AND

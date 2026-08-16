@@ -208,7 +208,12 @@ describe('publishing', () => {
     expect(note).toHaveTextContent(/every check and its status/i);
     expect(note).toHaveTextContent(/deferred/i);
     expect(note).toHaveTextContent(/never been run/);
-    expect(note).toHaveTextContent(/validation\.json/);
+    // PINNED ON THE VERB, not on the vocabulary. Round 2 replaced a test that
+    // asserted a FALSE sentence with one asserting four substrings none of
+    // which touched the claim — so "validation.json is UPLOADED too" passed it.
+    // The one factual assertion in the sentence is that the file is withheld.
+    expect(note).toHaveTextContent(/validation\.json[^.]*withheld/i);
+    expect(note).not.toHaveTextContent(/validation\.json[^.]*uploaded/i);
     expect(note).not.toHaveTextContent(/verdict does not travel/i);
   });
 
@@ -308,6 +313,38 @@ describe('review round 1 findings', () => {
     open();
     expect(screen.getByTestId('jlens-acquire-no-model')).toBeInTheDocument();
     expect(screen.getByTestId('jlens-acquire-run')).toBeDisabled();
+  });
+
+  it('the no-model guard holds even once a file IS selected', async () => {
+    /**
+     * The test above never previews, so `!selected` disables the button on its
+     * own and `!modelId` can be deleted freely — its own docstring claimed a
+     * control that did not work. Selecting a candidate first is what isolates
+     * the clause.
+     *
+     * MUTATION CONTROL: delete `!modelId ||` from the disabled expression.
+     */
+    mount({ modelId: '' });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    expect(screen.getByTestId('jlens-acquire-run')).toBeDisabled();
+  });
+
+  it('does NOT render a warning naming no model', () => {
+    /**
+     * On a fresh session `modelId` is '' and this rendered "**  ** is not
+     * downloaded" — round 1 fixed the button and left the misleading string
+     * beside it. The helper's `weightsPresent` default is `true`, so the
+     * earlier fixture could not see it either.
+     *
+     * MUTATION CONTROL: drop `Boolean(modelId) &&` from the warning.
+     */
+    mount({ modelId: '', weightsPresent: false });
+    open();
+    expect(screen.queryByTestId('jlens-acquire-weights-missing')).toBeNull();
+    expect(screen.getByTestId('jlens-acquire-no-model')).toBeInTheDocument();
   });
 
   it('does not let a queued job be queued AGAIN', async () => {
@@ -622,6 +659,158 @@ describe('review round 2 findings', () => {
       .getAllByRole('button')
       .filter((b) => b.hasAttribute('aria-pressed'));
     expect(after[1]).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('review round 3 — the fixes themselves', () => {
+  it('KEEPS each token across a mode round-trip', async () => {
+    /**
+     * Round 1 pinned the split and not the retention: nothing asserted a token
+     * survives switching away and back, so wiping both on every switch was
+     * green — and a user who pastes a write token, flips to Download to
+     * re-check the list, and flips back loses it silently.
+     *
+     * MUTATION CONTROL: clear both tokens in the mode toggle's onClick.
+     */
+    mount();
+    open();
+    fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
+      target: { value: 'hf_READ' },
+    });
+    const toggles = () =>
+      screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'));
+    fireEvent.click(toggles()[1]);
+    fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
+      target: { value: 'hf_WRITE' },
+    });
+    fireEvent.click(toggles()[0]);
+    expect(screen.getByTestId('jlens-acquire-token')).toHaveValue('hf_READ');
+    fireEvent.click(toggles()[1]);
+    expect(screen.getByTestId('jlens-acquire-token')).toHaveValue('hf_WRITE');
+  });
+
+  it('clears a stale note on the PUBLISH branch too', async () => {
+    /**
+     * `setNote(null)` was applied to three call sites and pinned at one, so a
+     * refused publish still rendered its red error beneath a green
+     * "Publishing — queued as…" — round 1's defect verbatim, on the branch it
+     * was not tested on.
+     *
+     * MUTATION CONTROL: delete `setNote(null)` from `runPublish`.
+     */
+    mount();
+    open();
+    const toggles = screen
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-pressed'));
+    fireEvent.click(toggles[1]);
+    fireEvent.change(screen.getByTestId('jlens-acquire-repo'), {
+      target: { value: 'you/lenses' },
+    });
+    fireEvent.click(screen.getByTestId('jlens-publish-run'));
+    await waitFor(() => expect(screen.getByText(/queued as/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /start another/ }));
+    (jlensApi.publish as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('401 no write access'),
+    );
+    fireEvent.click(screen.getByTestId('jlens-publish-run'));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/401/),
+    );
+    expect(screen.queryByText(/queued as/)).toBeNull();
+  });
+
+  it('RE-ARMS nothing when the model changes back', async () => {
+    /**
+     * The effect clears `queued`, so model A → B → A returned a form that would
+     * queue a SECOND download of the same multi-gigabyte file — the
+     * bandwidth-twice defect round 1 fixed, three clicks away. Each sub-clause
+     * of the effect was also individually unpinned.
+     *
+     * MUTATION CONTROL: remove `setQueued(null)`, `setNote(null)` or
+     * `setError(null)` from the effect body.
+     */
+    const { rerender } = mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.click(screen.getByTestId('jlens-acquire-run'));
+    await waitFor(() =>
+      expect(jlensApi.acquire as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getByTestId('jlens-queued-note')).toBeInTheDocument();
+
+    const swap = (id: string) =>
+      rerender(
+        <AcquireLensCard
+          modelId={id}
+          modelRepoId="org/x"
+          weightsPresent
+          hasArtifact
+        />,
+      );
+    swap('m_OTHER');
+    swap('m_1');
+
+    // The queued note is gone AND so is the selection, so nothing can be
+    // re-queued without previewing again.
+    expect(screen.queryByTestId('jlens-queued-note')).toBeNull();
+    expect(screen.queryByText(/queued as/)).toBeNull();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.getByTestId('jlens-acquire-run')).toBeDisabled();
+  });
+
+  it('says when the size check DID NOT RUN', async () => {
+    /**
+     * `fits_envelope` is null for three reasons, not one — no model named, no
+     * size reported, or the model row lacking the dimensions to derive a bound.
+     * A hard gate on `=== false` permits all three silently, which is the case
+     * the preview exists for.
+     *
+     * MUTATION CONTROL: drop the `fits_envelope === null` note.
+     */
+    (jlensApi.previewRepo as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      candidates: [
+        { ...PREVIEW.candidates[0], fits_envelope: null, envelope_detail: null },
+      ],
+    });
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/1 candidate/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    expect(
+      screen.getByTestId('jlens-acquire-envelope-unknown'),
+    ).toHaveTextContent(/did not run/);
+    // It is a WARNING, not a block — the check may still pass server-side.
+    expect(screen.getByTestId('jlens-acquire-run')).toBeEnabled();
+  });
+
+  it('references the dataset helper only when it EXISTS', () => {
+    /**
+     * The helper renders only on an invalid value and `mistudio` is valid, so
+     * an unconditional `aria-describedby` dangled on every open.
+     *
+     * MUTATION CONTROL: make the attribute unconditional.
+     */
+    mount();
+    open();
+    const toggles = screen
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-pressed'));
+    fireEvent.click(toggles[1]);
+    const field = screen.getByTestId('jlens-publish-dataset');
+    expect(field).not.toHaveAttribute('aria-describedby');
+
+    fireEvent.change(field, { target: { value: 'bad/value' } });
+    expect(screen.getByTestId('jlens-publish-dataset')).toHaveAttribute(
+      'aria-describedby',
+      'jlens-dataset-help',
+    );
+    expect(document.getElementById('jlens-dataset-help')).not.toBeNull();
   });
 });
 
