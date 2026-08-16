@@ -260,7 +260,10 @@ def derive_converged(upstream_config: Optional[Dict[str, Any]]) -> Optional[bool
     return reached <= delta
 
 
-def derive_n_prompts(upstream_config: Optional[Dict[str, Any]]) -> Optional[int]:
+def derive_n_prompts(
+    upstream_config: Optional[Dict[str, Any]],
+    checkpoint: Optional[Dict[str, Any]] = None,
+) -> Optional[int]:
     """How many prompts the fit ACTUALLY ran, not how many were requested.
 
     `fit.n_prompts` is the cap the operator asked for; `results.prompts_fitted`
@@ -274,7 +277,14 @@ def derive_n_prompts(upstream_config: Optional[Dict[str, Any]]) -> Optional[int]
         return ran
     # A bare `n_prompts` at the top level is what OUR OWN configs write, and it
     # means "prompts seen". Fall back to it, never to `fit.n_prompts`.
-    return _upstream_int(upstream_config, "n_prompts")
+    from_config = _upstream_int(upstream_config, "n_prompts")
+    if from_config is not None:
+        return from_config
+    # THE CHECKPOINT CARRIES IT TOO, and that is the only source a community
+    # repo shipping a bare `.pt` has. Without this, `n_prompts` is absent for
+    # exactly those repos, `_quality_regression` cannot fire, and a 50-prompt
+    # foreign lens silently displaces a converged 634-prompt local fit.
+    return _upstream_int(checkpoint, "n_prompts")
 
 
 def config_yaml_for_acquired(
@@ -285,6 +295,7 @@ def config_yaml_for_acquired(
     n_layers: int,
     dtype: str,
     upstream_config: Optional[Dict[str, Any]],
+    checkpoint: Optional[Dict[str, Any]] = None,
 ) -> str:
     """The recipe file for a lens miStudio did not fit.
 
@@ -315,7 +326,7 @@ def config_yaml_for_acquired(
     if layers.target_layer is not None:
         lines.append(f"target_layer: {layers.target_layer}")
 
-    n_prompts = derive_n_prompts(upstream_config)
+    n_prompts = derive_n_prompts(upstream_config, checkpoint)
     if n_prompts is not None:
         lines.append(f"# the publisher's figure, not a fit miStudio ran")
         lines.append(f"n_prompts: {n_prompts}")
@@ -330,6 +341,72 @@ def config_yaml_for_acquired(
     # be equivalent arithmetically and would assert knowledge of a convention
     # the publisher never stated.
     return "\n".join(lines) + "\n"
+
+
+def publication_blocker(report: Any) -> Optional[str]:
+    """Why this report must not be committed, or None.
+
+    A PURE DECISION, EXTRACTED. `commit` raises `ArtifactNotValidated` for any
+    report short of a full pass, so a worker that calls it unguarded turns the
+    likeliest outcome for a foreign lens — not surfacing the fixture token —
+    into a traceback instead of a report carrying the per-layer evidence that
+    distinguishes "bad lens" from "wrong fixture".
+
+    Pulling it out of the worker is what makes it testable: an inline `if` is
+    only reachable by running the whole task, so a mutation that deletes it
+    survives every test that does not.
+    """
+    if not getattr(report, "serviceable", False):
+        return (
+            "the artifact did not pass the local checks, so it was staged and "
+            "not published: " + report.summary()
+        )
+    return None
+
+
+def preview_envelope_verdict(
+    size_bytes: int, dims: Dict[str, int], dtype_bytes: int = 2
+) -> Dict[str, Any]:
+    """Whether a remote file's SIZE alone rules it out for these weights.
+
+    ONLY THE UPPER BOUND. `check_envelope` uses the layer count for both bounds
+    and the count is unknowable before the file is opened, so applying the
+    model's full stack made the floor far too high — every legitimate PARTIAL
+    lens previewed as a failure while the validator accepted it, and the MCP
+    tool tells an agent to read this field when choosing a path.
+
+    A file BIGGER than a full fit is out whatever its coverage: that is BR-006's
+    materialisation guard and it is monotonic in the layer count. A smaller file
+    is simply not decidable from size, and says so rather than guessing.
+    """
+    from .jlens_validation import container_allowance
+
+    required = dims["d_model"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
+    ceiling = int(required * 1.5) + container_allowance(required)
+    materialised = dims["n_vocab"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
+
+    if size_bytes > ceiling:
+        looks_materialised = size_bytes >= materialised * 0.5
+        return {
+            "fits": False,
+            "detail": (
+                f"{size_bytes:,} bytes exceeds {ceiling:,}, the most a lens for "
+                f"these weights could be"
+                + (
+                    " — this looks like a materialised token dictionary (BR-006)"
+                    if looks_materialised
+                    else ""
+                )
+            ),
+        }
+    return {
+        "fits": True,
+        "detail": (
+            f"{size_bytes:,} bytes is within a full fit for this model; the "
+            "layer count sets the lower bound and is unknown until the file is "
+            "opened"
+        ),
+    }
 
 
 def file_digest(path: Path) -> str:
@@ -537,6 +614,16 @@ def preview_repo(
     return RepoPreview(repo_id=repo_id, revision=resolved, candidates=candidates)
 
 
+def download_footprint(size_bytes: int) -> int:
+    """How much disk a download of this size actually consumes: TWICE its size.
+
+    `fetch_file` writes the blob into the HuggingFace cache and `stage_from_file`
+    then copies it into the registry, so both exist simultaneously. Reserving
+    one copy passes and then fills the volume with the second.
+    """
+    return 2 * max(0, int(size_bytes))
+
+
 def check_free_space(*paths: Path, needed_bytes: int) -> None:
     """Refuse a download that would not fit, BEFORE fetching a byte.
 
@@ -547,11 +634,22 @@ def check_free_space(*paths: Path, needed_bytes: int) -> None:
     """
     import shutil as _shutil
 
+    # ONE PROBE PER DISTINCT MOUNT. The registry lives INSIDE the data dir
+    # (`jlens_artifacts_dir = data_dir / "jlens"`), so passing both probed the
+    # same filesystem twice while the HuggingFace cache — the volume the
+    # download hits FIRST — went unchecked, which is precisely what this
+    # function's docstring says it exists to prevent.
+    seen: set = set()
     for path in paths:
         probe = path
         while not probe.exists() and probe != probe.parent:
             probe = probe.parent
-        free = _shutil.disk_usage(probe).free
+        usage = _shutil.disk_usage(probe)
+        key = (usage.total, usage.free)
+        if key in seen:
+            continue
+        seen.add(key)
+        free = usage.free
         if free < needed_bytes + MIN_FREE_DISK_BYTES:
             raise AcquisitionRefused(
                 f"{path} has {free / 2**30:.1f} GiB free; this needs "

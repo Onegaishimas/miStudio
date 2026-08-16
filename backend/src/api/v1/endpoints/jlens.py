@@ -1582,6 +1582,23 @@ async def token_check(
     return out
 
 
+def _full_fit_ceiling(dims: Dict[str, int], dtype_bytes: int = 2) -> int:
+    """The largest a lens for these weights could legitimately be.
+
+    Mirrors `check_envelope`'s ceiling at FULL coverage. Used pre-flight, where
+    the artifact's own layer count is not yet knowable: an artifact bigger than
+    this is materialising the token dictionary whatever its coverage, and that
+    is the single most likely implementation error BR-006 guards against.
+
+    The lower bound is deliberately NOT applied here — it scales with the layer
+    count, and a partial lens is legitimately far smaller.
+    """
+    from ....services.jlens_validation import container_allowance
+
+    required = dims["d_model"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
+    return int(required * 1.5) + container_allowance(required)
+
+
 def _model_dims(record: Any) -> Optional[Dict[str, int]]:
     """`d_model`, `n_layers`, `n_vocab` from the Model row, or None.
 
@@ -1667,7 +1684,11 @@ async def acquire_preview(
     """
     from ....models.model import Model
     from ....services.huggingface_sae_service import resolve_hf_token
-    from ....services.jlens_acquire_service import AcquisitionRefused, preview_repo
+    from ....services.jlens_acquire_service import (
+        AcquisitionRefused,
+        preview_envelope_verdict,
+        preview_repo,
+    )
     from ....services.jlens_validation import CheckStatus, check_envelope
 
     dims = None
@@ -1702,19 +1723,9 @@ async def acquire_preview(
         fits: Optional[bool] = None
         detail: Optional[str] = None
         if dims and c.size_bytes:
-            # THE SAME BOUND THE VALIDATOR WILL APPLY, spent here for a request
-            # instead of a multi-gigabyte download. `n_layers` is unknown before
-            # opening the file, so the model's own count is the bound — an
-            # artifact larger than a FULL fit for these weights is out either
-            # way, and a partial one is smaller and passes.
-            verdict = check_envelope(
-                c.size_bytes,
-                d_model=dims["d_model"],
-                n_layers=dims["n_layers"],
-                n_vocab=dims["n_vocab"],
-            )
-            fits = verdict.status is not CheckStatus.FAIL
-            detail = verdict.detail
+            verdict = preview_envelope_verdict(c.size_bytes, dims)
+            fits = verdict["fits"]
+            detail = verdict["detail"]
         candidates.append(
             AcquireCandidate(
                 path=c.path,

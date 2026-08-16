@@ -144,6 +144,22 @@ class ArtifactQualityRegression(RuntimeError):
     """
 
 
+def _dtype_bytes(payload: Optional[Dict[Any, Any]]) -> int:
+    """Bytes per element of the matrices actually on disk.
+
+    Falls back to 2 when the payload could not be read — the envelope check is
+    then bounded on the assumption every local fit satisfies, and STRUCTURAL has
+    already failed for the unreadable case anyway.
+    """
+    if not payload:
+        return 2
+    try:
+        sizes = {t.element_size() for t in payload.values()}
+    except AttributeError:
+        return 2
+    return max(sizes) if sizes else 2
+
+
 class PayloadShapeError(ValueError):
     """The checkpoint is not a shape this project knows how to read."""
 
@@ -323,6 +339,14 @@ class JLensArtifactService:
                 d_model=d_model,
                 n_layers=len(list(expected_layers)),
                 n_vocab=n_vocab,
+                # DERIVED FROM THE PAYLOAD THIS METHOD ALREADY LOADED, not
+                # taken as an argument. A parameter defaulting to 2 is right for
+                # every artifact this project FITS — the fitter writes fp16 —
+                # and silently wrong for an acquired fp32 one, which is the
+                # first path where a non-fp16 artifact can arrive. A caller that
+                # forgets to pass it gets the wrong ceiling and no error, so
+                # there is no parameter to forget.
+                dtype_bytes=_dtype_bytes(payload),
             )
         )
 
@@ -405,6 +429,7 @@ class JLensArtifactService:
         lens_source: Path,
         config_yaml: str,
         sidecars: Optional[Dict[str, Path]] = None,
+        replace_staged: bool = False,
     ) -> ArtifactRef:
         """Stage bytes that ALREADY EXIST, without deserialising them.
 
@@ -421,6 +446,19 @@ class JLensArtifactService:
         directory with a second `.pt`, and a consumer globbing
         `*_jacobian_lens.pt` picks among multiple matches silently.
         """
+        # A STAGED ARTIFACT IS NOT SCRATCH SPACE. A fit that validated but was
+        # refused by a gate is deliberately KEPT there — this project once
+        # destroyed a converged 15-layer LFM2 artifact, 754 seconds of GPU time,
+        # by treating staging as disposable. Clearing it here to make room for a
+        # download that has not yet been validated repeats that with someone
+        # else's work.
+        existing = self.staging_dir(repo_id)
+        if existing.is_dir() and not replace_staged and self._ref_for(existing):
+            raise ArtifactConflict(
+                f"{existing.name} already holds a staged artifact for this "
+                "model. It may be a completed fit that a gate refused; inspect "
+                "it, or pass replace_staged to overwrite it deliberately."
+            )
         _slug, staging, lens_path = self._fresh_staging(repo_id)
         shutil.copyfile(lens_source, lens_path)
         (staging / "config.yaml").write_text(config_yaml)

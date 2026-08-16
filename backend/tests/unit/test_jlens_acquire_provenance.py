@@ -48,6 +48,12 @@ from src.services.jlens_acquire_service import (
     write_acquisition_record,
 )
 from src.services.jlens_artifact_service import ArtifactRef, JLensArtifactService
+from src.services.jlens_validation import (
+    CheckClass,
+    CheckResult,
+    CheckStatus,
+    ValidationReport,
+)
 
 #: A published config in the real shape, with the two prompt figures DIFFERENT.
 #:
@@ -466,3 +472,211 @@ class TestStagingNamesFromTheModel:
             "org/m", source, "model: org/m\n", sidecars={"m_convergence.csv": csv}
         )
         assert (ref.directory / "m_convergence.csv").read_text().startswith("n_done")
+
+class TestTheReviewRound1Findings:
+    """Regressions for eight defects, two of which crashed every acquisition.
+
+    MUTATION CONTROLS:
+      * digest after commit                  -> "the digest is taken BEFORE"
+      * catch only the two gate refusals     -> "an unserviceable lens REPORTS"
+      * preview applies the lower bound      -> "a PARTIAL lens is not rejected"
+      * dtype_bytes hardcoded 2              -> "an fp32 lens fits its own envelope"
+      * one probe per path                   -> "distinct MOUNTS"
+      * single-copy footprint                -> "BOTH copies"
+      * checkpoint n_prompts ignored         -> "a bare .pt still carries n_prompts"
+      * staging cleared unconditionally      -> "a staged artifact is NOT destroyed"
+    """
+
+    def test_the_digest_is_taken_BEFORE_commit_renames_the_directory(self, tmp_path):
+        """`commit` ends in `staging.rename(final)`, so reading `ref.lens_path`
+        afterwards raises FileNotFoundError — on every LFS-hosted lens, which is
+        every real one. The artifact published, the row said completed, and then
+        the task failed over a lens that had actually landed.
+        """
+        from src.services.jlens_acquire_service import file_digest
+        from src.services.jlens_validation import (
+            CheckClass,
+            CheckResult,
+            CheckStatus,
+            ValidationReport,
+        )
+
+        source = tmp_path / "up_jacobian_lens.pt"
+        torch.save({0: torch.zeros(2, 2)}, source)
+        service = JLensArtifactService(tmp_path / "reg")
+        ref = service.stage_from_file("org/m", source, "model: org/m\n")
+
+        before = file_digest(ref.lens_path)
+        service.commit(
+            "org/m",
+            ValidationReport(
+                [CheckResult(c, CheckStatus.PASS, "ok") for c in CheckClass]
+            ),
+        )
+        assert not ref.lens_path.exists(), (
+            "the staging path survived commit; this test no longer describes "
+            "the hazard"
+        )
+        # The digest must have been captured while the file was still there.
+        assert before and len(before) == 64
+
+    def test_an_UNSERVICEABLE_lens_REPORTS_rather_than_crashing(self, tmp_path):
+        """`commit` raises ArtifactNotValidated for any report short of a full
+        pass. Catching only the two gate refusals meant a lens that simply did
+        not surface the fixture — the likeliest outcome for a foreign lens —
+        crashed instead of returning its per-layer evidence."""
+        from src.services.jlens_artifact_service import ArtifactNotValidated
+        from src.services.jlens_validation import (
+            CheckClass,
+            CheckResult,
+            CheckStatus,
+            ValidationReport,
+        )
+
+        results = [
+            CheckResult(c, CheckStatus.PASS, "ok")
+            for c in CheckClass
+            if c is not CheckClass.SEMANTIC
+        ]
+        results.append(
+            CheckResult(CheckClass.SEMANTIC, CheckStatus.FAIL, "no spider anywhere")
+        )
+        report = ValidationReport(results)
+        assert report.serviceable is False, "the fixture must be unserviceable"
+        assert report.passed is False
+
+        source = tmp_path / "up_jacobian_lens.pt"
+        torch.save({0: torch.zeros(2, 2)}, source)
+        service = JLensArtifactService(tmp_path / "reg")
+        service.stage_from_file("org/m", source, "model: org/m\n")
+        with pytest.raises(ArtifactNotValidated):
+            service.commit("org/m", report)
+
+        # THE DECISION, TESTED WHERE IT IS MADE. An inline `if` in the worker is
+        # only reachable by running the whole task, so a mutation deleting it
+        # survives every test that does not — which is exactly what happened to
+        # the first version of this test.
+        from src.services.jlens_acquire_service import publication_blocker
+
+        blocker = publication_blocker(report)
+        assert blocker is not None, "an unserviceable report was cleared to publish"
+        assert "not published" in blocker
+        # And a good report is NOT blocked, or the guard would refuse everything.
+        good = ValidationReport(
+            [CheckResult(c, CheckStatus.PASS, "ok") for c in CheckClass]
+        )
+        assert publication_blocker(good) is None
+
+    def test_a_PARTIAL_lens_is_not_rejected_by_the_preview(self):
+        """`check_envelope` uses the layer count for BOTH bounds, and the count
+        is unknowable before opening the file. Passing the model's full stack
+        made the floor far too high, so every legitimate partial lens previewed
+        as `fits_envelope: false` while the validator accepted it — and the MCP
+        tool tells an agent to read that field when choosing a path."""
+        from src.services.jlens_acquire_service import preview_envelope_verdict
+
+        dims = {"d_model": 2304, "n_layers": 26, "n_vocab": 256000}
+        partial = 2304 * 2304 * 2 * 12
+        full = 2304 * 2304 * 2 * 26
+        materialised = 256000 * 2304 * 2 * 26
+
+        assert preview_envelope_verdict(partial, dims)["fits"] is True, (
+            "a 12-layer partial lens previewed as a failure while the validator "
+            "would accept it"
+        )
+        assert preview_envelope_verdict(full, dims)["fits"] is True
+        out = preview_envelope_verdict(materialised, dims)
+        assert out["fits"] is False and "materialised" in out["detail"]
+
+    def test_an_fp32_lens_fits_its_OWN_envelope(self, tmp_path):
+        """`dtype_of` supports fp32, and `check_envelope` was hardcoded to 2
+        bytes — so a full-coverage fp32 lens could never pass the one check that
+        gates publication. Acquisition is the first path where a non-fp16
+        artifact can arrive; local fits always write fp16."""
+        from src.services.jlens_validation import CheckClass, CheckStatus
+
+        # END TO END THROUGH `validate`, which now DERIVES the element size from
+        # the payload it already loads. A `dtype_bytes` parameter defaulting to 2
+        # was right for every artifact this project fits and silently wrong for
+        # an acquired fp32 one — and a caller that forgot to pass it got the
+        # wrong ceiling and no error. There is no parameter to forget now.
+        for dtype, label in ((torch.float16, "fp16"), (torch.float32, "fp32")):
+            directory = tmp_path / label
+            directory.mkdir()
+            lens = directory / f"{label}_jacobian_lens.pt"
+            torch.save(
+                {l: torch.zeros(64, 64, dtype=dtype) for l in range(4)}, lens
+            )
+            (directory / "config.yaml").write_text("model: org/m\n")
+            ref = ArtifactRef(
+                slug=label,
+                directory=directory,
+                lens_path=lens,
+                config_path=directory / "config.yaml",
+            )
+            report = JLensArtifactService(tmp_path).validate(
+                ref, d_model=64, expected_layers=range(4), n_vocab=5000
+            )
+            envelope = next(
+                r for r in report.results if r.check is CheckClass.ENVELOPE
+            )
+            assert envelope.status is CheckStatus.PASS, (
+                f"a {label} lens failed its own envelope: {envelope.detail}"
+            )
+
+    def test_the_disk_guard_reserves_BOTH_copies(self):
+        """The blob lands in the HF cache and is then copied into the registry,
+        so the peak is twice the file."""
+        from src.services.jlens_acquire_service import download_footprint
+
+        assert download_footprint(100) == 200
+        assert download_footprint(0) == 0
+
+    def test_the_disk_guard_probes_DISTINCT_MOUNTS_only(self, tmp_path):
+        """`jlens_artifacts_dir` lives inside `data_dir`, so passing both probed
+        one filesystem twice while the cache volume — which the download hits
+        FIRST — went unchecked. That is what the function's docstring says it
+        exists to prevent."""
+        from src.services.jlens_acquire_service import (
+            MIN_FREE_DISK_BYTES,
+            AcquisitionRefused,
+            check_free_space,
+        )
+
+        inner = tmp_path / "jlens"
+        inner.mkdir()
+        # Same mount twice: the requirement must not be double-counted.
+        check_free_space(tmp_path, inner, needed_bytes=0)
+        with pytest.raises(AcquisitionRefused):
+            check_free_space(tmp_path, needed_bytes=2**60)
+
+    def test_a_bare_pt_still_carries_n_prompts(self):
+        """The checkpoint declares it per spec §2.2, and for a community repo
+        with no config.yaml that is the ONLY provenance. Without it
+        `_quality_regression` cannot fire and a 50-prompt foreign lens silently
+        displaces a converged 634-prompt local fit."""
+        assert derive_n_prompts(None, {"n_prompts": 50}) == 50
+        # The publisher's config still wins when it exists — it records what RAN.
+        assert derive_n_prompts(parse_upstream_config(UPSTREAM), {"n_prompts": 50}) == 337
+
+    def test_a_staged_artifact_is_NOT_destroyed_by_an_acquisition(self, tmp_path):
+        """A fit that validated but was refused by a gate is deliberately kept
+        in staging. This project once destroyed a converged 15-layer LFM2
+        artifact — 754 seconds of GPU time — by treating staging as disposable.
+        """
+        from src.services.jlens_artifact_service import ArtifactConflict
+
+        source = tmp_path / "up_jacobian_lens.pt"
+        torch.save({0: torch.zeros(2, 2)}, source)
+        service = JLensArtifactService(tmp_path / "reg")
+        service.stage_from_file("org/m", source, "model: org/m\n")
+
+        with pytest.raises(ArtifactConflict, match="staged artifact"):
+            service.stage_from_file("org/m", source, "model: org/m\n")
+
+        # And it CAN be replaced when the caller says so deliberately.
+        ref = service.stage_from_file(
+            "org/m", source, "model: org/m\n", replace_staged=True
+        )
+        assert ref.lens_path.exists()
+
