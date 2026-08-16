@@ -1803,7 +1803,18 @@ class PublishRequest(BaseModel):
     #: and the worker refuses rather than sending an empty credential.
     access_token: Optional[str] = Field(None, max_length=500)
     #: The corpus segment of the published path, per spec §2.1.
-    dataset: str = Field("mistudio", min_length=1, max_length=100)
+    #:
+    #: CONSTRAINED, because it is interpolated into a repo path. `..` or a
+    #: leading `/` places the artifact outside the conformance layout the whole
+    #: feature rests on — the Hub accepts it, so the lens commits somewhere no
+    #: consumer resolving `<model>/jlens/<dataset>/` will look, under a README
+    #: describing a third location.
+    dataset: str = Field(
+        "mistudio",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
     create_repo: bool = False
     private: bool = False
 
@@ -1826,6 +1837,7 @@ async def publish_artifact_endpoint(
     """
     from ....models.model import Model
     from ....services.jlens_acquire_service import AcquisitionRefused
+    from ....services.huggingface_sae_service import resolve_hf_token
     from ....services.jlens_artifact_service import JLensArtifactService
     from ....workers import jlens_progress
     from ....workers.jlens_acquire_tasks import publish_jlens_artifact_task
@@ -1860,6 +1872,19 @@ async def publish_artifact_endpoint(
             detail=(
                 "The artifact carries no validation verdict matching its current "
                 "weights, so there is nothing to publish it on."
+            ),
+        )
+
+    # A WRITE TOKEN IS KNOWABLE HERE. Deferring it to the worker spends a slot
+    # on the single-GPU queue — possibly behind a 45-minute fit — to discover
+    # something a sync function already answers, which is the doctrine this file
+    # states 130 lines above.
+    if not resolve_hf_token(request.access_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Publishing needs a HuggingFace token with write access. None "
+                "was supplied and none is configured."
             ),
         )
 
