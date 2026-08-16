@@ -978,6 +978,59 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
         assert sent["allow_quality_regression"] is False
         assert out.task_id == "t-1"
 
+    def test_OCCUPIED_STAGING_is_409_and_downloads_nothing(self, monkeypatch):
+        """Found on hardware: leftover debris from an interrupted fit refused an
+        acquisition — correctly, it was a converged 549-prompt artifact — but
+        only after the worker had downloaded 265 MB, because `stage_from_file`
+        runs after the fetch. Whether staging is occupied is a `stat` away.
+
+        MUTATION CONTROL: move the check back into the worker and this fails.
+        """
+        import types
+        from unittest.mock import MagicMock, patch
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path="/x")
+        service = MagicMock()
+        service.staging_dir.return_value = MagicMock(
+            is_dir=lambda: True, name="m.staging"
+        )
+        service._ref_for.return_value = object()
+
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            return_value=("org/m", "/x"),
+        ), patch("src.services.jlens_acquire_service.check_free_space"), patch(
+            "src.services.jlens_artifact_service.JLensArtifactService",
+            return_value=service,
+        ):
+            _out, exc, task, _row = self._call(record, monkeypatch)
+        assert exc is not None and getattr(exc, "status_code", None) == 409
+        assert "replace_staged" in str(getattr(exc, "detail", ""))
+        assert task.apply_async.call_count == 0, "265 MB would have been spent"
+
+    def test_replace_staged_SKIPS_that_refusal(self, monkeypatch):
+        """Or the flag the message names would not work."""
+        import types
+        from unittest.mock import MagicMock, patch
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path="/x")
+        service = MagicMock()
+        service.staging_dir.return_value = MagicMock(is_dir=lambda: True)
+        service._ref_for.return_value = object()
+
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            return_value=("org/m", "/x"),
+        ), patch("src.services.jlens_acquire_service.check_free_space"), patch(
+            "src.services.jlens_artifact_service.JLensArtifactService",
+            return_value=service,
+        ):
+            _out, exc, task, _row = self._call(
+                record, monkeypatch, replace_staged=True
+            )
+        assert exc is None, exc
+        assert task.apply_async.call_count == 1
+
     def test_the_endpoint_OPENS_A_TASK_QUEUE_ROW(self, monkeypatch):
         """Without it the job never appears in Running Work, and a download that
         stalls is indistinguishable from one that was never queued.
