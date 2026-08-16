@@ -563,8 +563,16 @@ export function JLensPanel() {
           // A lens is unusable without its weights — validating one MEANS
           // reading out through it — so the prerequisite is shown before the
           // fetch rather than discovered after it.
+          // MATCHES WHAT THE SERVER CHECKS, as closely as the row allows. The
+          // endpoint refuses via `locate_weights`: a `file_path` that is set
+          // AND present on disk. `status === ready` alone reports a model whose
+          // files were pruned as available, so the card would imply a fetch
+          // that the endpoint then 409s.
           weightsPresent={Boolean(
-            models.find((m) => m.id === modelId)?.status === 'ready',
+            (() => {
+              const m = models.find((x) => x.id === modelId);
+              return m?.status === 'ready' && Boolean(m?.file_path);
+            })(),
           )}
           hasArtifact={artifacts.some(
             (a) => a.slug === artifactSlugFor(modelRepoId),

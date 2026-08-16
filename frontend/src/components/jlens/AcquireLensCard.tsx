@@ -220,6 +220,8 @@ export function AcquireLensCard({
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
+                // ANNOUNCED, not conveyed by background colour alone.
+                aria-pressed={mode === m}
                 className={`rounded px-2 py-1 ${
                   mode === m
                     ? 'bg-emerald-600 text-white'
@@ -358,7 +360,7 @@ export function AcquireLensCard({
                                 : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
                             }`}
                           >
-                            {c.has_config ? 'identity checkable' : 'unverified'}
+                            {c.has_config ? 'declares a config' : 'no config'}
                           </span>
                           {c.fits_envelope === false && (
                             <span
@@ -375,14 +377,49 @@ export function AcquireLensCard({
                 </div>
               )}
 
-              {chosen && !chosen.has_config && (
-                <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                  This file names no model, so weight identity cannot be checked.
-                  It will be adopted as <strong>unverified</strong> and the
-                  artifact will record that the pairing rests on your assertion.
+              {/* BOTH OUTCOMES EXPLAINED, because the badge cannot predict
+                  either. `has_config` is directory-level presence of a file
+                  with that name; the verdict comes from whether the config
+                  NAMES a model, and one naming a DIFFERENT model is a hard
+                  refusal after the bytes are already spent. Explaining only the
+                  config-less case left the top-sorted, green-badged candidate
+                  the least described. */}
+              {chosen && (
+                <p
+                  className="text-[10px] text-amber-700 dark:text-amber-400"
+                  data-testid="jlens-identity-note"
+                >
+                  {chosen.has_config ? (
+                    <>
+                      A config sits beside this file. If it names these weights
+                      the artifact records <strong>verified</strong>; if it
+                      names other weights the acquisition is{' '}
+                      <strong>refused</strong> after the download; if it names
+                      none, <strong>unverified</strong>.
+                    </>
+                  ) : (
+                    <>
+                      This file has no config beside it, so weight identity
+                      cannot be checked. It will be adopted as{' '}
+                      <strong>unverified</strong> and the artifact will record
+                      that the pairing rests on your assertion.
+                    </>
+                  )}
                 </p>
               )}
 
+              {chosen?.fits_envelope === false && (
+                <p
+                  className="text-[11px] text-amber-700 dark:text-amber-400"
+                  data-testid="jlens-acquire-too-large"
+                >
+                  {chosen.envelope_detail ??
+                    'This file is larger than a lens for these weights could be.'}{' '}
+                  Downloading it would spend the bandwidth and a GPU-queue slot
+                  to reach the same verdict — which is what this preview exists
+                  to avoid.
+                </p>
+              )}
               {!modelId && (
                 <p
                   className="text-[11px] text-amber-700 dark:text-amber-400"
@@ -392,23 +429,16 @@ export function AcquireLensCard({
                   without it the request is refused with a 404 naming an empty id.
                 </p>
               )}
-              {queued && (
-                <p className="text-[10px] text-slate-500 dark:text-slate-500">
-                  A job is already queued from this card. Watch Running Work, or{' '}
-                  <button
-                    type="button"
-                    onClick={() => setQueued(null)}
-                    className="underline"
-                  >
-                    start another
-                  </button>
-                  .
-                </p>
-              )}
               <button
                 type="button"
                 onClick={() => void runAcquire()}
-                disabled={busy || !selected || !modelId || Boolean(queued)}
+                disabled={
+                  busy ||
+                  !selected ||
+                  !modelId ||
+                  Boolean(queued) ||
+                  chosen?.fits_envelope === false
+                }
                 data-testid="jlens-acquire-run"
                 className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
               >
@@ -427,6 +457,8 @@ export function AcquireLensCard({
                     value={dataset}
                     onChange={(e) => setDataset(e.target.value)}
                     data-testid="jlens-publish-dataset"
+                    aria-invalid={!DATASET_PATTERN.test(dataset.trim())}
+                    aria-describedby="jlens-dataset-help"
                     className="rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                   />
                   {/* MIRRORED FROM THE SERVER. It is a path segment, so the
@@ -435,6 +467,7 @@ export function AcquireLensCard({
                       slash 422s with a regex the form gives no hint about. */}
                   {!DATASET_PATTERN.test(dataset.trim()) && (
                     <span
+                      id="jlens-dataset-help"
                       className="text-[10px] text-amber-700 dark:text-amber-400"
                       data-testid="jlens-publish-dataset-invalid"
                     >
@@ -454,19 +487,31 @@ export function AcquireLensCard({
                 </label>
               </div>
 
-              {/* WHAT LEAVES AND WHAT DOES NOT, before the button rather than
-                  after. The local validation verdict records two checks as
-                  DEFERRED because nothing has ever run them, and shipping it
-                  would invite a reader to take our verdict for the lens's own. */}
+              {/* WHAT LEAVES, ACCURATELY. This said the local validation
+                  verdict "does not travel" — false, and self-contradicting two
+                  clauses earlier: the README carries every check's name, status
+                  and detail, and the README is uploaded. Only `validation.json`
+                  is withheld, which is a file-level fact rather than a claim
+                  about what a reader learns. A test asserted the false
+                  sentence, so correcting the copy turned the suite red. */}
               <p
                 className="text-[10px] text-slate-500 dark:text-slate-500"
                 data-testid="jlens-publish-note"
               >
-                Uploads the checkpoint, its recipe, any recorded interventions and
-                the convergence trace, plus a README stating what was and was not
-                checked. The local validation verdict does <strong>not</strong>{' '}
-                travel — two of its checks need a live external consumer and have
-                never been run.
+                Uploads the checkpoint, its recipe, any recorded interventions
+                and the convergence trace, plus a README that lists{' '}
+                <strong>every check and its status</strong> — including the two
+                recorded <em>deferred</em>, which need a live external consumer
+                and have never been run. The machine-readable{' '}
+                <code>validation.json</code> itself is withheld, so a reader
+                cannot mistake this installation&rsquo;s verdict for the
+                lens&rsquo;s own.
+                {createRepo && (
+                  <>
+                    {' '}
+                    A repo created here is <strong>public</strong>.
+                  </>
+                )}
               </p>
 
               {/* THE OTHER GATE, NAMED. `hasArtifact` is slug presence only;
@@ -515,6 +560,25 @@ export function AcquireLensCard({
             </>
           )}
 
+          {/* IN BOTH MODES. It lived inside the acquire branch, so after a
+              publish the button greyed out with no stated reason and the only
+              recovery was to switch modes and click the link there. */}
+          {queued && (
+            <p
+              className="text-[10px] text-slate-500 dark:text-slate-500"
+              data-testid="jlens-queued-note"
+            >
+              A job is already queued from this card. Watch Running Work, or{' '}
+              <button
+                type="button"
+                onClick={() => setQueued(null)}
+                className="underline"
+              >
+                start another
+              </button>
+              .
+            </p>
+          )}
           {note && (
             <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
               {note}

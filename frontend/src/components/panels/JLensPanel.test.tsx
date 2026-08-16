@@ -1563,6 +1563,32 @@ describe('JLensPanel — ranked readouts and interventions', () => {
     expect(screen.getByText(/are disjoint/)).toBeInTheDocument();
   }, 20000);
 
+  it('tells the card the WEIGHTS ARE MISSING when the row has no file_path', async () => {
+    /**
+     * The endpoint refuses via `locate_weights`: a `file_path` that is set AND
+     * present on disk. Inferring from `status === "ready"` alone reports a model
+     * whose files were pruned as available, so the card implies a fetch the
+     * endpoint then 409s — and both prerequisite props were computed here and
+     * asserted by nothing, so hardcoding either one left the suite green.
+     *
+     * MUTATION CONTROL: hardcode `weightsPresent={true}` and this fails.
+     */
+    (useModelsStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (sel: (s: unknown) => unknown) =>
+        sel({
+          models: [{ id: 'm_lfm2', status: 'ready', file_path: null }],
+          fetchModels: vi.fn(),
+        }),
+    );
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() => expect(screen.getByTestId('jlens-acquire')).toBeTruthy());
+    await userEvent.setup().click(screen.getByRole('button', { name: /Browse/ }));
+    expect(
+      screen.getByTestId('jlens-acquire-weights-missing')
+    ).toBeInTheDocument();
+  });
+
   it('MOUNTS the acquire card \u2014 the only way to reach a published lens', async () => {
     /**
      * REACHABILITY, not existence. `AcquireLensCard.test.tsx` renders the

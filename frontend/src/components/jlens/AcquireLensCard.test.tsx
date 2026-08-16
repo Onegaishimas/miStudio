@@ -129,8 +129,11 @@ describe('acquiring', () => {
     const rows = screen.getAllByRole('listitem');
     // The one WITH a config reads differently from the one without — a single
     // shared label would tell the operator nothing.
-    expect(within(rows[0]).getByText('identity checkable')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('unverified')).toBeInTheDocument();
+    // THE BADGE STATES WHAT WAS OBSERVED, not a verdict it cannot predict:
+    // `has_config` is file presence, while the outcome depends on whether that
+    // config NAMES a model — and one naming another model is a hard refusal.
+    expect(within(rows[0]).getByText('declares a config')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('no config')).toBeInTheDocument();
   });
 
   it('explains what UNVERIFIED costs, once one is chosen', async () => {
@@ -155,7 +158,13 @@ describe('acquiring', () => {
 
 describe('publishing', () => {
   const toPublish = () =>
-    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    // SCOPED TO THE MODE TOGGLE. The publish ACTION button shares the
+    // accessible name, and only the toggle carries aria-pressed.
+    fireEvent.click(
+      screen
+        .getAllByRole('button')
+        .filter((b) => b.hasAttribute('aria-pressed'))[1],
+    );
 
   it('is REFUSED when there is no published artifact', () => {
     mount({ hasArtifact: false });
@@ -185,20 +194,22 @@ describe('publishing', () => {
     expect(screen.getByTestId('jlens-publish-run')).toBeEnabled();
   });
 
-  it('says the local verdict does NOT travel', () => {
+  it('describes ACCURATELY what the upload carries', () => {
     mount();
     open();
     toPublish();
-    // A reader of the published repo must not take this installation's verdict
-    // for the lens's own — two of its checks have never been run anywhere.
-    //
-    // ASSERTED ON THE NEGATION ITSELF. Matching only "local validation verdict
-    // does" survives a rewrite that says it DOES travel, which is the exact
-    // sentence being guarded against.
+    // THE NOTE MUST MATCH WHAT IS ACTUALLY UPLOADED. The earlier version of
+    // this test asserted "the local validation verdict does not travel" — which
+    // was FALSE: `model_card` writes every check's name, status and detail into
+    // the README, and the README is uploaded. Only `validation.json` is
+    // withheld. A test pinning a false claim is worse than no test, because
+    // correcting the copy turned the suite red.
     const note = screen.getByTestId('jlens-publish-note');
-    expect(note).toHaveTextContent(/does\s*not\s*travel/i);
+    expect(note).toHaveTextContent(/every check and its status/i);
+    expect(note).toHaveTextContent(/deferred/i);
     expect(note).toHaveTextContent(/never been run/);
-    expect(note).not.toHaveTextContent(/verdict does travel/i);
+    expect(note).toHaveTextContent(/validation\.json/);
+    expect(note).not.toHaveTextContent(/verdict does not travel/i);
   });
 
   it('sends the corpus segment it was given', async () => {
@@ -338,7 +349,9 @@ describe('review round 1 findings', () => {
     fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
       target: { value: 'hf_READ_ONLY' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    fireEvent.click(
+      screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))[1],
+    );
     expect(screen.getByTestId('jlens-acquire-token')).toHaveValue('');
   });
 
@@ -352,7 +365,9 @@ describe('review round 1 findings', () => {
      */
     mount();
     open();
-    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    fireEvent.click(
+      screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))[1],
+    );
     fireEvent.change(screen.getByTestId('jlens-acquire-repo'), {
       target: { value: 'you/lenses' },
     });
@@ -380,23 +395,233 @@ describe('review round 1 findings', () => {
      */
     mount({ hasArtifact: true });
     open();
-    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+    fireEvent.click(
+      screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))[1],
+    );
     expect(screen.getByText(/validation verdict matching/)).toBeInTheDocument();
   });
 
-  it('clears a stale note when a new request starts', () => {
+  it('clears a stale SUCCESS note when the next request FAILS', async () => {
     /**
-     * `note` was cleared nowhere, so a red error rendered directly below a
-     * still-green "queued" note and a refused request read as a queued one.
+     * A red error rendered directly beneath a still-green "queued" line, so a
+     * refused request read on screen as a queued one.
+     *
+     * THE FIRST VERSION OF THIS TEST WAS VACUOUS: it only clicked "Look
+     * inside", so nothing ever set a note and the assertion held with or
+     * without the fix. A real one has to queue a job and then fail the next
+     * request.
      *
      * MUTATION CONTROL: drop `setNote(null)` from the request starts.
      */
     mount();
     open();
     fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
-    // The note surface starts empty and a failed preview must not leave a
-    // success message behind it.
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.click(screen.getByTestId('jlens-acquire-run'));
+    await waitFor(() => expect(screen.getByText(/queued as/)).toBeInTheDocument());
+
+    // Now start another and have it refused.
+    fireEvent.click(screen.getByRole('button', { name: /start another/ }));
+    (jlensApi.acquire as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('507 Insufficient Storage'),
+    );
+    fireEvent.click(screen.getByTestId('jlens-acquire-run'));
+    await waitFor(() =>
+      expect(screen.getByText(/507 Insufficient Storage/)).toBeInTheDocument(),
+    );
     expect(screen.queryByText(/queued as/)).toBeNull();
+  });
+});
+
+describe('review round 2 findings', () => {
+  it('sends the WRITE token on publish, not the read one', async () => {
+    /**
+     * Round 1 separated the fields; nothing asserted the wire. Swapping
+     * `writeToken` for `readToken` in the request left the suite green, and the
+     * defect returns verbatim — the endpoint's pre-flight only tests that A
+     * token resolves, so it 202s and dies in the worker after taking a slot.
+     *
+     * MUTATION CONTROL: send `readToken` from `runPublish` and this fails.
+     */
+    mount();
+    open();
+    fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
+      target: { value: 'hf_READ' },
+    });
+    fireEvent.click(
+      screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))[1],
+    );
+    fireEvent.change(screen.getByTestId('jlens-acquire-repo'), {
+      target: { value: 'you/lenses' },
+    });
+    fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
+      target: { value: 'hf_WRITE' },
+    });
+    fireEvent.click(screen.getByTestId('jlens-publish-run'));
+    await waitFor(() =>
+      expect(jlensApi.publish as ReturnType<typeof vi.fn>).toHaveBeenCalled(),
+    );
+    expect(
+      (jlensApi.publish as ReturnType<typeof vi.fn>).mock.calls[0][0].access_token,
+    ).toBe('hf_WRITE');
+  });
+
+  it('sends the READ token on acquire', async () => {
+    mount();
+    open();
+    fireEvent.change(screen.getByTestId('jlens-acquire-token'), {
+      target: { value: 'hf_READ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.click(screen.getByTestId('jlens-acquire-run'));
+    await waitFor(() =>
+      expect(jlensApi.acquire as ReturnType<typeof vi.fn>).toHaveBeenCalled(),
+    );
+    expect(
+      (jlensApi.acquire as ReturnType<typeof vi.fn>).mock.calls[0][0].access_token,
+    ).toBe('hf_READ');
+  });
+
+  it('REFUSES a candidate the preview already ruled out', async () => {
+    /**
+     * `fits_envelope: false` rendered a red badge and changed nothing else, so
+     * the one verdict the preview exists to produce did not prevent the
+     * multi-gigabyte fetch and queue slot it exists to prevent. Both fixtures
+     * used `fits_envelope: true`, so nothing exercised it.
+     *
+     * MUTATION CONTROL: drop the `fits_envelope === false` clause -> fails.
+     */
+    (jlensApi.previewRepo as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      candidates: [
+        {
+          ...PREVIEW.candidates[0],
+          fits_envelope: false,
+          envelope_detail: '9,000,000,000 bytes exceeds 400,000,000',
+        },
+      ],
+    });
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/1 candidate/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    expect(screen.getByTestId('jlens-acquire-too-large')).toHaveTextContent(
+      /exceeds 400,000,000/,
+    );
+    expect(screen.getByTestId('jlens-acquire-run')).toBeDisabled();
+  });
+
+  it('survives a candidate with an UNKNOWN size', async () => {
+    /**
+     * The Hub does not always report one. `formatBytes`'s null branch had no
+     * fixture, so it could be deleted freely.
+     */
+    (jlensApi.previewRepo as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      candidates: [{ ...PREVIEW.candidates[0], size_bytes: null }],
+    });
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/1 candidate/));
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('SHOWS a rejection rather than going quiet', async () => {
+    /**
+     * The most likely thing a user hits had zero coverage: dropping
+     * `setError(...)` from a catch left the suite green while a refusal
+     * rendered as nothing at all — the spinner stops and the card is silent.
+     * The 409 detail is the only explanation that exists.
+     *
+     * MUTATION CONTROL: drop `setError` from `runPreview` and this fails.
+     */
+    (jlensApi.previewRepo as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Could not read org/nope: 404'),
+    );
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/404/),
+    );
+  });
+
+  it('says so when a repo holds NO candidates', async () => {
+    (jlensApi.previewRepo as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      candidates: [],
+    });
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/No .* files/),
+    );
+  });
+
+  it('holds the PUBLISH button after a publish, and offers a reset', async () => {
+    /**
+     * The queued note lived inside the acquire branch, so after a publish the
+     * button greyed out with no stated reason and the only recovery was to
+     * switch modes.
+     *
+     * MUTATION CONTROL: drop `Boolean(queued)` from the publish disabled expr.
+     */
+    mount();
+    open();
+    fireEvent.click(
+      screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'))[1],
+    );
+    fireEvent.change(screen.getByTestId('jlens-acquire-repo'), {
+      target: { value: 'you/lenses' },
+    });
+    fireEvent.click(screen.getByTestId('jlens-publish-run'));
+    await waitFor(() =>
+      expect(jlensApi.publish as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.getByTestId('jlens-publish-run')).toBeDisabled();
+    expect(screen.getByTestId('jlens-queued-note')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /start another/ }));
+    expect(screen.getByTestId('jlens-publish-run')).toBeEnabled();
+  });
+
+  it('explains BOTH identity outcomes, not only the config-less one', async () => {
+    /**
+     * The server sorts config-bearing files first, so the candidate most likely
+     * to be picked was the one whose real outcome was least described — and a
+     * config naming OTHER weights is a hard refusal after the bytes are spent.
+     */
+    mount();
+    open();
+    fireEvent.click(screen.getByRole('button', { name: /Look inside/ }));
+    await waitFor(() => screen.getByText(/2 candidates/));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    expect(screen.getByTestId('jlens-identity-note')).toHaveTextContent(/refused/);
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    expect(screen.getByTestId('jlens-identity-note')).toHaveTextContent(
+      /rests on your assertion/,
+    );
+  });
+
+  it('announces the active mode to assistive tech', () => {
+    mount();
+    open();
+    const toggles = screen
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-pressed'));
+    expect(toggles.map((b) => b.textContent)).toEqual(['Download', 'Publish']);
+    expect(toggles[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(toggles[1]).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggles[1]);
+    const after = screen
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('aria-pressed'));
+    expect(after[1]).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
