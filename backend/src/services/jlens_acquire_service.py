@@ -364,8 +364,61 @@ def publication_blocker(report: Any) -> Optional[str]:
     return None
 
 
+#: Bytes per element to assume when the dtype is NOT YET KNOWN.
+#:
+#: The preview sees a size and nothing else. Assuming 2 rejected a legitimate
+#: full-coverage fp32 lens that `validate` — which derives the real element size
+#: from the payload — accepts, and the MCP tool tells an agent to read the
+#: preview verdict when choosing a path. The ceiling must therefore be drawn for
+#: the WIDEST element a lens could use, or the pre-flight contradicts the check
+#: it stands in for.
+WIDEST_ELEMENT_BYTES = 4
+
+
+def model_dims(record: Any) -> Optional[Dict[str, int]]:
+    """`d_model`, `n_layers`, `n_vocab` from a Model row, WITHOUT loading weights.
+
+    From `architecture_config`, which records what config.json said at download
+    time. NONE when any of the three is missing, and the caller then reports no
+    verdict rather than a guessed one — `check_envelope`'s bounds are "derived,
+    never constants", so a defaulted dimension produces a bound derived from
+    nothing that passes on one model and misses a real materialisation on
+    another.
+    """
+    config = getattr(record, "architecture_config", None) or {}
+    if not isinstance(config, dict):
+        return None
+    try:
+        dims = {
+            "d_model": int(config.get("hidden_size") or config.get("d_model")),
+            "n_layers": int(config.get("num_hidden_layers") or config.get("n_layer")),
+            "n_vocab": int(config.get("vocab_size")),
+        }
+    except (TypeError, ValueError):
+        return None
+    return dims if all(v > 0 for v in dims.values()) else None
+
+
+def full_fit_ceiling(
+    dims: Dict[str, int], dtype_bytes: int = WIDEST_ELEMENT_BYTES
+) -> int:
+    """The largest a lens for these weights could legitimately be.
+
+    Mirrors `check_envelope`'s ceiling at FULL coverage, for the two places that
+    must bound something before the artifact's own layer count is knowable: the
+    pre-flight preview, and the expansion guard that runs before `torch.load`.
+
+    The lower bound is deliberately absent — it scales with the layer count, and
+    a partial lens is legitimately far smaller.
+    """
+    from .jlens_validation import container_allowance
+
+    required = dims["d_model"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
+    return int(required * 1.5) + container_allowance(required)
+
+
 def preview_envelope_verdict(
-    size_bytes: int, dims: Dict[str, int], dtype_bytes: int = 2
+    size_bytes: int, dims: Dict[str, int], dtype_bytes: int = WIDEST_ELEMENT_BYTES
 ) -> Dict[str, Any]:
     """Whether a remote file's SIZE alone rules it out for these weights.
 
@@ -379,10 +432,8 @@ def preview_envelope_verdict(
     materialisation guard and it is monotonic in the layer count. A smaller file
     is simply not decidable from size, and says so rather than guessing.
     """
-    from .jlens_validation import container_allowance
-
     required = dims["d_model"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
-    ceiling = int(required * 1.5) + container_allowance(required)
+    ceiling = full_fit_ceiling(dims, dtype_bytes)
     materialised = dims["n_vocab"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
 
     if size_bytes > ceiling:
@@ -416,6 +467,20 @@ def file_digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def bytes_identity(
+    upstream_sha256: Optional[str], local_sha256: Optional[str]
+) -> Optional[bool]:
+    """True, False, or None for "the publisher did not say".
+
+    Unknown is not divergence. Collapsing them made every non-LFS lens report
+    that what we serve differs from what was published, which the MCP tool
+    presents to an agent as a fact.
+    """
+    if not upstream_sha256 or not local_sha256:
+        return None
+    return upstream_sha256 == local_sha256
 
 
 def write_acquisition_record(
@@ -453,7 +518,12 @@ def write_acquisition_record(
         "bytes": {
             "upstream_sha256": upstream_sha256,
             "local_sha256": local_sha256,
-            "identical": bool(upstream_sha256) and upstream_sha256 == local_sha256,
+            # TRI-STATE. `False` here meant "we did not check" as often as it
+            # meant "they differ" — the Hub exposes `lfs.sha256` only for
+            # LFS-tracked files, so every small lens reported a positive claim of
+            # DIVERGENCE from a measurement that never ran. This module is
+            # explicit everywhere else that None is not False.
+            "identical": bytes_identity(upstream_sha256, local_sha256),
         },
         "weight_identity": {
             "state": identity.state.value,
@@ -583,8 +653,16 @@ def preview_repo(
 
     siblings = list(getattr(info, "siblings", None) or [])
     all_paths = {s.rfilename for s in siblings}
+    # AN EXACT BASENAME. `endswith("config.yaml")` also matched
+    # `adapter_config.yaml` and `model_config.yaml`, so a repo holding one of
+    # those previewed as self-describing — and `has_config` is the field the MCP
+    # tool calls "the field to read first", and the sort key that floats a
+    # candidate to the top. The worker then asks for `<parent>/config.yaml`,
+    # which is not there, and the acquisition comes back unverified.
     dirs_with_config = {
-        p.rsplit("/", 1)[0] if "/" in p else "" for p in all_paths if p.endswith("config.yaml")
+        p.rsplit("/", 1)[0] if "/" in p else ""
+        for p in all_paths
+        if p.rsplit("/", 1)[-1] == "config.yaml"
     }
     dirs_with_csv = {
         p.rsplit("/", 1)[0] if "/" in p else ""
@@ -632,6 +710,7 @@ def check_free_space(*paths: Path, needed_bytes: int) -> None:
     once as the staged artifact. Checking only the destination passes and then
     fills the cache volume instead.
     """
+    import os
     import shutil as _shutil
 
     # ONE PROBE PER DISTINCT MOUNT. The registry lives INSIDE the data dir
@@ -644,18 +723,74 @@ def check_free_space(*paths: Path, needed_bytes: int) -> None:
         probe = path
         while not probe.exists() and probe != probe.parent:
             probe = probe.parent
-        usage = _shutil.disk_usage(probe)
-        key = (usage.total, usage.free)
-        if key in seen:
+        # KEYED ON THE DEVICE. `(total, free)` collapses two genuinely distinct
+        # mounts whose usage happens to coincide — two same-size volumes from
+        # one StorageClass, both freshly provisioned, are identical on both
+        # numbers — and the one it would skip is the cache volume this guard
+        # exists to cover.
+        device = os.stat(probe).st_dev
+        if device in seen:
             continue
-        seen.add(key)
-        free = usage.free
+        seen.add(device)
+        free = _shutil.disk_usage(probe).free
         if free < needed_bytes + MIN_FREE_DISK_BYTES:
             raise AcquisitionRefused(
                 f"{path} has {free / 2**30:.1f} GiB free; this needs "
                 f"{needed_bytes / 2**30:.1f} GiB plus a "
                 f"{MIN_FREE_DISK_BYTES / 2**30:.0f} GiB floor"
             )
+
+
+def declared_uncompressed_size(path: Path) -> Optional[int]:
+    """What a `torch.save` archive says it will expand to, WITHOUT expanding it.
+
+    EVERY OTHER GUARD IN THIS PATH BOUNDS THE COMPRESSED SIZE. `check_envelope`
+    compares `size_bytes` off the filesystem, `preview_envelope_verdict` compares
+    the size the Hub reports, and `download_footprint` reserves twice the
+    download — so nothing bounds what `torch.load` will allocate. Measured: a
+    34 KB archive of zeros expands to 33.5 MB, a factor of 986, and loads without
+    complaint. At that ratio a file small enough to pass every check above
+    OOM-kills the worker — which is the single-GPU queue, head-of-line for every
+    fit, readout and intervention.
+
+    A zip's central directory carries each member's uncompressed length, so this
+    is a header read rather than a decompression. Returns None when the file is
+    not a zip — an old-format `.pt` or a `.safetensors` — and the caller must
+    then decide, rather than being handed a zero that reads as "no risk".
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return sum(info.file_size for info in archive.infolist())
+    except (zipfile.BadZipFile, OSError):
+        return None
+
+
+def check_expansion(path: Path, ceiling_bytes: int) -> int:
+    """Refuse a checkpoint that would expand past what these weights could need.
+
+    The ceiling is the caller's envelope for a FULL fit — the same bound
+    `check_envelope` applies to the file, applied instead to what the file
+    becomes. An archive that declares no size is refused too when it is already
+    over the ceiling on disk, and otherwise allowed: a non-zip checkpoint cannot
+    hide expansion, because it has none.
+    """
+    declared = declared_uncompressed_size(path)
+    on_disk = path.stat().st_size
+    effective = declared if declared is not None else on_disk
+    if effective > ceiling_bytes:
+        raise AcquisitionRefused(
+            f"the checkpoint expands to {effective:,} bytes, above the "
+            f"{ceiling_bytes:,} a lens for these weights could need"
+            + (
+                f" — it is only {on_disk:,} bytes on disk, a "
+                f"{effective / max(on_disk, 1):.0f}x expansion"
+                if declared is not None and declared > on_disk * 2
+                else ""
+            )
+        )
+    return effective
 
 
 def fetch_file(

@@ -50,6 +50,7 @@ def acquire_jlens_artifact(
     access_token: Optional[str] = None,
     allow_coverage_loss: bool = False,
     allow_quality_regression: bool = False,
+    replace_staged: bool = False,
 ) -> Dict[str, Any]:
     """Download a published lens, describe it honestly, validate it, publish it.
 
@@ -67,6 +68,8 @@ def acquire_jlens_artifact(
     from ..services.jlens_acquire_service import (
         AcquisitionRefused,
         WeightIdentity,
+        bytes_identity,
+        check_expansion,
         check_free_space,
         check_weight_identity,
         download_footprint,
@@ -75,7 +78,9 @@ def acquire_jlens_artifact(
         fetch_file,
         fetch_optional,
         file_digest,
+        full_fit_ceiling,
         inspect_layers,
+        model_dims,
         parse_upstream_config,
         preview_repo,
         publication_blocker,
@@ -148,6 +153,17 @@ def acquire_jlens_artifact(
     convergence_file = fetch_optional(
         repo_id, siblings["convergence"], preview.revision, token
     )
+    if config_file is None and remote.has_config:
+        # THE PREVIEW SAW ONE. A transient 429, an expired token or a 5xx would
+        # otherwise turn "the publisher says these are OTHER weights" — the one
+        # hard refusal this feature has — into a publishable `unverified`, and
+        # the lens would serve a complete, plausible readout that is wrong.
+        # Absence is a real state only when the file is genuinely absent.
+        raise AcquisitionRefused(
+            f"{siblings['config']} is listed in {repo_id}@{preview.revision[:8]} "
+            "but could not be fetched, so weight identity cannot be checked. "
+            "Retry rather than adopting it unverified."
+        )
     upstream_config = (
         parse_upstream_config(config_file.read_text(encoding="utf-8"))
         if config_file
@@ -156,6 +172,14 @@ def acquire_jlens_artifact(
 
     jlens_progress.update_row(self.request.id, progress=40.0)
     self.update_state(state="PROGRESS", meta=beat({"stage": "inspecting"}))
+
+    # BOUNDED BEFORE IT IS OPENED. Every other guard bounds the file on disk;
+    # this bounds what it becomes. A 34 KB archive of zeros expands to 33.5 MB —
+    # measured — and at that ratio a file small enough to pass the envelope
+    # OOM-kills this worker, which is the single-GPU queue.
+    dims = model_dims(record)
+    if dims:
+        check_expansion(lens_file, full_fit_ceiling(dims))
 
     checkpoint = torch.load(lens_file, map_location="cpu", weights_only=True)
     payload = normalise_payload(checkpoint)
@@ -223,10 +247,13 @@ def acquire_jlens_artifact(
             lens_file,
             config_yaml,
             sidecars=sidecars or None,
-            # A RE-RUN OF THIS ACQUISITION MAY OVERWRITE ITS OWN STAGING, but a
-            # staged FIT belongs to someone else's GPU hour. The endpoint
-            # surfaces the refusal so the choice is explicit.
-            replace_staged=allow_coverage_loss or allow_quality_regression,
+            # ITS OWN FLAG. Coupling this to the two gate flags trapped the case
+            # the worker calls likeliest: an unserviceable lens leaves staging
+            # populated, so a plain RE-RUN of the same acquisition died with
+            # ArtifactConflict, and the only escapes also disabled the coverage
+            # and quality gates at commit — three unrelated decisions on one
+            # switch, in both directions.
+            replace_staged=replace_staged,
         )
 
         # DIGESTED ONCE, AND BEFORE `commit`. `commit` ends in
@@ -237,7 +264,17 @@ def acquire_jlens_artifact(
         # stamped completed, and then `owns_its_failure` flipped it to failed
         # over a lens that had actually landed.
         local_sha256 = file_digest(ref.lens_path)
-        bytes_identical = bool(remote.sha256) and remote.sha256 == local_sha256
+        bytes_identical = bytes_identity(remote.sha256, local_sha256)
+
+        # THE CACHE COPY IS NOW REDUNDANT. `download_footprint` reserves twice
+        # the file because both exist at once — but nothing ever removed the
+        # first, so ten refused attempts at a 1.5 GB lens left 15 GB behind with
+        # nothing pointing at it. Removed AFTER the copy has landed, and failure
+        # to remove is a warning: the bytes we serve are already safe.
+        try:
+            lens_file.unlink()
+        except OSError as exc:  # noqa: BLE001 - the artifact is already staged
+            logger.warning("Could not reclaim the cached download: %s", exc)
 
         write_acquisition_record(
             ref.directory,
@@ -382,14 +419,22 @@ def acquire_jlens_artifact(
             # `model=loaded.model`, an independent strong reference that lives in
             # its frame for as long as a propagating traceback holds it.
             #
-            # `sys.exc_info()` is cleared for the same reason: on the failure
-            # path the traceback keeps every frame between here and the raise
-            # alive, and one of them is the semantic check's.
+            # THE TRACEBACK'S FRAMES ARE CLEARED, not merely inspected. The
+            # first version called `sys.exc_info()` and a comment claimed that
+            # cleared it — Python 3 has no `exc_clear`, and `exc_info()` is a
+            # pure read, so the fix was a no-op on the exact path it named. On a
+            # propagating exception the traceback keeps every frame between here
+            # and the raise alive, and one of them is `_run_semantic_check`'s,
+            # which holds a `ReadoutService` built with `model=loaded.model`.
             import sys
+            import traceback as _traceback
+
+            pending = sys.exc_info()[1]
+            if pending is not None and pending.__traceback__ is not None:
+                _traceback.clear_frames(pending.__traceback__)
 
             loaded = None  # noqa: F841 - the assignment IS the release
             payload = None  # noqa: F841 - d_model x d_model per layer, on CPU
             checkpoint = None  # noqa: F841 - the undivided original
-            sys.exc_info()
             clear_cache()
             logger.info("Released the acquisition model from GPU memory")
