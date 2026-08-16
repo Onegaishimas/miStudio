@@ -82,12 +82,19 @@ def update_row(
     status: Optional[str] = None,
     progress: Optional[float] = None,
     error_message: Optional[str] = None,
-) -> None:
+) -> bool:
     """Move a queued row along. Located by CELERY task id, not by row id.
 
     By task id because the worker knows that and would otherwise have to be
     handed the row id through the task signature — one more argument to forget,
     and forgetting it silently leaves a row stuck at "queued" forever.
+
+    RETURNS WHETHER A ROW WAS FOUND. The endpoints open the row AFTER `.delay()`,
+    so a task that fails in its first milliseconds can arrive here before the row
+    exists — and a silent `return` then leaves it at "queued 0%" forever, which
+    reads as a job that never started rather than one that failed instantly. A
+    caller that can retry needs to know the difference; one that cannot is
+    unaffected, since the value is simply ignored.
     """
     from ..core.database import get_sync_db
     from ..models.task_queue import TaskQueue
@@ -96,7 +103,7 @@ def update_row(
         with get_sync_db() as db:
             row = db.query(TaskQueue).filter(TaskQueue.task_id == task_id).first()
             if row is None:
-                return
+                return False
             if status is not None:
                 # STAMP THE CLOCK ON THE TRANSITIONS. Both columns existed and
                 # neither was ever written for J-space work, so every J-lens row
@@ -116,8 +123,10 @@ def update_row(
             if error_message is not None:
                 row.error_message = error_message[:2000]
             db.commit()
+            return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not update task_queue row for %s: %s", task_id, exc)
+    return False
 
 
 def fail_row(task_id: str, exc: BaseException) -> None:

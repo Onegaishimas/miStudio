@@ -26,6 +26,7 @@ missing autodiscover entry means the worker never imports this module at all, so
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from ..core.celery_app import celery_app
@@ -439,6 +440,23 @@ def acquire_jlens_artifact(
             clear_cache()
             logger.info("Released the acquisition model from GPU memory")
 
+def _report_cleared_for_handover(report: Dict[str, Any]) -> bool:
+    """Rebuild `ValidationReport.cleared_for_handover` from a stored verdict.
+
+    FAILS CLOSED ON A MISSING CLASS, which is the whole point: a bare
+    `all(status == "pass")` is vacuously True over an empty or partial result
+    list, and this value is what an MCP caller and the UI read as the handover
+    verdict.
+    """
+    from ..services.jlens_validation import CheckClass
+
+    rows = report.get("results") or []
+    seen = {r.get("check") for r in rows}
+    if seen != {c.value for c in CheckClass}:
+        return False
+    return all(r.get("status") == "pass" for r in rows)
+
+
 @celery_app.task(
     name="src.workers.jlens_acquire_tasks.publish_jlens_artifact",
     bind=True,
@@ -473,7 +491,18 @@ def publish_jlens_artifact_task(
     from ..services.jlens_acquire_service import AcquisitionRefused, publish_artifact
     from ..services.jlens_artifact_service import JLensArtifactService
 
-    jlens_progress.update_row(self.request.id, status="running", progress=5.0)
+    # THE ROW MAY NOT EXIST YET. `open_row` runs in the endpoint AFTER
+    # `.delay()`, so a task that fails in its first milliseconds can reach
+    # `fail_row` before the row is written — `update_row` then finds nothing,
+    # returns silently, and the row lands as "queued 0%" and never moves.
+    # Retried briefly rather than assumed: the work is the point and the row is
+    # the narration, so this must never raise.
+    for _attempt in range(10):
+        if jlens_progress.update_row(
+            self.request.id, status="running", progress=5.0
+        ):
+            break
+        time.sleep(0.1)
 
     with get_sync_db() as db:
         record = db.query(Model).filter(Model.id == model_id).first()
@@ -508,20 +537,43 @@ def publish_jlens_artifact_task(
             "supplied and none is configured"
         )
 
-    self.update_state(state="PROGRESS", meta=beat({"stage": "uploading"}))
     jlens_progress.update_row(self.request.id, progress=30.0)
 
-    outcome = publish_artifact(
-        ref.directory,
-        repo_of_model,
-        target_repo,
-        token,
-        dataset=dataset,
-        create=create_repo,
-        private=private,
-        recipe=service._recipe_summary(ref),  # noqa: SLF001 - same package concern
-        validation=report,
-    )
+    # BEATEN WHILE IT UPLOADS. One heartbeat before a transfer of unbounded
+    # duration is how `cleanup_orphaned_tasks` comes to mark a still-running
+    # publish as failed: it sees a `running` row whose Celery heartbeat is older
+    # than STALE_AFTER_SECONDS and writes "presumed gone… Any work it completed
+    # was not saved. Re-run it." A 276 MB lens over an ordinary uplink passes
+    # ten minutes routinely, so the user would be told to re-run a publish that
+    # is in flight and about to land.
+    import threading
+
+    done = threading.Event()
+
+    def _heartbeat() -> None:
+        while not done.wait(30.0):
+            self.update_state(
+                state="PROGRESS", meta=beat({"stage": "uploading"})
+            )
+
+    self.update_state(state="PROGRESS", meta=beat({"stage": "uploading"}))
+    pulse = threading.Thread(target=_heartbeat, daemon=True)
+    pulse.start()
+    try:
+        outcome = publish_artifact(
+            ref.directory,
+            repo_of_model,
+            target_repo,
+            token,
+            dataset=dataset,
+            create=create_repo,
+            private=private,
+            recipe=service._recipe_summary(ref),  # noqa: SLF001 - same package
+            validation=report,
+        )
+    finally:
+        done.set()
+        pulse.join(timeout=5.0)
 
     jlens_progress.update_row(self.request.id, status="completed", progress=100.0)
     return {
@@ -530,9 +582,12 @@ def publish_jlens_artifact_task(
         # WHAT THE READER OF THAT REPO IS AND IS NOT BEING TOLD. The two
         # consumer-interop classes travel as DEFERRED, so nobody downstream can
         # mistake this project's local verdict for proven interoperability.
-        "cleared_for_handover": all(
-            r.get("status") == "pass" for r in (report.get("results") or [])
-        ),
+        # THE AUTHORITATIVE PROPERTY, not a re-implementation. `all(...)` over an
+        # empty list is vacuously True, so a report with no results at all read
+        # as "every class literally passed" — the strongest claim this system
+        # makes, from no evidence. The sibling acquire task in this file already
+        # uses the real one.
+        "cleared_for_handover": _report_cleared_for_handover(report),
         "caveat": (
             "Published with the validation report this installation produced. "
             "The two consumer-interop classes are DEFERRED — they need a live "

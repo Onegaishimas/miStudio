@@ -129,7 +129,19 @@ class TestTheLayoutMatchesTheSpec:
         a reader to take this installation's verdict for the lens's own."""
         assert "validation.json" not in PUBLISHED_FILES
         assert "acquisition.json" not in PUBLISHED_FILES
-        assert PUBLISHED_FILES == ("config.yaml",)
+
+    def test_the_EVIDENCE_does_travel(self):
+        """`interventions.json` exists precisely to make this journey.
+
+        "A lens published to HuggingFace and pulled down by a serving runtime
+        arrives as files and nothing else", and a result that does not travel
+        leaves the consumer "with a dictionary it can read and no measurements
+        of what happened when it was applied". Publish is the only mechanism
+        that could carry it, and the MCP tool already promises agents it does.
+
+        MUTATION CONTROL: drop it from PUBLISHED_FILES and this fails.
+        """
+        assert "interventions.json" in PUBLISHED_FILES
 
 
 class TestTheModelCardIsHonest:
@@ -192,9 +204,11 @@ class TestPublishing:
         with patch("huggingface_hub.HfApi", return_value=api):
             out = publish_artifact(directory, "org/m", "you/lenses", "tok")
 
-        assert captured["files"] == ["README.md", "config.yaml", "m_jacobian_lens.pt"], (
-            captured["files"]
-        )
+        assert captured["files"] == [
+            "README.md",
+            "config.yaml",
+            "m_jacobian_lens.pt",
+        ], captured["files"]
         assert "validation.json" not in captured["files"]
         assert "acquisition.json" not in captured["files"]
         assert captured["path"] == "m/jlens/mistudio"
@@ -222,3 +236,152 @@ class TestPublishing:
         with patch("huggingface_hub.HfApi", return_value=api):
             with pytest.raises(AcquisitionRefused, match="exactly one"):
                 publish_artifact(directory, "org/m", "you/lenses", "tok")
+
+class TestPublishReviewRound1:
+    """Eight findings. The first would have shipped an unloadable file.
+
+    MUTATION CONTROLS:
+      * upload the .pt verbatim                -> "an OLD-FORMAT artifact"
+      * model_card ignores dataset             -> "the README documents WHERE"
+      * drop the dataset pattern               -> "a dataset segment cannot escape"
+      * re-implement cleared_for_handover      -> "an EMPTY report is not cleared"
+      * skip the temp-dir space check          -> "the rewrite checks for space"
+      * drop the convergence copy              -> "the convergence trace travels"
+    """
+
+    @staticmethod
+    def _old_format(tmp_path):
+        """An artifact in the shape EVERY existing lens on the cluster has."""
+        directory = tmp_path / "m"
+        directory.mkdir()
+        torch.save(
+            {l: torch.zeros(4, 4, dtype=torch.float16) for l in range(3)},
+            directory / "m_jacobian_lens.pt",
+        )
+        (directory / "config.yaml").write_text(
+            "model: org/m\nn_prompts: 634\n"
+        )
+        (directory / "m_convergence.csv").write_text(
+            "n_done,identity_distance\n1,0.5\n"
+        )
+        return directory
+
+    @staticmethod
+    def _upload_capture():
+        captured = {}
+
+        def fake_upload(folder_path, repo_id, path_in_repo, commit_message):
+            import pathlib as _p
+
+            out = _p.Path(folder_path)
+            captured["files"] = sorted(p.name for p in out.iterdir())
+            captured["path"] = path_in_repo
+            lens = next(out.glob("*_jacobian_lens.pt"))
+            captured["payload"] = torch.load(
+                lens, map_location="cpu", weights_only=True
+            )
+            captured["readme"] = (out / "README.md").read_text()
+            return types.SimpleNamespace(oid="sha1234")
+
+        api = MagicMock()
+        api.upload_folder = fake_upload
+        return api, captured
+
+    def test_an_OLD_FORMAT_artifact_is_published_CONFORMANT(self, tmp_path):
+        """Both lenses on the cluster predate the emitted-format change and are
+        the bare `{layer: matrix}` form. They carry a matching validation.json,
+        so every gate passes and the upload proceeds — and the consumer then
+        reads `payload["J"]`, raises, and is holding a README describing the
+        wrapper. Publishing is the moment the on-disk vintage stops being local.
+        """
+        directory = self._old_format(tmp_path)
+        api, captured = self._upload_capture()
+        with patch("huggingface_hub.HfApi", return_value=api):
+            publish_artifact(directory, "org/m", "you/lenses", "tok")
+
+        payload = captured["payload"]
+        assert "J" in payload, (
+            f"an old-format lens was uploaded verbatim: {sorted(payload)}"
+        )
+        assert sorted(payload["J"]) == [0, 1, 2]
+        assert payload["d_model"] == 4
+        # And the figure the README quotes came from the recipe, not from thin air.
+        assert payload["source_layers"] == [0, 1, 2]
+
+    def test_the_README_documents_WHERE_the_files_actually_went(self, tmp_path):
+        """The card called `published_path(repo_id)` with no dataset, so every
+        README documented `.../jlens/mistudio/` regardless — wrong on exactly
+        the calls that use the parameter."""
+        directory = self._old_format(tmp_path)
+        api, captured = self._upload_capture()
+        with patch("huggingface_hub.HfApi", return_value=api):
+            publish_artifact(
+                directory, "org/m", "you/lenses", "tok", dataset="wikitext"
+            )
+        assert captured["path"] == "m/jlens/wikitext"
+        assert "m/jlens/wikitext/" in captured["readme"], (
+            "the README points somewhere the files are not"
+        )
+        assert "jlens/mistudio" not in captured["readme"]
+
+    def test_the_CONVERGENCE_TRACE_travels(self, tmp_path):
+        """Spec §2.1 puts it in the same directory, and it is what miStudio
+        itself reads off an acquired artifact to see whether a fit plateaued."""
+        directory = self._old_format(tmp_path)
+        api, captured = self._upload_capture()
+        with patch("huggingface_hub.HfApi", return_value=api):
+            publish_artifact(directory, "org/m", "you/lenses", "tok")
+        assert "m_convergence.csv" in captured["files"], captured["files"]
+
+    def test_an_EMPTY_report_is_not_CLEARED_FOR_HANDOVER(self):
+        """`all(...)` over an empty list is vacuously True, so a report with no
+        results read as "every class literally passed" — the strongest claim
+        this system makes, from no evidence."""
+        from src.workers.jlens_acquire_tasks import _report_cleared_for_handover
+
+        assert _report_cleared_for_handover({"results": []}) is False
+        assert _report_cleared_for_handover({}) is False
+        # A PARTIAL report is not cleared either.
+        assert (
+            _report_cleared_for_handover(
+                {"results": [{"check": "structural", "status": "pass"}]}
+            )
+            is False
+        )
+        # And a genuinely complete one IS.
+        from src.services.jlens_validation import CheckClass
+
+        assert (
+            _report_cleared_for_handover(
+                {
+                    "results": [
+                        {"check": c.value, "status": "pass"} for c in CheckClass
+                    ]
+                }
+            )
+            is True
+        )
+
+    def test_a_dataset_segment_cannot_ESCAPE_the_layout(self):
+        """It is interpolated into a repo path. `..` commits the lens where no
+        consumer resolving `<model>/jlens/<dataset>/` will look."""
+        from pydantic import ValidationError
+
+        from src.api.v1.endpoints.jlens import PublishRequest
+
+        for bad in ("../..", "/abs", "a/b", ".hidden", ""):
+            with pytest.raises(ValidationError):
+                PublishRequest(model_id="m", target_repo="you/x", dataset=bad)
+        assert PublishRequest(
+            model_id="m", target_repo="you/x", dataset="wikitext-103"
+        ).dataset == "wikitext-103"
+
+    def test_update_row_REPORTS_whether_it_found_the_row(self):
+        """The endpoints open the row after `.delay()`, so a task failing in its
+        first milliseconds arrives before the row exists. A silent return left it
+        at "queued 0%" forever — a job that failed instantly, displayed as one
+        that never started."""
+        from src.workers.jlens_progress import update_row
+
+        assert update_row("no-such-task-id", status="running") is False
+

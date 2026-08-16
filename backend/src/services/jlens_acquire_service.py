@@ -871,13 +871,20 @@ def sibling_paths(lens_path: str) -> Dict[str, str]:
 
 #: Files that travel when a lens is published, in the layout spec §2.1 defines.
 #:
+#: `interventions.json` IS INCLUDED, because carrying it is the entire reason it
+#: exists: "a lens published to HuggingFace and pulled down by a serving runtime
+#: arrives as files and nothing else", and a result that does not make that
+#: journey leaves the consumer "with a dictionary it can read and no measurements
+#: of what happened when it was applied". Publish is the only mechanism that
+#: could carry it, and the MCP tool already promises agents that it does.
+#:
 #: `validation.json` and `acquisition.json` are DELIBERATELY EXCLUDED. The first
 #: is miStudio's verdict on its own copy — including two classes recorded as
 #: DEFERRED, which is a statement about this installation and not about the
 #: artifact — and the second describes a transfer that has nothing to do with a
 #: downstream consumer. A reader of the conformance format ignores both, and
 #: shipping them invites someone to read our local verdict as the lens's own.
-PUBLISHED_FILES = ("config.yaml",)
+PUBLISHED_FILES = ("config.yaml", "interventions.json")
 
 
 def published_path(repo_id: str, dataset: str = "mistudio") -> str:
@@ -898,6 +905,7 @@ def model_card(
     repo_id: str,
     recipe: Dict[str, Any],
     validation: Optional[Dict[str, Any]] = None,
+    dataset: str = "mistudio",
 ) -> str:
     """The README that travels with a published lens.
 
@@ -923,7 +931,7 @@ def model_card(
         "## Layout",
         "",
         "```",
-        f"{published_path(repo_id)}/",
+        f"{published_path(repo_id, dataset)}/",
         f"    {slug_of(repo_id)}_jacobian_lens.pt",
         "    config.yaml",
         "```",
@@ -1023,15 +1031,57 @@ def publish_artifact(
             "required and a consumer globs for it"
         )
 
+    # NORMALISED AT PUBLISH TIME, NOT ASSUMED. `write_staged` emits the
+    # conformant wrapper now, but every artifact fitted BEFORE that change is
+    # the bare `{layer: matrix}` form — including both lenses on the cluster —
+    # and they carry a matching validation.json, so every gate here passes and
+    # the upload proceeds. The consumer then reads `payload["J"]`, raises, and
+    # is holding a README that describes the wrapper. Publishing is the one
+    # moment the on-disk vintage stops being a local detail.
+    from .jlens_artifact_service import normalise_payload
+
+    raw = torch.load(lens_files[0], map_location="cpu", weights_only=True)
+    layers = normalise_payload(raw)
+    widths = {int(t.shape[0]) for t in layers.values()}
+    if len(widths) != 1:
+        raise AcquisitionRefused(
+            f"the lens matrices are {sorted(widths)} wide; a consumer reads one "
+            "d_model without a fallback"
+        )
+    n_prompts = raw.get("n_prompts") if isinstance(raw, dict) else None
+    if n_prompts is None:
+        n_prompts = (recipe or {}).get("n_prompts") or 0
+
+    # SPACE FOR THE REWRITE. In the pod only /data is a volume; the temp copy
+    # lands on the node's ephemeral layer, and a multi-GB lens there risks
+    # evicting a pod that is also running GPU fits. This module refuses before a
+    # byte moves on the acquire path and did not on this one.
+    needed = lens_files[0].stat().st_size
     with tempfile.TemporaryDirectory() as staging:
         outbox = Path(staging)
-        shutil.copyfile(lens_files[0], outbox / lens_files[0].name)
+        check_free_space(outbox, needed_bytes=needed)
+
+        torch.save(
+            {
+                "J": layers,
+                "d_model": widths.pop(),
+                "source_layers": sorted(layers),
+                "n_prompts": int(n_prompts),
+            },
+            outbox / lens_files[0].name,
+        )
         for name in PUBLISHED_FILES:
             source = directory / name
             if source.is_file():
                 shutil.copyfile(source, outbox / name)
+        # The convergence trace rides along per spec §2.1 — it is the
+        # publisher's own record of whether the fit plateaued, and it is what
+        # miStudio itself reads off an acquired artifact.
+        for csv in directory.glob("*_convergence.csv"):
+            shutil.copyfile(csv, outbox / csv.name)
         (outbox / "README.md").write_text(
-            model_card(repo_id, recipe or {}, validation), encoding="utf-8"
+            model_card(repo_id, recipe or {}, validation, dataset=dataset),
+            encoding="utf-8",
         )
 
         info = api.upload_folder(
