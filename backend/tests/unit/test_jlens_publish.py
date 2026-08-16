@@ -139,9 +139,53 @@ class TestTheLayoutMatchesTheSpec:
         of what happened when it was applied". Publish is the only mechanism
         that could carry it, and the MCP tool already promises agents it does.
 
-        MUTATION CONTROL: drop it from PUBLISHED_FILES and this fails.
+        MUTATION CONTROL: skip it in the copy loop and this fails.
         """
         assert "interventions.json" in PUBLISHED_FILES
+
+    def test_the_evidence_ARRIVES_not_merely_is_listed(self, tmp_path):
+        """Membership in a constant is not delivery — and that gap SHIPPED.
+
+        The first version of this test asserted only
+        `"interventions.json" in PUBLISHED_FILES`, so a `continue` in the copy
+        loop left it green. A concurrent review agent's mutation doing exactly
+        that was committed to main and rode a full green suite; `interventions.json`
+        stopped travelling and nothing noticed. Its sibling
+        `test_the_CONVERGENCE_TRACE_travels` was written correctly against the
+        uploaded file list, which is what makes the omission visible in hindsight.
+
+        MUTATION CONTROL: `continue` past it in the copy loop and this fails.
+        """
+        directory = tmp_path / "m"
+        directory.mkdir()
+        torch.save(
+            {"J": {0: torch.zeros(2, 2)}, "d_model": 2},
+            directory / "m_jacobian_lens.pt",
+        )
+        (directory / "config.yaml").write_text("model: org/m\n")
+        (directory / "interventions.json").write_text(
+            '[{"steering_recipe": {"primitive": "additive"}}]'
+        )
+
+        captured = {}
+
+        def fake_upload(folder_path, repo_id, path_in_repo, commit_message):
+            import pathlib as _p
+
+            captured["files"] = sorted(
+                q.name for q in _p.Path(folder_path).iterdir()
+            )
+            return types.SimpleNamespace(oid="sha")
+
+        api = MagicMock()
+        api.upload_folder = fake_upload
+        with patch("huggingface_hub.HfApi", return_value=api):
+            publish_artifact(directory, "org/m", "you/lenses", "tok")
+
+        assert "interventions.json" in captured["files"], (
+            "the recorded evidence did not reach the upload; a consumer gets a "
+            f"dictionary and no measurements. Uploaded: {captured['files']}"
+        )
 
 
 class TestTheModelCardIsHonest:
