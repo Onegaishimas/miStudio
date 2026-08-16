@@ -69,6 +69,7 @@ def acquire_jlens_artifact(
         WeightIdentity,
         check_free_space,
         check_weight_identity,
+        download_footprint,
         config_yaml_for_acquired,
         dtype_of,
         fetch_file,
@@ -77,11 +78,13 @@ def acquire_jlens_artifact(
         inspect_layers,
         parse_upstream_config,
         preview_repo,
+        publication_blocker,
         sibling_paths,
         write_acquisition_record,
     )
     from ..services.jlens_artifact_service import (
         ArtifactCoverageLoss,
+        ArtifactNotValidated,
         ArtifactQualityRegression,
         JLensArtifactService,
         normalise_payload,
@@ -116,10 +119,18 @@ def acquire_jlens_artifact(
     # REFUSED BEFORE A BYTE MOVES. A download that cannot fit fails halfway and
     # leaves the volume full — and this volume also holds every model, dataset
     # and checkpoint.
-    needed = int(remote.size_bytes or 0)
+    # BOTH COPIES, ON EVERY VOLUME THEY TOUCH. The blob lands in the HF cache
+    # and is then copied into the registry, so the peak is twice the file — and
+    # the cache may be a different mount, which the previous call never probed.
+    needed = download_footprint(int(remote.size_bytes or 0))
+    if not remote.size_bytes:
+        logger.warning(
+            "%s reports no size; the disk guard falls back to the bare floor",
+            path_in_repo,
+        )
     check_free_space(
         settings.jlens_artifacts_dir,
-        settings.data_dir,
+        settings.hf_cache_dir,
         needed_bytes=needed,
     )
 
@@ -146,27 +157,47 @@ def acquire_jlens_artifact(
     jlens_progress.update_row(self.request.id, progress=40.0)
     self.update_state(state="PROGRESS", meta=beat({"stage": "inspecting"}))
 
-    payload = normalise_payload(
-        torch.load(lens_file, map_location="cpu", weights_only=True)
-    )
+    checkpoint = torch.load(lens_file, map_location="cpu", weights_only=True)
+    payload = normalise_payload(checkpoint)
+    # THE WRAPPER'S OWN DECLARATIONS, KEPT. `n_prompts` and `d_model` live in the
+    # checkpoint per spec §2.2, and for a community repo shipping a bare `.pt`
+    # with no config.yaml they are the ONLY provenance there is.
+    declared = checkpoint if isinstance(checkpoint, dict) else {}
 
     # ---------------------------------------------------------- the model
     # AFTER the download, because the endpoint already refused synchronously
     # when the weights are absent; this load is belt-and-braces rather than the
     # primary guard, and doing it first would pay a model load to discover a
     # bad path.
+    # LOADED INSIDE THE GUARDED BLOCK. Outside it, a CUDA OOM part-way through
+    # `from_pretrained` left whatever had been allocated with no `clear_cache()`
+    # — and the failure path is the one this task takes most often.
     device = "cuda" if torch.cuda.is_available() else None
+    loaded = None
     try:
-        loaded = load_for_readout(record, capture_device=device)
-    except ModelNotAvailable as exc:
-        raise AcquisitionRefused(str(exc)) from exc
+        try:
+            loaded = load_for_readout(record, capture_device=device)
+        except ModelNotAvailable as exc:
+            raise AcquisitionRefused(str(exc)) from exc
 
-    try:
         identity = check_weight_identity(upstream_config, repo_of_model)
         if identity.state is WeightIdentity.MISMATCH:
             # A REFUSAL, NOT A BADGE. The readout would be complete, plausible
             # and wrong, and nothing downstream can tell that from a good one.
             raise AcquisitionRefused(identity.detail)
+
+        observed_dtype = dtype_of(payload)
+        # THE CHECKPOINT'S OWN d_model, CROSS-CHECKED. Spec §2.2 makes it the
+        # one field read without a fallback, so it is a claim by the publisher —
+        # and two independent declarations of the same fact disagreeing is a
+        # wrong-model signal that costs nothing to test.
+        declared_d_model = declared.get("d_model")
+        if declared_d_model is not None and int(declared_d_model) != int(loaded.d_model):
+            raise AcquisitionRefused(
+                f"the checkpoint declares d_model={int(declared_d_model)} but "
+                f"{repo_of_model} has {int(loaded.d_model)}; these are not the "
+                "same weights"
+            )
 
         layers = inspect_layers(
             payload, n_layers=int(loaded.n_layers), d_model=int(loaded.d_model)
@@ -176,8 +207,9 @@ def acquire_jlens_artifact(
             layers=layers,
             n_vocab=int(loaded.n_vocab),
             n_layers=int(loaded.n_layers),
-            dtype=dtype_of(payload),
+            dtype=observed_dtype,
             upstream_config=upstream_config,
+            checkpoint=declared,
         )
 
         service = JLensArtifactService(settings.jlens_artifacts_dir)
@@ -187,8 +219,25 @@ def acquire_jlens_artifact(
                 convergence_file
             )
         ref = service.stage_from_file(
-            repo_of_model, lens_file, config_yaml, sidecars=sidecars or None
+            repo_of_model,
+            lens_file,
+            config_yaml,
+            sidecars=sidecars or None,
+            # A RE-RUN OF THIS ACQUISITION MAY OVERWRITE ITS OWN STAGING, but a
+            # staged FIT belongs to someone else's GPU hour. The endpoint
+            # surfaces the refusal so the choice is explicit.
+            replace_staged=allow_coverage_loss or allow_quality_regression,
         )
+
+        # DIGESTED ONCE, AND BEFORE `commit`. `commit` ends in
+        # `staging.rename(final)`, so `ref.lens_path` no longer exists
+        # afterwards — reading it again to build the return value raised
+        # FileNotFoundError on every successful acquisition of an LFS-hosted
+        # lens, i.e. every real one. The artifact published, the row was
+        # stamped completed, and then `owns_its_failure` flipped it to failed
+        # over a lens that had actually landed.
+        local_sha256 = file_digest(ref.lens_path)
+        bytes_identical = bool(remote.sha256) and remote.sha256 == local_sha256
 
         write_acquisition_record(
             ref.directory,
@@ -196,7 +245,7 @@ def acquire_jlens_artifact(
             source_path=path_in_repo,
             revision=preview.revision,
             upstream_sha256=remote.sha256,
-            local_sha256=file_digest(ref.lens_path),
+            local_sha256=local_sha256,
             identity=identity,
             layers=layers,
             upstream_config=upstream_config,
@@ -240,29 +289,43 @@ def acquire_jlens_artifact(
         published = False
         unpublished_reason: Optional[str] = None
         displaced: Optional[Dict[str, Any]] = None
-        try:
-            incumbent = service.find(repo_of_model)
-            if incumbent is not None:
-                displaced = service._recipe_summary(incumbent)  # noqa: SLF001
-            service.commit(
-                repo_of_model,
+
+        # GUARDED LIKE THE FIT WORKER IS. `commit` raises ArtifactNotValidated
+        # for any report short of a full pass, and the handler below caught only
+        # the two gate refusals — so a lens that simply did not surface the
+        # fixture token, which is the LIKELIEST outcome for a foreign lens,
+        # crashed the task instead of returning its report. The caller then
+        # never saw `check_semantic`'s per-layer evidence, which is the only way
+        # to tell "bad lens" from "wrong fixture".
+        blocker = publication_blocker(report)
+        if blocker is not None:
+            unpublished_reason = blocker
+            logger.warning("Acquired lens not serviceable: %s", report.summary())
+        else:
+            try:
+                incumbent = service.find(repo_of_model)
+                if incumbent is not None:
+                    displaced = service._recipe_summary(incumbent)  # noqa: SLF001
+                service.commit(
+                    repo_of_model,
                 # ITS OWN WORDING. Copying the fit worker's sentence would put
                 # "requires a live external consumer" over an artifact nobody
                 # fitted here, implying a local fit was performed.
-                defer_consumer_checks(report),
-                allow_coverage_loss=allow_coverage_loss,
-                allow_quality_regression=allow_quality_regression,
-            )
-            published = True
-        except (
-            ArtifactCoverageLoss,
-            ArtifactQualityRegression,
-        ) as exc:
-            # THE STAGED ARTIFACT SURVIVES. It is a completed download; throwing
-            # it away because the gate refused means paying the bandwidth again
-            # to make the same decision with a flag set.
-            unpublished_reason = str(exc)
-            logger.warning("Acquired lens staged but not published: %s", exc)
+                    defer_consumer_checks(report),
+                    allow_coverage_loss=allow_coverage_loss,
+                    allow_quality_regression=allow_quality_regression,
+                )
+                published = True
+            except (
+                ArtifactCoverageLoss,
+                ArtifactQualityRegression,
+                ArtifactNotValidated,
+            ) as exc:
+                # THE STAGED ARTIFACT SURVIVES. It is a completed download;
+                # throwing it away because the gate refused means paying the
+                # bandwidth again to make the same decision with a flag set.
+                unpublished_reason = str(exc)
+                logger.warning("Acquired lens staged but not published: %s", exc)
 
         jlens_progress.update_row(
             self.request.id, status="completed", progress=100.0
@@ -284,8 +347,7 @@ def acquire_jlens_artifact(
             "displaced": displaced,
             "weight_identity": identity.state.value,
             "weight_identity_detail": identity.detail,
-            "bytes_identical": bool(remote.sha256)
-            and remote.sha256 == file_digest(ref.lens_path),
+            "bytes_identical": bytes_identical,
             "fitted_layers": layers.fitted,
             "target_layer": layers.target_layer,
             "degenerate_layers": layers.degenerate,
@@ -312,9 +374,22 @@ def acquire_jlens_artifact(
         if device == "cuda":
             from ..services.jlens_model_registry import clear_cache
 
-            # Same release the intervention task performs, and for the same
-            # reason: `clear_cache` runs gc then `empty_cache`, so a live
-            # reference in this frame keeps every block allocated.
+            # DROP EVERY REFERENCE, NOT JUST `loaded`. `clear_cache` runs gc then
+            # `empty_cache`, so anything still holding the model keeps every
+            # block allocated. The intervention task documents this as
+            # hardware-proven — 2570 MiB stayed resident when only `loaded` was
+            # nulled — and `_run_semantic_check` builds a `ReadoutService` with
+            # `model=loaded.model`, an independent strong reference that lives in
+            # its frame for as long as a propagating traceback holds it.
+            #
+            # `sys.exc_info()` is cleared for the same reason: on the failure
+            # path the traceback keeps every frame between here and the raise
+            # alive, and one of them is the semantic check's.
+            import sys
+
             loaded = None  # noqa: F841 - the assignment IS the release
+            payload = None  # noqa: F841 - d_model x d_model per layer, on CPU
+            checkpoint = None  # noqa: F841 - the undivided original
+            sys.exc_info()
             clear_cache()
             logger.info("Released the acquisition model from GPU memory")
