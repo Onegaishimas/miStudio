@@ -154,10 +154,19 @@ def _dtype_bytes(payload: Optional[Dict[Any, Any]]) -> int:
     if not payload:
         return 2
     try:
-        sizes = {t.element_size() for t in payload.values()}
+        total = sum(t.numel() * t.element_size() for t in payload.values())
+        elements = sum(t.numel() for t in payload.values())
     except AttributeError:
         return 2
-    return max(sizes) if sizes else 2
+    if not elements:
+        return 2
+    # THE EXACT FIGURE, not the widest dtype present. `validate` is also called
+    # on arbitrary mounted artifacts with no mixed-dtype gate, and taking the
+    # max there doubles both the publication ceiling and the materialisation
+    # threshold for a single stray fp32 tensor — weakening, in the permissive
+    # direction, the one check that gates publication, for exactly a
+    # nonconformant file. Both figures are already in hand.
+    return max(1, round(total / elements))
 
 
 class PayloadShapeError(ValueError):
@@ -399,6 +408,28 @@ class JLensArtifactService:
     def staging_dir(self, repo_id: str) -> Path:
         return self.root / f"{slug_for(repo_id)}{STAGING_SUFFIX}"
 
+    def _refuse_occupied_staging(self, repo_id: str, replace_staged: bool) -> None:
+        """Staging is not scratch space when something conformant is already in it.
+
+        A fit or an acquisition that validated but was refused by a gate is
+        deliberately KEPT there, and the documented recovery is to re-run with a
+        flag. This project once destroyed a converged 15-layer LFM2 artifact —
+        754 seconds of GPU time — by treating staging as disposable, and the
+        first version of this guard covered only the acquisition path, leaving
+        the FIT path (the one that caused that incident) still clearing
+        unconditionally.
+        """
+        existing = self.staging_dir(repo_id)
+        if replace_staged or not existing.is_dir():
+            return
+        if self._ref_for(existing) is None:
+            return
+        raise ArtifactConflict(
+            f"{existing.name} already holds a staged artifact for this model. "
+            "It may be completed work that a gate refused; inspect it, or pass "
+            "replace_staged to overwrite it deliberately."
+        )
+
     def _fresh_staging(self, repo_id: str) -> Tuple[str, Path, Path]:
         """A cleared staging directory, its slug, and the lens path to write.
 
@@ -446,19 +477,7 @@ class JLensArtifactService:
         directory with a second `.pt`, and a consumer globbing
         `*_jacobian_lens.pt` picks among multiple matches silently.
         """
-        # A STAGED ARTIFACT IS NOT SCRATCH SPACE. A fit that validated but was
-        # refused by a gate is deliberately KEPT there — this project once
-        # destroyed a converged 15-layer LFM2 artifact, 754 seconds of GPU time,
-        # by treating staging as disposable. Clearing it here to make room for a
-        # download that has not yet been validated repeats that with someone
-        # else's work.
-        existing = self.staging_dir(repo_id)
-        if existing.is_dir() and not replace_staged and self._ref_for(existing):
-            raise ArtifactConflict(
-                f"{existing.name} already holds a staged artifact for this "
-                "model. It may be a completed fit that a gate refused; inspect "
-                "it, or pass replace_staged to overwrite it deliberately."
-            )
+        self._refuse_occupied_staging(repo_id, replace_staged)
         _slug, staging, lens_path = self._fresh_staging(repo_id)
         shutil.copyfile(lens_source, lens_path)
         (staging / "config.yaml").write_text(config_yaml)
@@ -479,9 +498,25 @@ class JLensArtifactService:
         return ref
 
     def write_staged(
-        self, repo_id: str, jacobians: Dict[int, torch.Tensor], config_yaml: str
+        self,
+        repo_id: str,
+        jacobians: Dict[int, torch.Tensor],
+        config_yaml: str,
+        replace_staged: bool = True,
     ) -> ArtifactRef:
-        """Write a fit into staging, where nothing will serve it."""
+        """Write a fit into staging, where nothing will serve it.
+
+        `replace_staged` DEFAULTS TRUE HERE, and that is the historical
+        behaviour rather than a considered one: the fit worker banks on staging
+        being cleared before the next fit. It is a parameter so a caller that
+        cares can say otherwise — and so the two writers share one rule instead
+        of the acquisition path being the only one that checks.
+
+        The asymmetry is real and worth stating: a re-fit overwriting its own
+        staged output is the normal loop, while an ACQUISITION landing on staged
+        work belongs to a different operation entirely.
+        """
+        self._refuse_occupied_staging(repo_id, replace_staged)
         slug, staging, lens_path = self._fresh_staging(repo_id)
         # SAVE ON CPU, ALWAYS. `torch.save` records each tensor's device, and a
         # fit runs on the GPU — so an artifact written straight from a fit is

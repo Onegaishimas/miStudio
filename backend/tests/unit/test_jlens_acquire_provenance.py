@@ -356,8 +356,16 @@ class TestTheTransferRecord:
         record = json.loads((tmp_path / "acquisition.json").read_text())
         assert record["bytes"]["identical"] is False
 
-    def test_an_UNKNOWN_upstream_digest_is_not_identical_either(self, tmp_path):
-        """`None == None` must not read as a match."""
+    def test_an_UNKNOWN_upstream_digest_reads_as_UNKNOWN(self, tmp_path):
+        """Not as divergence — and this test used to assert the opposite.
+
+        The Hub exposes `lfs.sha256` only for LFS-tracked files, so every lens
+        below the threshold produced `identical: false`: a positive claim that
+        what we serve differs from what was published, from a comparison that
+        never ran. The MCP tool presents that field to an agent as a fact. This
+        module is explicit everywhere else that None is not False, and the first
+        version of this test PINNED the exception rather than preventing it.
+        """
         verdict = inspect_layers(_payload(), N_LAYERS, D_MODEL)
         write_acquisition_record(
             tmp_path,
@@ -371,7 +379,9 @@ class TestTheTransferRecord:
             upstream_config=None,
         )
         record = json.loads((tmp_path / "acquisition.json").read_text())
-        assert record["bytes"]["identical"] is False
+        assert record["bytes"]["identical"] is None, (
+            "an unmeasured comparison was recorded as a difference"
+        )
 
     def test_the_upstream_config_is_QUARANTINED_here(self, tmp_path):
         """It is the richest provenance available AND it must never reach
@@ -600,12 +610,18 @@ class TestTheReviewRound1Findings:
         # was right for every artifact this project fits and silently wrong for
         # an acquired fp32 one — and a caller that forgot to pass it got the
         # wrong ceiling and no error. There is no parameter to forget now.
+        # A FIXTURE WITH REAL MARGIN. At 64x64x4 layers the fp16 requirement is
+        # 32 KiB, which puts `container_allowance` in its `required // 2` branch
+        # — so the fp16 ceiling lands at exactly 2x required, exactly the fp32
+        # payload, and the test passed on 2 KB of zip-container overhead alone.
+        # A 3% margin is not a discrimination. Above 128 KiB the allowance caps
+        # at 64 KiB and the two ceilings separate properly.
         for dtype, label in ((torch.float16, "fp16"), (torch.float32, "fp32")):
             directory = tmp_path / label
             directory.mkdir()
             lens = directory / f"{label}_jacobian_lens.pt"
             torch.save(
-                {l: torch.zeros(64, 64, dtype=dtype) for l in range(4)}, lens
+                {l: torch.zeros(256, 256, dtype=dtype) for l in range(8)}, lens
             )
             (directory / "config.yaml").write_text("model: org/m\n")
             ref = ArtifactRef(
@@ -615,7 +631,7 @@ class TestTheReviewRound1Findings:
                 config_path=directory / "config.yaml",
             )
             report = JLensArtifactService(tmp_path).validate(
-                ref, d_model=64, expected_layers=range(4), n_vocab=5000
+                ref, d_model=256, expected_layers=range(8), n_vocab=5000
             )
             envelope = next(
                 r for r in report.results if r.check is CheckClass.ENVELOPE
@@ -679,4 +695,51 @@ class TestTheReviewRound1Findings:
             "org/m", source, "model: org/m\n", replace_staged=True
         )
         assert ref.lens_path.exists()
+
+    def test_the_element_size_is_the_EXACT_average_not_the_widest(self):
+        """`max()` over a mixed payload doubled the ceiling for one stray fp32
+        tensor — weakening, in the permissive direction, the single check that
+        gates publication, for exactly a nonconformant file. `validate` is also
+        called on arbitrary mounted artifacts with no mixed-dtype gate.
+
+        MUTATION CONTROL: `max(t.element_size() ...)` and this fails.
+        """
+        from src.services.jlens_artifact_service import _dtype_bytes
+
+        assert _dtype_bytes({0: torch.zeros(10, 10, dtype=torch.float16)}) == 2
+        assert _dtype_bytes({0: torch.zeros(10, 10, dtype=torch.float32)}) == 4
+        # Mostly fp16 with one fp32 layer: nearer 2 than 4, and NOT 4.
+        mixed = {
+            0: torch.zeros(100, 100, dtype=torch.float16),
+            1: torch.zeros(100, 100, dtype=torch.float16),
+            2: torch.zeros(100, 100, dtype=torch.float16),
+            3: torch.zeros(10, 10, dtype=torch.float32),
+        }
+        assert _dtype_bytes(mixed) == 2, (
+            "one small fp32 tensor set the ceiling for the whole artifact"
+        )
+
+    def test_the_disk_guard_dedups_on_the_DEVICE(self, tmp_path):
+        """`(total, free)` collapses two genuinely distinct mounts whose usage
+        coincides — two same-size volumes from one StorageClass, both freshly
+        provisioned, match on both numbers — and the one it would skip is the
+        cache volume the guard exists to cover.
+
+        MUTATION CONTROL: key on `(total, free)` and this fails.
+        """
+        import inspect
+
+        from src.services import jlens_acquire_service as module
+
+        source = inspect.getsource(module.check_free_space)
+        assert "st_dev" in source, "the guard no longer keys on the device"
+        # And it still refuses when the ONE volume is too small, or the dedup
+        # would have made the whole check vacuous.
+        from src.services.jlens_acquire_service import (
+            AcquisitionRefused,
+            check_free_space,
+        )
+
+        with pytest.raises(AcquisitionRefused):
+            check_free_space(tmp_path, tmp_path, needed_bytes=2**60)
 

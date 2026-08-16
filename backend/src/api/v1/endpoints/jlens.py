@@ -1582,54 +1582,6 @@ async def token_check(
     return out
 
 
-def _full_fit_ceiling(dims: Dict[str, int], dtype_bytes: int = 2) -> int:
-    """The largest a lens for these weights could legitimately be.
-
-    Mirrors `check_envelope`'s ceiling at FULL coverage. Used pre-flight, where
-    the artifact's own layer count is not yet knowable: an artifact bigger than
-    this is materialising the token dictionary whatever its coverage, and that
-    is the single most likely implementation error BR-006 guards against.
-
-    The lower bound is deliberately NOT applied here — it scales with the layer
-    count, and a partial lens is legitimately far smaller.
-    """
-    from ....services.jlens_validation import container_allowance
-
-    required = dims["d_model"] * dims["d_model"] * dtype_bytes * dims["n_layers"]
-    return int(required * 1.5) + container_allowance(required)
-
-
-def _model_dims(record: Any) -> Optional[Dict[str, int]]:
-    """`d_model`, `n_layers`, `n_vocab` from the Model row, or None.
-
-    FROM `architecture_config`, WITHOUT LOADING WEIGHTS. The row records what
-    the config.json said at download time, which is enough to bound a file size
-    — and loading a model to decide whether to download a file is the cost this
-    whole preview exists to avoid.
-
-    NONE WHEN ANY OF THE THREE IS MISSING, and the caller then reports no
-    envelope verdict rather than a guessed one. `check_envelope`'s docstring is
-    explicit that its bounds are "derived, never constants"; feeding it a
-    defaulted dimension would produce a bound derived from nothing, which passes
-    on one model and misses a real materialisation on another.
-    """
-    config = getattr(record, "architecture_config", None) or {}
-    if not isinstance(config, dict):
-        return None
-    d_model = config.get("hidden_size") or config.get("d_model")
-    n_layers = config.get("num_hidden_layers") or config.get("n_layer")
-    n_vocab = config.get("vocab_size")
-    try:
-        dims = {
-            "d_model": int(d_model),
-            "n_layers": int(n_layers),
-            "n_vocab": int(n_vocab),
-        }
-    except (TypeError, ValueError):
-        return None
-    return dims if all(v > 0 for v in dims.values()) else None
-
-
 class AcquirePreviewRequest(BaseModel):
     """Look before fetching. Read-only, and that is the point."""
 
@@ -1686,6 +1638,7 @@ async def acquire_preview(
     from ....services.huggingface_sae_service import resolve_hf_token
     from ....services.jlens_acquire_service import (
         AcquisitionRefused,
+        model_dims,
         preview_envelope_verdict,
         preview_repo,
     )
@@ -1700,7 +1653,7 @@ async def acquire_preview(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No model with id {request.model_id!r}",
             )
-        dims = _model_dims(record)
+        dims = model_dims(record)
 
     try:
         preview = preview_repo(
@@ -1755,6 +1708,11 @@ class AcquireRequest(BaseModel):
     allow_coverage_loss: bool = False
     #: The incumbent is a stronger fit. Refused by default.
     allow_quality_regression: bool = False
+    #: Overwrite an artifact already sitting in this model's staging directory.
+    #: Refused by default — it may be completed work that a gate declined to
+    #: publish, and the documented recovery is to re-run with a flag rather than
+    #: to have it deleted underneath you.
+    replace_staged: bool = False
 
 
 @router.post(
@@ -1806,8 +1764,14 @@ async def acquire_artifact(
     # 2. IT MUST FIT ON DISK. No download path in this project checked, and the
     #    data volume also holds every model, dataset and checkpoint.
     try:
+        # THE CACHE VOLUME TOO. `jlens_artifacts_dir` lives inside `data_dir`,
+        # so the original pair probed one filesystem twice — and after the
+        # device-dedup that became a single probe of a single volume, while the
+        # download lands in the HuggingFace cache FIRST.
         check_free_space(
-            settings.jlens_artifacts_dir, settings.data_dir, needed_bytes=0
+            settings.jlens_artifacts_dir,
+            settings.hf_cache_dir,
+            needed_bytes=0,
         )
     except AcquisitionRefused as exc:
         raise HTTPException(
@@ -1822,6 +1786,7 @@ async def acquire_artifact(
         access_token=request.access_token,
         allow_coverage_loss=request.allow_coverage_loss,
         allow_quality_regression=request.allow_quality_regression,
+        replace_staged=request.replace_staged,
     )
     # VISIBLE WHILE IT RUNS, like every other J-space task. Opened here rather
     # than in the worker so a job that never gets picked up still appears.
