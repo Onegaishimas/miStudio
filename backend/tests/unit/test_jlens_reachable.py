@@ -885,6 +885,7 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
 
         task = MagicMock()
         task.delay.return_value = MagicMock(id="t-1")
+        task.apply_async.return_value = MagicMock(id="t-1")
         with patch(
             "src.workers.jlens_acquire_tasks.acquire_jlens_artifact", task
         ), patch("src.workers.jlens_progress.open_row") as open_row:
@@ -900,6 +901,7 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
         _out, exc, task, _row = self._call(None, monkeypatch)
         assert exc is not None and getattr(exc, "status_code", None) == 404
         assert task.delay.call_count == 0
+        assert task.apply_async.call_count == 0
 
     def test_a_model_whose_WEIGHTS_ARE_ABSENT_is_409_and_queues_nothing(
         self, monkeypatch
@@ -924,6 +926,7 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
         assert exc is not None and getattr(exc, "status_code", None) == 409
         assert "not downloaded" in str(getattr(exc, "detail", ""))
         assert task.delay.call_count == 0, "a doomed job took a GPU slot"
+        assert task.apply_async.call_count == 0, "a doomed job took a GPU slot"
 
     def test_INSUFFICIENT_DISK_is_507_and_queues_nothing(self, monkeypatch):
         """No download path in this project checked disk. The data volume also
@@ -944,6 +947,7 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
             _out, exc, task, _row = self._call(record, monkeypatch)
         assert exc is not None and getattr(exc, "status_code", None) == 507
         assert task.delay.call_count == 0
+        assert task.apply_async.call_count == 0
 
     def test_a_GOOD_request_queues_with_the_arguments_it_was_given(
         self, monkeypatch
@@ -961,8 +965,12 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
                 record, monkeypatch, revision="abc123", allow_coverage_loss=True
             )
         assert exc is None, exc
-        assert task.delay.call_count == 1
-        sent = task.delay.call_args.kwargs
+        # QUEUED VIA apply_async, because the endpoint overrides `kwargsrepr` to
+        # keep the HuggingFace token out of the message headers — Celery renders
+        # that repr into every `task-sent` event on `celeryev`.
+        assert task.apply_async.call_count == 1
+        assert task.delay.call_count == 0
+        sent = task.apply_async.call_args.kwargs["kwargs"]
         assert sent["repo_id"] == "org/lenses"
         assert sent["path_in_repo"] == "a/b_jacobian_lens.pt"
         assert sent["revision"] == "abc123"
@@ -988,4 +996,32 @@ class TestTheEndpointRefusesWhatIsKnowableWITHOUTTheGPU:
         assert open_row.call_count == 1
         args = open_row.call_args.args
         assert args[0] == "jlens_acquire", args
+
+    def test_the_TOKEN_does_not_reach_the_message_headers(self, monkeypatch):
+        """Celery renders `kwargsrepr` into the message headers, and
+        `task_send_sent_event` is on — so every `task-sent` event published to
+        `celeryev` carries it, readable by Flower or any monitoring consumer.
+        The BODY still carries the real value, so the worker is unaffected.
+
+        MUTATION CONTROL: queue with `.delay(...)` and this fails.
+        """
+        import types
+        from unittest.mock import patch
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/m", file_path="/x")
+        with patch(
+            "src.services.jlens_model_registry.locate_weights",
+            return_value=("org/m", "/x"),
+        ), patch("src.services.jlens_acquire_service.check_free_space"):
+            _out, exc, task, _row = self._call(
+                record, monkeypatch, access_token="hf_SECRET_TOKEN"
+            )
+        assert exc is None, exc
+        call = task.apply_async.call_args.kwargs
+        assert call["kwargs"]["access_token"] == "hf_SECRET_TOKEN", (
+            "the worker must still receive the real token"
+        )
+        assert "hf_SECRET_TOKEN" not in call["kwargsrepr"], (
+            "the token is rendered into the message headers and the task-sent event"
+        )
 

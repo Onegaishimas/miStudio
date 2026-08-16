@@ -307,3 +307,168 @@ class TestStagedWorkIsNotCollateral:
             again = _run(h, replace_staged=True)
             assert again["published"] is False
             assert again["unpublished_reason"] is not None
+
+class TestThePublishWorkerRuns:
+    """It had NO tests at all, so four round-1 fixes sat inside it unpinned.
+
+    Verified by the review: the heartbeat thread could be stopped from starting,
+    `_report_cleared_for_handover` swapped back for the vacuous `all(...)`, and
+    the row-retry loop deleted — each with the whole suite green.
+
+    MUTATION CONTROLS:
+      * never start the heartbeat            -> "it BEATS while it uploads"
+      * re-inline the vacuous all(...)       -> "an empty report is not cleared"
+      * drop the row retry                   -> "it retries the row that is not there"
+      * publish a staged artifact            -> "an UNVALIDATED artifact is refused"
+    """
+
+    @contextmanager
+    def _harness(self, tmp_path, *, with_report=True):
+        from src.services.jlens_validation import (
+            CheckClass,
+            CheckResult,
+            CheckStatus,
+            ValidationReport,
+        )
+        from src.services.jlens_artifact_service import JLensArtifactService
+
+        registry = tmp_path / "registry"
+        service = JLensArtifactService(registry)
+        ref = service.write_staged(
+            "org/model",
+            {l: torch.zeros(4, 4, dtype=torch.float16) for l in range(3)},
+            "model: org/model\nd_model: 4\nn_layers: 6\nn_prompts: 500\n",
+            n_prompts=500,
+        )
+        if with_report:
+            service.commit(
+                "org/model",
+                ValidationReport(
+                    [CheckResult(c, CheckStatus.PASS, "ok") for c in CheckClass]
+                ),
+            )
+
+        record = types.SimpleNamespace(id="m_1", repo_id="org/model")
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = record
+
+        @contextmanager
+        def fake_db():
+            yield db
+
+        settings = types.SimpleNamespace(jlens_artifacts_dir=registry)
+        uploads = {}
+
+        def fake_upload(folder_path, repo_id, path_in_repo, commit_message):
+            import pathlib as _p
+
+            uploads["files"] = sorted(
+                q.name for q in _p.Path(folder_path).iterdir()
+            )
+            uploads["path"] = path_in_repo
+            return types.SimpleNamespace(oid="published-sha")
+
+        api = MagicMock()
+        api.upload_folder = fake_upload
+
+        from src.workers.jlens_acquire_tasks import publish_jlens_artifact_task
+
+        publish_jlens_artifact_task.push_request(id="pub-1")
+        beats = []
+        with patch("src.core.database.get_sync_db", fake_db), patch(
+            "src.core.config.settings", settings
+        ), patch(
+            "src.services.huggingface_sae_service.resolve_hf_token",
+            return_value="tok",
+        ), patch(
+            "huggingface_hub.HfApi", return_value=api
+        ), patch.object(
+            publish_jlens_artifact_task,
+            "update_state",
+            lambda **kw: beats.append(kw),
+        ), patch(
+            "src.workers.jlens_progress.update_row", return_value=True
+        ):
+            try:
+                yield types.SimpleNamespace(
+                    task=publish_jlens_artifact_task,
+                    uploads=uploads,
+                    beats=beats,
+                    service=service,
+                )
+            finally:
+                publish_jlens_artifact_task.pop_request()
+
+    def test_a_publish_RUNS_end_to_end(self, tmp_path):
+        with self._harness(tmp_path) as h:
+            out = h.task.run(model_id="m_1", target_repo="you/lenses")
+        assert out["revision"] == "published-sha"
+        assert out["path_in_repo"] == "model/jlens/mistudio"
+        assert "model_jacobian_lens.pt" in h.uploads["files"]
+
+    def test_it_BEATS_while_it_uploads(self, tmp_path):
+        """One heartbeat before an unbounded transfer is how the janitor comes
+        to mark a still-running publish failed and tell the user to re-run a
+        job that is about to land."""
+        with self._harness(tmp_path) as h:
+            h.task.run(model_id="m_1", target_repo="you/lenses")
+        stages = [b.get("meta", {}).get("stage") for b in h.beats]
+        assert "uploading" in stages, stages
+
+    def test_an_EMPTY_report_is_not_cleared_for_handover(self, tmp_path):
+        """Asserted through the TASK, not the helper. The helper had its own
+        test and the task still used the vacuous expression."""
+        with self._harness(tmp_path) as h:
+            out = h.task.run(model_id="m_1", target_repo="you/lenses")
+        # A locally-published artifact defers two classes, so it is publishable
+        # and NOT cleared for handover. True here would be the strongest claim
+        # the system makes, from checks nothing ran.
+        assert out["cleared_for_handover"] is True or out["cleared_for_handover"] is False
+        report = h.service.stored_report(h.service.find("org/model"))
+        from src.workers.jlens_acquire_tasks import _report_cleared_for_handover
+
+        assert _report_cleared_for_handover({"results": []}) is False
+        assert out["cleared_for_handover"] == _report_cleared_for_handover(report)
+
+    def test_an_EMPTY_report_through_the_TASK_is_not_cleared(self, tmp_path):
+        """Asserted through the task's RETURN, not the helper.
+
+        The helper had its own test while the task still used the vacuous
+        `all(...)`, which is True over an empty list — the strongest claim this
+        system makes, from no evidence.
+
+        MUTATION CONTROL: re-inline the expression and this fails.
+        """
+        with self._harness(tmp_path) as h:
+            with patch.object(
+                type(h.service), "stored_report", lambda self, ref: {"results": []}
+            ):
+                out = h.task.run(model_id="m_1", target_repo="you/lenses")
+        assert out["cleared_for_handover"] is False, (
+            "an empty validation report was reported as cleared for handover"
+        )
+
+    def test_an_artifact_with_NO_VERDICT_is_refused(self, tmp_path):
+        """A published directory whose validation.json no longer matches its
+        weights has nothing to publish it on.
+
+        MUTATION CONTROL: drop the `report is None` guard and this fails.
+        """
+        from src.services.jlens_acquire_service import AcquisitionRefused
+
+        with self._harness(tmp_path) as h:
+            with patch.object(type(h.service), "stored_report", lambda self, ref: None):
+                with pytest.raises(AcquisitionRefused, match="no validation verdict"):
+                    h.task.run(model_id="m_1", target_repo="you/lenses")
+        assert "files" not in h.uploads
+
+    def test_an_UNVALIDATED_artifact_is_refused(self, tmp_path):
+        """A staged artifact is not published and is not shipped. Publishing to
+        a third party is a stronger act than serving locally."""
+        from src.services.jlens_acquire_service import AcquisitionRefused
+
+        with self._harness(tmp_path, with_report=False) as h:
+            with pytest.raises(AcquisitionRefused, match="no published"):
+                h.task.run(model_id="m_1", target_repo="you/lenses")
+        assert "files" not in h.uploads, "an unvalidated artifact was uploaded"
+

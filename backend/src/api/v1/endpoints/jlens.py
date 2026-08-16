@@ -1582,6 +1582,25 @@ async def token_check(
     return out
 
 
+def _queue_without_leaking_token(task: Any, **kwargs: Any) -> Any:
+    """Queue a task whose kwargs include a credential.
+
+    CELERY PUTS `kwargsrepr` IN THE MESSAGE HEADERS, and `task_send_sent_event`
+    is on — so every `task-sent` event published to `celeryev` carries the
+    rendered kwargs, readable by Flower, `celery events`, or any monitoring
+    consumer attached to the broker. Verified: a HuggingFace token passed to
+    `.delay()` appears in `message.headers` verbatim.
+
+    `kwargsrepr` is what headers and events render; the BODY still carries the
+    real values, so the worker is unaffected. Redacting it is the difference
+    between a write credential sitting in a monitoring stream and not.
+    """
+    redacted = {
+        k: ("***" if "token" in k else v) for k, v in kwargs.items()
+    }
+    return task.apply_async(kwargs=kwargs, kwargsrepr=repr(redacted))
+
+
 class AcquirePreviewRequest(BaseModel):
     """Look before fetching. Read-only, and that is the point."""
 
@@ -1778,7 +1797,8 @@ async def acquire_artifact(
             status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=str(exc)
         ) from exc
 
-    task = acquire_jlens_artifact.delay(
+    task = _queue_without_leaking_token(
+        acquire_jlens_artifact,
         model_id=request.model_id,
         repo_id=request.repo_id,
         path_in_repo=request.path_in_repo,
@@ -1888,7 +1908,8 @@ async def publish_artifact_endpoint(
             ),
         )
 
-    task = publish_jlens_artifact_task.delay(
+    task = _queue_without_leaking_token(
+        publish_jlens_artifact_task,
         model_id=request.model_id,
         target_repo=request.target_repo,
         access_token=request.access_token,

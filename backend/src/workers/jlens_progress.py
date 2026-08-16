@@ -129,6 +129,37 @@ def update_row(
     return False
 
 
+def mark_running(task_id: str, progress: float = 1.0, attempts: int = 10) -> bool:
+    """First transition to `running`, RETRIED past the row's own creation.
+
+    THE ROW MAY NOT EXIST YET. Every J-space endpoint opens it AFTER `.delay()`,
+    so a worker that picks the task up immediately can arrive before the insert
+    commits — `update_row` then finds nothing, returns, and the row lands as
+    "queued 0%" and never moves. That reads as a job that never started rather
+    than one already running.
+
+    FOR THE FIRST-AND-ONLY EARLY TRANSITION. Acquire and publish mark themselves
+    running once and then do long work, so a missed write is permanent. The fit,
+    band and intervention tasks write `running` from a REPEATING callback — one
+    per prompt or per layer — so a first write that loses the race is corrected
+    milliseconds later by the next, and putting a sleeping retry inside a hot
+    callback would cost more than the race does. They deliberately keep
+    `update_row`.
+    """
+    import time as _time
+
+    for _attempt in range(max(1, attempts)):
+        if update_row(task_id, status="running", progress=progress):
+            return True
+        _time.sleep(0.1)
+    logger.warning(
+        "No task_queue row for %s after %d attempts; it will not show progress",
+        task_id,
+        attempts,
+    )
+    return False
+
+
 def fail_row(task_id: str, exc: BaseException) -> None:
     """Record a task's OWN failure, with its OWN reason.
 
