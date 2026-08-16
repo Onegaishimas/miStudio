@@ -1,0 +1,424 @@
+/**
+ * Adopt a lens someone else fitted, or publish one of ours.
+ *
+ * Fitting is a long GPU job per model, and a large body of pre-fitted lenses is
+ * already published. This is the cheaper route when one exists — minutes and a
+ * download instead of a GPU hour — and the other direction, so a lens fitted
+ * here can be mounted by anyone else.
+ *
+ * PREVIEW BEFORE FETCH, ALWAYS. A mistyped path otherwise costs a
+ * multi-gigabyte download and a slot on the single-GPU queue before anything
+ * notices. The preview is read-only and returns the resolved commit, so the file
+ * that was inspected is the file that arrives.
+ */
+
+import { useState } from 'react';
+import { Download, Eye, EyeOff, Loader2, Upload } from 'lucide-react';
+
+import { jlensApi } from '../../api/jlens';
+import type {
+  JLensAcquireCandidate,
+  JLensAcquirePreview,
+} from '../../types/jlens';
+
+interface AcquireLensCardProps {
+  /** The model a downloaded lens would be attached to. */
+  modelId: string;
+  modelRepoId: string;
+  /**
+   * Whether this model's WEIGHTS are present.
+   *
+   * A lens is unusable without them — the readout runs a real forward pass, and
+   * validating an acquired lens IS a readout. The server refuses at the door,
+   * and saying so here means the prerequisite is visible before a 265 MB fetch
+   * rather than discovered after it.
+   */
+  weightsPresent: boolean;
+  /** Whether a validated artifact already exists, i.e. whether publish is live. */
+  hasArtifact: boolean;
+  onQueued?: (taskId: string, label: string) => void;
+}
+
+function formatBytes(n: number | null): string {
+  if (!n) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = n;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+export function AcquireLensCard({
+  modelId,
+  modelRepoId,
+  weightsPresent,
+  hasArtifact,
+  onQueued,
+}: AcquireLensCardProps) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'acquire' | 'publish'>('acquire');
+  const [repoId, setRepoId] = useState('neuronpedia/jacobian-lens');
+  const [token, setToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [preview, setPreview] = useState<JLensAcquirePreview | null>(null);
+  const [selected, setSelected] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Publish-side state.
+  const [targetRepo, setTargetRepo] = useState('');
+  const [dataset, setDataset] = useState('mistudio');
+  const [createRepo, setCreateRepo] = useState(false);
+
+  const runPreview = async () => {
+    setBusy(true);
+    setError(null);
+    setPreview(null);
+    setSelected('');
+    try {
+      const out = await jlensApi.previewRepo({
+        repo_id: repoId.trim(),
+        model_id: modelId || undefined,
+        access_token: token || undefined,
+      });
+      setPreview(out);
+      if (!out.candidates.length) {
+        setError(`No .pt or .safetensors files in ${out.repo_id}.`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not read that repo.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runAcquire = async () => {
+    if (!selected || !preview) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const accepted = await jlensApi.acquire({
+        model_id: modelId,
+        repo_id: preview.repo_id,
+        path_in_repo: selected,
+        // THE RESOLVED SHA, not the branch the preview started from. `main`
+        // moves, and an acquisition pinned to it is not reproducible.
+        revision: preview.revision,
+        access_token: token || undefined,
+      });
+      setNote(`Acquiring — queued as ${accepted.task_id.slice(0, 8)}…`);
+      onQueued?.(accepted.task_id, 'Acquire');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The acquisition was refused.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runPublish = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const accepted = await jlensApi.publish({
+        model_id: modelId,
+        target_repo: targetRepo.trim(),
+        access_token: token || undefined,
+        dataset: dataset.trim(),
+        create_repo: createRepo,
+      });
+      setNote(`Publishing — queued as ${accepted.task_id.slice(0, 8)}…`);
+      onQueued?.(accepted.task_id, 'Publish');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The upload was refused.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chosen: JLensAcquireCandidate | undefined = preview?.candidates.find(
+    (c) => c.path === selected,
+  );
+
+  return (
+    <section
+      className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800"
+      data-testid="jlens-acquire"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          Published lenses
+        </span>
+        <span className="text-[10px] text-slate-500 dark:text-slate-500">
+          download one, or share yours
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+        >
+          <Download className="h-3 w-3" />
+          {open ? 'Close' : 'Browse…'}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div className="flex gap-1 text-xs">
+            {(['acquire', 'publish'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`rounded px-2 py-1 ${
+                  mode === m
+                    ? 'bg-emerald-600 text-white'
+                    : 'border border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-300'
+                }`}
+              >
+                {m === 'acquire' ? 'Download' : 'Publish'}
+              </button>
+            ))}
+          </div>
+
+          {/* THE PREREQUISITE, STATED BEFORE THE FETCH. Validating an acquired
+              lens means reading out through it, which needs the weights. The
+              server refuses at the door; discovering that after a 265 MB
+              download is the expensive way to learn it. */}
+          {mode === 'acquire' && !weightsPresent && (
+            <p
+              className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+              data-testid="jlens-acquire-weights-missing"
+            >
+              <strong>{modelRepoId}</strong> is not downloaded. A lens cannot be
+              validated — or read out — without its weights, so this will be
+              refused. Download the model first.
+            </p>
+          )}
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-600 dark:text-slate-400">
+              {mode === 'acquire'
+                ? 'Source repository'
+                : 'Target repository'}
+            </span>
+            <input
+              type="text"
+              value={mode === 'acquire' ? repoId : targetRepo}
+              onChange={(e) =>
+                mode === 'acquire'
+                  ? setRepoId(e.target.value)
+                  : setTargetRepo(e.target.value)
+              }
+              placeholder={mode === 'acquire' ? 'owner/repo' : 'you/jacobian-lenses'}
+              data-testid="jlens-acquire-repo"
+              className="rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-600 dark:text-slate-400">
+              HuggingFace token{' '}
+              {mode === 'publish' && (
+                <span className="text-amber-700 dark:text-amber-400">
+                  — needs WRITE access
+                </span>
+              )}
+            </span>
+            <div className="flex gap-1">
+              <input
+                type={showToken ? 'text' : 'password'}
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="falls back to the configured token"
+                data-testid="jlens-acquire-token"
+                className="flex-1 rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken((v) => !v)}
+                aria-label={showToken ? 'Hide token' : 'Show token'}
+                className="rounded border border-slate-300 px-2 dark:border-slate-600"
+              >
+                {showToken ? (
+                  <EyeOff className="h-3 w-3" />
+                ) : (
+                  <Eye className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+          </label>
+
+          {mode === 'acquire' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void runPreview()}
+                disabled={busy || !repoId.trim()}
+                className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
+              >
+                {busy ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Reading…
+                  </span>
+                ) : (
+                  'Look inside'
+                )}
+              </button>
+
+              {preview && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-500">
+                    {preview.candidates.length} candidate
+                    {preview.candidates.length === 1 ? '' : 's'} at{' '}
+                    <span className="font-mono">
+                      {preview.revision.slice(0, 12)}
+                    </span>
+                    {' — pinned, so what you inspect is what arrives'}
+                  </p>
+                  <ul className="max-h-56 space-y-[2px] overflow-y-auto">
+                    {preview.candidates.map((c) => (
+                      <li key={c.path}>
+                        <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-[2px] hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                          <input
+                            type="radio"
+                            name="jlens-candidate"
+                            checked={selected === c.path}
+                            onChange={() => setSelected(c.path)}
+                            className="h-3 w-3"
+                          />
+                          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-800 dark:text-slate-100">
+                            {c.path}
+                          </span>
+                          <span className="shrink-0 font-mono text-[10px] tabular-nums text-slate-500">
+                            {formatBytes(c.size_bytes)}
+                          </span>
+                          {/* THE FIELD TO READ FIRST. A file beside a config
+                              declares which weights it was fitted for, so its
+                              identity can be CHECKED; one without leaves the
+                              pairing resting on your assertion. */}
+                          <span
+                            className={`shrink-0 rounded px-1 text-[9px] ${
+                              c.has_config
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                            }`}
+                          >
+                            {c.has_config ? 'identity checkable' : 'unverified'}
+                          </span>
+                          {c.fits_envelope === false && (
+                            <span
+                              className="shrink-0 rounded bg-red-100 px-1 text-[9px] text-red-800 dark:bg-red-900/40 dark:text-red-300"
+                              title={c.envelope_detail ?? undefined}
+                            >
+                              too large
+                            </span>
+                          )}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {chosen && !chosen.has_config && (
+                <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                  This file names no model, so weight identity cannot be checked.
+                  It will be adopted as <strong>unverified</strong> and the
+                  artifact will record that the pairing rests on your assertion.
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void runAcquire()}
+                disabled={busy || !selected}
+                data-testid="jlens-acquire-run"
+                className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
+              >
+                Download &amp; validate
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    Corpus segment
+                  </span>
+                  <input
+                    type="text"
+                    value={dataset}
+                    onChange={(e) => setDataset(e.target.value)}
+                    data-testid="jlens-publish-dataset"
+                    className="rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+                <label className="mt-5 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={createRepo}
+                    onChange={(e) => setCreateRepo(e.target.checked)}
+                    className="h-3 w-3"
+                  />
+                  Create the repo if absent
+                </label>
+              </div>
+
+              {/* WHAT LEAVES AND WHAT DOES NOT, before the button rather than
+                  after. The local validation verdict records two checks as
+                  DEFERRED because nothing has ever run them, and shipping it
+                  would invite a reader to take our verdict for the lens's own. */}
+              <p
+                className="text-[10px] text-slate-500 dark:text-slate-500"
+                data-testid="jlens-publish-note"
+              >
+                Uploads the checkpoint, its recipe, any recorded interventions and
+                the convergence trace, plus a README stating what was and was not
+                checked. The local validation verdict does <strong>not</strong>{' '}
+                travel — two of its checks need a live external consumer and have
+                never been run.
+              </p>
+
+              {!hasArtifact && (
+                <p
+                  className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                  data-testid="jlens-publish-no-artifact"
+                >
+                  There is no published lens for {modelRepoId} yet. Fit or
+                  download one first — a staged artifact is not published and is
+                  not shipped.
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void runPublish()}
+                disabled={busy || !targetRepo.trim() || !hasArtifact}
+                data-testid="jlens-publish-run"
+                className="flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
+              >
+                <Upload className="h-3 w-3" />
+                Publish
+              </button>
+            </>
+          )}
+
+          {note && (
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+              {note}
+            </p>
+          )}
+          {error && (
+            <p className="text-[11px] text-red-600 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

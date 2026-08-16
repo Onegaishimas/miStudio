@@ -1071,6 +1071,8 @@ def publish_artifact(
             outbox / lens_files[0].name,
         )
         for name in PUBLISHED_FILES:
+            if name == "interventions.json":
+                continue  # MUTATION M1
             source = directory / name
             if source.is_file():
                 shutil.copyfile(source, outbox / name)

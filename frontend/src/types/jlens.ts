@@ -353,3 +353,51 @@ export interface JLensTokenCheck {
   detail: string;
 }
 
+/** One downloadable candidate in a HuggingFace repo. */
+export interface JLensAcquireCandidate {
+  path: string;
+  size_bytes: number | null;
+  /** Sits beside a `config.yaml`, so weight identity can be CHECKED rather than
+   *  asserted by the operator. The field to read first. */
+  has_config: boolean;
+  has_convergence: boolean;
+  /** Null when no model was named — no verdict rather than a guessed one. */
+  fits_envelope: boolean | null;
+  envelope_detail: string | null;
+}
+
+export interface JLensAcquirePreview {
+  repo_id: string;
+  /** The RESOLVED commit. `main` moves, so an acquisition pinned to it is not a
+   *  reproducible statement. */
+  revision: string;
+  candidates: JLensAcquireCandidate[];
+}
+
+export interface JLensAcquirePreviewRequest {
+  repo_id: string;
+  revision?: string;
+  model_id?: string;
+  access_token?: string;
+}
+
+export interface JLensAcquireRequest {
+  model_id: string;
+  repo_id: string;
+  path_in_repo: string;
+  revision?: string;
+  access_token?: string;
+  allow_coverage_loss?: boolean;
+  allow_quality_regression?: boolean;
+  replace_staged?: boolean;
+}
+
+export interface JLensPublishRequest {
+  model_id: string;
+  target_repo: string;
+  access_token?: string;
+  dataset?: string;
+  create_repo?: boolean;
+  private?: boolean;
+}
+
