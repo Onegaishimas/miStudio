@@ -26,6 +26,11 @@ const LABELS: Partial<Record<TaskType, string>> = {
   [TaskType.JLENS_INTERVENTION]: 'Running an intervention',
   [TaskType.JLENS_READOUT]: 'Reading out',
   [TaskType.JLENS_PROBE]: 'Probing',
+  // WITHOUT THESE THE RAW TYPE RENDERS. `LABELS` is a Partial record and the
+  // component falls back to `String(task_type)`, so a missing entry shows
+  // `jlens_acquire` to the user rather than words.
+  [TaskType.JLENS_ACQUIRE]: 'Downloading a published lens',
+  [TaskType.JLENS_PUBLISH]: 'Publishing a lens',
 };
 
 /**

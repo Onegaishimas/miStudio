@@ -1488,6 +1488,23 @@ describe('JLensPanel — ranked readouts and interventions', () => {
     ).toEqual([6, 7]);
   });
 
+  it('MOUNTS the acquire card \u2014 the only way to reach a published lens', async () => {
+    /**
+     * REACHABILITY, not existence. `AcquireLensCard.test.tsx` renders the
+     * component directly, so deleting it from this panel would leave that file
+     * green while no user could download or publish anything — the shape of the
+     * 16 MCP tools that shipped fully tested and unregistered.
+     *
+     * MUTATION CONTROL: remove `<AcquireLensCard />` from the panel and this
+     * fails.
+     */
+    render(<JLensPanel />);
+    seed(makeReadout([0, 1, 2], ['LOGIT_LENS'], 4));
+    await waitFor(() =>
+      expect(screen.getByTestId('jlens-acquire')).toBeInTheDocument()
+    );
+  });
+
   it('MOUNTS the layer-range picker \u2014 the only way a range is ever set', async () => {
     /**
      * REACHABILITY, not existence. `LayerRangePicker.test.tsx` renders the

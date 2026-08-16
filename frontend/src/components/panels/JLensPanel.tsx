@@ -20,6 +20,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronRight, Eraser, Layers, Link2, Pin, PinOff } from 'lucide-react';
+import { AcquireLensCard } from '../jlens/AcquireLensCard';
 import { ArtifactsStrip } from '../jlens/ArtifactsStrip';
 import { ByLayerRail } from '../jlens/ByLayerRail';
 import { EvidenceRungCard } from '../jlens/EvidenceRungCard';
@@ -548,6 +549,30 @@ export function JLensPanel() {
                 ])
               ).sort((a, b) => a - b)
             )
+          }
+        />
+      </div>
+
+      {/* MOUNTED BESIDE THE FITTER, because they are two routes to the same
+          thing and the cheaper one should not be hidden. A published lens costs
+          a download; fitting costs a GPU hour. */}
+      <div className="mb-4">
+        <AcquireLensCard
+          modelId={modelId}
+          modelRepoId={modelRepoId}
+          // A lens is unusable without its weights — validating one MEANS
+          // reading out through it — so the prerequisite is shown before the
+          // fetch rather than discovered after it.
+          weightsPresent={Boolean(
+            models.find((m) => m.id === modelId)?.status === 'ready',
+          )}
+          hasArtifact={artifacts.some(
+            (a) => a.slug === artifactSlugFor(modelRepoId),
+          )}
+          // The note is the only surface a queued job has here; Running Work
+          // polls the queue independently and shows it by task type.
+          onQueued={(_taskId, label) =>
+            setInterventionNote(`${label} queued — see Running Work`)
           }
         />
       </div>

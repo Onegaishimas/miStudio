@@ -43,6 +43,8 @@ export enum TaskType {
   JLENS_INTERVENTION = 'jlens_intervention',
   JLENS_READOUT = 'jlens_readout',
   JLENS_PROBE = 'jlens_probe',
+  JLENS_ACQUIRE = 'jlens_acquire',
+  JLENS_PUBLISH = 'jlens_publish',
 }
 
 /**

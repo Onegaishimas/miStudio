@@ -11,7 +11,11 @@ import { fetchAPI } from './client';
 import type {
   JLensAnnotateRequest,
   JLensAnnotation,
+  JLensAcquirePreview,
+  JLensAcquirePreviewRequest,
+  JLensAcquireRequest,
   JLensInterventionRequest,
+  JLensPublishRequest,
   JLensTokenCheck,
   JLensWatchlistRequest,
   JLensWatchlistResponse,
@@ -75,6 +79,33 @@ export const jlensApi = {
     fetchAPI<JLensTokenCheck[]>('/jlens/token-check', {
       method: 'POST',
       body: JSON.stringify({ model_id: modelId, tokens }),
+    }),
+
+  /**
+   * What in this repo could be a lens, with sizes. READ-ONLY.
+   *
+   * Spending a request instead of a download: a mistyped path otherwise costs a
+   * multi-gigabyte fetch and a slot on the single-GPU queue before anything
+   * notices.
+   */
+  previewRepo: (request: JLensAcquirePreviewRequest) =>
+    fetchAPI<JLensAcquirePreview>('/jlens/acquire/preview', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  /** Download a published lens and validate it for a local model. */
+  acquire: (request: JLensAcquireRequest) =>
+    fetchAPI<JLensFitAccepted>('/jlens/acquire', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  /** Upload this model's validated lens to HuggingFace. */
+  publish: (request: JLensPublishRequest) =>
+    fetchAPI<JLensFitAccepted>('/jlens/publish', {
+      method: 'POST',
+      body: JSON.stringify(request),
     }),
 
   /** Queue an intervention AND its matched control. Poll the task id. */
