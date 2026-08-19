@@ -14,6 +14,7 @@ import torch
 
 from src.api.v1.endpoints.steering import compute_cluster_strength_allocation
 from src.schemas.steering import ClusterAllocationMember, ClusterAllocationRequest
+from src.services import steering_hazards as steering_hazards_mod
 from fastapi import HTTPException
 
 
@@ -285,3 +286,138 @@ async def test_multi_layer_validated_hazard_from_circuit_edges():
     assert h.evidence.startswith("validated:ES=")   # quantified, not heuristic
     assert h.rung == 2
     assert h.quantified_effect == pytest.approx(0.8)
+
+
+@pytest.mark.asyncio
+async def test_a_CLUSTER_LEVEL_circuit_edge_reaches_the_hazard_analysis():
+    """BR-016 wiring: cluster edges are expanded before hazards are detected.
+
+    A capability is not shipped until a test fails when its wiring is removed.
+    This drives the real endpoint with a real cluster-level edge and a real
+    profile, and requires the resolved feature pair to arrive at
+    `detect_hazards`. Deleting the `expand_cluster_edges` call turns it red.
+
+    Asserted on the ARGUMENT, not on "was called": a reachability test that only
+    checks arrival passes against a call handing over the unexpanded edge, which
+    is exactly the defect.
+    """
+    from src.schemas.steering import MultiLayerAllocationResponse
+
+    req = ClusterAllocationRequest(
+        sae_id="sae_A",
+        circuit_id="crc_test",
+        members=[
+            ClusterAllocationMember(feature_idx=1, layer=13, similarity=0.8,
+                                    activation_frequency=0.2, sae_id="sae_A"),
+            ClusterAllocationMember(feature_idx=2, layer=14, similarity=0.8,
+                                    activation_frequency=0.2, sae_id="sae_B"),
+        ],
+    )
+    saes = {"sae_A": _mk_sae_layer(13, "sae_A"), "sae_B": _mk_sae_layer(14, "sae_B")}
+
+    async def get_sae(db, sid):
+        return saes[sid]
+
+    cluster_edge = {
+        "up": {"layer": 13, "cluster_profile_id": "cp_up", "feature_idx": None},
+        "down": {"layer": 14, "cluster_profile_id": "cp_down", "feature_idx": None},
+        "rung": 2,
+        "effect_size": 0.9,
+    }
+
+    async def load_edges(db, cid):
+        return [dict(cluster_edge)]
+
+    async def resolve(db, ids):
+        return {"cp_up": [1], "cp_down": [2]}
+
+    seen = {}
+    real_detect = steering_hazards_mod.detect_hazards
+
+    def spy(steered, circuit_edges=None, **kw):
+        seen["edges"] = circuit_edges
+        return real_detect(steered, circuit_edges=circuit_edges, **kw)
+
+    with patch(
+        "src.api.v1.endpoints.steering.SAEManagerService.get_sae", new=get_sae
+    ), patch(
+        "src.api.v1.endpoints.steering._load_circuit_edges", new=load_edges
+    ), patch(
+        "src.api.v1.endpoints.steering._resolve_cluster_members", new=resolve
+    ), patch(
+        "src.api.v1.endpoints.steering.get_steering_service"
+    ), patch.object(
+        steering_hazards_mod, "detect_hazards", new=spy
+    ), patch(
+        "src.api.v1.endpoints.steering.settings"
+    ) as st:
+        st.resolve_data_path.return_value = MagicMock(exists=MagicMock(return_value=False))
+        st.steering_cluster_constants_json = "{}"
+        st.steering_hazard_prior_threshold = 0.5
+        resp = await compute_cluster_strength_allocation(req, db=MagicMock())
+
+    assert isinstance(resp, MultiLayerAllocationResponse)
+    delivered = seen.get("edges") or []
+    assert delivered, "no circuit edges reached detect_hazards at all"
+    assert all(
+        e["up"].get("feature_idx") is not None
+        and e["down"].get("feature_idx") is not None
+        for e in delivered
+    ), (
+        "a cluster-level edge arrived at detect_hazards unexpanded — its key "
+        f"can never match the feature-level steered list: {delivered}"
+    )
+    assert (delivered[0]["up"]["feature_idx"], delivered[0]["down"]["feature_idx"]) == (1, 2)
+    assert delivered[0]["rung"] == 2 and delivered[0]["effect_size"] == 0.9
+    # And the warning is actually produced, which is the point of the expansion.
+    assert resp.hazards, "the validated cluster edge produced no hazard"
+
+
+@pytest.mark.asyncio
+async def test_an_UNRESOLVABLE_cluster_edge_is_reported_not_silently_dropped():
+    """"No hazards" must not be reportable when nothing could be checked."""
+    req = ClusterAllocationRequest(
+        sae_id="sae_A",
+        circuit_id="crc_test",
+        members=[
+            ClusterAllocationMember(feature_idx=1, layer=13, sae_id="sae_A"),
+            ClusterAllocationMember(feature_idx=2, layer=14, sae_id="sae_B"),
+        ],
+    )
+    saes = {"sae_A": _mk_sae_layer(13, "sae_A"), "sae_B": _mk_sae_layer(14, "sae_B")}
+
+    async def get_sae(db, sid):
+        return saes[sid]
+
+    async def load_edges(db, cid):
+        return [{
+            "up": {"layer": 13, "cluster_profile_id": "cp_gone", "feature_idx": None},
+            "down": {"layer": 14, "cluster_profile_id": "cp_gone2", "feature_idx": None},
+            "rung": 2, "effect_size": 0.9,
+        }]
+
+    async def resolve(db, ids):
+        return {}          # both profiles deleted
+
+    with patch(
+        "src.api.v1.endpoints.steering.SAEManagerService.get_sae", new=get_sae
+    ), patch(
+        "src.api.v1.endpoints.steering._load_circuit_edges", new=load_edges
+    ), patch(
+        "src.api.v1.endpoints.steering._resolve_cluster_members", new=resolve
+    ), patch(
+        "src.api.v1.endpoints.steering.get_steering_service"
+    ), patch(
+        "src.api.v1.endpoints.steering.settings"
+    ) as st:
+        st.resolve_data_path.return_value = MagicMock(exists=MagicMock(return_value=False))
+        st.steering_cluster_constants_json = "{}"
+        st.steering_hazard_prior_threshold = 0.5
+        resp = await compute_cluster_strength_allocation(req, db=MagicMock())
+
+    assert resp.hazards == []
+    assert resp.unchecked_edges, (
+        "an edge that could not be checked was dropped silently — an empty "
+        "hazard list then reads as 'safe' when it means 'not analysed'"
+    )
+    assert "could not be checked" in resp.unchecked_edges[0]["reason"]

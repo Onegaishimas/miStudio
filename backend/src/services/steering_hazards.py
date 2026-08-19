@@ -19,7 +19,7 @@ DB — so the whole hazard matrix is exhaustively unit-testable.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,106 @@ def _edge_key(e: Dict[str, Any]) -> Tuple:
             down.get("layer"), down.get("feature_idx"))
 
 
+def expand_cluster_edges(
+    circuit_edges: Optional[List[Dict[str, Any]]],
+    resolve_cluster,
+    keep: Optional[Set[Tuple[int, int]]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Cluster-level edges → the feature-level edges they stand for.
+
+    Returns ``(edges, unresolved)``.
+
+    BR-016 makes a cluster a first-class circuit member (`member_kind:
+    cluster_ref`), so a circuit's edges can be cluster-level — and those are the
+    edges most worth having, because an edge that reached rung 2 is a MEASURED
+    effect size rather than the weight-prior heuristic. `detect_hazards` dropped
+    every one of them: its keys are `(layer, feature_idx, …)` and a cluster-ref
+    endpoint has no `feature_idx`, so the key could never match and the edge was
+    skipped. The result was silent and backwards — steering a cluster-membered
+    circuit discarded its best evidence and fell back to the heuristic, or to
+    nothing, while reporting an empty hazard list either way.
+
+    A cluster edge asserts that the upstream cluster drives the downstream one,
+    so it stands for every (upstream feature → downstream feature) pair across
+    the two memberships, and each inherits the edge's rung and effect size. That
+    inheritance is the honest reading of a supernode edge and it is also the
+    conservative one: it can only ADD warnings.
+
+    BOUNDED BY `keep`, which is the set of `(layer, feature_idx)` actually being
+    steered. Two twenty-feature clusters would otherwise expand to four hundred
+    edges of which at most a handful are reachable, and `detect_hazards` only
+    ever looks up pairs drawn from the steered list. Filtering to that set is
+    exactly equivalent and keeps the product small; passing `keep=None` expands
+    everything, which is what the tests do.
+
+    UNRESOLVABLE PROFILES ARE RETURNED, NOT DROPPED. A deleted or empty cluster
+    profile means an edge that cannot be checked, and the caller has to be able
+    to say so — "no hazards" and "not analysed" are different claims, and this
+    project has already been bitten by a UI where an empty list read as safety.
+    """
+    edges = list(circuit_edges or [])
+    if not edges:
+        return [], []
+
+    out: List[Dict[str, Any]] = []
+    unresolved: List[Dict[str, Any]] = []
+    cache: Dict[Any, List[int]] = {}
+
+    def _members(ref: Dict[str, Any]) -> Optional[List[int]]:
+        pid = ref.get("cluster_profile_id")
+        if pid is None:
+            return None
+        if pid not in cache:
+            try:
+                cache[pid] = [int(i) for i in (resolve_cluster(pid) or [])]
+            except Exception:  # noqa: BLE001 - an edge must not fail allocation
+                cache[pid] = []
+        return cache[pid]
+
+    def _side(ref: Dict[str, Any]) -> Tuple[Optional[List[int]], bool]:
+        """(feature indices, was_a_cluster)."""
+        if ref.get("feature_idx") is not None:
+            return [int(ref["feature_idx"])], False
+        return _members(ref), True
+
+    for e in edges:
+        up, down = e.get("up") or {}, e.get("down") or {}
+        up_idx, up_was_cluster = _side(up)
+        down_idx, down_was_cluster = _side(down)
+
+        if not up_was_cluster and not down_was_cluster:
+            out.append(e)          # already feature-level; untouched
+            continue
+
+        if not up_idx or not down_idx:
+            unresolved.append({
+                "up": dict(up),
+                "down": dict(down),
+                "reason": (
+                    "a cluster endpoint resolved to no features — the profile is "
+                    "missing or empty, so this edge could not be checked"
+                ),
+            })
+            continue
+
+        up_layer, down_layer = up.get("layer"), down.get("layer")
+        for ui in up_idx:
+            if keep is not None and (up_layer, ui) not in keep:
+                continue
+            for di in down_idx:
+                if keep is not None and (down_layer, di) not in keep:
+                    continue
+                expanded = dict(e)
+                expanded["up"] = {**up, "feature_idx": ui}
+                expanded["down"] = {**down, "feature_idx": di}
+                # Kept so a consumer can tell an inherited effect size from one
+                # measured on this feature pair directly.
+                expanded["expanded_from_cluster_edge"] = True
+                out.append(expanded)
+
+    return out, unresolved
+
+
 def detect_hazards(
     steered: List[Dict[str, int]],
     *,
@@ -84,9 +184,10 @@ def detect_hazards(
     edges_by_key = {}
     for e in (circuit_edges or []):
         k = _edge_key(e)
-        # Skip cluster-ref edges (feature_idx None — R1 QA-2): the steered list
-        # is feature-level, so a (layer, None, …) key can never match and its
-        # rung/ES aren't per-feature. Feature-level hazards only, in v1.
+        # A cluster-ref endpoint still has no `feature_idx`, so its key can
+        # never match the feature-level steered list. Callers run
+        # `expand_cluster_edges` first, which turns those into the feature pairs
+        # they stand for; anything still unexpanded here is genuinely unusable.
         if None in k:
             continue
         edges_by_key[k] = e
