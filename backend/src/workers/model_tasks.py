@@ -501,6 +501,48 @@ def download_and_load_model(
 
         raise
 
+    finally:
+        # GIVE THE WEIGHTS BACK. This task loads the model for one reason — to
+        # read `architecture`, `params_count` and `architecture_config` off it
+        # for the database — and `device_map="auto"` puts them on the GPU to do
+        # it. Nothing downstream wants them resident: training and extraction
+        # each load what they need themselves. Without this the weights sit on
+        # the card until the worker is restarted, which is days.
+        #
+        # Measured: downloading LFM2.5-2.6B (2,697,198,592 params at FP32) left
+        # 10,696 MiB held on a 24 GB card for an hour, against a ~3 GB CUDA
+        # context floor. The next model to want the card gets what is left.
+        #
+        # The pre-extraction path already calls `empty_cache()` with the comment
+        # "in case previous task didn't complete cleanup" — that is this leak,
+        # worked around at the far end. A workaround there cannot help anything
+        # that is not an extraction, which is what the serving process is.
+        #
+        # EVERY REFERENCE, then gc, then `empty_cache`. Freeing the local alone
+        # returns the blocks to torch's allocator and not to the driver, so the
+        # memory stays unavailable to every other process on the card, which is
+        # the whole complaint. `tokenizer` and `config` are nulled with it: they
+        # are small, but they are the kind of thing that keeps a module alive.
+        try:
+            import gc
+
+            import torch
+
+            model_obj = None  # noqa: F841 - the assignment IS the release
+            tokenizer = None  # noqa: F841
+            config = None  # noqa: F841
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info(
+                    "Released the download-inspection model from GPU memory "
+                    f"(reserved now {torch.cuda.memory_reserved() / 1024**3:.2f} GB)"
+                )
+        except Exception as cleanup_exc:  # noqa: BLE001
+            # A failure here must not replace the real outcome — including a
+            # propagating exception, which a raise from `finally` would discard.
+            logger.warning(f"GPU cleanup after download failed: {cleanup_exc}")
+
 
 @celery_app.task(name="workers.model_tasks.delete_model_files")
 def delete_model_files(model_id: str, file_path: Optional[str] = None, quantized_path: Optional[str] = None):
