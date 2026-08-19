@@ -72,6 +72,45 @@ JSPACE_SURFACES = sorted(
     )
 )
 
+# Clusters: DISCOVERED, and under BOTH names.
+#
+# A cluster is a correlational object. Its members are grouped by co-occurrence
+# and TF-IDF context similarity, and the strength budget allocates a DIAL, not
+# evidence — so these surfaces are entitled to no causal claim whatsoever. The
+# only route by which a cluster earns one is BR-016: being mined into a circuit
+# as `member_kind: cluster_ref` and passing rung 2 on the ordinary ladder, which
+# happens in the circuit modules already audited above.
+#
+# The audit reached none of them. Twelve modules across six layers — including
+# both REST endpoints and the `groups` MCP tool surface, which an agent reads and
+# relays verbatim — were unaudited while the circuit and J-space corpora were
+# globbed. The argument for globbing had simply never been applied here.
+#
+# BOTH NAMING CONVENTIONS, and this is the trap. The Feature Groups → Clusters
+# rename was UI-ONLY (IDL-28): the backend still calls half of these
+# `feature_group*`. A `cluster_*` glob alone reads as thorough and silently
+# misses `feature_grouping_service.py`, `feature_groups.py`, `feature_group.py`,
+# `feature_grouping_tasks.py`, `feature_grouping.py` and `groups.py` — six of
+# twelve, including the service that does the grouping and the tool that reports
+# it. A glob is only as good as its pattern, which is the same failure as a
+# hand-maintained list wearing better clothes.
+CLUSTER_SURFACES = sorted(
+    set(
+        list((BACKEND / "services").glob("cluster_*.py"))
+        + list((BACKEND / "services").glob("feature_group*.py"))
+        + list((BACKEND / "api" / "v1" / "endpoints").glob("cluster*.py"))
+        + list((BACKEND / "api" / "v1" / "endpoints").glob("feature_group*.py"))
+        + list((BACKEND / "schemas").glob("cluster_*.py"))
+        + list((BACKEND / "schemas").glob("feature_group*.py"))
+        + list((BACKEND / "workers").glob("cluster_*.py"))
+        + list((BACKEND / "workers").glob("feature_group*.py"))
+        + list((BACKEND / "models").glob("cluster_*.py"))
+        + list((BACKEND / "models").glob("feature_group*.py"))
+        + list((BACKEND / "mcp_server" / "tools").glob("group*.py"))
+        + list((BACKEND / "mcp_server" / "tools").glob("cluster*.py"))
+    )
+)
+
 # F20 R1-09/10: NEGATION-anchored, not topic-anchored.
 #
 # The previous `ALLOWED_CONTEXT` whitelisted TOPIC WORDS — `causal\s+evidence`,
@@ -611,3 +650,77 @@ class TestTheAuditWouldCatchAPlantedClaim:
         assert not _offending_lines(path)
         assert "not a causal claim" in jspace_claims.READOUT_NOT_CAUSAL
         assert "not evidence" in jspace_claims.ABSENCE_CAVEAT
+
+
+# ── Clusters: a correlational object may make no causal claim ──────────────
+
+
+class TestClusterSurfacesAreDiscovered:
+    """The corpus comes from the filesystem, under both names.
+
+    `cluster_allocation_service.py` and `cluster_profile_service.py` were the
+    two modules I could name from a directory listing. Globbing found ten more,
+    six of which do not contain the word "cluster" at all — the rename never
+    reached the backend.
+    """
+
+    def test_the_cluster_corpus_is_not_empty(self):
+        assert CLUSTER_SURFACES, "cluster discovery matched nothing at all"
+
+    def test_it_contains_the_modules_that_exist_today(self):
+        names = {p.name for p in CLUSTER_SURFACES}
+        for expected in (
+            "cluster_allocation_service.py",
+            "cluster_profile_service.py",
+            "cluster_profiles.py",
+            "cluster_profile.py",
+        ):
+            assert expected in names, f"{expected} is not audited"
+
+    def test_the_PRE_RENAME_names_are_audited_too(self):
+        """The half a `cluster_*` glob misses.
+
+        Fails if someone 'tidies' the globs down to the current vocabulary.
+        """
+        names = {p.name for p in CLUSTER_SURFACES}
+        for expected in (
+            "feature_grouping_service.py",   # the grouping itself
+            "feature_groups.py",             # REST, reaches the UI directly
+            "feature_group.py",
+            "feature_grouping_tasks.py",
+            "feature_grouping.py",
+            "groups.py",                     # MCP: an agent relays this verbatim
+        ):
+            assert expected in names, (
+                f"{expected} is not audited — the Feature Groups → Clusters "
+                "rename was UI-only, so a cluster_* glob alone misses it"
+            )
+
+    def test_discovery_spans_every_layer_a_claim_can_reach(self):
+        parents = {p.parent.name for p in CLUSTER_SURFACES}
+        for layer in ("services", "endpoints", "schemas", "workers", "models", "tools"):
+            assert layer in parents, f"no cluster {layer} module is audited"
+
+
+@pytest.mark.parametrize("path", CLUSTER_SURFACES, ids=lambda p: p.name)
+def test_cluster_surface_makes_no_causal_claim(path):
+    """Co-occurrence is not mechanism, and a dial is not evidence.
+
+    Nothing in the CLUSTERS chain earns a causal claim: across all thirteen of
+    its documents the words causal, rung and intervention appear zero times.
+    The code must hold the same line.
+    """
+    if path.name in RUNG_TWO_MACHINERY:
+        pytest.skip(
+            f"{path.name} IS the rung-2 machinery — see RUNG_TWO_MACHINERY for "
+            "why. Skipped rather than silently passing, so the exemption stays "
+            "visible in the test output."
+        )
+    violations = _offending_lines(path)
+    assert not violations, (
+        f"{path.name} states a causal claim in user-facing text. A cluster is "
+        "features grouped by co-occurrence and context similarity; it earns a "
+        "causal claim only by being mined into a circuit (BR-016) and passing "
+        "rung 2.\n"
+        + "\n".join(f"  line {ln}: {text}" for ln, text in violations)
+    )

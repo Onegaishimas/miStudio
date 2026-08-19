@@ -19,7 +19,7 @@ import subprocess
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1511,6 +1511,45 @@ async def _load_circuit_edges(db: AsyncSession, circuit_id: str) -> Optional[lis
         return None
 
 
+async def _resolve_cluster_members(
+    db: AsyncSession, profile_ids
+) -> Dict[Any, List[int]]:
+    """`{profile_id: [feature_idx]}` for the profiles named by cluster edges.
+
+    ONE query for all of them, resolved BEFORE expansion rather than during it:
+    `expand_cluster_edges` is a synchronous pure function (which is what makes
+    it testable without a database), so it cannot await, and resolving per edge
+    inside a loop would be a query per edge besides.
+
+    Never raises. A hazard analysis that fails must degrade to "could not
+    check", which the caller reports, and never take the allocation down with
+    it.
+    """
+    ids = [p for p in dict.fromkeys(profile_ids) if p is not None]
+    if not ids:
+        return {}
+    try:
+        from ....models.cluster_profile import ClusterProfile
+        from sqlalchemy import select
+
+        rows = (
+            await db.execute(
+                select(ClusterProfile).where(ClusterProfile.id.in_(ids))
+            )
+        ).scalars().all()
+        return {
+            r.id: [
+                int(m["feature_idx"])
+                for m in (r.members or [])
+                if m.get("feature_idx") is not None
+            ]
+            for r in rows
+        }
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[ClusterAllocation] Could not resolve cluster profiles: {e}")
+        return {}
+
+
 async def _compute_multi_layer_allocation_response(
     request: ClusterAllocationRequest,
     db: AsyncSession,
@@ -1658,6 +1697,33 @@ async def _compute_multi_layer_allocation_response(
         {"layer": m.layer, "feature_idx": m.feature_idx, "strength": s}
         for m, s in zip(request.members, ml.strengths)
     ]
+
+    # BR-016: a circuit's edges can be CLUSTER-level, and those are the ones
+    # most worth having — an edge at rung >= 2 carries a measured effect size,
+    # where the fallback is a weight-prior heuristic. `detect_hazards` keys on
+    # `feature_idx` and a cluster endpoint has none, so every such edge used to
+    # be skipped: steering a cluster-membered circuit silently discarded its
+    # best evidence and still reported an empty hazard list. Expanded here,
+    # where the session exists, and bounded to what is actually being steered.
+    unresolved_edges: list = []
+    if circuit_edges:
+        keep = {
+            (m["layer"], m["feature_idx"])
+            for m in steered
+            if m.get("feature_idx") is not None
+        }
+        wanted = [
+            side.get("cluster_profile_id")
+            for e in circuit_edges
+            for side in ((e.get("up") or {}), (e.get("down") or {}))
+        ]
+        resolved = await _resolve_cluster_members(db, wanted)
+        circuit_edges, unresolved_edges = steering_hazards.expand_cluster_edges(
+            circuit_edges,
+            resolved.get,
+            keep=keep,
+        )
+
     hazards = steering_hazards.detect_hazards(
         steered,
         circuit_edges=circuit_edges,
@@ -1687,5 +1753,10 @@ async def _compute_multi_layer_allocation_response(
         layers=layers_out,
         hazards=[HazardModel(**h.to_dict()) for h in hazards],
         strengths=ml.strengths,
+        # "No hazards" and "not analysed" are different claims. An edge whose
+        # cluster profile is missing or empty could not be checked, and saying
+        # so is the whole point — an empty list that reads as safety is a bug
+        # this project has shipped before.
+        unchecked_edges=unresolved_edges,
     )
 

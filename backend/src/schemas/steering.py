@@ -632,6 +632,16 @@ class MultiLayerAllocationResponse(BaseModel):
         ..., description="layer (as string key) -> that layer's allocation")
     hazards: List[HazardModel] = Field(
         default_factory=list, description="cross-layer compounding/cancellation warnings")
+    unchecked_edges: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "circuit edges that could NOT be checked for hazards, each with a "
+            "reason — a cluster-level edge whose profile is missing or empty. "
+            "An empty `hazards` list means 'none found' only when this is also "
+            "empty; otherwise it means 'none found among the edges we could "
+            "read'."
+        ),
+    )
     strengths: List[float] = Field(
         ..., description="per-member strengths flattened in request-member order (client convenience)")
 
