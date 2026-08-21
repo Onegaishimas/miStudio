@@ -454,12 +454,21 @@ class CircuitCaptureService:
             over = _exceeds_memory_budget(events_est)
             if over is not None:
                 run.status = "failed"
+                suggested = _suggested_sample_cap(events_est, sample_cap)
+                fix = (f"lower sample_cap to about {suggested:,} "
+                       f"(from {sample_cap:,}), capture fewer layers, "
+                       "or use an SAE that is sparser on this data"
+                       if suggested is not None else
+                       "lower sample_cap, capture fewer layers, or use an SAE "
+                       "that is sparser on this data")
                 run.error_message = (
                     f"Capture refused: {over}. This corpus activates "
                     f"{estimate.get('features_per_token')} features per token "
                     f"({(estimate.get('density') or 0) * 100:.1f}% of the "
-                    "dictionary) — raise epsilon, lower sample_cap, or use an "
-                    "SAE that is sparser on this data.")
+                    f"dictionary, against the ~0.5% a well-trained SAE gives) — "
+                    f"{fix}. Raising epsilon barely helps at this density: "
+                    "these features have too little dynamic range for a "
+                    "relative threshold to remove much.")
                 db.commit()
                 return {"status": "failed", "reason": "memory_ceiling",
                         "estimate": estimate}
@@ -789,6 +798,30 @@ def _memory_budget_bytes() -> Optional[int]:
     except (OSError, ValueError, IndexError):
         pass
     return None
+
+
+def _max_rows_that_fit() -> Optional[int]:
+    """How many events the budget allows, or None when it cannot be read."""
+    budget = _memory_budget_bytes()
+    if budget is None:
+        return None
+    return budget // (EVENT_BYTES * PEAK_MEMORY_MULTIPLIER)
+
+
+def _suggested_sample_cap(events_est: int, sample_cap: int) -> Optional[int]:
+    """The sample_cap that would fit, since events scale linearly with it.
+
+    A refusal that lists knobs makes the reader do arithmetic the service has
+    already done. This is the one lever that is reliably linear — raising
+    epsilon is not: measured on this corpus, epsilon 0.1 -> 0.9 removed only 80%
+    of events (20.1B -> 4.1B, still 183 GB against a 97 GB budget), because
+    these features have so little dynamic range that even a 90%-of-max threshold
+    admits most of them.
+    """
+    fits = _max_rows_that_fit()
+    if fits is None or events_est <= 0:
+        return None
+    return max(1, int(sample_cap * fits / events_est))
 
 
 def _exceeds_memory_budget(rows: int) -> Optional[str]:
