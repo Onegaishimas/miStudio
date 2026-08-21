@@ -193,6 +193,8 @@ class CircuitCaptureService:
                 "model_id could not be resolved — pass it explicitly or use "
                 "SAEs whose model_id is set")
 
+        _validate_attention_config(db, config, model_id, seen_layers)
+
         tokenization = db.query(DatasetTokenization).filter(
             DatasetTokenization.dataset_id == dataset_id,
             DatasetTokenization.model_id == model_id,
@@ -295,6 +297,10 @@ class CircuitCaptureService:
         if run is None:
             raise ValueError(f"Capture run {run_id} not found")
         manifest = dict(run.manifest)
+        # Hoisted above the model load: whether attention is being captured
+        # decides the attention backend, which is a load-time argument.
+        attn_cfg = manifest.get("attention_capture") or None
+        wants_attention = bool(attn_cfg and attn_cfg.get("layers"))
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model_record = db.query(Model).filter(
@@ -323,8 +329,27 @@ class CircuitCaptureService:
                 cache_dir=resolved_model_path,
                 device_map=device,
                 local_files_only=model_is_downloaded,
+                # Attention PROBABILITIES require eager. SDPA and flash kernels
+                # never materialise them — `sdpa_attention_forward` returns
+                # `(attn_output, None)` — so a capture asking for attention on
+                # an SDPA model collected nothing and then indexed an empty
+                # tuple. Eager is slower, so it is requested only when needed.
+                attn_implementation="eager" if wants_attention else None,
             )
             model.eval()
+
+            # ASSERT THE REQUEST TOOK, before the probe rather than 90 seconds
+            # into the capture. transformers can decline or an OOM fallback can
+            # drop it, and the failure mode is silent: the hooks simply capture
+            # nothing.
+            if wants_attention:
+                resolved_attn = _meta.get("attn_implementation")
+                if resolved_attn != "eager":
+                    raise CaptureConfigError(
+                        "attention capture needs eager attention, but the model "
+                        f"loaded with {resolved_attn!r}. Attention probabilities "
+                        "cannot be recorded from this backend."
+                    )
 
             fingerprints = {}
             for entry in manifest["layers"]:
@@ -335,8 +360,34 @@ class CircuitCaptureService:
                 fingerprints[entry["sae_id"]] = _sae_fingerprint(sae)
             manifest["sae_fingerprints"] = fingerprints
 
+            # WHICH POINT OF THE RESIDUAL STREAM THIS CAPTURE READ.
+            #
+            # "residual" is resolved by pattern-matching a layer's children, and
+            # a Llama-style layer offers two candidates — `input_layernorm` and
+            # `post_attention_layernorm`. Until the patterns were given a fixed
+            # order that choice varied per worker process, so a capture could
+            # read a different point than the extraction that trained its SAE,
+            # with no disagreement recorded anywhere. Feeding an SAE
+            # out-of-distribution activations makes its learned thresholds
+            # meaningless and it fires densely — which is what an implausible
+            # event estimate looks like from the outside.
+            #
+            # Recorded so that a future mismatch is visible in the artifact
+            # rather than inferred from a suspicious number.
+            from ..ml.layer_discovery import discover_transformer_structure
+            try:
+                _struct = discover_transformer_structure(
+                    model, architecture_hint=getattr(
+                        model.config, "model_type", "auto"))
+                manifest["hook_points"] = {
+                    "residual": _struct.residual_norm_module,
+                    "attention": ("per-layer self-attention module"
+                                  if wants_attention else None),
+                }
+            except Exception as exc:  # noqa: BLE001 - provenance, not control flow
+                logger.warning("Could not record hook points: %s", exc)
+
             layer_indices = sorted(saes.keys())
-            attn_cfg = manifest.get("attention_capture") or None
 
             run.status = "estimating"
             run.progress = 0.0
@@ -345,7 +396,11 @@ class CircuitCaptureService:
             # ── probe: per-feature max + event-rate estimate ────────────
             t0 = time.monotonic()
             probe_max, probe_events, probe_tokens = _probe(
-                model, tokenizer, dataset, saes, layer_indices, device)
+                model, tokenizer, dataset, saes, layer_indices, device,
+                epsilon_by_layer={e["layer"]: e["epsilon"]
+                                  for e in manifest["layers"]},
+                floor_by_layer={e["layer"]: e["theta_floor"]
+                                for e in manifest["layers"]})
             probe_seconds = time.monotonic() - t0
             total_tokens_est = probe_tokens / PROBE_SAMPLES * sample_cap
             events_est = int(probe_events / max(probe_tokens, 1) * total_tokens_est)
@@ -412,7 +467,15 @@ class CircuitCaptureService:
                     probe_max=probe_max, attn_cfg=attn_cfg)
                 # Running byte estimate from buffered events (u32 idx + u16
                 # pos + u32 doc + f16 act ≈ EVENT_BYTES/event, plus errnorm).
-                buffered = sum(ev.count for ev, _en, _at in writers.values())
+                #
+                # ATTENTION ROWS COUNT TOO. They were excluded, which was
+                # harmless only for as long as the sidecar was always empty —
+                # attention capture could never produce a row, because it
+                # crashed first. Now that it works, a default request (2000 docs
+                # x 32 heads x 512 queries x top_k 4) is ~131M rows, buffered in
+                # host RAM until finalize(), and this guard was the only thing
+                # standing between that and an OOM it could not see coming.
+                buffered = _buffered_rows(writers)
                 if exceeds_size_ceiling(buffered, events_est):
                     run.status = "failed"
                     run.error_message = (
@@ -473,6 +536,82 @@ class CircuitCaptureService:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+def _validate_attention_config(db, config, model_id, capture_layers) -> None:
+    """Refuse an unrunnable attention request AT SUBMIT, not 90 seconds in.
+
+    Every one of these was previously discovered on the GPU, after the run had
+    taken a slot on the single-GPU queue — possibly behind a 45-minute fit.
+
+    Tri-state on "is this layer an attention layer", deliberately. The API
+    process has no model in memory, so the honest answers are known-bad (refuse)
+    and not-known (let the worker decide, which it now does before the probe).
+    Guessing from an architecture name is the third option and it is the wrong
+    one — the same reasoning as `jlens_acquire_service.model_dims`.
+    """
+    from ..models.model import Model
+
+    attn = config.get("attention_capture") or None
+    if not attn:
+        return
+
+    layers = attn.get("layers") or []
+    if not layers:
+        raise CaptureConfigError(
+            "attention_capture was requested with no layers; either name the "
+            "layers or turn it off (it forces eager attention, which is slower)")
+
+    # An attention layer outside the capture's SAE layers silently produced no
+    # file: `open_writers` only creates a sidecar writer for layers it knows.
+    stray = sorted(set(layers) - set(capture_layers))
+    if stray:
+        raise CaptureConfigError(
+            f"attention layers {stray} are not among the capture's layers "
+            f"{sorted(capture_layers)} — no sidecar would be written for them")
+
+    dupes = sorted({L for L in layers if layers.count(L) > 1})
+    if dupes:
+        raise CaptureConfigError(f"duplicate attention layers {dupes}")
+
+    top_k = int(attn.get("top_k") or 0)
+    if top_k < 1:
+        raise CaptureConfigError("attention top_k must be at least 1")
+
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if model is None:
+        raise CaptureConfigError(f"Model {model_id} not found")
+
+    arch = model.architecture_config or {}
+    n_layers = arch.get("num_hidden_layers")
+    if isinstance(n_layers, int):
+        oob = sorted(L for L in layers if not 0 <= L < n_layers)
+        if oob:
+            raise CaptureConfigError(
+                f"attention layers {oob} are out of range for a model with "
+                f"{n_layers} layers")
+
+    n_heads = arch.get("num_attention_heads")
+    heads = attn.get("heads")
+    if heads and isinstance(n_heads, int):
+        oob = sorted(h for h in heads if not 0 <= h < n_heads)
+        if oob:
+            raise CaptureConfigError(
+                f"attention heads {oob} are out of range for a model with "
+                f"{n_heads} heads")
+
+    # KNOWN-BAD only: a config that declares per-layer block types tells us
+    # exactly which layers have attention. Absent that key, say nothing.
+    layer_types = arch.get("layer_types")
+    if isinstance(layer_types, list) and layer_types:
+        not_attention = sorted(
+            L for L in layers
+            if L < len(layer_types) and layer_types[L] != "full_attention")
+        if not_attention:
+            raise CaptureConfigError(
+                f"layers {not_attention} are not attention layers on this model "
+                f"({', '.join(sorted(set(layer_types)))}) — they have no "
+                "attention probabilities to capture")
+
 
 def _load_sae_sync(sae_record: "ExternalSAE", device: str):
     """Sync SAE load (worker context) — the same path SteeringService.load_sae
@@ -538,8 +677,60 @@ def _encode_layer(sae, acts):
     return z
 
 
-def _probe(model, tokenizer, dataset, saes, layer_indices, device):
-    """~PROBE_SAMPLES docs → per-layer per-feature max + event-rate sample."""
+def _buffered_rows(writers) -> int:
+    """Rows held in host RAM across every writer, including the sidecar.
+
+    EXTRACTED SO IT CAN BE TESTED. Inline, the only available guard was a test
+    grepping `run_capture`'s source for the expression — which kept passing
+    against a mutation that left the text intact and multiplied the result by
+    zero. A source scrape fails open; this does not.
+
+    Attention rows are the reason this exists. `_BufferedWriter` keeps every
+    chunk in memory until `finalize()`, and a default attention request is
+    ~131M rows (~1.5 GiB) per layer. The ceiling counted only SAE events, which
+    was harmless for exactly as long as the sidecar could never hold anything.
+    """
+    return sum(
+        ev.count + (at.count if at is not None else 0)
+        for ev, _en, at in writers.values()
+    )
+
+
+def _event_threshold(z, probe_max, eps: float, floor: float):
+    """Per-feature activation threshold — the ONE definition.
+
+    Used by both the probe's estimate and the capture's writer. They had
+    separate rules (`z > 0` versus this), which is why the estimate could not
+    predict the size of the thing it was estimating.
+    """
+    import torch
+
+    if eps > 0 and probe_max is not None:
+        return torch.clamp(eps * probe_max, min=floor)
+    return torch.full((z.shape[-1],), floor, device=z.device)
+
+
+def _probe(model, tokenizer, dataset, saes, layer_indices, device,
+           *, epsilon_by_layer=None, floor_by_layer=None):
+    """~PROBE_SAMPLES docs → per-layer per-feature max + event-rate sample.
+
+    TWO PASSES, AND THE SECOND ONE IS THE POINT. The count returned here is what
+    the size and duration estimate is built from, and the user confirms a
+    multi-hundred-gigabyte run against it — so it has to count the same thing
+    the capture will write.
+
+    It did not. The estimate counted `z > 0`, every strictly positive encoder
+    output, while the capture writes only `z > clamp(eps * probe_max, floor)`.
+    The two are not close: on granite-4.1-8b the unthresholded count came to
+    19,719 features per token of 32,768 — 60% density, against the 0.48% the
+    SAE recorded during its own training — and the estimate read 20.2 billion
+    events / 242 GB.
+
+    The threshold needs the FINAL per-feature max, which is only known once the
+    whole probe has been seen, so the count cannot be accumulated in the same
+    sweep that builds it. Hence a second sweep. It is PROBE_SAMPLES documents;
+    the cost is trivial next to being wrong.
+    """
     import torch
 
     from ..ml.forward_hooks import HookManager, HookType
@@ -548,26 +739,41 @@ def _probe(model, tokenizer, dataset, saes, layer_indices, device):
     events = 0
     tokens = 0
     n = min(PROBE_SAMPLES, len(dataset))
-    with HookManager(model) as hm:
-        hm.register_hooks(layer_indices, [HookType.RESIDUAL],
-                          getattr(model.config, "model_type", "auto"))
-        for start in range(0, n, 8):
-            batch = dataset[start:min(start + 8, n)]
-            input_ids, mask, lengths = _pad_batch(batch, tokenizer)
-            with torch.no_grad():
-                _ = model(input_ids=input_ids.to(model.device),
-                          attention_mask=mask.to(model.device))
-            for L in layer_indices:
-                acts = hm.activations[f"layer_{L}_residual"][-1]  # [b, s, h]
-                flat = acts.to(device).float().reshape(-1, acts.shape[-1])
+    model_type = getattr(model.config, "model_type", "auto")
+
+    def _sweep(count_with_threshold: bool) -> int:
+        nonlocal events, tokens
+        seen = 0
+        with HookManager(model) as hm:
+            hm.register_hooks(layer_indices, [HookType.RESIDUAL], model_type)
+            for start in range(0, n, 8):
+                batch = dataset[start:min(start + 8, n)]
+                input_ids, mask, lengths = _pad_batch(batch, tokenizer)
                 with torch.no_grad():
-                    z = _encode_layer(saes[L], flat)
-                fmax = z.max(dim=0).values
-                probe_max[L] = (torch.maximum(probe_max[L], fmax)
-                                if L in probe_max else fmax)
-                events += int((z > 0).sum())
-            tokens += int(sum(lengths))
-            hm.clear_activations()
+                    _ = model(input_ids=input_ids.to(model.device),
+                              attention_mask=mask.to(model.device))
+                for L in layer_indices:
+                    acts = hm.activations[f"layer_{L}_residual"][-1]  # [b, s, h]
+                    flat = acts.to(device).float().reshape(-1, acts.shape[-1])
+                    with torch.no_grad():
+                        z = _encode_layer(saes[L], flat)
+                    if count_with_threshold:
+                        events += int((z > _event_threshold(
+                            z, probe_max.get(L),
+                            (epsilon_by_layer or {}).get(L, 0.0),
+                            (floor_by_layer or {}).get(L, 0.0),
+                        ).unsqueeze(0)).sum())
+                    else:
+                        fmax = z.max(dim=0).values
+                        probe_max[L] = (torch.maximum(probe_max[L], fmax)
+                                        if L in probe_max else fmax)
+                if count_with_threshold:
+                    seen += int(sum(lengths))
+                hm.clear_activations()
+        return seen
+
+    _sweep(count_with_threshold=False)      # builds probe_max
+    tokens = _sweep(count_with_threshold=True)   # counts what will be written
     return probe_max, events, tokens
 
 
@@ -579,11 +785,43 @@ def _capture_batch(model, saes, layer_indices, writers, input_ids, mask,
     from ..ml.forward_hooks import HookManager, HookType
 
     with HookManager(model) as hm:
-        hm.register_hooks(layer_indices, [HookType.RESIDUAL],
-                          getattr(model.config, "model_type", "auto"))
+        model_type = getattr(model.config, "model_type", "auto")
+        hm.register_hooks(layer_indices, [HookType.RESIDUAL], model_type)
+
+        # ATTENTION WEIGHTS COME FROM OUR OWN HOOKS, keyed by absolute layer.
+        #
+        # This used to read `out.attentions[L]` after passing
+        # `output_attentions=True`. Two things were wrong with that. In
+        # transformers 5 the flag is gone — the decoder no longer builds
+        # `all_self_attns`, and the replacement collects module outputs only
+        # when they are not None, which under SDPA they always are — so
+        # `out.attentions` was `()`, passed the `is not None` guard, and
+        # `()[34]` raised `IndexError: tuple index out of range`. And the index
+        # itself was wrong in principle: that tuple holds one entry per
+        # attention module that RAN, so on a hybrid like LFM2 (attention on 6
+        # of 16 layers) `[L]` reads a different layer's weights, or overruns.
+        #
+        # A hook keyed `layer_{L}_attention_weights` cannot have either bug.
+        attn_layers = sorted(attn_cfg.get("layers") or []) if attn_cfg else []
+        if attn_layers:
+            before = len(hm.hook_names)
+            hm.register_hooks(attn_layers, [HookType.ATTENTION_WEIGHTS], model_type)
+            registered = len(hm.hook_names) - before
+            # `register_hooks` only raises when NOTHING is registered, and the
+            # residual hooks above already made the list non-empty — so without
+            # this check a total failure to attach is silent.
+            if registered != len(attn_layers):
+                raise CaptureConfigError(
+                    f"attention hooks attached to {registered} of "
+                    f"{len(attn_layers)} requested layers {attn_layers}; the "
+                    "others have no attention module"
+                )
+
         with torch.no_grad():
-            out = model(input_ids=input_ids, attention_mask=mask,
-                        output_attentions=bool(attn_cfg))
+            # The return value is not read: residual activations and attention
+            # weights both arrive through hooks. The forward is run for its
+            # side effects.
+            model(input_ids=input_ids, attention_mask=mask)
         for L in layer_indices:
             acts = hm.activations[f"layer_{L}_residual"][-1]  # [b, s, h] cpu
             ev_w, en_w, at_w = writers[L]
@@ -593,13 +831,9 @@ def _capture_batch(model, saes, layer_indices, writers, input_ids, mask,
                 z = _encode_layer(saes[L], flat)          # [b*s, d_sae]
                 recon = saes[L].decode(z)
                 err = (flat - recon).norm(dim=-1)          # [b*s]
-            eps = epsilon_by_layer[L]
-            floor = floor_by_layer[L]
-            pm = probe_max.get(L)
-            if eps > 0 and pm is not None:
-                thresh = torch.clamp(eps * pm, min=floor)  # per-feature
-            else:
-                thresh = torch.full((z.shape[-1],), floor, device=z.device)
+            # The SAME rule the probe's estimate uses — see `_event_threshold`.
+            thresh = _event_threshold(z, probe_max.get(L),
+                                      epsilon_by_layer[L], floor_by_layer[L])
             hits = (z > thresh.unsqueeze(0)).nonzero(as_tuple=False)  # [n, 2]
             if len(hits):
                 vals = z[hits[:, 0], hits[:, 1]].cpu().numpy()
@@ -617,9 +851,15 @@ def _capture_batch(model, saes, layer_indices, writers, input_ids, mask,
                 en_w.append(np.full(L_i, doc_base + i, dtype=np.uint32),
                             np.arange(L_i), row)
             # attention sidecar
-            if at_w is not None and attn_cfg and out.attentions is not None:
-                _append_attention(at_w, out.attentions[L], attn_cfg,
-                                  doc_base, lengths)
+            if at_w is not None and attn_cfg:
+                captured = hm.activations.get(f"layer_{L}_attention_weights")
+                if captured:
+                    _append_attention(at_w, captured[-1], attn_cfg,
+                                      doc_base, lengths)
+                    # Released immediately: [b, heads, q, k] is ~128 MiB per
+                    # layer at seq 512, and holding every requested layer's
+                    # weights to the end of the loop multiplies that.
+                    captured.clear()
         hm.clear_activations()
 
 
@@ -630,19 +870,40 @@ def _append_attention(at_w, attn, cfg, doc_base, lengths):
     top_k = int(cfg.get("top_k", 4))
     heads = cfg.get("heads")  # list | None = all
     b, n_heads, q_len, _ = attn.shape
-    head_ids = heads if heads else list(range(n_heads))
+    head_ids = list(heads) if heads else list(range(n_heads))
+
+    # BOUNDS-CHECKED. `heads` arrives from a user-supplied config and was
+    # indexed straight into the tensor; an out-of-range head gave an opaque
+    # torch error mid-capture.
+    bad = [h for h in head_ids if not 0 <= int(h) < n_heads]
+    if bad:
+        raise CaptureConfigError(
+            f"attention heads {bad} are out of range for a model with "
+            f"{n_heads} heads")
+
     for i, L_i in enumerate(lengths):
         for hd in head_ids:
             probs = attn[i, hd, :L_i, :L_i]
             k = min(top_k, probs.shape[-1])
             mass, keys = torch.topk(probs, k, dim=-1)
-            q_idx = torch.arange(L_i).unsqueeze(-1).expand_as(keys)
+            q_idx = torch.arange(L_i, device=keys.device).unsqueeze(-1).expand_as(keys)
+
+            # DROP FUTURE KEYS AND EMPTY MASS. topk runs over the full L_i x
+            # L_i square, so for a query at position q < k it necessarily
+            # returns keys the mask forbids — positions carrying exactly 0.0 —
+            # and those were written as though they were attention edges. A
+            # zero-mass edge is not a weak edge; it is a position the model
+            # could not see.
+            keep = (keys <= q_idx) & (mass > 0)
+            if not bool(keep.any()):
+                continue
+            q_sel = q_idx[keep]
             at_w.append(
-                np.full(q_idx.numel(), doc_base + i, dtype=np.uint32),
-                q_idx.reshape(-1).cpu().numpy(),
-                np.full(q_idx.numel(), hd, dtype=np.uint16),
-                keys.reshape(-1).cpu().numpy(),
-                mass.reshape(-1).float().cpu().numpy())
+                np.full(q_sel.numel(), doc_base + i, dtype=np.uint32),
+                q_sel.cpu().numpy(),
+                np.full(q_sel.numel(), hd, dtype=np.uint16),
+                keys[keep].cpu().numpy(),
+                mass[keep].float().cpu().numpy())
 
 
 def _write_manifest_atomic(path: Path, manifest: Dict[str, Any]) -> None:

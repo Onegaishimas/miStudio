@@ -44,6 +44,18 @@ def _cancel_checker(db, model_cls, run_id, status_field="status"):
     return check
 
 
+def _failure_detail(exc: BaseException) -> str:
+    """`TypeName: message (file:line)` — enough to act on without the pod log."""
+    import traceback
+
+    where = ""
+    tb = exc.__traceback__
+    if tb is not None:
+        frame = traceback.extract_tb(tb)[-1]
+        where = f" ({frame.filename.rsplit('/', 1)[-1]}:{frame.lineno})"
+    return f"{type(exc).__name__}: {exc}{where}"
+
+
 @celery_app.task(bind=True, base=DatabaseTask,
                  name="src.workers.circuit_capture_tasks.capture_circuit_activations",
                  max_retries=0)
@@ -64,13 +76,19 @@ def capture_circuit_activations(self, run_id: str, confirmed: bool = False) -> D
             return result
         except Exception as e:
             logger.exception("Circuit capture %s failed", run_id)
+            # TYPE AND FRAME, NOT JUST THE MESSAGE. `str(IndexError(...))` is
+            # exactly "tuple index out of range" — no exception type, no file,
+            # no line — and that string is the whole of what the UI and the API
+            # ever showed. A real failure took a log dive on the worker pod to
+            # identify. The frame is what makes the next one self-diagnosing.
+            detail = _failure_detail(e)
             run = db.query(CircuitCaptureRun).filter(
                 CircuitCaptureRun.id == run_id).first()
             if run is not None:
                 run.status = "failed"
-                run.error_message = str(e)[:2000]
+                run.error_message = detail[:2000]
                 db.commit()
-            emit_circuit_run_failed("capture", run_id, str(e)[:500])
+            emit_circuit_run_failed("capture", run_id, detail[:500])
             raise
 
 

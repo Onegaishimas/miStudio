@@ -12,7 +12,7 @@ The only differences are naming conventions.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import torch.nn as nn
 
@@ -32,28 +32,46 @@ LAYER_CONTAINER_PATTERNS = [
     ("", "h"),                    # Direct model.h
 ]
 
+# ORDERED TUPLES, NOT SETS. Every one of these is consumed by a
+# first-match-wins loop (`for pattern in ...: ... break`), so the order decides
+# which module gets hooked when a layer has more than one candidate — and a set
+# has no order. Python randomises string hashing per process, so as sets these
+# genuinely returned different answers in different workers:
+#
+#     PYTHONHASHSEED=1 -> input_layernorm
+#     PYTHONHASHSEED=2 -> post_attention_layernorm
+#
+# on the same Llama-style layer. That is the residual point activations are
+# captured at, so an SAE could be trained on one point by an extraction worker
+# and fed the other by a capture worker, with nothing anywhere reporting a
+# disagreement. The comments below always described a preference order; these
+# are now actually ordered by it.
+
 # Patterns that indicate an attention module
-ATTENTION_PATTERNS = {
+ATTENTION_PATTERNS = (
     "self_attn",       # Llama, Mistral, Gemma, Phi
     "attention",       # Generic
     "attn",            # GPT-2, Falcon
     "self_attention",  # Some variants
     "mha",             # Multi-head attention
     "conv",            # LFM2 uses convolution for sequence mixing
-}
+)
 
 # Patterns that indicate an MLP/feed-forward module
-MLP_PATTERNS = {
+MLP_PATTERNS = (
     "mlp",             # Most modern architectures
     "feed_forward",    # Some variants
     "ffn",             # Feed-forward network
     "dense",           # Some variants
     "ff",              # Abbreviated
     "intermediate",    # BERT-style
-}
+)
 
-# Patterns for layer normalization (used for residual stream hooks)
-LAYER_NORM_PATTERNS = {
+# Patterns for layer normalization (used for residual stream hooks).
+# Most-specific and most-preferred first: a post-attention norm is the residual
+# point this project means by "residual", and `input_layernorm` is last because
+# it is the pre-attention point and only a fallback.
+LAYER_NORM_PATTERNS = (
     # Post-attention norms (preferred for residual stream)
     "post_attention_layernorm",  # Llama-style
     "ln_2",                       # GPT-2 style
@@ -67,7 +85,7 @@ LAYER_NORM_PATTERNS = {
     "layer_norm",                 # Generic
     "ln_1",                       # GPT-2 pre-attention
     "input_layernorm",            # Llama pre-attention
-}
+)
 
 
 @dataclass
@@ -134,13 +152,14 @@ def _get_nested_attr(obj: object, path: str) -> Optional[object]:
     return current
 
 
-def _find_matching_attr(module: nn.Module, patterns: Set[str]) -> Optional[str]:
+def _find_matching_attr(module: nn.Module, patterns: Sequence[str]) -> Optional[str]:
     """
     Find the first attribute name that matches any of the given patterns.
 
     Args:
         module: Module to search
-        patterns: Set of attribute name patterns to match
+        patterns: Ordered attribute-name patterns; membership only, so order
+            does not matter here (see the note on the constants).
 
     Returns:
         Matching attribute name, or None if no match
@@ -380,6 +399,50 @@ def validate_model_for_extraction(model: nn.Module, architecture_hint: Optional[
         )
 
     return structure
+
+
+def find_attention_module(layer: nn.Module) -> Optional[nn.Module]:
+    """The layer's genuine self-attention module, or None if it has none.
+
+    STRICTER THAN `ATTENTION_PATTERNS`, deliberately. That tuple includes
+    `"conv"` because LFM2 uses a short convolution for sequence mixing, which is
+    the right call for "what mixes across positions" — but a conv mixer has no
+    attention probabilities, so anything reading `[batch, heads, q, k]` off it is
+    reading something that does not exist. On a hybrid this is the difference
+    between a layer that can be captured and one that cannot.
+
+    Identified structurally rather than by name: a class whose name ends in
+    "Attention", or a module carrying both `q_proj` and `k_proj`. That covers
+    granite, llama, gemma, mistral, lfm2's attention layers and GPT-2, and
+    excludes conv/SSM mixers without needing a list of their names.
+
+    Returns the MODULE, not its attribute name, because the caller wants to hook
+    it and the name is per-architecture noise.
+    """
+    for attr_name in dir(layer):
+        if attr_name.startswith("__"):
+            continue
+        child = getattr(layer, attr_name, None)
+        if child is None or not isinstance(child, nn.Module):
+            continue
+        if type(child).__name__.endswith("Attention"):
+            return child
+        if hasattr(child, "q_proj") and hasattr(child, "k_proj"):
+            return child
+    return None
+
+
+def attention_layer_indices(layers_module: nn.ModuleList) -> List[int]:
+    """Which layers actually have attention — checked PER LAYER.
+
+    `discover_transformer_structure` inspects only layer 0 and applies that
+    verdict model-wide, which is fine for a dense model and wrong for a hybrid:
+    LFM2 has attention on 6 of 16 layers and granite-4.x MoE variants interleave
+    Mamba blocks. Anything that needs to know whether a SPECIFIC layer can be
+    attention-captured has to look at that layer.
+    """
+    return [i for i, layer in enumerate(layers_module)
+            if find_attention_module(layer) is not None]
 
 
 def get_hookable_module(

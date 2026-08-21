@@ -18,6 +18,7 @@ from src.ml.layer_discovery import (
     _is_transformer_layer,
     _find_matching_attr,
     ATTENTION_PATTERNS,
+    LAYER_NORM_PATTERNS,
     MLP_PATTERNS,
 )
 
@@ -227,8 +228,10 @@ class TestTransformerLayerDetection:
         assert is_transformer is True
         assert modules["attention"] == "self_attn"
         assert modules["mlp"] == "mlp"
-        # Either input_layernorm or post_attention_layernorm works for residual hooks
-        assert modules["residual_norm"] in ("input_layernorm", "post_attention_layernorm")
+        # THE POST-ATTENTION NORM, specifically. This used to accept either,
+        # which tolerated the very nondeterminism that made captures
+        # irreproducible instead of preventing it.
+        assert modules["residual_norm"] == "post_attention_layernorm"
 
     def test_detects_gpt2_style_layer(self):
         """Test detection of GPT-2 style layer."""
@@ -271,8 +274,8 @@ class TestDiscoverTransformerStructure:
         assert structure.num_layers == 3
         assert structure.attention_module == "self_attn"
         assert structure.mlp_module == "mlp"
-        # Either input_layernorm or post_attention_layernorm works for residual hooks
-        assert structure.residual_norm_module in ("input_layernorm", "post_attention_layernorm")
+        # See above: pinned, not tolerated.
+        assert structure.residual_norm_module == "post_attention_layernorm"
 
     def test_discovers_gpt2_structure(self, gpt2_model):
         """Test discovery of GPT-2 style model structure."""
@@ -382,17 +385,46 @@ class TestTransformerStructureDataclass:
 
 
 class TestPatternSets:
-    """Tests for the pattern constant sets."""
+    """Tests for the pattern constants — content AND order.
+
+    These were sets, and every one of them is consumed by a first-match-wins
+    loop, so the order decides which module gets hooked on a layer with more
+    than one candidate. A set has no order and Python randomises string hashing
+    per process, so the answer differed between workers.
+    """
 
     def test_attention_patterns_comprehensive(self):
         """Test that attention patterns cover common naming."""
         expected = {"self_attn", "attention", "attn", "self_attention", "mha", "conv"}
-        assert ATTENTION_PATTERNS == expected
+        assert set(ATTENTION_PATTERNS) == expected
 
     def test_mlp_patterns_comprehensive(self):
         """Test that MLP patterns cover common naming."""
         expected = {"mlp", "feed_forward", "ffn", "dense", "ff", "intermediate"}
-        assert MLP_PATTERNS == expected
+        assert set(MLP_PATTERNS) == expected
+
+    def test_every_pattern_collection_is_ORDERED(self):
+        """A set here is a latent nondeterminism bug, not a style choice."""
+        for name, patterns in (
+            ("ATTENTION_PATTERNS", ATTENTION_PATTERNS),
+            ("MLP_PATTERNS", MLP_PATTERNS),
+            ("LAYER_NORM_PATTERNS", LAYER_NORM_PATTERNS),
+        ):
+            assert isinstance(patterns, (tuple, list)), (
+                f"{name} is a {type(patterns).__name__}; it is consumed by a "
+                "first-match-wins loop, so it must have a defined order"
+            )
+
+    def test_the_POST_attention_norm_is_preferred_over_the_pre_attention_one(self):
+        """The preference the comments have always claimed.
+
+        A Llama-style layer has both `input_layernorm` (pre-attention) and
+        `post_attention_layernorm`. Which one wins is the residual point every
+        SAE in this project is trained and served on, so it must be fixed, and
+        it must be the post-attention one.
+        """
+        order = list(LAYER_NORM_PATTERNS)
+        assert order.index("post_attention_layernorm") < order.index("input_layernorm")
 
 
 class TestEdgeCases:
@@ -432,3 +464,56 @@ class TestEdgeCases:
         # Should find layers via deep search
         assert structure.num_layers == 2
         assert structure.attention_module == "self_attn"
+
+
+class TestDiscoveryIsDeterministicACROSSProcesses:
+    """The bug the ordering fix exists for.
+
+    `LAYER_NORM_PATTERNS` was a set, and the selection loop takes the first
+    match. Python randomises string hashing per process, so two workers running
+    identical code on an identical model chose different residual points. An
+    SAE trained by an extraction worker on one point could be fed the other by
+    a capture worker, silently, and the only symptom was an implausible
+    activation density much later.
+
+    In-process repetition cannot catch this — the seed is fixed once per
+    interpreter — so this spawns real subprocesses.
+    """
+
+    PROBE = (
+        "import torch.nn as nn;"
+        "from src.ml.layer_discovery import _is_transformer_layer;"
+        "l = nn.Module();"
+        "l.input_layernorm = nn.LayerNorm(8);"
+        "l.post_attention_layernorm = nn.LayerNorm(8);"
+        "l.self_attn = nn.Linear(8, 8);"
+        "l.mlp = nn.Linear(8, 8);"
+        "print(_is_transformer_layer(l)[1]['residual_norm'])"
+    )
+
+    def _choice_under(self, seed: str) -> str:
+        import os
+        import subprocess
+        import sys
+
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        out = subprocess.run(
+            [sys.executable, "-c", self.PROBE],
+            capture_output=True, text=True, env=env, timeout=300,
+            cwd=str(pathlib.Path(__file__).resolve().parents[2]),
+        )
+        assert out.returncode == 0, f"probe failed under seed {seed}: {out.stderr[-800:]}"
+        return out.stdout.strip().splitlines()[-1]
+
+    def test_the_residual_point_is_the_same_under_every_hash_seed(self):
+        seeds = ["0", "1", "2", "3", "4"]
+        choices = {seed: self._choice_under(seed) for seed in seeds}
+
+        assert len(set(choices.values())) == 1, (
+            "the residual hook target depends on PYTHONHASHSEED, so two workers "
+            f"can capture different points of the residual stream: {choices}"
+        )
+        assert set(choices.values()) == {"post_attention_layernorm"}
+
+
+import pathlib  # noqa: E402 - used by the subprocess probe above
