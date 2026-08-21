@@ -34,11 +34,29 @@ class Hazard:
     evidence: str        # source label — "validated:ES=…" | "heuristic:weight_prior=…"
     rung: int            # the edge's rung (0 for a pure heuristic pair)
     quantified_effect: Optional[float] = None  # ES for validated edges
+    #: The effect size was measured on a CLUSTER-level edge and inherited by
+    #: this feature pair, not measured on this pair.
+    #:
+    #: A supernode's activation is `A_C(t) = max_k a_{l,i_k}(t)` (Appendix A.4),
+    #: so a cluster edge's ES was measured on a signal that at any token is ONE
+    #: member's activation — whichever was carrying the cluster. Resolving that
+    #: edge to feature membership at steering time is what A.4 prescribes, and
+    #: it is what `expand_cluster_edges` does, but the resulting number belongs
+    #: to the cluster pair and not to any particular member pair.
+    #:
+    #: Without this flag such a hazard rendered as `validated:ES=0.800`, to
+    #: three decimals, indistinguishable from an effect size measured on that
+    #: exact pair. This module already separates measured from heuristic; the
+    #: third case is measured-HERE from inherited. A.4's own answer for "which
+    #: member pairs carry it" is to MEASURE them — the A.3 drill-down restricted
+    #: to the two memberships — never to apportion the cluster number.
+    inherited_from_cluster_edge: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {"type": self.type, "up": self.up, "down": self.down,
                 "evidence": self.evidence, "rung": self.rung,
-                "quantified_effect": self.quantified_effect}
+                "quantified_effect": self.quantified_effect,
+                "inherited_from_cluster_edge": self.inherited_from_cluster_edge}
 
 
 def weight_prior(up_decoder, up_idx: int, down_encoder, down_idx: int) -> float:
@@ -217,12 +235,25 @@ def detect_hazards(
                 # a validated NEGATIVE edge flips the compounding/cancellation
                 edge_positive = es >= 0
                 compounding = same_sign == edge_positive
+                inherited = bool(edge.get("expanded_from_cluster_edge"))
+                # SAY WHICH PAIR THE NUMBER BELONGS TO. `expand_cluster_edges`
+                # marks the edges it resolved out of a cluster edge, and that
+                # mark used to die here: the Hazard was built without it, so an
+                # ES measured on a supernode pair reached the caller wearing the
+                # same label as one measured on this feature pair.
+                label = (
+                    f"validated:cluster-ES={es:.3f} (inherited from a "
+                    "cluster-level edge; not measured on this feature pair)"
+                    if inherited
+                    else f"validated:ES={es:.3f}"
+                )
                 hazards.append(Hazard(
                     type="compounding" if compounding else "cancellation",
                     up=up_ref, down=down_ref,
-                    evidence=f"validated:ES={es:.3f}",
+                    evidence=label,
                     rung=int(edge.get("rung", 2)),
-                    quantified_effect=es))
+                    quantified_effect=es,
+                    inherited_from_cluster_edge=inherited))
                 seen_pairs.add(pair)
                 continue
 
