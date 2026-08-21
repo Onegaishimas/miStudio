@@ -23,6 +23,7 @@ from .layer_discovery import (
     discover_transformer_structure,
     get_hookable_module,
     TransformerStructure,
+    find_attention_module,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,14 @@ class HookType(Enum):
     """Types of forward hooks supported."""
     RESIDUAL = "residual"
     MLP = "mlp"
+    #: The attention module's OUTPUT HIDDEN STATES — `output[0]`, shape
+    #: [batch, seq, hidden]. Named "attention" for historical reasons; several
+    #: callers depend on this meaning (see `workers/training_tasks.py`).
     ATTENTION = "attention"
+    #: The attention PROBABILITIES — `output[1]`, shape [batch, heads, q, k].
+    #: A separate type because `create_hook` discards index 1 by design, so
+    #: ATTENTION can never yield them however it is pointed.
+    ATTENTION_WEIGHTS = "attention_weights"
 
 
 class HookManager:
@@ -62,7 +70,56 @@ class HookManager:
         self.model = model
         self.activations: Dict[str, List[torch.Tensor]] = {}
         self.hooks: List[torch.utils.hooks.RemovableHandle] = []
+        #: Names of the hooks registered, parallel to `hooks`. `register_hooks`
+        #: only raises when NOTHING at all is registered, so on a second call —
+        #: which is how attention capture is added on top of residual capture —
+        #: a total failure to register is invisible: the residual hooks from the
+        #: first call keep the list non-empty. Callers assert on the delta here.
+        self.hook_names: List[str] = []
         self.structure: Optional[TransformerStructure] = None
+
+    class AttentionWeightsUnavailable(RuntimeError):
+        """The hooked module produced no attention probabilities.
+
+        Overwhelmingly this means the model is running SDPA or flash attention,
+        whose kernels never materialise the probability matrix — transformers'
+        `sdpa_attention_forward` literally returns `(attn_output, None)`. The
+        fix is to load the model with `attn_implementation="eager"`.
+
+        RAISED, NOT LOGGED. The failure this replaces wrote an empty attention
+        sidecar that looked like a completed capture, and the only symptom
+        downstream was an analysis with nothing in it.
+        """
+
+    def create_attention_weights_hook(self, layer_name: str):
+        """Capture `output[1]` — the [batch, heads, q, k] probabilities.
+
+        `create_hook` below takes `output[0]` and drops the rest, under a comment
+        that names attention weights as the thing being dropped. That is correct
+        for hidden-state capture and useless here, which is why this is a
+        separate function rather than a flag on that one.
+
+        Kept on-device and NOT moved to CPU: the caller consumes each batch's
+        weights within the same loop iteration, and a 128 MiB device-to-host copy
+        per layer per batch would dominate the capture.
+        """
+        def hook_fn(module: nn.Module, input: Tuple[torch.Tensor, ...], output) -> None:
+            if not isinstance(output, tuple) or len(output) < 2:
+                raise HookManager.AttentionWeightsUnavailable(
+                    f"{layer_name}: hooked module {type(module).__name__} returned "
+                    f"{type(output).__name__}, not an (output, weights) tuple — it is "
+                    "probably a convolution or SSM mixer rather than attention"
+                )
+            weights = output[1]
+            if weights is None:
+                raise HookManager.AttentionWeightsUnavailable(
+                    f"{layer_name}: {type(module).__name__} returned no attention "
+                    "probabilities. SDPA and flash-attention kernels never produce "
+                    "them; load the model with attn_implementation=\"eager\"."
+                )
+            self.activations.setdefault(layer_name, []).append(weights.detach())
+
+        return hook_fn
 
     def create_hook(self, layer_name: str) -> Callable:
         """
@@ -174,20 +231,34 @@ class HookManager:
             hook_type: Type of hook to register
             architecture: Model architecture name (used for logging only)
         """
-        # Use dynamic discovery to find the module
-        module_to_hook = get_hookable_module(layer, hook_type.value, self.structure)
-
-        if module_to_hook is None:
-            logger.warning(f"Could not find module for {hook_type.value} hook on layer {layer_idx}")
-            return
-
-        # Create hook with descriptive name
         hook_name = f"layer_{layer_idx}_{hook_type.value}"
-        hook_fn = self.create_hook(hook_name)
+
+        if hook_type is HookType.ATTENTION_WEIGHTS:
+            # STRICT resolution, not `get_hookable_module`. That routes through
+            # ATTENTION_PATTERNS, which includes "conv" for LFM2's sequence
+            # mixer — a module with no attention probabilities at all. Pointing
+            # a weights hook at one produces a confusing error deep in a batch
+            # instead of a clear refusal here.
+            module_to_hook = find_attention_module(layer)
+            if module_to_hook is None:
+                logger.warning(
+                    f"Layer {layer_idx} has no attention module, so attention "
+                    "weights cannot be captured from it"
+                )
+                return
+            hook_fn = self.create_attention_weights_hook(hook_name)
+        else:
+            # Use dynamic discovery to find the module
+            module_to_hook = get_hookable_module(layer, hook_type.value, self.structure)
+            if module_to_hook is None:
+                logger.warning(f"Could not find module for {hook_type.value} hook on layer {layer_idx}")
+                return
+            hook_fn = self.create_hook(hook_name)
 
         # Register and store handle
         handle = module_to_hook.register_forward_hook(hook_fn)
         self.hooks.append(handle)
+        self.hook_names.append(hook_name)
 
         logger.debug(f"Registered {hook_type.value} hook on layer {layer_idx}")
 
@@ -217,6 +288,7 @@ class HookManager:
         for handle in self.hooks:
             handle.remove()
         self.hooks.clear()
+        self.hook_names.clear()
         self.activations.clear()
         logger.info("Removed all hooks and cleared activations")
 

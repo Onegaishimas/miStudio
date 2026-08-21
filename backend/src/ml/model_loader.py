@@ -185,6 +185,7 @@ def load_model_from_hf(
     hf_token: Optional[str] = None,
     auto_fallback: bool = True,
     local_files_only: bool = False,
+    attn_implementation: Optional[str] = None,
 ) -> Tuple[AutoModelForCausalLM, AutoTokenizer, AutoConfig, Dict[str, Any]]:
     """
     Load a language model from HuggingFace Hub with specified quantization.
@@ -198,6 +199,13 @@ def load_model_from_hf(
         hf_token: HuggingFace API token for gated models
         auto_fallback: Automatically fallback to less aggressive quantization on OOM
         local_files_only: If True, only use locally cached files (no network calls).
+        attn_implementation: Force an attention backend, e.g. "eager". Left as
+            None the model keeps transformers' own choice, which is SDPA
+            wherever supported — so every existing caller's `from_pretrained`
+            call is byte-identical to before. Pass "eager" only when the caller
+            needs attention PROBABILITIES: SDPA and flash kernels never
+            materialise them (`sdpa_attention_forward` returns
+            `(attn_output, None)`), and eager is materially slower.
             Use this when the model is already downloaded to avoid HF API validation
             for gated models.
 
@@ -241,8 +249,7 @@ def load_model_from_hf(
 
         # Load model
         try:
-            model = AutoModelForCausalLM.from_pretrained(
-                repo_id,
+            load_kwargs: Dict[str, Any] = dict(
                 config=config,
                 quantization_config=quantization_config,
                 torch_dtype=torch_dtype,
@@ -252,6 +259,11 @@ def load_model_from_hf(
                 token=hf_token,
                 local_files_only=local_files_only,
             )
+            # INSERTED ONLY WHEN ASKED FOR, so "a default caller's call is
+            # unchanged" is a property a test can assert rather than a claim.
+            if attn_implementation is not None:
+                load_kwargs["attn_implementation"] = attn_implementation
+            model = AutoModelForCausalLM.from_pretrained(repo_id, **load_kwargs)
 
             logger.info(f"Successfully loaded model with {quant_format.value} quantization")
 
@@ -274,6 +286,12 @@ def load_model_from_hf(
                             hf_token=hf_token,
                             auto_fallback=auto_fallback,
                             local_files_only=local_files_only,
+                            # CARRIED THROUGH THE FALLBACK. Without this an OOM
+                            # retry silently drops back to SDPA, and the caller
+                            # that asked for eager gets a model that can never
+                            # produce attention weights — with no error, because
+                            # the fallback itself succeeded.
+                            attn_implementation=attn_implementation,
                         )
                     else:
                         raise OutOfMemoryError(
@@ -308,6 +326,12 @@ def load_model_from_hf(
             "memory_required_bytes": memory_required,
             "architecture": config.model_type,
             "architecture_config": arch_config,
+            # THE RESOLVED backend, not the requested one. A caller that needs
+            # attention probabilities can assert on this and refuse in seconds,
+            # rather than discovering minutes into a GPU job that its request
+            # was ignored or lost in an OOM fallback.
+            "attn_implementation": getattr(
+                model.config, "_attn_implementation", None),
         }
 
         return model, tokenizer, config, metadata
