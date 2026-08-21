@@ -104,3 +104,44 @@ class TestTheRelativeCeilingCannotSubstitute:
             assert cap._exceeds_memory_budget(buffered_at_oom) is not None, (
                 "the absolute guard must catch what the relative one cannot"
             )
+
+
+class TestTheRefusalIsActionable:
+    """A refusal that lists knobs makes the reader redo arithmetic the service
+    has already done — and, in the first version, points at a knob that does
+    not work.
+
+    Measured on the real corpus: epsilon 0.1 -> 0.9 removed only 80% of events
+    (20.1B -> 4.1B, still 183 GB against a 97 GB budget). These features have
+    so little dynamic range that even a 90%-of-max threshold admits most of
+    them. sample_cap is the lever that is actually linear.
+    """
+
+    BUDGET = 97 * 2**30
+
+    def test_it_computes_a_sample_cap_that_would_FIT(self):
+        with patch.object(cap, "_memory_budget_bytes", return_value=self.BUDGET):
+            suggested = cap._suggested_sample_cap(20_076_133_937, 2000)
+
+            assert suggested is not None
+            # the suggestion must itself survive the guard it came from
+            scaled = int(20_076_133_937 * suggested / 2000)
+            assert cap._exceeds_memory_budget(scaled) is None, (
+                f"the suggested sample_cap {suggested} would be refused too"
+            )
+
+    def test_the_suggestion_is_PROPORTIONAL_not_a_constant(self):
+        """Twice the events, half the documents."""
+        with patch.object(cap, "_memory_budget_bytes", return_value=self.BUDGET):
+            a = cap._suggested_sample_cap(10**10, 2000)
+            b = cap._suggested_sample_cap(2 * 10**10, 2000)
+
+        assert b == pytest.approx(a / 2, rel=0.02)
+
+    def test_it_never_suggests_zero_documents(self):
+        with patch.object(cap, "_memory_budget_bytes", return_value=1024):
+            assert cap._suggested_sample_cap(10**12, 2000) >= 1
+
+    def test_no_budget_means_no_suggestion_rather_than_a_guess(self):
+        with patch.object(cap, "_memory_budget_bytes", return_value=None):
+            assert cap._suggested_sample_cap(10**10, 2000) is None
