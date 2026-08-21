@@ -616,6 +616,16 @@ class HazardModel(BaseModel):
     evidence: str
     rung: int = Field(0, description="edge rung (0 for a pure heuristic pair)")
     quantified_effect: Optional[float] = Field(None, description="measured ES for validated edges")
+    inherited_from_cluster_edge: bool = Field(
+        False,
+        description=(
+            "the effect size was measured on a CLUSTER-level edge and inherited "
+            "by this feature pair, not measured on this pair. A supernode's "
+            "activation is the max over its members (Appendix A.4), so the "
+            "number belongs to the cluster pair. To get a measured per-pair "
+            "figure, run the A.4 refinement restricted to the two memberships."
+        ),
+    )
 
 
 class MultiLayerAllocationResponse(BaseModel):

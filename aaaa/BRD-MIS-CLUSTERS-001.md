@@ -255,8 +255,46 @@ members actually being steered. Edges whose profile is missing or empty are
 returned as `unchecked_edges` on the response rather than dropped, so an empty
 `hazards` list can be read correctly.
 
-**Still open:** hazard analysis remains feature-level *internally* — a cluster
-edge is expanded into feature pairs rather than evaluated as a supernode, so a
-cluster-scale effect size is attributed to each constituent pair. That is the
-conservative direction (it can only add warnings) but it is an approximation,
-and a true supernode hazard model is not in this increment.
+### 3. Correction — this was never an open design question
+
+An earlier revision of this addendum recorded the remaining work as "a design
+question about how a cluster-scale ES decomposes". **That was wrong**, and the
+answer was already in CIRCUITS-002 Appendix A.4, which is normative:
+
+> `A_C(t) = max_k a_{l,i_k}(t)` … A cluster-level edge that passes rungs is
+> stored with `member_kind: cluster_ref` and **resolves to feature membership at
+> steering/projection time**. Feature-level refinement of a promising cluster
+> edge (which member pairs carry it) is a **review-UX drill-down running A.3
+> restricted to the two clusters' members**.
+
+So expansion at steering time is the *specified* behaviour, not an
+approximation; and per-pair attribution is not derived from the cluster figure
+at all — it is **measured**, by running A.3 over the two memberships. There is
+no decomposition rule to invent, and inventing one would be actively wrong: any
+apportionment (divide by member count, weight by cohesion) is exactly as
+unmeasured as the inherited figure while looking more modest, and it SHRINKS
+hazards, which is the dangerous direction.
+
+Two concrete items followed, both now shipped.
+
+**The label.** Under `A_C = max` the cluster ES was measured on a signal that at
+any token is one member's activation, so attributing it to every member pair and
+rendering `validated:ES=0.800` to three decimals claimed a measurement that
+never happened. `Hazard` now carries `inherited_from_cluster_edge` and an
+evidence label that says so. This module already separated measured from
+heuristic; the third case is measured-HERE from inherited.
+
+**The refinement.** `refine_cluster_edge` implements A.4's drill-down: the A.3
+statistics — PMI, minimum support, circular-shift null, BH FDR, held-out
+replication — restricted to the two memberships, over an m x n candidate space
+instead of (8k)². Exposed at
+`POST /api/v1/circuit-discovery/refine-cluster-edge`. It shares `open_capture`
+with the discovery run rather than re-deriving the document split, because a
+refinement computed against a different split would produce numbers that are not
+comparable to the edge it refines. Rung is **not** inherited: these are
+association statistics, and a member pair earns rung 2 only through an
+intervention (A.5).
+
+**Still open:** nothing in A.4. The remaining gap is a review UI for the
+drill-down — the endpoint and its statistics exist and are tested, but no panel
+calls them yet.

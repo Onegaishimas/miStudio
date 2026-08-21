@@ -18,6 +18,7 @@ disclosed in the report and every downstream surface (IDL-35).
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -111,22 +112,14 @@ class CircuitDiscoveryService:
             CircuitDiscoveryRun.id == run_id).first()
         if run is None:
             raise ValueError(f"Discovery run {run_id} not found")
-        capture = db.query(CircuitCaptureRun).filter(
-            CircuitCaptureRun.id == run.capture_run_id).first()
-        if capture is None or not capture.store_path:
-            raise DiscoveryConfigError("Capture store missing")
+        cap = open_capture(db, run.capture_run_id)
         p = run.params
-        manifest = capture.manifest or {}
-        store_dir = settings.resolve_data_path(capture.store_path)
-        doc_lengths = {int(k): int(v)
-                       for k, v in (manifest.get("doc_lengths") or {}).items()}
-        heldout = np.array(manifest.get("split", {}).get("heldout_docs", []),
-                           dtype=np.uint32)
-        all_docs = np.arange(manifest.get("counts", {}).get("documents", 0),
-                             dtype=np.uint32)
-        discovery_docs = all_docs[~np.isin(all_docs, heldout)]
-        n_tokens_discovery = int(sum(doc_lengths.get(int(d), 0)
-                                     for d in discovery_docs))
+        manifest = cap.manifest
+        store_dir = cap.store_dir
+        doc_lengths = cap.doc_lengths
+        heldout = cap.heldout
+        discovery_docs = cap.discovery_docs
+        n_tokens_discovery = cap.n_tokens_discovery
 
         run.status = "running"
         run.progress = 0.0
@@ -424,3 +417,245 @@ def _unit_ref(unit: Dict[str, Any], granularity: str) -> Dict[str, Any]:
     return {"layer": unit["layer"],
             "cluster_profile_id": unit["cluster_profile_id"],
             "cluster_name": unit["cluster_name"]}
+
+
+# ── A.4 refinement: which member pairs carry a cluster-level edge ──────────
+
+
+@dataclass
+class OpenedCapture:
+    """Everything a statistics pass needs from a capture store.
+
+    SHARED WITH `run`, not copied from it. The discovery/held-out split, the
+    token count and the document lengths are all inputs to PMI and to the null,
+    so a refinement that recomputed them slightly differently would produce
+    numbers that are not comparable to the edge it is refining — and the whole
+    point of the refinement is comparing them.
+    """
+
+    manifest: Dict[str, Any]
+    store_dir: Any
+    doc_lengths: Dict[int, int]
+    heldout: np.ndarray
+    discovery_docs: np.ndarray
+    n_tokens_discovery: int
+    sae_by_layer: Dict[int, Any]
+
+
+def open_capture(db, capture_run_id: str) -> OpenedCapture:
+    capture = db.query(CircuitCaptureRun).filter(
+        CircuitCaptureRun.id == capture_run_id).first()
+    if capture is None or not capture.store_path:
+        raise DiscoveryConfigError("Capture store missing")
+    manifest = capture.manifest or {}
+    doc_lengths = {int(k): int(v)
+                   for k, v in (manifest.get("doc_lengths") or {}).items()}
+    heldout = np.array(manifest.get("split", {}).get("heldout_docs", []),
+                       dtype=np.uint32)
+    all_docs = np.arange(manifest.get("counts", {}).get("documents", 0),
+                         dtype=np.uint32)
+    discovery_docs = all_docs[~np.isin(all_docs, heldout)]
+    return OpenedCapture(
+        manifest=manifest,
+        store_dir=settings.resolve_data_path(capture.store_path),
+        doc_lengths=doc_lengths,
+        heldout=heldout,
+        discovery_docs=discovery_docs,
+        n_tokens_discovery=int(sum(doc_lengths.get(int(d), 0)
+                                   for d in discovery_docs)),
+        sae_by_layer={e["layer"]: e["sae_id"]
+                      for e in manifest.get("layers", [])},
+    )
+
+
+def _member_units(reader: EventReader, layer: int, feature_idxs, 
+                  discovery_docs: np.ndarray, s_min: int) -> List[Dict[str, Any]]:
+    """Feature units for a NAMED set of indices, with no unit cap.
+
+    `_feature_units` sweeps every feature in the store and trims to
+    `max_units_per_layer` by support. Neither applies here: the candidate set is
+    one cluster's membership, which is small and entirely the point — trimming
+    it by support would silently drop the members a reviewer asked about.
+
+    Members below `s_min` are still excluded, because PMI on a handful of
+    co-firings is noise, and the caller is told which (see `refine_cluster_edge`).
+    """
+    units = []
+    for fid in feature_idxs:
+        ev = reader.feature_events(int(fid))
+        if not len(ev):
+            continue
+        keys_all = (ev["doc_id"].astype(np.uint64) << np.uint64(16)) | \
+            ev["token_pos"].astype(np.uint64)
+        mask = np.isin((keys_all >> np.uint64(16)).astype(np.uint32),
+                       discovery_docs)
+        keys = keys_all[mask]
+        if len(keys) < s_min:
+            continue
+        units.append({
+            "kind": "feature", "layer": layer, "feature_idx": int(fid),
+            "keys": keys, "keys_all": keys_all,
+            "acts": ev["act"][mask].astype(np.float64),
+            "support": len(keys),
+        })
+    return units
+
+
+def refine_cluster_edge(
+    db,
+    capture_run_id: str,
+    up: Dict[str, Any],
+    down: Dict[str, Any],
+    *,
+    s_min: Optional[int] = None,
+    null_shuffles: Optional[int] = None,
+    null_percentile: Optional[float] = None,
+    fdr_q: Optional[float] = None,
+    max_null_tested: int = 200,
+    seed: int = 0,
+) -> Dict[str, Any]:
+    """Which member pairs carry a cluster-level edge (Appendix A.4).
+
+    A supernode's activation is `A_C(t) = max_k a_{l,i_k}(t)`, so a cluster
+    edge's effect size was measured on a signal that at any token is ONE
+    member's activation. The edge therefore says the two clusters are linked; it
+    does not say which members do the linking, and its number cannot be
+    apportioned to member pairs by any arithmetic — apportioning would look
+    modest while being exactly as unmeasured, and would quietly shrink a hazard.
+
+    A.4's answer is to MEASURE: run the A.3 statistics restricted to the two
+    clusters' members. That is this function. The candidate space is m x n
+    rather than (8k)^2, so an exhaustive pass is cheap.
+
+    Returns every surviving member pair with its own PMI, lift, support,
+    null threshold and held-out replication — measured on this pair, and
+    therefore usable where the inherited cluster figure is not.
+    """
+    up_ids = [int(m["feature_idx"]) for m in (up.get("members") or [])
+              if m.get("feature_idx") is not None]
+    down_ids = [int(m["feature_idx"]) for m in (down.get("members") or [])
+                if m.get("feature_idx") is not None]
+    up_layer, down_layer = int(up["layer"]), int(down["layer"])
+    if up_layer >= down_layer:
+        raise DiscoveryConfigError(
+            f"refinement runs upstream→downstream; got layers {up_layer}→{down_layer}")
+    if not up_ids or not down_ids:
+        raise DiscoveryConfigError(
+            "a cluster endpoint has no members with a feature_idx")
+
+    cap = open_capture(db, capture_run_id)
+    s_min = int(s_min if s_min is not None else stats.DEFAULT_S_MIN)
+    k_shuffles = int(null_shuffles if null_shuffles is not None
+                     else stats.DEFAULT_NULL_SHUFFLES)
+    percentile = float(null_percentile if null_percentile is not None
+                       else stats.DEFAULT_NULL_PERCENTILE)
+    q = float(fdr_q if fdr_q is not None else stats.DEFAULT_FDR_Q)
+
+    for L in (up_layer, down_layer):
+        if not layer_files_exist(cap.store_dir, L):
+            raise DiscoveryConfigError(
+                f"capture {capture_run_id} holds no events for layer {L}")
+
+    up_units = _member_units(EventReader(cap.store_dir, up_layer), up_layer,
+                             up_ids, cap.discovery_docs, s_min)
+    down_units = _member_units(EventReader(cap.store_dir, down_layer), down_layer,
+                               down_ids, cap.discovery_docs, s_min)
+
+    # WHAT WAS EXCLUDED, NAMED. A reviewer asking "which members carry this"
+    # must be able to tell "this member does not carry it" from "this member
+    # never had the support to be tested" — an absent row reads as the former.
+    tested_up = {u["feature_idx"] for u in up_units}
+    tested_down = {u["feature_idx"] for u in down_units}
+    excluded = (
+        [{"layer": up_layer, "feature_idx": i, "reason": "below support floor"}
+         for i in up_ids if i not in tested_up]
+        + [{"layer": down_layer, "feature_idx": i, "reason": "below support floor"}
+           for i in down_ids if i not in tested_down]
+    )
+
+    pairs = []
+    for u in up_units:
+        for d in down_units:
+            ps = stats.pair_stats(u["keys"], d["keys"], cap.n_tokens_discovery,
+                                  u.get("acts"), d.get("acts"))
+            if ps.n_ud < s_min:
+                continue
+            pairs.append({"up": u, "down": d, "stats": ps})
+
+    pairs.sort(key=lambda c: c["stats"].pmi, reverse=True)
+
+    # PMI-ranked, then capped for the null pass — the same discipline as a
+    # discovery run. m x n is small next to (8k)^2 but not free: 100 shuffles a
+    # pair means two twenty-member clusters cost 40,000 circular-shift passes.
+    # THE CAP IS REPORTED. A truncated drill-down that looked complete would
+    # answer "which members carry this edge" with a silent subset, which is a
+    # worse failure than refusing.
+    null_capped = len(pairs) > max_null_tested
+    pairs = pairs[:max_null_tested]
+
+    # Same null, same FDR, same replication as a discovery run.
+    nulls = [stats.null_test(c["up"]["keys"], c["down"]["keys"], cap.doc_lengths,
+                             k_shuffles=k_shuffles, percentile=percentile,
+                             seed=seed + j)
+             for j, c in enumerate(pairs)]
+    pooled = stats.pooled_null_pvalues(nulls) if pairs else []
+    keep = stats.bh_fdr(pooled, q=q) if pairs else []
+    survivors = [dict(c, null=n, pooled_p=float(pp))
+                 for c, n, pp, k in zip(pairs, nulls, pooled, keep) if k]
+
+    repl, flags = stats.heldout_replication(
+        [(c["up"]["keys_all"], c["down"]["keys_all"]) for c in survivors],
+        cap.heldout, cap.doc_lengths,
+        k_shuffles=k_shuffles, percentile=percentile, seed=seed + 10_000)
+
+    member_pairs = []
+    for c, replicated in zip(survivors, flags):
+        ps: stats.PairStats = c["stats"]
+        member_pairs.append({
+            "up": {"layer": up_layer, "feature_idx": c["up"]["feature_idx"]},
+            "down": {"layer": down_layer, "feature_idx": c["down"]["feature_idx"]},
+            # `n_up`/`n_down`, the names PairStats actually uses. My first
+            # version invented `n_u`/`n_d` and raised on the first surviving
+            # pair — the same class of slip as `threshold` above, and both
+            # reached a `finally`-free path where only a real survivor exposes
+            # them. Worth the note: a fixture too weak to produce a survivor
+            # (K=3, whose empirical p floors at 0.25 and can never clear BH)
+            # hid both bugs behind an empty result that looked like a clean run.
+            "stats": {"pmi": ps.pmi, "lift": ps.lift, "n_ud": int(ps.n_ud),
+                      "n_up": int(ps.n_up), "n_down": int(ps.n_down),
+                      "n_tokens": int(ps.n_tokens), "spearman": ps.spearman},
+            # `threshold_n_ud`, not `threshold` — the latter does not exist on
+            # NullResult and would have raised on the first surviving pair.
+            "null_threshold_n_ud": c["null"].threshold_n_ud,
+            "null_percentile": round(c["null"].null_percentile, 2),
+            "p_value": round(c["null"].p_value, 5),
+            "pooled_p": c["pooled_p"],
+            "replicated": bool(replicated),
+            # Measured on THIS pair. That is the entire point of the drill-down
+            # and the one thing an inherited cluster figure can never claim.
+            "measured_on_this_pair": True,
+        })
+
+    return {
+        "up_cluster": {"layer": up_layer,
+                       "cluster_profile_id": up.get("cluster_profile_id")},
+        "down_cluster": {"layer": down_layer,
+                         "cluster_profile_id": down.get("cluster_profile_id")},
+        "members_tested": {"up": len(up_units), "down": len(down_units)},
+        "pairs_tested": len(pairs),
+        "null_capped": null_capped,
+        "member_pairs": member_pairs,
+        "excluded_members": excluded,
+        "replication_rate": repl,
+        "params": {"s_min": s_min, "null_shuffles": k_shuffles,
+                   "null_percentile": percentile, "fdr_q": q,
+                   "max_null_tested": max_null_tested, "seed": seed},
+        # Rung is NOT inherited. These are A.3 statistics — association, at
+        # rung 1 at best. A member pair earns rung 2 the same way anything else
+        # does: an intervention with a control (A.5).
+        "evidence_note": (
+            "Tier-1 association statistics restricted to the two clusters' "
+            "members. This says which member pairs co-fire, not which cause "
+            "which; a member pair earns rung 2 only through an intervention."
+        ),
+    }

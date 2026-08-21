@@ -450,3 +450,88 @@ async def _run_sync(db: AsyncSession, fn):
             return fn(sync_db)
 
     return await anyio.to_thread.run_sync(_call)
+
+
+# ── A.4 refinement: which member pairs carry a cluster-level edge ──────────
+
+
+class RefineClusterEdgeBody(BaseModel):
+    """One cluster-level edge, named by its two profiles and their layers."""
+
+    capture_run_id: str = Field(..., min_length=1, max_length=64)
+    up_cluster_profile_id: str = Field(..., min_length=1, max_length=64)
+    up_layer: int = Field(..., ge=0, le=512)
+    down_cluster_profile_id: str = Field(..., min_length=1, max_length=64)
+    down_layer: int = Field(..., ge=0, le=512)
+    s_min: Optional[int] = Field(None, ge=1, le=100_000)
+    null_shuffles: Optional[int] = Field(None, ge=1, le=1000)
+    null_percentile: Optional[float] = Field(None, gt=0, lt=100)
+    fdr_q: Optional[float] = Field(None, gt=0, lt=1)
+    max_null_tested: int = Field(200, ge=1, le=4000)
+    seed: int = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def _upstream_is_upstream(self):
+        if self.up_layer >= self.down_layer:
+            raise ValueError(
+                "refinement runs upstream→downstream; up_layer must be less "
+                "than down_layer")
+        return self
+
+
+@router.post("/circuit-discovery/refine-cluster-edge")
+async def refine_cluster_edge_route(body: RefineClusterEdgeBody):
+    """Which member pairs carry a cluster-level edge (Appendix A.4).
+
+    A supernode's activation is `A_C(t) = max_k a_{l,i_k}(t)`, so a cluster
+    edge's effect size was measured on a signal that at any token is one
+    member's activation. The edge says the two clusters are linked; it does not
+    say which members do the linking, and the number cannot be apportioned to
+    member pairs by arithmetic. A.4's answer is to MEASURE — the A.3 statistics
+    restricted to the two memberships — which is what this runs.
+
+    OFF THE EVENT LOOP. The work is numpy: one hundred circular-shift null
+    passes per surviving pair. Running it inline would block every other request
+    on the worker for the duration.
+    """
+    import asyncio
+
+    from ....core.database import get_sync_db
+    from ....models.cluster_profile import ClusterProfile
+    from ....services import circuit_discovery_service as discovery
+
+    def _work():
+        with get_sync_db() as db:
+            profs = {
+                p.id: p for p in db.query(ClusterProfile).filter(
+                    ClusterProfile.id.in_([body.up_cluster_profile_id,
+                                           body.down_cluster_profile_id])).all()
+            }
+            missing = [pid for pid in (body.up_cluster_profile_id,
+                                       body.down_cluster_profile_id)
+                       if pid not in profs]
+            if missing:
+                raise LookupError(f"cluster profile(s) not found: {missing}")
+            return discovery.refine_cluster_edge(
+                db,
+                body.capture_run_id,
+                {"layer": body.up_layer,
+                 "cluster_profile_id": body.up_cluster_profile_id,
+                 "members": profs[body.up_cluster_profile_id].members or []},
+                {"layer": body.down_layer,
+                 "cluster_profile_id": body.down_cluster_profile_id,
+                 "members": profs[body.down_cluster_profile_id].members or []},
+                s_min=body.s_min,
+                null_shuffles=body.null_shuffles,
+                null_percentile=body.null_percentile,
+                fdr_q=body.fdr_q,
+                max_null_tested=body.max_null_tested,
+                seed=body.seed,
+            )
+
+    try:
+        return await asyncio.to_thread(_work)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except discovery.DiscoveryConfigError as e:
+        raise HTTPException(422, str(e))

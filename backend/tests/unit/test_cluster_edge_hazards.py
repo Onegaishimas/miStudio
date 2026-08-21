@@ -130,3 +130,81 @@ class TestTheExpandedEdgesActuallyPRODUCEHazards:
             "a causally-validated cluster-level edge produced no hazard — the "
             "strongest evidence available is the evidence being discarded"
         )
+
+
+class TestAnInheritedEffectSizeSaysSo:
+    """A cluster-scale ES must not render as a per-pair measurement.
+
+    `A_C(t) = max_k a_{l,i_k}(t)` (Appendix A.4), so a cluster edge's effect
+    size was measured on a signal that at any token is ONE member's activation.
+    Resolving the edge to feature membership at steering time is what A.4
+    prescribes — but the number belongs to the cluster pair, and printing it as
+    `validated:ES=0.800` to three decimals claims it was measured here.
+
+    This module already separates measured from heuristic. This is the third
+    case: measured-HERE from inherited.
+    """
+
+    def _hazard_from(self, edges):
+        steered = [
+            {"layer": 4, "feature_idx": 11, "strength": 1.0},
+            {"layer": 9, "feature_idx": 21, "strength": 1.0},
+        ]
+        h = steering_hazards.detect_hazards(steered, circuit_edges=edges)
+        assert h, "precondition: a hazard was produced"
+        return h[0]
+
+    def test_an_expanded_cluster_edge_is_FLAGGED(self):
+        expanded, _ = expand_cluster_edges(
+            [_cluster_edge(rung=2, es=0.8)], {"cp_up": [11], "cp_down": [21]}.get
+        )
+        h = self._hazard_from(expanded)
+
+        assert h.inherited_from_cluster_edge is True
+        assert "inherited" in h.evidence
+        assert "not measured on this feature pair" in h.evidence
+
+    def test_a_DIRECTLY_measured_edge_is_not_flagged(self):
+        """The control. Without it the flag could be hardcoded True."""
+        direct = [{
+            "up": {"layer": 4, "feature_idx": 11},
+            "down": {"layer": 9, "feature_idx": 21},
+            "rung": 2, "effect_size": 0.8,
+        }]
+        h = self._hazard_from(direct)
+
+        assert h.inherited_from_cluster_edge is False
+        assert h.evidence == "validated:ES=0.800"
+        assert "inherited" not in h.evidence
+
+    def test_the_two_are_DISTINGUISHABLE_in_the_serialised_form(self):
+        """The caller reads to_dict(), so the flag has to survive it."""
+        expanded, _ = expand_cluster_edges(
+            [_cluster_edge(rung=2, es=0.8)], {"cp_up": [11], "cp_down": [21]}.get
+        )
+        inherited = self._hazard_from(expanded).to_dict()
+        direct = self._hazard_from([{
+            "up": {"layer": 4, "feature_idx": 11},
+            "down": {"layer": 9, "feature_idx": 21},
+            "rung": 2, "effect_size": 0.8,
+        }]).to_dict()
+
+        assert inherited["inherited_from_cluster_edge"] is True
+        assert direct["inherited_from_cluster_edge"] is False
+        assert inherited["evidence"] != direct["evidence"]
+
+    def test_the_ES_ITSELF_is_NOT_apportioned(self):
+        """The tempting fix is worse than the problem.
+
+        Dividing the cluster ES by member count would look numerically modest
+        while being exactly as unmeasured — and it would SUPPRESS warnings,
+        which is the dangerous direction. A.4's answer to "which member pairs
+        carry it" is to measure them, never to apportion.
+        """
+        members = {"cp_up": [11, 12, 13, 14], "cp_down": [21, 22, 23, 24]}
+        expanded, _ = expand_cluster_edges([_cluster_edge(rung=2, es=0.8)], members.get)
+
+        assert all(e["effect_size"] == 0.8 for e in expanded), (
+            "the effect size was scaled by membership — that is an unmeasured "
+            "assumption that quietly reduces warnings"
+        )
