@@ -352,12 +352,18 @@ class CircuitCaptureService:
                     )
 
             fingerprints = {}
+            d_sae_by_layer: Dict[int, Optional[int]] = {}
             for entry in manifest["layers"]:
                 sae_record = db.query(ExternalSAE).filter(
                     ExternalSAE.id == entry["sae_id"]).first()
                 sae = _load_sae_sync(sae_record, device)
                 saes[entry["layer"]] = sae
                 fingerprints[entry["sae_id"]] = _sae_fingerprint(sae)
+                # From the RECORD, not the tensor. `W_enc` is [d_sae, d_model]
+                # here and [d_model, d_sae] in other conventions, so reading a
+                # shape would silently return d_model for some SAEs — and this
+                # number is the denominator of the density the user is shown.
+                d_sae_by_layer[entry["layer"]] = sae_record.n_features
             manifest["sae_fingerprints"] = fingerprints
 
             # WHICH POINT OF THE RESIDUAL STREAM THIS CAPTURE READ.
@@ -404,6 +410,18 @@ class CircuitCaptureService:
             probe_seconds = time.monotonic() - t0
             total_tokens_est = probe_tokens / PROBE_SAMPLES * sample_cap
             events_est = int(probe_events / max(probe_tokens, 1) * total_tokens_est)
+            # MEASURED SPARSITY, REPORTED. A capture's size is set almost
+            # entirely by how densely its SAEs fire on THIS corpus, and that
+            # number was nowhere in the estimate — so a run needing 240 GB
+            # looked like any other, distinguishable only by a big number with
+            # no explanation attached. These SAEs fire ~25x denser on
+            # `hard-negatives` than the 0.48% they recorded during training,
+            # which is the whole reason the run was enormous.
+            per_token = (probe_events / max(probe_tokens, 1)
+                         / max(len(layer_indices), 1))
+            widths = [w for w in d_sae_by_layer.values() if w]
+            density = (per_token / (sum(widths) / len(widths))) if widths else None
+
             estimate = {
                 "events": events_est,
                 "bytes": events_est * EVENT_BYTES,
@@ -411,6 +429,11 @@ class CircuitCaptureService:
                                  * sample_cap / 60.0, 1),
                 "probe_samples": PROBE_SAMPLES,
                 "probe_events": int(probe_events),
+                "features_per_token": round(per_token, 1),
+                "density": round(density, 5) if density is not None else None,
+                "memory_required_bytes": (events_est * EVENT_BYTES
+                                          * PEAK_MEMORY_MULTIPLIER),
+                "memory_budget_bytes": _memory_budget_bytes(),
             }
             manifest["estimate"] = estimate
             run.manifest = manifest
@@ -419,6 +442,27 @@ class CircuitCaptureService:
                 run.progress = None
                 db.commit()
                 return {"status": "estimated", "estimate": estimate}
+
+            # REFUSE A CAPTURE THAT CANNOT FIT IN MEMORY, before it starts.
+            #
+            # Every event is buffered in host RAM until `finalize()`, so the
+            # binding constraint is memory and nothing was checking it. This is
+            # the guard `cap_cda1e1da6a0a` needed: it was confirmed against an
+            # estimate of 20 billion events, ran to 45.6%, and the worker was
+            # OOM-killed with ~110 GB of rows held. Failing here costs nothing;
+            # failing there wedged the single-GPU guard for every later capture.
+            over = _exceeds_memory_budget(events_est)
+            if over is not None:
+                run.status = "failed"
+                run.error_message = (
+                    f"Capture refused: {over}. This corpus activates "
+                    f"{estimate.get('features_per_token')} features per token "
+                    f"({(estimate.get('density') or 0) * 100:.1f}% of the "
+                    "dictionary) — raise epsilon, lower sample_cap, or use an "
+                    "SAE that is sparser on this data.")
+                db.commit()
+                return {"status": "failed", "reason": "memory_ceiling",
+                        "estimate": estimate}
 
             # ── full capture ─────────────────────────────────────────────
             store_dir = captures_dir() / run.id
@@ -476,6 +520,21 @@ class CircuitCaptureService:
                 # host RAM until finalize(), and this guard was the only thing
                 # standing between that and an OOM it could not see coming.
                 buffered = _buffered_rows(writers)
+                # ABSOLUTE, not relative. `exceeds_size_ceiling` is 5x this
+                # run's own estimate, so an estimate that is itself enormous
+                # authorises something five times more enormous — it can only
+                # catch a run that under-estimated, never one whose estimate was
+                # the problem. Memory is the hard bound and does not scale with
+                # anyone's expectations.
+                over_mem = _exceeds_memory_budget(buffered)
+                if over_mem is not None:
+                    run.status = "failed"
+                    run.error_message = (
+                        f"Capture aborted to avoid running the worker out of "
+                        f"memory: {over_mem}")
+                    db.commit()
+                    shutil.rmtree(store_dir, ignore_errors=True)
+                    return {"status": "failed", "reason": "memory_ceiling"}
                 if exceeds_size_ceiling(buffered, events_est):
                     run.status = "failed"
                     run.error_message = (
@@ -675,6 +734,73 @@ def _encode_layer(sae, acts):
     if isinstance(z, tuple):  # JumpReLU return_pre_activations styles
         z = z[0]
     return z
+
+
+#: What `finalize()` costs on top of the buffer itself. It concatenates every
+#: chunk (a second full copy), argsorts that (an int64 index, 8 bytes a row),
+#: and materialises the sorted result (a third copy) — roughly 3.7x the
+#: buffered bytes at peak, rounded up for margin. A guard that compared only
+#: the buffer would pass and then die inside finalize.
+PEAK_MEMORY_MULTIPLIER = 4
+
+
+def _memory_budget_bytes() -> Optional[int]:
+    """Bytes this process may safely hold, or None if it cannot be determined.
+
+    The capture buffers every event in HOST RAM until `finalize()`, so the
+    binding constraint is memory, not disk — and nothing was checking it.
+    `cap_cda1e1da6a0a` was OOM-killed at 45.6% of a 20-billion-event estimate,
+    about 110 GB of rows on a 131 GB node with no cgroup limit set.
+
+    The existing ceiling could not have caught it: it is 5x the run's OWN
+    estimate, so an estimate of 20 billion events authorises 100 billion. A
+    ceiling expressed as a multiple of a number that is itself the problem
+    scales with the problem.
+
+    Prefers the cgroup limit, because that is what the kernel kills on. Falls
+    back to MemAvailable. Returns None rather than a guess when neither can be
+    read — the caller then declines to refuse, since inventing a budget could
+    block a capture that would have run.
+    """
+    for path in ("/sys/fs/cgroup/memory.max",
+                 "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = Path(path).read_text().strip()
+        except OSError:
+            continue
+        if raw == "max":
+            # Unlimited — the node's own memory is the real bound. READABILITY,
+            # NOT CONTROL FLOW: `int("max")` raises below and lands in the same
+            # place, so no mutation of this line can change an answer. Said out
+            # loud so a later reader does not mistake it for the guard.
+            break
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        # cgroup v1 reports a sentinel near 2**63 for "unlimited".
+        if 0 < value < 2**62:
+            return value
+        break
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _exceeds_memory_budget(rows: int) -> Optional[str]:
+    """A message when buffering `rows` would not survive finalize, else None."""
+    budget = _memory_budget_bytes()
+    if budget is None:
+        return None
+    needed = rows * EVENT_BYTES * PEAK_MEMORY_MULTIPLIER
+    if needed <= budget:
+        return None
+    return (f"{rows:,} events need ~{needed / 2**30:.0f} GB of RAM to buffer "
+            f"and sort, against ~{budget / 2**30:.0f} GB available")
 
 
 def _buffered_rows(writers) -> int:
