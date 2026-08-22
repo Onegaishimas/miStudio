@@ -25,6 +25,7 @@ import { FeatureDetailModal } from './FeatureDetailModal';
 import { StartLabelingButton } from '../labeling/StartLabelingButton';
 import { COMPONENTS } from '../../config/brand';
 import { formatL0Absolute, formatActivation, getActivationFrequencyColor, getMaxActivationColor } from '../../utils/formatters';
+import { fireAndForget } from '../../utils/fireAndForget';
 
 interface ExtractionJobCardProps {
   extraction: ExtractionStatusResponse;
@@ -231,7 +232,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
 
       // Fetch with new sort order from backend
       setSearchFilters(extraction.id, newFilters);
-      fetchExtractionFeatures(extraction.id, newFilters);
+      fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
     }
   };
 
@@ -267,7 +268,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
   // Load features when expanded and completed
   useEffect(() => {
     if (isExpanded && isCompleted && !features.length) {
-      fetchExtractionFeatures(extraction.id, filters);
+      fireAndForget(fetchExtractionFeatures(extraction.id, filters));
     }
   }, [isExpanded, isCompleted, extraction.id]);
 
@@ -552,7 +553,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
         offset: 0, // Reset to first page on new search
       };
       setSearchFilters(extraction.id, newFilters);
-      fetchExtractionFeatures(extraction.id, newFilters);
+      fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
     }, 300);
 
     setSearchDebounceTimer(timer);
@@ -569,7 +570,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       offset: 0,
     };
     setSearchFilters(extraction.id, newFilters);
-    fetchExtractionFeatures(extraction.id, newFilters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
   };
 
   /**
@@ -593,7 +594,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
         offset: 0, // Reset pagination
       };
       setSearchFilters(extraction.id, newFilters);
-      fetchExtractionFeatures(extraction.id, newFilters);
+      fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
     }, 500);
 
     setRangeDebounceTimer(timer);
@@ -619,7 +620,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       offset: 0,
     };
     setSearchFilters(extraction.id, newFilters);
-    fetchExtractionFeatures(extraction.id, newFilters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
   };
 
   /**
@@ -657,7 +658,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       offset: Math.max(0, filters.offset! - filters.limit!),
     };
     setSearchFilters(extraction.id, newFilters);
-    fetchExtractionFeatures(extraction.id, newFilters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
   };
 
   const handleNextPage = () => {
@@ -668,14 +669,14 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       offset: filters.offset! + filters.limit!,
     };
     setSearchFilters(extraction.id, newFilters);
-    fetchExtractionFeatures(extraction.id, newFilters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
   };
 
   /**
    * Handle refresh - reload current page of features.
    */
   const handleRefresh = () => {
-    fetchExtractionFeatures(extraction.id, filters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, filters));
   };
 
   /**
@@ -707,7 +708,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       offset: Math.max(0, Math.min(newOffset, metadata.total - 1)),
     };
     setSearchFilters(extraction.id, newFilters);
-    fetchExtractionFeatures(extraction.id, newFilters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
     setGoToFeatureInput('');
   };
 
@@ -730,7 +731,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
       offset: newOffset,
     };
     setSearchFilters(extraction.id, newFilters);
-    fetchExtractionFeatures(extraction.id, newFilters);
+    fireAndForget(fetchExtractionFeatures(extraction.id, newFilters));
     setGoToPageInput('');
   };
 
@@ -1060,7 +1061,7 @@ export const ExtractionJobCard: React.FC<ExtractionJobCardProps> = ({
               onSuccess={() => {
                 // Optionally refresh features list if expanded
                 if (isExpanded) {
-                  fetchExtractionFeatures(extraction.id, filters);
+                  fireAndForget(fetchExtractionFeatures(extraction.id, filters));
                 }
               }}
             />

@@ -48,6 +48,7 @@ import { HyperparameterLabel, HyperparameterTooltip } from '../common/Hyperparam
 import { calculateOptimalL1Alpha, validateSparsityConfig } from '../../utils/hyperparameterOptimization';
 import { COMPONENTS } from '../../config/brand';
 import type { TrainingTemplate } from '../../types/trainingTemplate';
+import { fireAndForget } from '../../utils/fireAndForget';
 
 export const TrainingPanel: React.FC = () => {
   // Store state
@@ -200,7 +201,7 @@ export const TrainingPanel: React.FC = () => {
   useEffect(() => {
     fetchModels();
     fetchDatasets();
-    fetchTrainings();
+    fireAndForget(fetchTrainings());
   }, [fetchModels, fetchDatasets, fetchTrainings]);
 
   // Fetch available extractions when model is selected
@@ -301,7 +302,7 @@ export const TrainingPanel: React.FC = () => {
     // Poll every 5 seconds - silent update to avoid UI flicker/collapse
     const pollInterval = setInterval(() => {
       runningTrainingIds.forEach((id) => {
-        fetchTraining(id, true); // silent=true prevents loading state changes
+        fireAndForget(fetchTraining(id, true)); // silent=true prevents loading state changes
       });
     }, 5000);
 

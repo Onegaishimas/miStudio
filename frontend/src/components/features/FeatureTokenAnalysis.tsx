@@ -11,6 +11,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Hash, Settings } from 'lucide-react';
 import { useFeaturesStore } from '../../stores/featuresStore';
+import { fireAndForget } from '../../utils/fireAndForget';
 
 interface FeatureTokenAnalysisProps {
   featureId: string;
@@ -34,7 +35,7 @@ export const FeatureTokenAnalysis: React.FC<FeatureTokenAnalysisProps> = ({ feat
 
   // Fetch data with current filters
   const fetchData = () => {
-    fetchFeatureTokenAnalysis(featureId, {
+    fireAndForget(fetchFeatureTokenAnalysis(featureId, {
       applyFilters: true,
       filterSpecial,
       filterSingleChar,
@@ -42,7 +43,7 @@ export const FeatureTokenAnalysis: React.FC<FeatureTokenAnalysisProps> = ({ feat
       filterNumbers,
       filterFragments,
       filterStopWords,
-    });
+    }));
   };
 
   // Load on mount

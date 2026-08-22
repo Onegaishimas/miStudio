@@ -16,6 +16,7 @@ import { cancelSAEExtraction } from '../../api/saes';
 import { useExtractionWebSocket } from '../../hooks/useExtractionWebSocket';
 import { useNlpWebSocket } from '../../hooks/useNlpWebSocket';
 import { COMPONENTS } from '../../config/brand';
+import { fireAndForget } from '../../utils/fireAndForget';
 
 /**
  * How often to reconcile extraction state over HTTP while work is in flight.
@@ -61,7 +62,7 @@ export const ExtractionsPanel: React.FC = () => {
 
   // Load trainings and extractions on mount
   useEffect(() => {
-    fetchTrainings();
+    fireAndForget(fetchTrainings());
     fetchAllExtractions(statusFilter.length > 0 ? statusFilter : undefined);
   }, []);
 
