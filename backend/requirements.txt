@@ -31,7 +31,7 @@
 accelerate==1.12.0
 aiofiles==23.2.1
 aiohappyeyeballs==2.6.1
-aiohttp==3.14.1
+aiohttp==3.14.3  # GHSA fixes (high + 2 medium)
 aiosignal==1.4.0
 alembic==1.17.2
 amqp==5.3.1
@@ -57,7 +57,7 @@ click-plugins==1.1.1.2
 click-repl==0.3.0
 coverage==7.13.0
 crashtest==0.4.1
-cryptography==48.0.1
+cryptography==50.0.0  # GHSA fix (high)
 datasets==2.21.0
 decorator==5.2.1
 dill==0.3.8
@@ -76,7 +76,7 @@ hf-xet==1.5.2
 httpcore==1.0.9
 httptools==0.7.1
 httpx>=0.27.0
-huggingface-hub==1.24.0
+huggingface-hub==1.28.0  # transformers 5.15 wants >=1.5,<2.0
 idna==3.15
 iniconfig==2.3.0
 installer==0.7.0
@@ -150,9 +150,9 @@ regex==2025.11.3
 requests==2.33.0
 requests-toolbelt==1.0.0
 ruff==0.1.15
-safetensors==0.7.0
+safetensors==0.8.0  # REQUIRED by transformers 5.15 (>=0.8.0)
 SecretStorage==3.4.0
-setuptools==80.9.0
+setuptools==83.0.0  # GHSA fix (medium)
 shellingham==1.5.4
 simple-websocket==1.1.0
 six==1.17.0
@@ -172,7 +172,7 @@ rich==15.0.0
 markdown-it-py==4.2.0
 mdurl==0.1.2
 traitlets==5.14.3
-transformers==5.5.4  # Upgraded from 4.57.6; LFM2 requires >=4.55.0
+transformers==5.15.1  # 5.5.4 did not know gemma4_unified (google/gemma-4-*)
 triton==3.5.1
 trove-classifiers==2025.9.11.17
 types-aiofiles==23.2.0.20240623
