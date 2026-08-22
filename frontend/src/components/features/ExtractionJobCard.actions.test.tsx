@@ -28,9 +28,15 @@ vi.mock('../../api/models', () => ({
   resetNlpAnalysis: vi.fn(),
 }));
 
-// Expanding fetches the feature list. Left unmocked it fires a real XHR that
-// rejects after the test has finished, which surfaces as an unhandled error and
-// makes a passing suite look broken.
+// Expanding fetches the feature list. The mock is here so the test controls
+// whether that request SUCCEEDS OR FAILS — not to make the failure go away.
+//
+// The first version of this file mocked `get` to resolve, permanently. That
+// silenced an unhandled-rejection warning, and in doing so hid the reason for
+// it: `fetchExtractionFeatures` records its error in store state and then
+// re-throws, while every one of its twelve call sites ignores the promise. So
+// every failed feature fetch in a real browser produced an unhandled rejection.
+// A mock that removes the only symptom of a defect is not test hygiene.
 vi.mock('axios', () => ({
   default: {
     get: vi.fn().mockResolvedValue({ data: { features: [], total: 0 } }),
@@ -38,6 +44,8 @@ vi.mock('axios', () => ({
     delete: vi.fn().mockResolvedValue({ data: {} }),
   },
 }));
+
+import axios from 'axios';
 
 const completed = {
   id: 'extr_1',
@@ -127,5 +135,63 @@ describe('ExtractionJobCard action labels', () => {
       .querySelector('svg')!;
     expect(openIcon.getAttribute('class')).toContain('rotate-180');
     expect(container).toBeTruthy();
+  });
+});
+
+
+describe('ExtractionJobCard — a failed feature fetch stays handled', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  /** Collect anything Node decides nobody handled, for the duration of `run`. */
+  async function unhandledDuring(run: () => void): Promise<unknown[]> {
+    const escaped: unknown[] = [];
+    const listener = (reason: unknown) => escaped.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      run();
+      // One turn for the rejection to propagate, one more for Node to conclude
+      // that nothing caught it.
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+    return escaped;
+  }
+
+  it('does not leak an unhandled rejection when the request fails', async () => {
+    // The real failure: a flaky network, a restarting backend, a 500.
+    (axios.get as any).mockRejectedValueOnce(new Error('Network Error'));
+    renderCard();
+
+    const escaped = await unhandledDuring(() => {
+      fireEvent.click(screen.getByText('Browse 32,766 features'));
+    });
+
+    expect(escaped).toEqual([]);
+  });
+
+  it('proves the harness can SEE an unhandled rejection', async () => {
+    // Negative control. Without this, the test above passes just as happily
+    // against a harness that cannot detect the thing it is asserting about —
+    // which is how the original defect survived a green suite.
+    const escaped = await unhandledDuring(() => {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      Promise.reject(new Error('deliberately unhandled'));
+    });
+
+    expect(escaped).toHaveLength(1);
+  });
+
+  it('still opens the panel when the fetch fails', async () => {
+    (axios.get as any).mockRejectedValueOnce(new Error('Network Error'));
+    renderCard();
+
+    fireEvent.click(screen.getByText('Browse 32,766 features'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The user gets the opened panel and whatever error the store recorded,
+    // rather than a silently dead click.
+    expect(screen.getByText('Hide features')).toBeInTheDocument();
   });
 });

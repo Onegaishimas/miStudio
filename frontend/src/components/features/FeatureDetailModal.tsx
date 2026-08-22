@@ -23,6 +23,7 @@ import { FeatureTokenAnalysis } from './FeatureTokenAnalysis';
 import { NLPAnalysisView } from './NLPAnalysisView';
 import { formatActivation } from '../../utils/formatters';
 import { formatExamplesForClipboard, copyToClipboard, ExportFormat } from '../../utils/featureExampleFormatter';
+import { fireAndForget } from '../../utils/fireAndForget';
 
 interface FeatureDetailModalProps {
   featureId: string;
@@ -70,8 +71,8 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
 
   // Load feature details on mount
   useEffect(() => {
-    fetchFeatureDetail(featureId);
-    fetchFeatureExamples(featureId, 100);
+    fireAndForget(fetchFeatureDetail(featureId));
+    fireAndForget(fetchFeatureExamples(featureId, 100));
 
     return () => {
       clearSelectedFeature();
