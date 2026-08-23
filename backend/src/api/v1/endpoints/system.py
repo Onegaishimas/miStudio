@@ -15,17 +15,19 @@ Created: 2025-10-16
 """
 
 import logging
+import hmac
 import os
 import signal
 from typing import Dict, List, Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
+from fastapi import Header, APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from src.services.gpu_monitor_service import get_gpu_monitor_service
 from src.services.system_monitor_service import get_system_monitor_service
 from src.services.resource_config import ResourceConfig
 from src.models.training import Training
+from src.core.config import settings
 from src.core.deps import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -54,17 +56,48 @@ def _delayed_exit():
 
 
 @router.post("/restart")
-async def restart_backend(background_tasks: BackgroundTasks):
+async def restart_backend(
+    background_tasks: BackgroundTasks,
+    x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token"),
+):
     """
     Restart the backend service to clear orphaned GPU memory.
 
     This triggers a graceful shutdown. Docker will automatically restart
     the container due to the restart policy.
 
+    REQUIRES THE INTERNAL TOKEN (MIS-E2E-099).
+    -----------------------------------------
+    This took no arguments, required nothing, and returned 200. Terminating the
+    API process is a privilege operation regardless of who can reach the port,
+    so it is not covered by the accepted network-boundary posture — the same
+    reasoning already applied to the steering `pkill`/`Popen` pair.
+
+    Being unauthenticated, unrated AND idempotent made it a restart LOOP: the
+    restart policy that makes the feature work is what makes the loop
+    self-sustaining, so a caller repeating it keeps the backend permanently
+    unavailable. It also kills any in-flight request, including a training
+    dispatch mid-write.
+
+    `hmac.compare_digest`, not `==`, matching the existing internal-endpoint
+    checks in `main.py`.
+
     Returns:
         Dict with restart status message
     """
-    logger.warning("Backend restart requested via API")
+    if x_internal_token is None or not hmac.compare_digest(
+        x_internal_token, settings.internal_api_secret
+    ):
+        logger.warning("Backend restart REFUSED: missing or invalid internal token")
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Restart requires the internal token. This endpoint terminates "
+                "the API process."
+            ),
+        )
+
+    logger.warning("Backend restart requested via API (token verified)")
     background_tasks.add_task(_delayed_exit)
     return {"message": "Backend restarting...", "status": "restarting"}
 

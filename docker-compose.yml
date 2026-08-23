@@ -22,7 +22,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
       POSTGRES_DB: ${POSTGRES_DB:-mistudio}
     ports:
-      - "5432:5432"
+      # LOOPBACK ONLY (MIS-E2E-146).
+      #
+      # This was published on 0.0.0.0 with the password `devpassword`, which is
+      # committed to the repo. The accepted no-app-auth posture concedes the
+      # API behind nginx; it does not concede the DATABASE, direct, bypassing
+      # nginx entirely. Bound to localhost so a LAN host cannot reach it; set
+      # POSTGRES_BIND=0.0.0.0 deliberately if you need remote access, and give
+      # it a real password when you do.
+      - "${POSTGRES_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -62,7 +70,12 @@ services:
     image: redis:7-alpine
     container_name: mistudio-redis
     ports:
-      - "6379:6379"
+      # LOOPBACK ONLY (MIS-E2E-146), and this one is the sharper half.
+      #
+      # Redis is the CELERY BROKER and has no auth, so anyone on the LAN could
+      # enqueue tasks — which in this product means starting GPU jobs — and read
+      # the payloads of jobs already queued.
+      - "${REDIS_BIND:-127.0.0.1}:6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -280,7 +293,13 @@ services:
       VITE_API_URL: ""
       VITE_WS_URL: ""
     ports:
-      - "3000:80"  # Frontend image serves on port 80
+      # 8080, NOT 80 (MIS-E2E-147).
+      #
+      # Commit bca37c6 moved the image to nginx-unprivileged, which listens on
+      # 8080, and updated k8s and nginx.docker.conf but not this file — so
+      # http://localhost:3000 has been dead since, while the comment still said
+      # the image serves on 80.
+      - "3000:8080"
     restart: unless-stopped
     networks:
       - mistudio-network

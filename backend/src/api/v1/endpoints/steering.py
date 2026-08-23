@@ -435,6 +435,40 @@ async def cleanup_steering_gpu():
 
 # Use configurable run_dir for PID files and logs (works across native/docker/k8s)
 PID_FILE = str(settings.run_dir / "mistudio-celery-steering.pid")
+
+#: PIDs of steering workers THIS process spawned, so orphan cleanup can be
+#: precise (MIS-E2E-003).
+#:
+#: `pkill -9 -f steering@` SIGKILLs any process on the host whose COMMAND LINE
+#: contains "steering@" — another user's shell, an unrelated container sharing
+#: the PID namespace, someone's `grep steering@`. A pattern kill reachable over
+#: HTTP is a privilege operation regardless of who can reach the port, which is
+#: why it is not covered by the accepted network-boundary posture.
+#:
+#: The worker is already started with `--pidfile`, so the precise handle exists;
+#: nothing was using it for the orphan sweep.
+_SPAWNED_WORKER_PIDS: set[int] = set()
+
+
+async def _kill_orphan_steering_workers() -> int:
+    """SIGKILL steering workers this process started, and nothing else.
+
+    Replaces `pkill -9 -f steering@`. Returns how many were signalled.
+    """
+    killed = 0
+    for pid in sorted(_SPAWNED_WORKER_PIDS):
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed += 1
+            logger.info(f"Killed orphaned steering worker PID {pid}")
+        except ProcessLookupError:
+            pass          # already gone — the normal case
+        except PermissionError:
+            logger.warning(f"Not permitted to kill PID {pid}; leaving it")
+        except Exception:
+            logger.exception(f"Could not kill steering worker PID {pid}")
+    _SPAWNED_WORKER_PIDS.clear()
+    return killed
 STEERING_LOG = str(settings.run_dir / "celery-steering.log")
 
 # Ceiling on sync result-backend reads executed via asyncio.to_thread —
@@ -565,14 +599,8 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
         except Exception as e:
             logger.exception(f"Could not kill worker {existing_pid}")
 
-        # Also kill by pattern to catch orphans
-        try:
-            await asyncio.to_thread(
-                subprocess.run, ["pkill", "-9", "-f", "steering@"],
-                timeout=5, capture_output=True,
-            )
-        except Exception:
-            pass
+        # Also clear orphans WE spawned — by PID, never by cmdline pattern.
+        await _kill_orphan_steering_workers()
 
         # Wait for process to fully terminate
         await asyncio.sleep(1)
@@ -607,7 +635,10 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
         # Redirect output to log file; child inherits fd after fork
         log_file = open(STEERING_LOG, "a")
         try:
-            subprocess.Popen(
+            # RECORD THE PID (MIS-E2E-003). The orphan sweep kills what this
+            # process started, by pid — never `pkill -f steering@`, which would
+            # SIGKILL any process on the host whose cmdline happens to match.
+            _spawned = subprocess.Popen(
                 [
                     celery_bin, "-A", "src.core.celery_app", "worker",
                     "-Q", "steering", "-c", "1", "--pool=solo", "--loglevel=info",
@@ -620,6 +651,7 @@ async def _ensure_steering_worker_running() -> tuple[bool, Optional[int]]:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+            _SPAWNED_WORKER_PIDS.add(_spawned.pid)
         finally:
             log_file.close()
 
@@ -706,7 +738,10 @@ async def enter_steering_mode():
         # Redirect output to log file; child inherits fd after fork
         log_file = open(STEERING_LOG, "a")
         try:
-            subprocess.Popen(
+            # RECORD THE PID (MIS-E2E-003). The orphan sweep kills what this
+            # process started, by pid — never `pkill -f steering@`, which would
+            # SIGKILL any process on the host whose cmdline happens to match.
+            _spawned = subprocess.Popen(
                 [
                     celery_bin, "-A", "src.core.celery_app", "worker",
                     "-Q", "steering", "-c", "1", "--pool=solo", "--loglevel=info",
@@ -719,6 +754,7 @@ async def enter_steering_mode():
                 stderr=subprocess.STDOUT,
                 start_new_session=True,  # Detach from parent
             )
+            _SPAWNED_WORKER_PIDS.add(_spawned.pid)   # MIS-E2E-003
         finally:
             log_file.close()
 
@@ -796,15 +832,9 @@ async def exit_steering_mode():
         except Exception as e:
             logger.exception(f"Could not kill PID {existing_pid}")
 
-    # Also kill by pattern to catch any orphans
-    try:
-        await asyncio.to_thread(
-            subprocess.run, ["pkill", "-9", "-f", "steering@"],
-            timeout=5, capture_output=True,
-        )
+    # Also clear orphans WE spawned — by PID, never by cmdline pattern.
+    if await _kill_orphan_steering_workers():
         killed = True
-    except Exception:
-        pass
 
     # Clean up PID file
     try:
