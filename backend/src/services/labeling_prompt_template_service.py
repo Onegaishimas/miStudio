@@ -519,6 +519,36 @@ class LabelingPromptTemplateService:
                 existing_template = result.scalar_one_or_none()
 
                 if existing_template:
+                    # A SYSTEM TEMPLATE IS NOT OVERWRITABLE, HERE EITHER
+                    # (MIS-E2E-108).
+                    #
+                    # `update_template` and `delete_template` both refuse one:
+                    # `if db_template.is_system: raise ValueError(...)`. Import
+                    # had neither guard. It matched on NAME alone and replaced
+                    # `system_message`, `user_prompt_template` and the rest
+                    # unconditionally — and would promote the row to
+                    # `is_default`.
+                    #
+                    # So an import naming a seeded template (e.g. "Context-Aware
+                    # Labeling", seeded `is_system=True`) with
+                    # `overwrite_duplicates: true` replaced its prompt body and
+                    # made it the default. Every subsequent bulk-labeling run —
+                    # including runs billing the operator's OpenAI key against
+                    # their corpus — then executed the imported instructions,
+                    # while the UI still showed the template as protected and
+                    # PATCH/DELETE still refused it. The tamper was invisible
+                    # from the surface that is supposed to be authoritative.
+                    #
+                    # Note the create branch below already pins
+                    # `is_default=False, is_system=False`; the overwrite branch
+                    # simply was not given the same treatment.
+                    if existing_template.is_system:
+                        skipped_count += 1
+                        details.append(
+                            f"Skipped '{template_name}' (system template — "
+                            f"protected from import overwrite)"
+                        )
+                        continue
                     if not overwrite_duplicates:
                         skipped_count += 1
                         details.append(f"Skipped '{template_name}' (already exists)")
@@ -533,7 +563,10 @@ class LabelingPromptTemplateService:
                         existing_template.top_p = template_data.get("top_p", 0.9)
                         existing_template.updated_at = datetime.now(timezone.utc)
 
-                        # Handle default status
+                        # Handle default status. `is_system` is deliberately
+                        # NOT read from the payload — an import must not be able
+                        # to grant itself protection, any more than it may
+                        # bypass it above.
                         if template_data.get("is_default"):
                             await LabelingPromptTemplateService._unset_all_defaults(db)
                             existing_template.is_default = True

@@ -94,6 +94,13 @@ def label_features_task(
             # already CANCELLED (that is what the loop noticed), so return
             # quietly and free the worker. Re-raising would mark the run failed
             # and log a spurious traceback for something the user asked for.
+            #
+            # THIS COMMENT WAS FALSE UNTIL MIS-E2E-058 was fixed. The service's
+            # outer `except Exception` caught `_LabelingCancelled` first and set
+            # status=FAILED before re-raising, so the row reaching here was
+            # FAILED, not CANCELLED — and the comment asserting otherwise is
+            # exactly why nobody looked. The service now handles the
+            # cancellation explicitly, ahead of the generic handler.
             logger.info(
                 f"Labeling job {labeling_job_id} stopped early: cancelled by user"
             )

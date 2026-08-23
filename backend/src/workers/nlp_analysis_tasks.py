@@ -98,11 +98,37 @@ def analyze_features_nlp_task(
             extraction_job.nlp_error_message = None
             db.commit()
 
-            # Get features to analyze
+            # BIND THE CHILD TO THE PARENT (MIS-E2E-109).
+            #
+            # The ids branch dropped the extraction scope entirely, while the
+            # no-ids branch below scopes correctly. So a caller could POST to a
+            # small extraction, pass ids belonging to a large one, and with
+            # `force_reprocess: true` overwrite every one of those features'
+            # curated `nlp_analysis` and delete its `FeatureAnalysisCache` row —
+            # while the progress counters were written onto the PATH extraction.
+            # Silent in both directions: the extraction whose data was destroyed
+            # shows no activity, and the one showing activity holds none of the
+            # results.
+            #
+            # Of the 11 two-path-parameter routes in this API, all 11 bind child
+            # to parent. This is the body-parameter case that was missed.
             if feature_ids:
                 features = db.query(Feature).filter(
-                    Feature.id.in_(feature_ids)
+                    Feature.id.in_(feature_ids),
+                    Feature.extraction_job_id == extraction_job_id,
                 ).all()
+
+                requested = len(set(feature_ids))
+                if len(features) != requested:
+                    # Say so rather than silently analysing a subset — a caller
+                    # passing foreign ids should learn that, not get a partial
+                    # result that looks complete.
+                    logger.warning(
+                        "NLP analysis for extraction %s: %d of %d requested "
+                        "feature ids belong to this extraction; the rest were "
+                        "ignored",
+                        extraction_job_id, len(features), requested,
+                    )
             else:
                 features = db.query(Feature).filter(
                     Feature.extraction_job_id == extraction_job_id
@@ -458,19 +484,32 @@ def _start_next_batch_job(db: Session, current_job) -> None:
     try:
         batch_id = current_job.batch_id
         current_position = current_job.batch_position
-        next_position = current_position + 1
         
-        logger.info(f"Batch {batch_id}: Looking for next job at position {next_position}")
+        logger.info(
+            f"Batch {batch_id}: looking for the next queued job after position "
+            f"{current_position}"
+        )
         
         # Find the next job in the batch and CLAIM it under a row lock.
         # celery_task_id IS NULL is the claim flag: a job that already has one
         # has been dispatched, so a second caller must not dispatch it again.
+        # THE NEXT ONE BY ORDER, NOT position + 1 (MIS-E2E-066).
+        #
+        # `batch_position` comes from `enumerate` over the REQUESTED SAEs, so a
+        # skipped one — already extracted, invalid — leaves a GAP. Demanding an
+        # exact `current + 1` then found nothing and the whole tail of the batch
+        # was stranded: those jobs sat QUEUED until the 3-hour reaper closed
+        # them with a "crashed worker" message, which is not what happened. The
+        # diagnosis handed to the user pointed at infrastructure for a dispatch
+        # arithmetic bug.
         next_job = db.query(ExtractionJob).filter(
             ExtractionJob.batch_id == batch_id,
-            ExtractionJob.batch_position == next_position,
+            ExtractionJob.batch_position > current_position,
             ExtractionJob.status == ExtractionStatus.QUEUED.value,
             ExtractionJob.celery_task_id.is_(None),
-        ).with_for_update(skip_locked=True).first()
+        ).order_by(ExtractionJob.batch_position).with_for_update(
+            skip_locked=True
+        ).first()
 
         if next_job:
             # Get the config from the job
@@ -492,7 +531,7 @@ def _start_next_batch_job(db: Session, current_job) -> None:
             
             logger.info(
                 f"Batch {batch_id}: Started next job {next_job.id} for SAE {sae_id} "
-                f"(position {next_position}/{next_job.batch_total})"
+                f"(position {next_job.batch_position}/{next_job.batch_total})"
             )
         else:
             logger.info(f"Batch {batch_id}: No more jobs to process (completed at position {current_position})")

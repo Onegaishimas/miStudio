@@ -728,10 +728,21 @@ class LabelingService:
                 if template:
                     logger.info(f"No template specified in job - using DB default: {template.name}")
 
+            # BOUND BEFORE THE BRANCH (MIS-E2E-059).
+            #
+            # `job_batch_size` was assigned only inside `if template:` and read
+            # unconditionally at three later points, so the explicitly-supported
+            # "no template found" path died with UnboundLocalError — a labeling
+            # run against a deleted template crashed with a Python error instead
+            # of falling back, and surfaced as a generic 500 / FAILED job.
+            job_max_examples = None
+            job_batch_size = 10
+            if labeling_job.statistics and isinstance(labeling_job.statistics, dict):
+                job_max_examples = labeling_job.statistics.get('max_examples')
+                job_batch_size = labeling_job.statistics.get('batch_size', 10)
+
             if template:
                 # Check for job-level overrides in statistics
-                job_max_examples = None
-                job_batch_size = 10
                 if labeling_job.statistics and isinstance(labeling_job.statistics, dict):
                     job_max_examples = labeling_job.statistics.get('max_examples')
                     job_batch_size = labeling_job.statistics.get('batch_size', 10)
@@ -1060,7 +1071,21 @@ class LabelingService:
                         system_message = template.system_message
                         user_prompt_template = template.user_prompt_template
                         temperature = template.temperature
-                        max_tokens = template.max_tokens
+                        # THE JOB'S VALUE WINS (MIS-E2E-060).
+                        #
+                        # `max_tokens` is exposed on the API and in the UI as a
+                        # per-job setting and was then unconditionally replaced
+                        # by the template's (default 50). A user raising it to
+                        # get longer descriptions had the value accepted and
+                        # every description still truncated — a control that
+                        # appears to work and does nothing.
+                        #
+                        # The sibling `max_examples` already gets this
+                        # precedence right; this is the same rule.
+                        if labeling_job.max_tokens:
+                            max_tokens = labeling_job.max_tokens
+                        else:
+                            max_tokens = template.max_tokens
                         top_p = template.top_p
                         logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
 
@@ -1259,7 +1284,21 @@ class LabelingService:
                         system_message = template.system_message
                         user_prompt_template = template.user_prompt_template
                         temperature = template.temperature
-                        max_tokens = template.max_tokens
+                        # THE JOB'S VALUE WINS (MIS-E2E-060).
+                        #
+                        # `max_tokens` is exposed on the API and in the UI as a
+                        # per-job setting and was then unconditionally replaced
+                        # by the template's (default 50). A user raising it to
+                        # get longer descriptions had the value accepted and
+                        # every description still truncated — a control that
+                        # appears to work and does nothing.
+                        #
+                        # The sibling `max_examples` already gets this
+                        # precedence right; this is the same rule.
+                        if labeling_job.max_tokens:
+                            max_tokens = labeling_job.max_tokens
+                        else:
+                            max_tokens = template.max_tokens
                         top_p = template.top_p
                         logger.info(f"Using prompt template: {template.name} (ID: {template.id})")
 
@@ -1492,6 +1531,36 @@ class LabelingService:
             except Exception as e:
                 logger.error(f"Batch labeling failed: {e}", exc_info=True)
                 raise
+
+        except LabelingService._LabelingCancelled:
+            # A DELIBERATE CANCELLATION IS NOT A FAILURE (MIS-E2E-058).
+            #
+            # This fell through to the handler below, which set status=FAILED
+            # and emitted `labeling:failed` before re-raising — so a user
+            # pressing Cancel saw the job reported as broken. Worse,
+            # `labeling_tasks.py` carries a comment asserting "the job row is
+            # already CANCELLED", which was false precisely because this
+            # handler had just overwritten it, so the next reader would not
+            # look.
+            #
+            # Only reachable now that MIS-E2E-057 is fixed: before that the
+            # cancellation was never raised at all.
+            logger.info(f"Labeling job {labeling_job_id} was cancelled by the user")
+            labeling_job.status = LabelingStatus.CANCELLED.value
+            labeling_job.updated_at = datetime.now(timezone.utc)
+            self.db.commit()
+
+            emit_labeling_progress(
+                labeling_job_id=labeling_job.id,
+                event="labeling:cancelled",
+                data={
+                    "labeling_job_id": labeling_job.id,
+                    "extraction_job_id": labeling_job.extraction_job_id,
+                    "status": LabelingStatus.CANCELLED.value,
+                    "message": "Labeling cancelled",
+                },
+            )
+            raise
 
         except Exception as e:
             logger.error(f"Feature labeling failed for job {labeling_job_id}: {e}", exc_info=True)
