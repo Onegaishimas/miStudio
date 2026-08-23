@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 135
-**Last id issued:** MIS-E2E-135
+**Count:** 142
+**Last id issued:** MIS-E2E-142
 
 ---
 
@@ -2402,3 +2402,134 @@ audit's strict record-only rule, made deliberately and noted in the round record
 - **Verification (R3):** CONFIRMED
 - **Proposed remediation:** A single resolver — "give me the training/model behind this feature" — that walks the SAE row, and a sweep of every direct `Feature.training_id` read. MIS-E2E-100 is still open and is the third instance.
 - **Effort:** M
+
+---
+
+## P09 — Realtime (WebSocket end to end)
+
+---
+
+### MIS-E2E-136 — Sync WebSocket emits POST to the API's own event loop and can freeze it
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/workers/websocket_emitter.py:106`; callers `api/v1/endpoints/models.py:630,1031,1133`, `api/v1/endpoints/datasets.py:1279,1289`, `services/extraction_service.py:845`
+- **Claim:** `emit_progress` is **synchronous** and issues an HTTP POST to `/api/internal/ws/emit` — the backend's *own* endpoint. When it is called from inside an `async def` handler, the coroutine blocks the single event loop while waiting for a response that only that same loop can produce. Reproduced by the reviewer with a minimal uvicorn app: `ReadTimeout` after 5.01 s, the event dropped, and the whole API frozen for the duration. `datasets.py` calls it twice in sequence, so ~10 s.
+- **Failure scenario:** Self-deadlock under a single worker. Every other request — including WebSocket emissions and training dispatch — stalls for the timeout, and the progress event that caused it is lost anyway.
+- **The fix exists and was not generalized.** `training_service.py:328` wraps the same call: `await asyncio.to_thread(emit_deletion_progress, …)`, under a comment reading *"Run emit_deletion_progress in thread pool to avoid blocking async loop."* The author understood the hazard at that one site. Counted across the three exposed files: **13 sync `emit_*` calls, zero `to_thread`.**
+- **Evidence:** **verified-by-live-repro** — the reviewer reproduced the deadlock against a minimal uvicorn app; the defended site and the 13 undefended calls counted directly
+- **Doc reference:** PADR IDL-12; the architect persona already records *"In-process HTTP loopback: BackgroundMonitor runs inside FastAPI yet POSTs to its own `/api/internal/ws/emit`"*
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** From async contexts call `ws_manager.emit_event()` **directly** rather than looping back over HTTP — the recorded architectural recommendation. `asyncio.to_thread` is the stopgap the one fixed site already uses.
+- **Effort:** M
+- **Note:** the fourth "fixed one representative, never generalized" instance in this audit (MIS-E2E-064, 072, 092, this).
+
+---
+
+### MIS-E2E-137 — The retry that guarantees delivery catches the wrong exception
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/workers/websocket_emitter.py:128` (`except httpx.TimeoutException`) versus `:138` (`except Exception` → `return False`)
+- **Claim:** The retry loop retries **only** `httpx.TimeoutException`. Verified against the installed httpx:
+  ```
+  ConnectError          is TimeoutException? False
+  RemoteProtocolError   is TimeoutException? False
+  ReadTimeout           is TimeoutException? True
+  ```
+  `ConnectError` and `RemoteProtocolError` fall through to the generic handler, which logs and returns `False` **immediately** — so `retries=3` yields zero retries for them.
+- **Failure scenario:** `RemoteProtocolError` is precisely what a **stale pooled connection** produces after a backend restart — the single scenario the retries exist for. The events configured with `retries=3` are the ones the code treats as must-not-lose: `steering:completed`, `neuronpedia:push_completed`, `enhanced_labeling:completed`. A terminal event silently dropped leaves the UI showing a job in progress forever, which is the failure mode this product has been bitten by repeatedly.
+- **Evidence:** **verified-by-live-repro** — the exception hierarchy checked against the installed httpx; both handlers read
+- **Doc reference:** PADR IDL-12
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Retry on `httpx.TransportError` (the parent of both timeout and connection failures), keeping the immediate return only for genuine HTTP error statuses.
+- **Effort:** S
+
+---
+
+### MIS-E2E-138 — Duplicate Socket.IO handlers silently disable the acks and strip the exported manager
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/core/websocket.py:281` versus `backend/src/main.py:93-118`
+- **Claim:** Both modules register `@sio.event` handlers for the same events. Verified against live `python-socketio` 5.16.2: a later registration **silently overwrites** the earlier one. `main.py` wins, so `core/websocket.py`'s handlers never run — the `subscribed` / `unsubscribed` acknowledgements never fire, and the `__all__`-exported `ws_manager` singleton is never populated.
+- **Failure scenario:** Any consumer importing `ws_manager` to inspect subscriptions sees a permanently empty registry — including the direct-emit path MIS-E2E-136 recommends. And the client-side ack the frontend's `WebSocketContext` listens for (`'subscribed'`, `'unsubscribed'`) never arrives, so its queueing logic can never confirm a subscription landed.
+- **Evidence:** **verified-by-live-repro** (reviewer confirmed the overwrite behaviour against the installed library)
+- **Doc reference:** PADR IDL-1, IDL-12
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Register once. Given MIS-E2E-105 also needs `subscribe` hardened, do both in the surviving handler.
+- **Effort:** S
+
+---
+
+### MIS-E2E-139 — The system monitor can die silently and permanently
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/services/background_monitor.py:83` (`start`), `:61` (`stop`)
+- **Claim:** A crash during `_monitor_loop` setup leaves `_running = True`. `start()` then refuses to restart ("already running") and **nothing is logged**, so every `system/*` channel — CPU, memory, disk, network, per-GPU — goes permanently silent. Separately, `stop()` catches only `CancelledError`, so a dead loop's exception re-raises out of the FastAPI lifespan shutdown and `_http_client` is never closed.
+- **Failure scenario:** The Monitor page freezes with no error. This is the same shape as the recorded P0 where system-metrics emission 403'd silently — the frontend fallback keys on *connection*, not data freshness, so a live socket delivering nothing looks healthy.
+- **Evidence:** verified-by-live-repro (reviewer mirrored the start/stop logic faithfully and reproduced the state)
+- **Doc reference:** PADR IDL-5; `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Reset `_running` in a `finally`; log the setup failure; broaden `stop()`'s handler.
+- **Effort:** S
+
+---
+
+### MIS-E2E-140 — `subscribe` accepts any type and any quantity of channels
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** security
+- **Location:** `backend/src/core/websocket.py:107`
+- **Claim:** The client-supplied `channel` is neither type-checked nor bounded. A list raises `TypeError: unhashable type`; a non-dict payload raises `AttributeError`. The reviewer created **50,000 channels** from an unauthenticated client in a test.
+- **Failure scenario:** Compounds MIS-E2E-105 (any origin, no auth, any channel name): the same connection can also exhaust the subscription registry or crash the handler with a malformed payload. Recorded as a distinct finding because fixing 105's origin check does not add validation, and vice versa.
+- **Evidence:** **verified-by-live-repro** (reviewer exercised both the type errors and the unbounded growth)
+- **Doc reference:** PADR IDL-1
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Validate the payload shape and the channel against a known pattern; cap subscriptions per connection.
+- **Effort:** S
+
+---
+
+### MIS-E2E-141 — Two emitter defects: a wrong event name and an unlocked, never-closed client
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** bug
+- **Location:** `backend/src/workers/websocket_emitter.py:838` (`emit_system_metrics`), `:43` (`_get_http_client`)
+- **Claim:**
+  1. `emit_system_metrics` emits the event name `"metrics"` while every sibling emitter and the whole frontend use `"system:metrics"`. It has no callers today, so it delivers nothing to nobody — **and returns `True`**.
+  2. `_get_http_client()`'s lazy initialisation has no lock (a race under any non-default `CELERY_POOL`) and the client is never closed at shutdown.
+- **Failure scenario:** (1) is a latent trap: the first caller to use it will get a silent no-op with a success return. (2) leaks a connection pool per worker process.
+- **Evidence:** verified-by-live-repro (the name mismatch and the absent lock read directly)
+- **Doc reference:** PADR IDL-12 (WebSocket Emission Standardization) — the IDL this violates
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Rename the event; guard the lazy init and close the client in the lifespan.
+- **Effort:** S
+
+---
+
+## P09 — R2 (mutation controls)
+
+---
+
+### MIS-E2E-142 — Nothing pins which emit failures are retried
+- **Phase / Round:** P09 / R2
+- **Source:** mutation control M26
+- **Severity:** P2
+- **Type:** test-gap
+- **Location:** `backend/src/workers/websocket_emitter.py:128`
+- **Claim:** Changing the retry handler from `except httpx.TimeoutException` to `except httpx.TransportError` — which flips a `ConnectError`/`RemoteProtocolError` from *abandoned immediately* to *retried three times with backoff* — left the suite green. No test asserts which failures are retried, in either direction.
+- **Failure scenario:** The narrow catch of MIS-E2E-137 is therefore not a pinned decision but unobserved behaviour, and a fix to it would be equally unobserved. The events configured `retries=3` are the terminal ones — `steering:completed`, `neuronpedia:push_completed`, `enhanced_labeling:completed` — where a silent drop leaves the UI showing a finished job as still running.
+- **Evidence:** **verified-by-mutation** — M26 landed, suite green, restore confirmed
+- **Doc reference:** PADR IDL-12
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** Two tests: a `ReadTimeout` retries and eventually succeeds; a `RemoteProtocolError` does the same. Fix MIS-E2E-137 and use these as its negative control.
+- **Effort:** S
+- **Method note:** this mutation applied the *fix* rather than breaking the code. Where a finding claims behaviour is wrong, checking that the corrected behaviour is also unobserved tells you whether the fix will stay fixed.
