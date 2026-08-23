@@ -99,7 +99,7 @@ The **Docker Compose** path is the recommended starting point for single-machine
 
 → [Docker Compose Installation Guide](https://onegaishimas.github.io/miStudio/getting-started/install-guide-compose)
 
-The **Kubernetes** path is designed for shared lab infrastructure. The manifest at `k8s/mistudio-deployment.yaml` deploys the full stack into a dedicated `mistudio` namespace, with hostPath volumes for persistent data, ingress rules for both local (`hitsai.local`) and tunneled (`hitsai.net`) access, and GPU resource requests. This is the deployment mode used in the hitsai.local research cluster.
+The **Kubernetes** path is designed for shared lab infrastructure. The kustomize base at `k8s/base/` deploys the full stack into a dedicated `mistudio` namespace, with hostPath volumes for persistent data, ingress rules for both local (`hitsai.local`) and tunneled (`hitsai.net`) access, and GPU resource requests. This is the deployment mode used in the hitsai.local research cluster.
 
 → [Kubernetes Installation Guide](https://onegaishimas.github.io/miStudio/getting-started/install-guide-k8s)
 
