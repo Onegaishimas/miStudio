@@ -106,10 +106,26 @@ class TestPinPersistence:
         )
         row = result.scalar_one_or_none()
         assert row is not None, "PIN hash row not found in DB — commit did not happen"
-        assert row.value.startswith("pbkdf2:sha256:"), (
-            f"Unexpected hash format in DB: {row.value[:40]}"
+        # The row is ENCRYPTED at rest now (MIS-E2E-055/-165). It used to be
+        # written is_sensitive=False, which is precisely why GET /settings
+        # served the PBKDF2 salt+hash of a 4-digit PIN in the clear to an
+        # unauthenticated caller — 10,000 offline candidates.
+        assert row.is_sensitive is True, (
+            "the PIN hash must be encrypted at rest; storing it plaintext is "
+            "what made it readable when the row was exposed"
         )
-        assert row.is_sensitive is False
+        assert not row.value.startswith("pbkdf2:sha256:"), (
+            "the raw PBKDF2 hash is sitting in the column unencrypted"
+        )
+
+        # Decrypting it must yield the real hash — otherwise this test would
+        # pass against a version that stored garbage.
+        from src.core.encryption import decrypt_value
+
+        plaintext = decrypt_value(row.value, setting_key="settings_pin_hash")
+        assert plaintext.startswith("pbkdf2:sha256:"), (
+            f"Unexpected hash format after decryption: {plaintext[:40]}"
+        )
 
     async def test_pin_status_reflects_configured(self, client: AsyncClient):
         """After setting a PIN, /pin/status must report configured=true."""

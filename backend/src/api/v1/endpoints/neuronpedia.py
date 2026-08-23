@@ -205,7 +205,14 @@ async def delete_export(
 
     # Delete archive file if exists
     if job.output_path:
-        output_path = settings.resolve_data_path(job.output_path)
+        try:
+            output_path = settings.resolve_deletable_path(job.output_path)
+        except ValueError as e:
+            logger.error(f"Refusing to delete export output_path: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail="Stored output_path is not a valid deletion target",
+            )
         if output_path.exists():
             output_path.unlink()
 

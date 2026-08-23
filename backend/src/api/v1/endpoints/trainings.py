@@ -152,31 +152,22 @@ async def get_training(
     return db_training
 
 
-@router.patch("/{training_id}", response_model=TrainingResponse)
-async def update_training(
-    training_update: TrainingUpdate,
-    training_id: str = Path(..., description="Training job ID"),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Update a training job.
-
-    Args:
-        training_id: Training job ID
-        training_update: Update data
-        db: Database session
-
-    Returns:
-        Updated training job
-
-    Raises:
-        HTTPException: If training not found
-    """
-    db_training = await TrainingService.update_training(db, training_id, training_update)
-    if not db_training:
-        raise HTTPException(status_code=404, detail=f"Training not found: {training_id}")
-
-    return db_training
+# PATCH /api/trainings/{id} IS DELETED (MIS-E2E-106).
+#
+# `TrainingUpdate` is entirely lifecycle and worker-owned metric fields, and the
+# `trainings` table has no user-editable column, so there was nothing left after
+# removing the unsafe ones. The route had no caller — the frontend issues no
+# PATCH, no MCP tool wraps it, no test exercised it.
+#
+# What it allowed: `{"status": "completed"}` on a running job unlocked SAE
+# import from a partial checkpoint (`sae_manager_service` gates solely on
+# `status != COMPLETED`) with no `finalized_from_step` marker, made the job
+# uncancellable (`cancel_training` returns None for terminal statuses, so it
+# silently no-ops while the worker keeps the GPU), and let the same request set
+# `progress: 100` and `current_loss: 0.01` so the record agreed.
+#
+# `TrainingService.update_training` remains — the workers use it, and it now
+# enforces its own allow-list.
 
 
 @router.delete("/{training_id}", status_code=204)

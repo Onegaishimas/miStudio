@@ -1346,19 +1346,53 @@ def cancel_dataset_download(self, dataset_id: str, task_id: Optional[str] = None
             # Clean up partial download files ONLY if dataset was downloading
             # If dataset was processing (tokenizing), do NOT delete raw files - they're needed!
             if dataset.status == DatasetStatus.DOWNLOADING and dataset.raw_path:
-                raw_path = settings.resolve_data_path(dataset.raw_path)
-                if raw_path.exists():
+                try:
+                    # MIS-E2E-071: resolve_deletable_path, not resolve_data_path.
+                    # raw_path is API-writable, so it arrives stored, not trusted.
+                    raw_path = settings.resolve_deletable_path(dataset.raw_path)
+                except ValueError as e:
+                    logger.error(f"Refusing to delete raw_path for {dataset_id}: {e}")
+                    raw_path = None
+                if raw_path is not None and raw_path.exists():
                     try:
                         shutil.rmtree(raw_path)
                         logger.info(f"Cleaned up partial raw dataset files: {raw_path}")
                     except Exception as e:
                         logger.warning(f"Failed to clean up raw files {raw_path}: {e}")
 
-            # Clean up partial tokenization files from tokenizations relationship
+            # Clean up PARTIAL tokenization files only.
+            #
+            # MIS-E2E-151: this loop was ungated and rmtree'd every
+            # `tokenized_path` on the dataset, including tokenizations that had
+            # completed weeks earlier for a different model. The DB rows
+            # survived, so the UI kept rendering them while pointing at deleted
+            # directories — the same shape as the SAE-forfeit incident, and
+            # directly contrary to the manual's promise that each tokenization
+            # "can be cancelled or deleted independently".
+            #
+            # The raw-file cleanup immediately above IS status-gated. This is
+            # the sibling that was missed, which is this audit's most repeated
+            # anti-pattern.
+            from ..models.dataset_tokenization import TokenizationStatus
+
+            _IN_FLIGHT = {TokenizationStatus.QUEUED, TokenizationStatus.PROCESSING}
+
             if dataset.tokenizations:
                 for tokenization in dataset.tokenizations:
+                    if tokenization.status not in _IN_FLIGHT:
+                        logger.info(
+                            f"Preserving tokenization {tokenization.id} "
+                            f"(status={tokenization.status}) — not in flight"
+                        )
+                        continue
                     if tokenization.tokenized_path:
-                        tokenized_path = settings.resolve_data_path(tokenization.tokenized_path)
+                        try:
+                            tokenized_path = settings.resolve_deletable_path(
+                                tokenization.tokenized_path
+                            )
+                        except ValueError as e:
+                            logger.error(f"Refusing to delete tokenized_path: {e}")
+                            continue
                         if tokenized_path.exists():
                             try:
                                 shutil.rmtree(tokenized_path)
@@ -1430,7 +1464,17 @@ def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokeni
 
     try:
         # Resolve Docker-style /data/ paths for native mode compatibility
-        resolved_raw_path = str(settings.resolve_data_path(raw_path)) if raw_path else None
+        # MIS-E2E-071 — every path below is API-writable and is about to be
+        # handed to rmtree. A refusal is recorded as an error, never swallowed:
+        # a stored path that cannot be deleted safely is a defect to surface,
+        # not a no-op to hide.
+        resolved_raw_path = None
+        if raw_path:
+            try:
+                resolved_raw_path = str(settings.resolve_deletable_path(raw_path))
+            except ValueError as e:
+                errors.append(f"Refusing to delete raw_path {raw_path!r}: {e}")
+                logger.error(errors[-1])
 
         # Delete raw dataset files
         if resolved_raw_path and os.path.exists(resolved_raw_path):
@@ -1445,7 +1489,12 @@ def delete_dataset_files(dataset_id: str, raw_path: Optional[str] = None, tokeni
 
         # Delete all tokenized dataset files
         for tok_path in all_tokenized_paths:
-            resolved_tok_path = str(settings.resolve_data_path(tok_path))
+            try:
+                resolved_tok_path = str(settings.resolve_deletable_path(tok_path))
+            except ValueError as e:
+                errors.append(f"Refusing to delete tokenized_path {tok_path!r}: {e}")
+                logger.error(errors[-1])
+                continue
             if os.path.exists(resolved_tok_path):
                 try:
                     shutil.rmtree(resolved_tok_path)

@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
+from tests.integration._data_root_tmp import data_root_tmpdir
 from src.models.model import Model, ModelStatus, QuantizationFormat
 from src.services.model_service import ModelService
 from src.workers.model_tasks import delete_model_files
@@ -86,7 +87,7 @@ class TestModelFileCleanup:
         model_id = f"m_{uuid4().hex[:8]}"
 
         # Create temporary directories to simulate model files
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("models") as tmpdir:
             file_path = Path(tmpdir) / "raw_model"
             quantized_path = Path(tmpdir) / "quantized_model"
 
@@ -124,7 +125,7 @@ class TestModelFileCleanup:
         model_id = f"m_{uuid4().hex[:8]}"
 
         # Create temporary directory
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("models") as tmpdir:
             file_path = Path(tmpdir) / "raw_model"
             file_path.mkdir()
             (file_path / "model.bin").write_text("fake model data")
@@ -185,7 +186,7 @@ class TestModelFileCleanup:
         model_id = f"m_{uuid4().hex[:8]}"
 
         # Create temporary directory and make it read-only
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("models") as tmpdir:
             file_path = Path(tmpdir) / "read_only_model"
             file_path.mkdir()
             (file_path / "model.bin").write_text("fake model data")
@@ -223,7 +224,7 @@ class TestModelFileCleanup:
             test_name = f"test_e2e_{uuid4().hex[:8]}"
 
             # Create temporary directories for model files
-            with tempfile.TemporaryDirectory() as tmpdir:
+            with data_root_tmpdir("models") as tmpdir:
                 file_path = Path(tmpdir) / "raw_model"
                 quantized_path = Path(tmpdir) / "quantized_model"
 

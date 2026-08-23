@@ -16,6 +16,7 @@ from ....core.deps import get_db
 from ....models.model import ModelStatus, QuantizationFormat
 from ....models.activation_extraction import ActivationExtraction, ExtractionStatus
 from ....schemas.model import (
+    ModelPatchRequest,
     ModelUpdate,
     ModelResponse,
     ModelListResponse,
@@ -158,17 +159,25 @@ async def redownload_model(
         from ....core.config import settings
 
         # Delete existing model files (resolve Docker-style /data/ paths for native mode)
-        if model.file_path:
-            file_path = settings.resolve_data_path(model.file_path)
-            if file_path.exists():
-                logger.info(f"Deleting existing model files: {file_path}")
-                shutil.rmtree(file_path)
-
-        if model.quantized_path:
-            quantized_path = settings.resolve_data_path(model.quantized_path)
-            if quantized_path.exists():
-                logger.info(f"Deleting existing quantized files: {quantized_path}")
-                shutil.rmtree(quantized_path)
+        # MIS-E2E-071 — resolve_deletable_path refuses the trusted roots and
+        # their top-level category directories, which resolve_data_path returns
+        # verbatim. Requantize is reachable unauthenticated, so a crafted
+        # file_path made this endpoint an arbitrary-deletion primitive.
+        for attr in ("file_path", "quantized_path"):
+            stored = getattr(model, attr, None)
+            if not stored:
+                continue
+            try:
+                target = settings.resolve_deletable_path(stored)
+            except ValueError as e:
+                logger.error(f"Refusing to delete {attr} for model {model_id}: {e}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Stored {attr} is not a valid deletion target",
+                )
+            if target.exists():
+                logger.info(f"Deleting existing model files ({attr}): {target}")
+                shutil.rmtree(target)
 
         # Update model record
         from ....models.model import Model
@@ -397,7 +406,10 @@ async def get_model_architecture(
 @router.patch("/{model_id}", response_model=ModelResponse)
 async def update_model(
     model_id: str,
-    updates: ModelUpdate,
+    # MIS-E2E-106: the narrow request model. `ModelUpdate` keeps status,
+    # progress, the discovered architecture fields and the two path columns
+    # because the download and quantization workers write them.
+    patch: ModelPatchRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -405,7 +417,7 @@ async def update_model(
 
     Args:
         model_id: Model ID (string format: m_{uuid})
-        updates: Update data
+        patch: The user-editable fields
         db: Database session
 
     Returns:
@@ -414,6 +426,7 @@ async def update_model(
     Raises:
         HTTPException: If model not found
     """
+    updates = ModelUpdate(**patch.model_dump(exclude_unset=True))
     model = await ModelService.update_model(db, model_id, updates)
 
     if not model:
@@ -1204,19 +1217,35 @@ async def delete_extractions(
                     ActivationExtraction.model_id == model_id
                 ).first()
 
-                if extraction:
-                    sync_db.delete(extraction)
-                    sync_db.commit()
-                    logger.info(f"Deleted extraction record from database: {extraction_id}")
+                if not extraction:
+                    # SCOPE THE FILESYSTEM DELETE TO A ROW WE ACTUALLY OWN
+                    # (MIS-E2E-070). The rmtree used to sit OUTSIDE this guard,
+                    # so an id belonging to no extraction — or to a different
+                    # model — still reached the filesystem with the raw request
+                    # string, and `deleted_ids.append` ran regardless, so the
+                    # endpoint reported success.
+                    logger.warning(
+                        "extraction %s does not belong to model %s (or does not "
+                        "exist) — not deleting anything for it",
+                        extraction_id, model_id,
+                    )
+                    failed_ids.append(extraction_id)
+                    errors[extraction_id] = "not found for this model"
+                    continue
 
-            # Delete from filesystem
+                sync_db.delete(extraction)
+                sync_db.commit()
+                logger.info(f"Deleted extraction record from database: {extraction_id}")
+
+            # Filesystem delete, only for an id that resolved to a real row.
             try:
                 activation_service.delete_extraction(extraction_id)
                 logger.info(f"Deleted extraction files from filesystem: {extraction_id}")
             except Exception as fs_error:
-                # Log filesystem deletion error but don't fail the request
-                # (database record is already deleted)
+                # The DB row is already gone, so this is not fatal to the
+                # request — but it IS reported now rather than only logged.
                 logger.warning(f"Failed to delete extraction files for {extraction_id}: {fs_error}")
+                errors[extraction_id] = f"row deleted, files not: {fs_error}"
 
             deleted_ids.append(extraction_id)
 

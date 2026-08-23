@@ -280,6 +280,41 @@ class TrainingUpdate(BaseModel):
     error_traceback: Optional[str] = Field(None, description="Error traceback for debugging")
 
 
+# ── The PATCH BODY is not the internal update shape (MIS-E2E-106) ───────────
+#
+# The `*Update` schemas above are what the SERVICE accepts. They expose the
+# row's lifecycle `status` and the fields the Celery workers own, and the
+# service applies them with a blind `setattr` loop — which is correct for an
+# internal caller and catastrophic as a request body:
+#
+#   PATCH /api/trainings/{id} {"status": "completed"}
+#
+# against a running job did three things at once. It unlocked SAE import from a
+# partial checkpoint (`sae_manager_service` gates solely on
+# `status != COMPLETED`) with no `finalized_from_step` marker — the one signal
+# Feature 21 added to tell a salvaged run from a complete one. It made the job
+# uncancellable (`cancel_training` returns None for any terminal status, so it
+# silently no-ops while the worker keeps the GPU). And `progress: 100`,
+# `current_loss: 0.01`, `current_dead_neurons: 0` were writable in the same
+# request, so the record could be falsified to match.
+#
+# The fields cannot simply be deleted: internal callers legitimately write them
+# through these very schemas (`datasets.py` sets `status=PROCESSING` when it
+# queues tokenization). So the REQUEST gets its own narrow model, and the route
+# binds that. What a user may edit is a product decision; what a worker may
+# write is not the same list.
+
+
+# There is no `TrainingPatchRequest`. `TrainingUpdate` is ENTIRELY lifecycle and
+# worker-owned metric fields — status, progress, current_step, current_loss,
+# current_l0_sparsity, current_dead_neurons, current_learning_rate,
+# error_message, error_traceback — and the `trainings` table has no
+# user-editable column at all. Removing the unsafe fields therefore leaves
+# nothing, so `PATCH /api/trainings/{id}` is gone rather than reduced to a route
+# whose only valid body is `{}`. It had no caller: the frontend issues no PATCH
+# to it, no MCP tool wraps it, and no test exercised it.
+
+
 class TrainingResponse(BaseModel):
     """Schema for training job response."""
 

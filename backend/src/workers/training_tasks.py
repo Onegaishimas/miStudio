@@ -1948,7 +1948,13 @@ def delete_training_files(training_id: str, training_dir: Optional[str] = None) 
 
     try:
         # Resolve Docker-style /data/ paths for native mode compatibility
-        resolved_dir = str(settings.resolve_data_path(training_dir)) if training_dir else None
+        resolved_dir = None
+        if training_dir:
+            try:
+                resolved_dir = str(settings.resolve_deletable_path(training_dir))
+            except ValueError as e:
+                errors.append(f"Refusing to delete training_dir {training_dir!r}: {e}")
+                logger.error(errors[-1])
 
         # Delete training directory
         if resolved_dir and Path(resolved_dir).exists():

@@ -1228,7 +1228,10 @@ function StorageTab() {
  * this is that report. Without it the only way to see what pruning would remove
  * is the Celery worker log, which makes the advice unfollowable.
  */
-function CheckpointPrunePreviewPanel() {
+// Exported for MIS-E2E-128's regression test. The prune confirmation is the
+// product's only guard on an irreversible deletion, so it is tested directly
+// rather than through the whole settings page.
+export function CheckpointPrunePreviewPanel() {
   const { trainings, fetchTrainings, previewCheckpointPrune, pruneCheckpoints } =
     useTrainingsStore();
   const [selected, setSelected] = useState<string>('');
@@ -1303,21 +1306,51 @@ function CheckpointPrunePreviewPanel() {
           <button
             type="button"
             onClick={async () => {
-              const verb = preview.policy.dry_run ? 'report on' : 'PERMANENTLY DELETE';
+              // MIS-E2E-128. `preview` is a SNAPSHOT taken when Preview was
+              // clicked; the Celery task re-reads `checkpoint_prune_dry_run`
+              // from settings at execution time. Untick "dry run", Save, then
+              // Prune now, and the dialog said "This will report on 12
+              // checkpoint file(s)" while the task permanently deleted all
+              // twelve. A confirmation for an irreversible action must be
+              // rendered from the state the action will use — never a snapshot.
+              setPruning(true);
+              setPruneMsg(null);
+              setError(null);
+
+              let current: CheckpointPrunePreview;
+              try {
+                current = await previewCheckpointPrune(selected);
+                setPreview(current);
+              } catch (e: any) {
+                setError(
+                  e?.response?.data?.detail ||
+                    'Could not confirm the current prune policy — nothing was pruned'
+                );
+                setPruning(false);
+                return;
+              }
+
+              // Fail CLOSED. If the refreshed policy cannot be read, treat it
+              // as destructive rather than assuming dry-run: for `dry_run`,
+              // false is the deleting value, so the safe default is the loud
+              // one. (Feature 21's recorded lesson, same setting.)
+              const isDryRun = current.policy?.dry_run === true;
+              const verb = isDryRun ? 'report on' : 'PERMANENTLY DELETE';
+
               if (
                 !confirm(
-                  `This will ${verb} ${preview.checkpoint_count} checkpoint file(s) ` +
+                  `This will ${verb} ${current.checkpoint_count} checkpoint file(s) ` +
                     `for ${selected}. Continue?`
                 )
               ) {
+                setPruning(false);
                 return;
               }
-              setPruning(true);
-              setPruneMsg(null);
+
               try {
                 await pruneCheckpoints(selected);
                 setPruneMsg(
-                  preview.policy.dry_run
+                  isDryRun
                     ? 'Dry-run prune queued — check the worker log for the report.'
                     : 'Prune queued.'
                 );

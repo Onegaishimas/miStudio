@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.core.config import settings
 from src.core.deps import get_db
+from src.services.app_setting_service import AppSettingService
 from src.services.labeling_service import LabelingService
 from src.workers.labeling_tasks import label_features_task
 from src.schemas.labeling import (
@@ -469,6 +470,40 @@ class FetchModelsRequest(BaseModel):
     endpoint_url: str = "https://api.openai.com/v1"
 
 
+async def _host_may_receive_stored_key(db: AsyncSession, endpoint_url: str) -> bool:
+    """May the OPERATOR's stored key be attached to a request for this URL?
+
+    Only for hosts the operator already designated: the configured
+    `openai_compatible_endpoint`, or api.openai.com — the two the key was
+    entered for. Every other host gets no stored credential, however reachable
+    it is (MIS-E2E-069).
+
+    Compares HOST only. Matching the full URL would let a path or query
+    difference defeat it; matching a prefix would admit
+    `api.openai.com.evil.tld`.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        target = (urlparse(endpoint_url).hostname or "").lower()
+    except ValueError:
+        return False
+    if not target:
+        return False
+
+    allowed = {"api.openai.com"}
+    configured = await AppSettingService.get_decrypted_value(
+        db, "openai_compatible_endpoint"
+    )
+    for candidate in (configured,
+                      getattr(settings, "openai_compatible_endpoint", None)):
+        if candidate:
+            host = (urlparse(candidate).hostname or "").lower()
+            if host:
+                allowed.add(host)
+    return target in allowed
+
+
 @router.post(
     "/labeling/models/openai",
     summary="Fetch available models from OpenAI or compatible endpoint"
@@ -487,8 +522,29 @@ async def fetch_openai_models(
       3. Environment variable settings.openai_api_key
       4. None (unauthenticated — fine for Ollama / vLLM / miLLM)
     """
+    # VALIDATE THE URL FIRST (MIS-E2E-069). `validate_llm_endpoint_url` exists
+    # for exactly this and had two call sites in the whole tree — neither of
+    # them this one, the only path that attaches a stored credential.
+    from src.utils.url_validation import validate_llm_endpoint_url
+    try:
+        validate_llm_endpoint_url(request.endpoint_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # THE STORED KEY IS NEVER SENT TO A HOST THE REQUEST BODY CHOSE.
+    #
+    # This used to fall back to the operator's decrypted `openai_api_key`
+    # whenever the body omitted `api_key` — so the ABSENCE of a credential in
+    # the request is what caused one to be read from the database and sent to
+    # `endpoint_url`. A single unauthenticated POST naming any host exfiltrated
+    # it, defeating the AES-256-GCM at rest, the masking on every read and the
+    # Settings PIN in one call.
+    #
+    # A caller-supplied key is still honoured — it is the caller's to spend. A
+    # STORED key is attached only when the resolved host is one the operator
+    # already designated.
     api_key = request.api_key
-    if not api_key:
+    if not api_key and await _host_may_receive_stored_key(db, request.endpoint_url):
         from src.models.app_setting import AppSetting
         from src.core.encryption import decrypt_value
 
@@ -502,14 +558,14 @@ async def fetch_openai_models(
                 if db_setting.is_sensitive
                 else db_setting.value
             )
-    if not api_key:
-        api_key = getattr(settings, 'openai_api_key', None)
-
-    # Validate URL scheme — only http/https allowed to prevent SSRF via file://, ftp://, etc.
-    from urllib.parse import urlparse
-    parsed = urlparse(request.endpoint_url)
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(status_code=400, detail="endpoint_url must use http or https scheme")
+        if not api_key:
+            api_key = getattr(settings, "openai_api_key", None)
+    elif not api_key:
+        logger.info(
+            "listing models at %s without a stored credential — the host is not "
+            "the configured endpoint or api.openai.com",
+            request.endpoint_url,
+        )
 
     # Normalize endpoint URL
     base_url = request.endpoint_url.rstrip('/')
