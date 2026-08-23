@@ -5,7 +5,7 @@ Balances performance with safety to avoid OOM while maximizing throughput.
 import psutil
 import torch
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -307,3 +307,105 @@ class ResourceConfig:
             "warnings": warnings,
             "errors": errors
         }
+
+
+#: Bytes per parameter for each quantization format, INCLUDING bitsandbytes'
+#: overhead for the quantized ones (absmax scales, quant maps). Deliberately
+#: rounded up: a preflight that under-estimates is worse than none, because it
+#: adds a check the user then learns to ignore.
+_BYTES_PER_PARAM = {
+    "FP32": 4.0,
+    "FP16": 2.0,
+    "Q8": 1.1,
+    "Q4": 0.6,
+    "Q2": 0.4,
+}
+
+#: Headroom above the weights for activations, the KV cache and CUDA's own
+#: context. Extraction runs batched forward passes over long sequences, so this
+#: is not a rounding allowance — the reported OOM was for a 120 MiB allocation
+#: with 113 MiB free, i.e. the weights had taken essentially everything.
+_ACTIVATION_HEADROOM_GB = 2.0
+
+
+class VRAMInsufficientError(RuntimeError):
+    """The model cannot fit on this GPU with the requested quantization."""
+
+
+def preflight_gpu_capacity(
+    *,
+    params_count: Optional[int],
+    quantization: str,
+    model_name: str = "model",
+) -> None:
+    """Refuse a job that cannot fit, BEFORE spending minutes loading weights.
+
+    Reported live 2026-08-23: an extraction on `gemma-4-12B-it` ran for 2m47s
+    and died with "CUDA out of memory. Tried to allocate 120.00 MiB. GPU 0 has
+    a total capacity of 23.56 GiB of which 113.06 MiB is free" — the weights had
+    consumed the card and the first forward pass had nowhere to go.
+
+    Nothing checked. `ResourceConfig.get_optimal_settings` is called AFTER the
+    model is resident and tunes batch size against system RAM, so it cannot see
+    this coming and could not have prevented it.
+
+    A 12B model at FP16 is ~24 GB of weights on a 23.56 GB card: it was never
+    going to fit, and the product could have said so in under a second. Failing
+    fast with the arithmetic is worth more than failing late with a CUDA error,
+    because the arithmetic names the remedy.
+
+    Raises:
+        VRAMInsufficientError: with the shortfall and what would fit.
+    """
+    if not params_count or params_count <= 0:
+        # Unknown size — proceed rather than block on missing metadata. A
+        # preflight that refuses jobs it cannot assess is worse than none.
+        logger.info("Skipping GPU preflight: params_count unknown for %s", model_name)
+        return
+
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return
+        free_bytes, total_bytes = torch.cuda.mem_get_info(0)
+    except Exception as exc:                      # pragma: no cover - env dependent
+        logger.info("Skipping GPU preflight: could not read GPU memory (%s)", exc)
+        return
+
+    per_param = _BYTES_PER_PARAM.get(str(quantization).upper(), 2.0)
+    weights_gb = params_count * per_param / (1024 ** 3)
+    needed_gb = weights_gb + _ACTIVATION_HEADROOM_GB
+    free_gb = free_bytes / (1024 ** 3)
+
+    if needed_gb <= free_gb:
+        logger.info(
+            "GPU preflight OK for %s: ~%.1f GB needed (%.1f GB weights at %s "
+            "+ %.1f GB headroom), %.1f GB free",
+            model_name, needed_gb, weights_gb, quantization,
+            _ACTIVATION_HEADROOM_GB, free_gb,
+        )
+        return
+
+    # Name a format that WOULD fit, so the message ends with an action.
+    suggestion = None
+    for fmt in ("Q8", "Q4", "Q2"):
+        if params_count * _BYTES_PER_PARAM[fmt] / (1024 ** 3) + _ACTIVATION_HEADROOM_GB <= free_gb:
+            suggestion = fmt
+            break
+
+    remedy = (
+        f"Re-download or convert this model as {suggestion} — that needs about "
+        f"{params_count * _BYTES_PER_PARAM[suggestion] / (1024 ** 3):.1f} GB."
+        if suggestion
+        else "No supported quantization fits this GPU; use a smaller model."
+    )
+
+    raise VRAMInsufficientError(
+        f"{model_name} does not fit on this GPU. "
+        f"{params_count / 1e9:.1f}B parameters at {quantization} is about "
+        f"{weights_gb:.1f} GB of weights, plus ~{_ACTIVATION_HEADROOM_GB:.0f} GB "
+        f"for activations and CUDA context = ~{needed_gb:.1f} GB needed, "
+        f"against {free_gb:.1f} GB free of {total_bytes / (1024 ** 3):.1f} GB total. "
+        f"{remedy}"
+    )

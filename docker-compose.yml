@@ -148,7 +148,21 @@ services:
     command: python -m src.mcp_server
     environment:
       MISTUDIO_API_URL: http://backend:8000
-      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN in .env to enable the MCP server}
+      # `${VAR:-}`, NOT `${VAR:?}` (MIS-E2E-026).
+      #
+      # Compose evaluates `:?` during FILE INTERPOLATION, before profile
+      # filtering — so although this service is profile-gated and does not
+      # start by default, the missing variable aborted EVERY command against
+      # this file, including `docker compose ps`, `config --services` and
+      # `logs postgres`. A fresh clone (there is no root `.env`, only
+      # `.env.example`) could not run any of them, and the error named a
+      # service the user never asked for.
+      #
+      # The intent — the MCP port must not open without a token — is right and
+      # is enforced where it belongs: `mcp_server/server.py` already refuses to
+      # start on an empty token. The check moves there rather than into the
+      # interpolation pass that runs for everything.
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       MCP_TOOL_CATEGORIES: ${MCP_TOOL_CATEGORIES:-read,groups,steering,labeling,experiments,profiles,circuits,jlens,jobs}
       # Unified MCP (miLLM Feature 9): set to a reachable miLLM to enable the
       # millm_runtime/millm_clusters/millm_sensing categories (add them to

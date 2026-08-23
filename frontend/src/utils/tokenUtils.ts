@@ -103,7 +103,9 @@ export const inferWordStartHeuristic = (
   const tokenLower = token.toLowerCase();
 
   // After punctuation = new word (except apostrophe)
-  if (prevToken && /[.!?,;:\-\(\)\[\]{}]$/.test(prevToken)) {
+  // Inside a character class `(`, `)` and `[` are literal, so escaping them
+  // is noise the linter flags. `\-` and `\]` still need theirs.
+  if (prevToken && /[.!?,;:\-()[\]{}]$/.test(prevToken)) {
     return true;
   }
 

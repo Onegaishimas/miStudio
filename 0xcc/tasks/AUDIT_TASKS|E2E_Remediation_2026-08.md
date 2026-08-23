@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3123 passed / 0 failed** (baseline 2883) · frontend **1227 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean · **CI green, mirror images built**
+**Suites:** backend **3133 passed / 0 failed** (baseline 2883) · frontend **1227 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green, mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **next** |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — 12.7 ✅ · 12.8 ✅ · 12.9 ✅ · 12.10 ✅ · 9.3 ✅ (in Wave 4) · rest open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -186,10 +186,12 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [ ] 12.4 Fix `k8s_deploy`'s `&&`-chain so a failed pull/apply/rollout is not reported as success. — MIS-E2E-147
 - [ ] 12.5 Fix the compose frontend port (`3000:80` → 8080), add the `/ollama/` location, split the compose worker's queues, fix the `server_name` typo. — MIS-E2E-147
 - [ ] 12.6 Scope `MCP_TOOL_CATEGORIES` off the ingress `/api` prefix or deny `/api/internal/*` there; use `signed-by=` instead of `apt-key adv`. — MIS-E2E-148
-- [ ] 12.7 **Remove the 9 `--exclude` flags from `frontend-ci.yml`** — all 329 tests pass; 27% of the suite is ungated. — MIS-E2E-025
-- [ ] 12.8 **Run lint in CI** and fix the 34 errors. Nothing gates on it today, which is how a Rules-of-Hooks violation shipped. — MIS-E2E-024, -023
-- [ ] 12.9 Fix `${MCP_AUTH_TOKEN:?}` so it does not break every `docker compose` command. — MIS-E2E-026
-- [ ] 12.10 Ship `VERSION` in the backend image and make the fallback loud. — MIS-E2E-028
+- [x] 12.7 ✅ All nine removed. Verified first: **329 tests, 9 files, all passing** — whatever was once broken had been fixed and the exclusion outlived it silently. — MIS-E2E-025
+- [x] 12.8 ✅ **0 errors, and lint now gates CI.** The two `react-hooks/rules-of-hooks` errors were real: `ReadoutGrid`'s empty-readout guard sat *above* two `useMemo` calls, so an empty axis meant React saw a shorter hook list — "rendered fewer hooks than expected", which unmounts the tree. Assessed unreachable because the backend emits `types` and `layers_by_type` from one tuple; that is a property of today's backend, not of the component, so the guard moved below the hooks.
+  Also real: a regex escaping `(`/`)`/`[` **inside a character class**, and three `catch (e) { throw e }` wrappers that only cost the original stack frame. The rest were unused bindings — fixed by configuring the `_` convention the codebase already used (it was honoured for *arguments* only, so `const { [k]: _, ...rest }`, where the binding is **required syntax**, was an error that could not be removed).
+  Warnings do **not** block: a gate nobody can pass gets deleted. 492 `no-explicit-any` warnings remain as visible debt. — MIS-E2E-024, -023
+- [x] 12.9 ✅ `${MCP_AUTH_TOKEN:-}`. Compose evaluates `:?` during **file interpolation**, before profile filtering, so a profile-gated service aborted `ps`, `config` and `logs` on a fresh clone. The intent is enforced where it belongs — `mcp_server/server.py` already refuses to start on an empty token. — MIS-E2E-026
+- [x] 12.10 ✅ `APP_VERSION` build arg → `MISTUDIO_VERSION` + `/app/VERSION`. An `ARG`, not a `COPY`: the file is outside the `backend/` build context. The fallback now logs at ERROR naming the likely cause — returning a plausible string quietly is what let every pod report `unknown`. **Note:** `docker-images.yml` must pass `build-args: APP_VERSION=…` for this to take effect. — MIS-E2E-028
 
 ---
 
@@ -348,6 +350,15 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_audit_mutation_pins.py` | **New.** Task 8's harness — hook target, sensitive keys, `weights_only`, queue routing, retry scope, BR-002 package-wide, IDOR |
 | `backend/tests/unit/test_reachability.py` | MIS-E2E-119: `TestCallerCoverageIsAccounted` over the real built server; **100 exemptions listed** with reasons |
 | `frontend/src/utils/steeringStrength.test.ts` | MIS-E2E-127: the slope invariant stated directly rather than caught incidentally |
+| `.github/workflows/frontend-ci.yml` | MIS-E2E-024/-025: 9 excludes removed (329 tests were ungated); **lint now gates**, errors blocking and warnings not |
+| `frontend/eslint.config.js` | The `_` unused convention honoured for vars, caught errors and rest-siblings, not just arguments |
+| `frontend/src/components/jlens/ReadoutGrid.tsx` | MIS-E2E-023: the early return moved **below** the hooks |
+| `frontend/src/utils/tokenUtils.ts` · `stores/featuresStore.ts` | A regex over-escaped inside a character class; three pass-through `try/catch` wrappers removed |
+| `docker-compose.yml` | MIS-E2E-026: `:?` → `:-`; the token requirement is enforced in `server.py`, not in the interpolation pass |
+| `backend/Dockerfile` · `api/v1/endpoints/version.py` | MIS-E2E-028: `APP_VERSION` baked in; the fallback logs at ERROR |
+| `backend/src/services/resource_config.py` | **Live bug:** `preflight_gpu_capacity()` — a 12B FP16 model OOM'd 2m47s in on a 24 GB card with nothing checking |
+| `backend/src/ml/model_loader.py` | `estimate_parameter_count()` from the config, and the preflight **inside the loader** so all ten call sites inherit it |
+| `backend/tests/unit/test_gpu_preflight.py` | **New.** 10 tests incl. the reported card and model, and a control that a fitting quantization is still allowed |
 
 ## Negative controls run
 
@@ -443,6 +454,10 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC84 | Remove the checkpoint IDOR guard (MIS-E2E-112) | ✅ 2 failures |
 | NC85 | Register a new MCP tool with neither assertion nor exemption | ✅ 2 failures |
 | NC86 | **Re-run of audit mutation M22** — `BASELINE_SLOPE` 2.6 → 2.4 | ✅ 3 failures *(survived during the audit; already killed before this work, verified)* |
+| NC87 | Remove the preflight from the loader | ✅ 1 failure |
+| NC88 | Set the activation headroom to zero | ✅ 1 failure |
+| NC89 | Estimator stops reading nested configs | ✅ 1 failure |
+| NC90 | Preflight refuses everything | ✅ 3 failures — the fix must not block valid jobs |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

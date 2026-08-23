@@ -67,6 +67,21 @@ RUN python3.12 -m spacy download en_core_web_sm
 # Copy application code
 COPY --chown=mistudio:mistudio . .
 
+# THE VERSION MUST BE IN THE IMAGE (MIS-E2E-028).
+#
+# `GET /api/v1/version` returned {"version":"unknown"} on every deployed pod.
+# The build context is `backend/` and `VERSION` lives at the REPO ROOT, so it
+# never entered the image and the endpoint's three candidate paths all missed.
+# The endpoint that exists to answer "which build is this?" could not answer it
+# in the only environment where the question matters.
+#
+# An ARG rather than a COPY: the file is outside this build context, so a COPY
+# cannot reach it without moving the context. The build passes it in; the
+# entrypoint has no work to do.
+ARG APP_VERSION=unknown
+ENV MISTUDIO_VERSION=${APP_VERSION}
+RUN printf '%s' "${APP_VERSION}" > /app/VERSION
+
 # Copy LICENSE file for open source compliance
 COPY --chown=mistudio:mistudio LICENSE /app/LICENSE
 

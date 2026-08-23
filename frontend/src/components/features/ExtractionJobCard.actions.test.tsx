@@ -176,7 +176,7 @@ describe('ExtractionJobCard — a failed feature fetch stays handled', () => {
     // against a harness that cannot detect the thing it is asserting about —
     // which is how the original defect survived a green suite.
     const escaped = await unhandledDuring(() => {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+       
       Promise.reject(new Error('deliberately unhandled'));
     });
 

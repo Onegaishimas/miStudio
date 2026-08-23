@@ -193,7 +193,7 @@ describe('trainingsStore', () => {
 
       try {
         await fetchTrainings();
-      } catch (error) {
+      } catch (_error) {
         // Expected to throw
       }
 
@@ -383,7 +383,7 @@ describe('trainingsStore', () => {
 
       try {
         await fetchTraining('train_nonexistent');
-      } catch (error) {
+      } catch (_error) {
         // Expected to throw
       }
 
@@ -462,7 +462,7 @@ describe('trainingsStore', () => {
 
       try {
         await createTraining(mockRequest);
-      } catch (error) {
+      } catch (_error) {
         // Expected to throw
       }
 
@@ -547,7 +547,7 @@ describe('trainingsStore', () => {
 
       try {
         await deleteTraining('train_123');
-      } catch (error) {
+      } catch (_error) {
         // Expected to throw
       }
 

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { screen, fireEvent, _within, waitFor } from '@testing-library/react';
 // The Tokenization tab uses useWebSocketContext() via a progress hook, so the
 // modal must be wrapped in <WebSocketProvider>. renderWithProviders does that.
 import { renderWithProviders as render } from '../../test/renderWithProviders';
@@ -55,7 +55,7 @@ global.fetch = vi.fn();
 
 describe('DatasetDetailModal', () => {
   const mockOnClose = vi.fn();
-  const mockOnDatasetUpdate = vi.fn();
+  const _mockOnDatasetUpdate = vi.fn();
 
   const createMockDataset = (overrides?: Partial<Dataset>): Dataset => ({
     id: 'test-dataset-1',
@@ -362,7 +362,7 @@ describe('DatasetDetailModal', () => {
   describe('Tab Icons', () => {
     it('should render icons for all tabs', () => {
       const dataset = createMockDataset();
-      const { container } = render(
+      const { _container } = render(
         <DatasetDetailModal dataset={dataset} onClose={mockOnClose} />
       );
 

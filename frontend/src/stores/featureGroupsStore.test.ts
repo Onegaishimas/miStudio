@@ -78,7 +78,7 @@ describe('featureGroupsStore selection stamping', () => {
       { feature_id: 'f2', ...member({ neuron_index: 2 }) },
     ];
     act(() => store.setSelected(rows, true));
-    let sel = useFeatureGroupsStore.getState().selection;
+    const sel = useFeatureGroupsStore.getState().selection;
     expect(sel.size).toBe(2);
     expect(sel.get('f2')?.neuron_index).toBe(2);
     expect(sel.get('f2')?.group_id).toBe('gA');

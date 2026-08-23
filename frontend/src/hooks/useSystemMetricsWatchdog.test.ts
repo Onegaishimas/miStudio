@@ -24,6 +24,8 @@
  *   * drop the visibility guard                -> the hidden-tab test fails
  */
 
+import * as nodeFs from 'node:fs';
+import * as nodePath from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import {
@@ -142,8 +144,10 @@ describe('the watchdog is actually wired to the global header', () => {
   });
 
   it('the Monitor page uses the SAME hook rather than its own copy', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
+    // ESM imports, not require(): this file is ESM and `require` is not
+    // defined at runtime under vitest's node environment either.
+    const fs = nodeFs;
+    const path = nodePath;
     const src = fs.readFileSync(
       path.resolve(__dirname, '../components/SystemMonitor/SystemMonitor.tsx'),
       'utf8',

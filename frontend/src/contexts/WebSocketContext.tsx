@@ -36,7 +36,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // Queue for operations requested before socket is ready
   const pendingSubscriptionsRef = useRef<Set<string>>(new Set());
-  const pendingHandlersRef = useRef<Array<{ event: string; handler: (...args: any[]) => void }>>(new Array());
+  const pendingHandlersRef = useRef<Array<{ event: string; handler: (...args: any[]) => void }>>([]);
 
   useEffect(() => {
     console.log('[WebSocket] Initializing connection to', WS_URL);

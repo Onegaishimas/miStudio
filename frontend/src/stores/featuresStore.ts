@@ -459,37 +459,33 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * Update feature metadata (name, description, notes).
    */
   updateFeature: async (featureId: string, updates: FeatureUpdateRequest) => {
-    try {
-      const response = await axios.patch<Feature>(`/api/v1/features/${featureId}`, updates);
+    const response = await axios.patch<Feature>(`/api/v1/features/${featureId}`, updates);
 
-      // Update feature in list if it exists
-      set((state) => {
-        const updatedFeaturesByTraining = { ...state.featuresByTraining };
+    // Update feature in list if it exists
+    set((state) => {
+      const updatedFeaturesByTraining = { ...state.featuresByTraining };
 
-        // Find and update feature in all training lists
-        Object.keys(updatedFeaturesByTraining).forEach((trainingId) => {
-          const features = updatedFeaturesByTraining[trainingId];
-          const featureIndex = features.findIndex((f) => f.id === featureId);
+      // Find and update feature in all training lists
+      Object.keys(updatedFeaturesByTraining).forEach((trainingId) => {
+        const features = updatedFeaturesByTraining[trainingId];
+        const featureIndex = features.findIndex((f) => f.id === featureId);
 
-          if (featureIndex !== -1) {
-            updatedFeaturesByTraining[trainingId] = [
-              ...features.slice(0, featureIndex),
-              response.data,
-              ...features.slice(featureIndex + 1),
-            ];
-          }
-        });
-
-        return {
-          featuresByTraining: updatedFeaturesByTraining,
-          selectedFeature: state.selectedFeature?.id === featureId
-            ? { ...state.selectedFeature, ...response.data }
-            : state.selectedFeature,
-        };
+        if (featureIndex !== -1) {
+          updatedFeaturesByTraining[trainingId] = [
+            ...features.slice(0, featureIndex),
+            response.data,
+            ...features.slice(featureIndex + 1),
+          ];
+        }
       });
-    } catch (error: any) {
-      throw error;
-    }
+
+      return {
+        featuresByTraining: updatedFeaturesByTraining,
+        selectedFeature: state.selectedFeature?.id === featureId
+          ? { ...state.selectedFeature, ...response.data }
+          : state.selectedFeature,
+      };
+    });
   },
 
   /**
@@ -516,57 +512,53 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * Toggle favorite status for a feature.
    */
   toggleFavorite: async (featureId: string, isFavorite: boolean) => {
-    try {
-      await axios.post<{ is_favorite: boolean }>(
-        `/api/v1/features/${featureId}/favorite`,
-        null,
-        { params: { is_favorite: isFavorite } }
-      );
+    await axios.post<{ is_favorite: boolean }>(
+      `/api/v1/features/${featureId}/favorite`,
+      null,
+      { params: { is_favorite: isFavorite } }
+    );
 
-      // Update feature in all lists where it exists
-      set((state) => {
-        const updatedFeaturesByTraining = { ...state.featuresByTraining };
-        const updatedFeaturesByExtraction = { ...state.featuresByExtraction };
+    // Update feature in all lists where it exists
+    set((state) => {
+      const updatedFeaturesByTraining = { ...state.featuresByTraining };
+      const updatedFeaturesByExtraction = { ...state.featuresByExtraction };
 
-        // Find and update feature in all training lists
-        Object.keys(updatedFeaturesByTraining).forEach((trainingId) => {
-          const features = updatedFeaturesByTraining[trainingId];
-          const featureIndex = features.findIndex((f) => f.id === featureId);
+      // Find and update feature in all training lists
+      Object.keys(updatedFeaturesByTraining).forEach((trainingId) => {
+        const features = updatedFeaturesByTraining[trainingId];
+        const featureIndex = features.findIndex((f) => f.id === featureId);
 
-          if (featureIndex !== -1) {
-            updatedFeaturesByTraining[trainingId] = [
-              ...features.slice(0, featureIndex),
-              { ...features[featureIndex], is_favorite: isFavorite },
-              ...features.slice(featureIndex + 1),
-            ];
-          }
-        });
-
-        // Find and update feature in all extraction lists
-        Object.keys(updatedFeaturesByExtraction).forEach((extractionId) => {
-          const features = updatedFeaturesByExtraction[extractionId];
-          const featureIndex = features.findIndex((f) => f.id === featureId);
-
-          if (featureIndex !== -1) {
-            updatedFeaturesByExtraction[extractionId] = [
-              ...features.slice(0, featureIndex),
-              { ...features[featureIndex], is_favorite: isFavorite },
-              ...features.slice(featureIndex + 1),
-            ];
-          }
-        });
-
-        return {
-          featuresByTraining: updatedFeaturesByTraining,
-          featuresByExtraction: updatedFeaturesByExtraction,
-          selectedFeature: state.selectedFeature?.id === featureId
-            ? { ...state.selectedFeature, is_favorite: isFavorite }
-            : state.selectedFeature,
-        };
+        if (featureIndex !== -1) {
+          updatedFeaturesByTraining[trainingId] = [
+            ...features.slice(0, featureIndex),
+            { ...features[featureIndex], is_favorite: isFavorite },
+            ...features.slice(featureIndex + 1),
+          ];
+        }
       });
-    } catch (error: any) {
-      throw error;
-    }
+
+      // Find and update feature in all extraction lists
+      Object.keys(updatedFeaturesByExtraction).forEach((extractionId) => {
+        const features = updatedFeaturesByExtraction[extractionId];
+        const featureIndex = features.findIndex((f) => f.id === featureId);
+
+        if (featureIndex !== -1) {
+          updatedFeaturesByExtraction[extractionId] = [
+            ...features.slice(0, featureIndex),
+            { ...features[featureIndex], is_favorite: isFavorite },
+            ...features.slice(featureIndex + 1),
+          ];
+        }
+      });
+
+      return {
+        featuresByTraining: updatedFeaturesByTraining,
+        featuresByExtraction: updatedFeaturesByExtraction,
+        selectedFeature: state.selectedFeature?.id === featureId
+          ? { ...state.selectedFeature, is_favorite: isFavorite }
+          : state.selectedFeature,
+      };
+    });
   },
 
   /**
@@ -576,36 +568,32 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
    * null = unstar.
    */
   setStarColor: async (featureId: string, starColor: 'yellow' | 'purple' | 'aqua' | null) => {
-    try {
-      const response = await axios.post<{ is_favorite: boolean; star_color: string | null }>(
-        `/api/v1/features/${featureId}/star`,
-        null,
-        { params: { star_color: starColor } }
+    const response = await axios.post<{ is_favorite: boolean; star_color: string | null }>(
+      `/api/v1/features/${featureId}/star`,
+      null,
+      { params: { star_color: starColor } }
+    );
+    const { is_favorite } = response.data;
+    const star_color = (response.data.star_color ?? null) as 'yellow' | 'purple' | 'aqua' | null;
+
+    const applyUpdate = (feature: any) =>
+      feature.id === featureId ? { ...feature, is_favorite, star_color } : feature;
+
+    set((state) => {
+      const updatedByTraining = Object.fromEntries(
+        Object.entries(state.featuresByTraining).map(([k, v]) => [k, v.map(applyUpdate)])
       );
-      const { is_favorite } = response.data;
-      const star_color = (response.data.star_color ?? null) as 'yellow' | 'purple' | 'aqua' | null;
-
-      const applyUpdate = (feature: any) =>
-        feature.id === featureId ? { ...feature, is_favorite, star_color } : feature;
-
-      set((state) => {
-        const updatedByTraining = Object.fromEntries(
-          Object.entries(state.featuresByTraining).map(([k, v]) => [k, v.map(applyUpdate)])
-        );
-        const updatedByExtraction = Object.fromEntries(
-          Object.entries(state.featuresByExtraction).map(([k, v]) => [k, v.map(applyUpdate)])
-        );
-        return {
-          featuresByTraining: updatedByTraining,
-          featuresByExtraction: updatedByExtraction,
-          selectedFeature: state.selectedFeature?.id === featureId
-            ? { ...state.selectedFeature, is_favorite, star_color }
-            : state.selectedFeature,
-        };
-      });
-    } catch (error: any) {
-      throw error;
-    }
+      const updatedByExtraction = Object.fromEntries(
+        Object.entries(state.featuresByExtraction).map(([k, v]) => [k, v.map(applyUpdate)])
+      );
+      return {
+        featuresByTraining: updatedByTraining,
+        featuresByExtraction: updatedByExtraction,
+        selectedFeature: state.selectedFeature?.id === featureId
+          ? { ...state.selectedFeature, is_favorite, star_color }
+          : state.selectedFeature,
+      };
+    });
   },
 
   /**
