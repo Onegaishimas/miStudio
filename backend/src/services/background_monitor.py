@@ -46,9 +46,34 @@ class BackgroundMonitor:
             logger.warning("Background monitor already running")
             return
 
+        # `_running` IS SET LAST, AND UNWOUND ON FAILURE (MIS-E2E-139).
+        #
+        # It used to be set first. A crash while building the HTTP client or
+        # creating the task then left `_running = True` with no task running, so
+        # `start()` refused every retry with "already running" — and logged that
+        # at WARNING, which reads like a duplicate call rather than a fault.
+        #
+        # Every `system/*` channel — CPU, memory, disk, network, per-GPU — went
+        # permanently silent, and the Monitor page simply froze. The frontend
+        # fallback keys on CONNECTION, not data freshness, so a live socket
+        # delivering nothing looks healthy: the same shape as the recorded P0
+        # where metrics emission 403'd silently.
+        try:
+            self._http_client = httpx.AsyncClient(timeout=5.0)
+            self._task = asyncio.create_task(self._monitor_loop())
+        except Exception:
+            logger.exception(
+                "Background monitor failed to start — every system/* channel "
+                "will be silent until this is fixed and start() is called again"
+            )
+            self._running = False
+            if self._http_client is not None:
+                await self._http_client.aclose()
+                self._http_client = None
+            self._task = None
+            raise
+
         self._running = True
-        self._http_client = httpx.AsyncClient(timeout=5.0)
-        self._task = asyncio.create_task(self._monitor_loop())
         logger.info(f"Background monitor started (interval: {self.interval_seconds}s)")
 
     async def stop(self):
@@ -61,10 +86,19 @@ class BackgroundMonitor:
                 await self._task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                # A loop that died of something else re-raised here and out
+                # through the FastAPI lifespan, so `_http_client` below was
+                # never closed (MIS-E2E-139). Shutdown must not depend on the
+                # loop having exited cleanly.
+                logger.exception("Background monitor loop failed before shutdown")
             self._task = None
 
         if self._http_client:
-            await self._http_client.aclose()
+            try:
+                await self._http_client.aclose()
+            except Exception:
+                logger.exception("Failed to close the background monitor HTTP client")
             self._http_client = None
 
         logger.info("Background monitor stopped")

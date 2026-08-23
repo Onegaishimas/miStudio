@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3133 passed / 0 failed** (baseline 2883) · frontend **1227 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green, mirror images built**
+**Suites:** backend **3141 passed / 0 failed** (baseline 2883) · frontend **1232 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — 12.7 ✅ · 12.8 ✅ · 12.9 ✅ · 12.10 ✅ · 9.3 ✅ (in Wave 4) · rest open |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9: 9.1 ✅ 9.3 ✅ 9.4 ✅ 9.5 ✅ 9.6 ✅** (9.2 needs a design call) · 12.7–12.10 ✅ · Tasks 10, 11, 12.1–12.6 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -151,12 +151,12 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 9 — Realtime (P1)
 
-- [ ] 9.1 Drop the handler re-attach in `WebSocketContext` — socket.io does not detach on disconnect, so every event fires N+1 times after N reconnects. — MIS-E2E-120
+- [x] 9.1 ✅ Removed. socket.io keeps listeners across the whole reconnect cycle, so the "re-attach for reconnections" loop added a second registration each time. **`WebSocketContext` had no test file at all** — now 5, including one that asserts a handler runs **once per server message** after three reconnects, not just that the listener count is 1. — MIS-E2E-120
 - [ ] 9.2 Call `ws_manager.emit_event()` directly from async contexts instead of the HTTP loopback; `asyncio.to_thread` is the stopgap the one fixed site uses. Requires 4.4 first. — MIS-E2E-136, -138
 - [ ] 9.3 Retry on `httpx.TransportError`, not `TimeoutException`. — MIS-E2E-137
-- [ ] 9.4 Reset `_running` in a `finally` and log the setup failure, so the monitor cannot die silently. — MIS-E2E-139
-- [ ] 9.5 Fix the emit key `"error"` → `"error_message"`, and type the emit payloads so a rename cannot pass silently. — MIS-E2E-067
-- [ ] 9.6 Clear `pendingSubscriptionsRef` on unsubscribe; rename the `"metrics"` event to `"system:metrics"`. — MIS-E2E-126, -141
+- [x] 9.4 ✅ `_running` is now assigned **after** the setup succeeds (the ordering is the fix; the reset in the handler is defence in depth — control C95 proved that by surviving until the test pinned the *order*). `stop()` catches a dead loop so shutdown still closes the HTTP client. — MIS-E2E-139
+- [x] 9.5 ✅ `error_message`, and **both** terminal emits now carry a status matching their event — they were sending `status: "extracting"` on *completed* and *failed*, and the store spread-merges, so a finished job was written back as running. Asserted by parsing the emit payloads, with a control that the in-progress event still says `extracting`. Directly relevant to the OOM the user hit: that path's whole value is its diagnostics, and the key name was destroying them in transit. — MIS-E2E-067
+- [x] 9.6 ✅ Both. An abandoned channel was subscribed on the next connect and every reconnect after (compounding 9.1); `emit_system_metrics` emitted a name nothing listens for **and returned True**. — MIS-E2E-126, -141
 
 ## Task 10 — Provenance: `Feature.training_id` is NULL by design (P1)
 
@@ -359,6 +359,12 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/services/resource_config.py` | **Live bug:** `preflight_gpu_capacity()` — a 12B FP16 model OOM'd 2m47s in on a 24 GB card with nothing checking |
 | `backend/src/ml/model_loader.py` | `estimate_parameter_count()` from the config, and the preflight **inside the loader** so all ten call sites inherit it |
 | `backend/tests/unit/test_gpu_preflight.py` | **New.** 10 tests incl. the reported card and model, and a control that a fitting quantization is still allowed |
+| `frontend/src/contexts/WebSocketContext.tsx` | MIS-E2E-120/-126: the reconnect re-attach removed; `unsubscribe` clears the pending queue |
+| `frontend/src/contexts/WebSocketContext.test.tsx` | **New** — the file did not exist. 5 tests with a socket.io double that keeps listeners across reconnect, as the real one does |
+| `backend/src/services/background_monitor.py` | MIS-E2E-139: `_running` assigned after setup succeeds; `stop()` survives a dead loop and still closes the client |
+| `backend/src/services/extraction_service.py` | MIS-E2E-067: `error_message` not `error`; terminal emits carry their own status |
+| `backend/src/workers/websocket_emitter.py` | MIS-E2E-141: `system:metrics`, the name every sibling and the frontend use |
+| `backend/tests/unit/test_realtime_contracts.py` | **New.** 8 tests over the emit payloads, monitor lifecycle and event naming |
 
 ## Negative controls run
 
@@ -458,6 +464,13 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC88 | Set the activation headroom to zero | ✅ 1 failure |
 | NC89 | Estimator stops reading nested configs | ✅ 1 failure |
 | NC90 | Preflight refuses everything | ✅ 3 failures — the fix must not block valid jobs |
+| NC91 | Restore the reconnect re-attach (MIS-E2E-120) | ✅ 2 failures |
+| NC92 | `unsubscribe` stops clearing the pending queue | ✅ 2 failures |
+| NC93 | Failure emit key back to `error` (MIS-E2E-067) | ✅ 1 failure |
+| NC94 | Completed emit says `extracting` again | ✅ 1 failure |
+| NC95 | Reset removed from the start handler | ⚠️ **SURVIVED** — redundant once `_running` moved after the try. Re-pinned on the ORDER; **re-run ✅ 1 failure** |
+| NC96 | Drop the dead-loop handler in `stop()` | ⚠️ **SURVIVED** — the test matched the `aclose()` handler instead. Rewritten to run a dead task; **re-run ✅ 1 failure** |
+| NC97 | Metrics event name back to `"metrics"` (MIS-E2E-141) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

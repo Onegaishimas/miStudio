@@ -58,15 +58,23 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       console.log('[WebSocket] Connected with ID:', socket.id);
       setIsConnected(true);
 
-      // IMPORTANT: Re-attach existing handlers FIRST (for reconnections)
-      // This must happen before processing pending handlers to avoid double-registration
-      const existingHandlers = new Map(eventHandlersRef.current);
-      existingHandlers.forEach((handlers, event) => {
-        handlers.forEach(handler => {
-          socket.on(event, handler);
-          console.log('[WebSocket] Re-attached handler for event:', event);
-        });
-      });
+      // NO RE-ATTACH HERE (MIS-E2E-120).
+      //
+      // This used to walk `eventHandlersRef` and `socket.on(...)` every handler
+      // again, commented "for reconnections". socket.io does NOT detach
+      // listeners on disconnect — the same Socket instance keeps them across
+      // the whole reconnect cycle — so each reconnect ADDED a second
+      // registration of every handler already attached.
+      //
+      // After N reconnects every event fired N+1 times. For a progress event
+      // that is noise; for `extraction:completed` or a store action that
+      // appends, it is N+1 duplicate effects from one server message. And
+      // reconnects are routine, not exceptional: a pod restart or a laptop
+      // waking does it.
+      //
+      // Handlers registered while disconnected are a different case, and they
+      // are handled below via `pendingHandlersRef` — those genuinely are not
+      // on the socket yet.
 
       // Process pending event handlers (queued while disconnected)
       // These are NOT in eventHandlersRef yet, so no double-registration
@@ -159,10 +167,22 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   // Unsubscribe from a channel
   const unsubscribe = useCallback((channel: string) => {
     const socket = socketRef.current;
-    if (!socket) return;
 
-    // Remove from tracked subscriptions
+    // Remove from tracked subscriptions.
     subscriptionsRef.current.delete(channel);
+
+    // AND FROM THE PENDING QUEUE (MIS-E2E-126).
+    //
+    // A channel subscribed while disconnected sits in `pendingSubscriptionsRef`
+    // until the next connect. Unsubscribing did not clear it, so a channel the
+    // user had abandoned was subscribed anyway on reconnect — and, because it
+    // was never removed, on every reconnect after that. Compounds with
+    // MIS-E2E-120: the abandoned channel's events then fired N+1 times too.
+    pendingSubscriptionsRef.current.delete(channel);
+
+    // `socket` may be null when the caller unsubscribes during teardown; the
+    // refs above still had to be cleaned, which is why this check moved down.
+    if (!socket) return;
 
     console.log('[WebSocket] Unsubscribing from channel:', channel);
     socket.emit('unsubscribe', { channel });
