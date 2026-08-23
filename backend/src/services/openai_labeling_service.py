@@ -403,7 +403,13 @@ curl -X POST '{endpoint_url}' \\
                 if self.api_key and self.api_key not in ["not-needed", "dummy-key-not-required"]:
                     postman_collection["item"][0]["request"]["header"].append({
                         "key": "Authorization",
-                        "value": f"Bearer {self.api_key}",
+                        # NEVER the real token — same rule as the curl branch above, which
+                        # was hardened and this one was not (MIS-E2E-072). These are
+                        # debug artifacts that get attached to bug reports, and
+                        # export_format defaults to "both", so the DEFAULT path wrote
+                        # the operator's key to disk once per feature labelled.
+                        # {{OPENAI_API_KEY}} is a Postman variable the user fills in.
+                        "value": "Bearer {{OPENAI_API_KEY}}",
                         "type": "text"
                     })
 
@@ -642,7 +648,13 @@ curl -X POST '{endpoint_url}' \\
                 if self.api_key and self.api_key not in ["not-needed", "dummy-key-not-required"]:
                     postman_collection["item"][0]["request"]["header"].append({
                         "key": "Authorization",
-                        "value": f"Bearer {self.api_key}",
+                        # NEVER the real token — same rule as the curl branch above, which
+                        # was hardened and this one was not (MIS-E2E-072). These are
+                        # debug artifacts that get attached to bug reports, and
+                        # export_format defaults to "both", so the DEFAULT path wrote
+                        # the operator's key to disk once per feature labelled.
+                        # {{OPENAI_API_KEY}} is a Postman variable the user fills in.
+                        "value": "Bearer {{OPENAI_API_KEY}}",
                         "type": "text"
                     })
 
