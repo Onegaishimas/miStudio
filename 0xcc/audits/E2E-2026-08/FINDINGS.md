@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 91
-**Last id issued:** MIS-E2E-091
+**Count:** 97
+**Last id issued:** MIS-E2E-097
 
 ---
 
@@ -1590,4 +1590,117 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Doc reference:** PADR IDL-46 (artifact mount, not upload); BR-031
 - **Verification (R3):** CONFIRMED at R2
 - **Proposed remediation:** A test that asserts the `weights_only` kwarg passed to `torch.load` is `True` at each of the three sites — cheap, and it is the guard the acquisition feature's entire threat model rests on. Then re-run M14 as a negative control.
+- **Effort:** S
+
+---
+
+## P04 — Workers, Celery, task lifecycle
+
+---
+
+### MIS-E2E-092 — Four of five janitors still treat PENDING as alive; the fix exists in one
+- **Phase / Round:** P04 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `workers/cleanup_stuck_trainings.py:63`, `cleanup_stuck_extractions.py:80`, `cleanup_stuck_activations.py:61`, `cleanup_stuck_enhanced_labeling.py:50` — against the fixed `cleanup_stuck_circuit_runs.py:84`
+- **Claim:** Celery reports `PENDING` for **any task id it holds no result for** — which covers both a queued task and a task whose worker died. `task_track_started` is unset and the long-running tasks never call `update_state`, so a live task and a dead one are indistinguishable. Four janitors treat `PENDING` as alive and therefore **can never fire** for any row that has a `celery_task_id`.
+- **The pattern is the finding.** `cleanup_stuck_circuit_runs.py` was written for exactly this trap, uses `looks_abandoned` from `task_heartbeat`, and documents it at `:53` — *"The rule this replaced treated PENDING as alive… Celery reports PENDING for any task id it holds no result for"* — and again at `:63`: *"`looks_abandoned` already solved this for the task-queue surface."* Verified: `looks_abandoned` occurs **once** in `cleanup_stuck_circuit_runs.py` and **zero times** in each of the four siblings. A fix made, documented as general, and applied to one of five.
+- **Failure scenario:** Per subsystem: a drained training is never reclaimed; extractions reclaim only the no-task batch-queued rows — *the case the janitor was not written for*; a dead activation extraction never gets `error_type=TIMEOUT` and never emits `extraction:failed`, so the UI spinner never resolves; and enhanced labeling's own error text *"the worker was restarted or the task was lost"* names precisely the state Celery reports as PENDING and the janitor reads as healthy.
+- **Evidence:** **verified-by-live-repro** — `looks_abandoned` occurrence counts across all five janitors, and the fixed one's docstring read
+- **Doc reference:** PADR IDL-11 (Celery resilience); memory `nlp-status-had-no-janitor`
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Route all four through `looks_abandoned`. Then parametrize the existing regression test over the janitor **registry** rather than naming one — this is the "fixed one representative, never generalized" anti-pattern, and a per-janitor test invites the same omission next time.
+- **Effort:** M
+
+---
+
+### MIS-E2E-093 — `train_sae` never reaches the `training` queue, and the guard cannot see it
+- **Phase / Round:** P04 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/core/celery_app.py:103` (`"src.workers.training_tasks.*": {"queue": "training"}`); `backend/tests/unit/test_worker_queue_coverage.py`
+- **Claim:** Celery's `task_routes` globs match the **registered task name**. Verified against the live router and registry:
+  ```
+  registered: train_sae, resume_training,
+              src.workers.training_tasks.delete_training_files
+  route:      train_sae                            -> queue=datasets   (default)
+              resume_training                      -> queue=datasets   (default)
+              src.workers.training_tasks.delete_training_files -> training
+  ```
+  `train_sae` and `resume_training` are registered under **short names** and carry no decorator `queue=`, so the `src.workers.training_tasks.*` glob misses them. The `training` queue is declared, provisioned and consumed — and **the primary training task never lands on it**. Only the file-deletion task does.
+- **Why the existing guard misses it:** `test_worker_queue_coverage.py` asserts that every queue named in `task_routes` **has a consumer**, that each worker declares its queues, and that `low_priority` is off the GPU worker. It reads the routing *table's values*. It never asks whether any **registered task actually resolves** to a given queue — so a queue that is declared, consumed and permanently empty passes every one of its assertions. The guard proves no queue is a black hole and proves nothing about whether work arrives.
+- **Failure scenario:** SAE training — the product's headline long-running GPU job — runs on the `datasets` queue alongside downloads and tokenization, competing for the same workers, while a dedicated `training` worker sits idle. `get_queue_lengths()` reports the training queue empty during a training run, so the Monitor page and any capacity decision built on it are wrong.
+- **Evidence:** **verified-by-live-repro** — `celery_app.amqp.router.route()` executed against the real app for each name; registry enumerated
+- **Doc reference:** PADR IDL-11; memory `celery-queue-split-and-name-routing` — which records this exact trap
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Add `queue="training"` to both decorators — the pattern `steering_tasks`, `sae_tasks` and `model_tasks` already use correctly. Then extend the guard to assert the **resolved** queue of every registered task, which is the assertion that would have caught this.
+- **Effort:** S
+- **Note:** the reviewer explicitly cleared `steering.*` and `model_tasks.*` as saved by decorator-level `queue=`, and that clearing is **correct** — confirmed at `steering_tasks.py:115` (`name="steering.compare", queue="steering"`). An initial probe of mine using the *function* name rather than the registered task name suggested otherwise; the probe was wrong, not the code.
+
+---
+
+### MIS-E2E-094 — The solo pool discards `worker_max_tasks_per_child`, so the promised VRAM reclaim never happens
+- **Phase / Round:** P04 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/core/celery_app.py:473`
+- **Claim:** `worker_max_tasks_per_child` is set with a comment promising a periodic worker restart that reclaims VRAM. Celery's solo pool hardcodes `max-tasks-per-child: None` (`celery/concurrency/solo.py`), so the setting is discarded. `steering_tasks.py:13` already documents this.
+- **Failure scenario:** The recycling that would bound cached models, PyTorch hook accumulation and CUDA fragmentation does not occur. This is the documented root cause of the historical steering-worker hang (*"After 5-6 tasks: critical corruption → HANG"*), which was mitigated by an explicit `finally`-block state reset rather than by recycling — so the mitigation is load-bearing and the setting beside it is decorative. The comment tells the next reader the opposite.
+- **Evidence:** verified-by-live-repro (Celery source inspected; the contradicting comment at `steering_tasks.py:13` read)
+- **Doc reference:** PADR IDL-11; `.claude/context/agents/qa_engineer.md` records the original hang analysis
+- **Verification (R3):** pending
+- **Proposed remediation:** Delete the setting and the comment, or move off the solo pool deliberately. A configuration line that does nothing, next to a comment saying it does something, is worse than neither.
+- **Effort:** S
+
+---
+
+### MIS-E2E-095 — No beat entry sets `expires`, so stale periodic tasks queue up behind long jobs
+- **Phase / Round:** P04 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/core/celery_app.py:453` (the beat schedule)
+- **Claim:** No entry in the beat schedule sets `expires`. `low_priority` is served by **one solo worker** that also runs NLP passes taking ~13 minutes.
+- **Failure scenario:** During a single NLP pass, roughly **26 stale 30-second reconciles** and **13 watchdog runs** accumulate and then drain serially behind it, each doing work whose window has long passed. A reconcile that ran 13 minutes late can act on state that has since changed. `expires` exists precisely so a periodic task that missed its slot is dropped rather than queued.
+- **Evidence:** plausible (read-only) — the absent `expires` and the interval arithmetic are verified; the pile-up is reasoned
+- **Doc reference:** PADR IDL-5 (Celery Beat for system monitoring)
+- **Verification (R3):** pending
+- **Proposed remediation:** Set `expires` on every periodic entry to slightly under its interval.
+- **Effort:** S
+
+---
+
+### MIS-E2E-096 — A liveness stamp is wiped mid-task, and a diagnostic is overwritten before it is read
+- **Phase / Round:** P04 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/workers/jlens_fit_tasks.py:229` and `:180`; `backend/src/workers/cleanup_stuck_enhanced_labeling.py:69`
+- **Claim:** Two independent defects:
+  1. **`update_state` without `beat()`** during the `validating` stage of a J-lens fit **wipes the liveness stamp** the heartbeat mechanism relies on. A death during validation is then undetectable until `result_expires` (~1 hour) instead of the intended 10 minutes — on a task that holds the single-GPU guard.
+  2. **`job.status` is overwritten with `FAILED` before it is interpolated** into the message, so every enhanced-labeling janitor message reads *"Job stuck in **failed** for N minutes"* — losing the QUEUED-vs-RUNNING distinction, which is the only diagnostic that says whether the job ever started.
+- **Failure scenario:** (1) is the sharper one: it is a regression *within* the heartbeat mechanism that exists to bound exactly this, and it strands the GPU. (2) destroys the one piece of information the message exists to carry.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-11
+- **Verification (R3):** pending
+- **Proposed remediation:** Call `beat()` alongside `update_state`; capture the status before mutating it.
+- **Effort:** S
+
+---
+
+### MIS-E2E-097 — No test asserts any task's resolved queue
+- **Phase / Round:** P04 / R2
+- **Source:** mutation control M17
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `backend/tests/unit/test_worker_queue_coverage.py`
+- **Claim:** Removing `queue="steering"` from `steering.compare` — the GPU steering task — left **184 tests green**, including every test in the file written to guard queue routing.
+- **Failure scenario:** `test_worker_queue_coverage.py` asserts that every queue named in `task_routes` has a consumer, that each worker declares its queues explicitly, and that `low_priority` is off the GPU worker. Every one of those reads the routing **table**. None asserts that a **registered task** resolves to the queue intended for it. So a queue may be declared, provisioned, consumed and permanently empty and the suite is green — which is the live state of the `training` queue (MIS-E2E-093). The guard's own docstring lists its negative controls as *"route a task to a queue no container lists → coverage test fails"*; the inverse case, a task that reaches no dedicated queue at all, is not among them.
+- **Evidence:** **verified-by-mutation** — M17 landed (confirmed), suite green, restore verified clean
+- **Doc reference:** PADR IDL-11; memory `celery-queue-split-and-name-routing`
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** Add one assertion driven off the registry: for every registered task, resolve its queue through `celery_app.amqp.router` and compare against an expected mapping. That single test catches MIS-E2E-093 and would have caught M17. It is the same derive-from-the-registry shape the MCP reachability harness already uses.
 - **Effort:** S

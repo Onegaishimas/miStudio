@@ -1,6 +1,6 @@
 # miStudio End-to-End Assessment — E2E-2026-08
 
-**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ closed · P04 next
+**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ closed · P05 next
 
 An end-to-end assessment of the whole application — frontend, backend, MCP server,
 infrastructure, and the `0xcc` document chain — in **12 subsystem phases × 3 rounds
@@ -46,7 +46,7 @@ Legend: `·` not started · `~` in progress · `✅` closed
 | P01 | Data layer & migrations | ✅ | ✅ | ✅ | 26 |
 | P02 | Backend services | ✅ | ✅ | ✅ | 24 |
 | P03 | ML / GPU | ✅ | ✅ | ✅ | 13 |
-| P04 | Workers & Celery | · | · | · | 0 |
+| P04 | Workers & Celery | ✅ | ✅ | ✅ | 6 |
 | P05 | REST API & schemas | · | · | · | 0 |
 | P06 | MCP server | · | · | · | 0 |
 | P07 | Frontend state layer | · | · | · | 0 |
@@ -60,7 +60,7 @@ Legend: `·` not started · `~` in progress · `✅` closed
 
 | P0 | P1 | P2 | P3 | Total |
 |---:|---:|---:|---:|---:|
-| **8** | 33 | 34 | 16 | **91** |
+| **8** | 36 | 37 | 16 | **97** |
 
 Verdicts so far: **15 CONFIRMED**, 39 pending (most pending belong to phases that
 have not run yet). Severities are provisional until each finding's R3 verification.
@@ -72,6 +72,7 @@ have not run yet). Severities are provisional until each finding's R3 verificati
 | P01 | 5 | **3** | 2 |
 | P02 | 4 | **3** | 1 |
 | P03 | 6 | **3** | 3 |
+| P04 | 2 | **1** | 1 |
 
 A survival is a **test finding**, not a code finding. Every edit was confirmed to
 land before the suite ran, and `git diff` verified clean after every restore.
