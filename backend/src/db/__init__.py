@@ -1,7 +1,7 @@
 """Database utilities and schema validation."""
 
 from .schema_validator import (
-    REQUIRED_TABLES,
+    _required_tables,
     SchemaValidationError,
     validate_schema,
     validate_schema_on_startup,
@@ -9,7 +9,7 @@ from .schema_validator import (
 )
 
 __all__ = [
-    "REQUIRED_TABLES",
+    "_required_tables",
     "SchemaValidationError",
     "validate_schema",
     "validate_schema_on_startup",

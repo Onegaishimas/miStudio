@@ -30,39 +30,14 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 
-# Required tables and their critical columns
-REQUIRED_TABLES = {
-    # Core tables
-    "models": ["id", "name", "status", "created_at"],
-    "datasets": ["id", "name", "status", "created_at"],
-    "trainings": ["id", "status", "created_at"],
-    "features": ["id", "neuron_index", "created_at"],
+# Derived from the ORM, not copy-pasted.
+#
+# This file used to carry its own literal copy of the same 17-table dict that
+# lived in src/db/schema_validator.py. Two hand-maintained copies of a list
+# whose whole purpose is detecting drift (MIS-E2E-157). Import the one source.
+from src.db.schema_validator import _required_tables
 
-    # SAE tables
-    "external_saes": ["id", "name", "status", "created_at"],
-    "extraction_jobs": ["id", "status", "created_at"],
-
-    # Analysis tables
-    "feature_analysis_cache": ["id", "feature_id"],
-    "feature_dashboard_data": ["id", "feature_id", "logit_lens_data", "histogram_data"],
-
-    # Export tables
-    "neuronpedia_export_jobs": ["id", "sae_id", "status"],
-
-    # Template tables
-    "training_templates": ["id", "name"],
-    "extraction_templates": ["id", "name"],
-    "steering_experiments": ["id", "name"],
-
-    # Labeling tables
-    "labeling_jobs": ["id", "status"],
-
-    # Checkpoint tables
-    "checkpoints": ["id", "training_id"],
-
-    # Tokenization tables
-    "dataset_tokenizations": ["id", "dataset_id"],
-}
+REQUIRED_TABLES = _required_tables()
 
 
 # SQL to create missing tables (for --fix mode)

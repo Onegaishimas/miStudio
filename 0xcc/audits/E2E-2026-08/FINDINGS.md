@@ -2607,6 +2607,21 @@ audit's strict record-only rule, made deliberately and noted in the round record
   - **STILL REQUIRED — user action:** rotate the GPU node's SSH password. Per the locked
     decision the already-published objects are being left in place, so **rotation is the
     only mitigation** for that half. The published literal is `pass`.
+  - **A THIRD leak path, caught by the new gate on its first real run.** The orphan push
+    worked — `main` pointed at a 0-parent snapshot — and the mirror still reported **826
+    commits**, because `refs/tags/v0.5.0` still pointed at an old source commit. Orphaning
+    a branch does not orphan the objects while *any* ref reaches them, and `git clone`
+    follows tags. The sync now retargets every remote tag onto the snapshot, and Verify
+    prints `git show-ref` on a count mismatch so the next failure names the anchoring ref.
+  - **VERIFIED LIVE against the public mirror (2026-08-23):**
+    ```
+    commits (--all, incl. tags): 1        (was 826)
+    refs: main, origin/main, tags/v0.5.0  → all → f78ca55 (0 parents)
+    0xcc .claude CLAUDE.md backups scripts .understand-anything → clean in ALL commits
+    docs/schemas ✅   docs/mcp-contract.md ✅
+    git show HEAD~1:0xcc/... → fatal: invalid object name 'HEAD~1'
+    ```
+    The attack from the finding is now structurally impossible, not merely filtered.
   - **Accepted residual risk:** the previously-published objects remain retrievable by SHA
     (GitHub serves unreachable commits). That includes the 135-finding snapshot of this
     register. Future syncs publish none of it.
