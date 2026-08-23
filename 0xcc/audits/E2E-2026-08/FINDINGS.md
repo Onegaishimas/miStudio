@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 112
-**Last id issued:** MIS-E2E-112
+**Count:** 119
+**Last id issued:** MIS-E2E-119
 
 ---
 
@@ -1970,3 +1970,126 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Verification (R3):** CONFIRMED at R2
 - **Proposed remediation:** One test: create two trainings, take a checkpoint of the second, `DELETE` it through the first's URL, assert 404 and that the row and its file survive. Then re-run M18 as a negative control.
 - **Effort:** S
+
+---
+
+## P06 — MCP server
+
+---
+
+### MIS-E2E-113 — The 200-HTML failure mode was fixed on one of the two clients
+- **Phase / Round:** P06 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/mcp_server/client.py:65` (unguarded `response.json()` on the 2xx path); the fix exists at `backend/src/mcp_server/millm_client.py:80-102`
+- **Claim:** `MiStudioClient` — the **only** path from the MCP server to the backend — calls `response.json()` on any 2xx without guarding the content type. A misrouted `MISTUDIO_API_URL` that lands on the frontend SPA returns `200 text/html`, and the agent gets a bare `JSONDecodeError` rather than a `BackendError`. `millm_client.py:80-102` handles exactly this, documents it as *F20 R3-17*, and its own comment warns the fix *"was never carried across"*.
+- **Failure scenario:** This is the recorded defect that motivated writing `test_millm_client_failure_paths.py` in the first place: *"a 200 HTML page from a misrouted ingress used to reach the agent as an empty SUCCESS, so it would read 'nothing is steering' and activate into a contention."* The mitigation was applied to the miLLM client and the note that it had not been generalized was written down — and it still has not been. Every MCP tool that reads from the backend inherits it.
+- **Evidence:** **verified-by-live-repro** — the reviewer reproduced against a MockTransport; the two clients' 2xx paths read and contrasted
+- **Doc reference:** memory `millm-circuit-consolidation-increment`; `docs/mcp-contract.md`
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Lift the content-type guard out of `millm_client` into a shared helper both clients use, so "carried across" is structural rather than remembered.
+- **Effort:** S
+- **Also at `client.py:56`:** `response.json().get("detail", …)` raises `AttributeError` for a JSON array or scalar error body — not caught by the adjacent `except json.JSONDecodeError` — so the status code and verbatim detail (BR-6.2) are lost.
+
+---
+
+### MIS-E2E-114 — The published MCP contract lists three endpoints that do not exist, and a test pins them
+- **Phase / Round:** P06 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/mcp_server/contract.py:78`; the committed `docs/mcp-contract.md:47` and `:208`; `backend/tests/unit/test_mcp_contract_generated.py`
+- **Claim:** The AST scraper that generates the contract records plain `dict.get("x")` calls as HTTP endpoints. Verified in the **committed** file:
+  ```
+  get_steering_samples  | GET /validation-manifests … GET kind  GET manifests
+  get_steering_result   | GET /steering/async/result/{…}        GET status
+  ```
+  `GET kind`, `GET manifests` and `GET status` are not endpoints — they are `dict.get("kind")`, `.get("manifests")` and `.get("status")`. The `_submit` branch at `contract.py:68` already carries the `startswith("/")` filter that would exclude them; the sibling branch does not.
+- **Failure scenario:** `docs/mcp-contract.md` is the published description of the MCP surface — one of only two files the `sync-to-clean` filter **deliberately preserves** in the public mirror, because external consumers and the mirror's own tests need it. It advertises three endpoints that do not exist. And because `test_mcp_contract_generated.py` regenerates and diffs, **it pins the bogus rows as correct**: any fix to the scraper fails the test until the committed file is regenerated, and until then the test actively defends the error.
+- **Evidence:** **verified-by-live-repro** — the rows read from the committed file; the missing filter compared against the sibling branch
+- **Doc reference:** PADR IDL-26; `.github/workflows/sync-to-clean.yml:38-44` (which preserves this file explicitly)
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Apply the same `startswith("/")` filter at `:78`, regenerate, commit both. This is a test pinning a defect rather than preventing it — the class the review lessons call out.
+- **Effort:** S
+
+---
+
+### MIS-E2E-115 — Calling a read-only tool permanently changes what an unauthenticated endpoint advertises
+- **Phase / Round:** P06 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/mcp_server/tools/howto.py:589` (`os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")`); `backend/src/mcp_server/server.py:163` (`/health` re-reads `settings.millm_api_url` per request)
+- **Claim:** `mistudio_howto` — a documentation tool — calls `_all_tools()`, which **mutates the process environment** with `os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")` so it can enumerate the millm categories. `/health` re-reads that variable per request instead of using the build-time wiring.
+- **Failure scenario:** On a deployment with no miLLM configured, the first `mistudio_howto` call permanently flips the unauthenticated `/health` endpoint to advertising `millm: available=false` — a product that was never wired. Verified before/after by the reviewer. Two defects compound: a read-only tool with a global side effect, and a health endpoint reading mutable process state rather than the configuration the server was actually built with. The health endpoint is the one surface whose entire job is to report what *is*.
+- **Evidence:** **verified-by-live-repro** — the `setdefault` read at source; the before/after `/health` difference reproduced by the reviewer against a built server
+- **Doc reference:** PADR IDL-26
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Enumerate the millm tools without touching `os.environ` (pass the flag through, or build a throwaway settings object). Have `/health` report the build-time wiring the server was constructed with.
+- **Effort:** S
+
+---
+
+### MIS-E2E-116 — A malformed miLLM URL makes gated tools raise, defeating the gate's contract
+- **Phase / Round:** P06 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/mcp_server/health_gate.py:140`
+- **Claim:** The `gated()` decorator's contract is that an unavailable product yields `{"unavailable": …, "reason": …}` and **never raises** — the server instructions tell agents exactly that. `httpx.InvalidURL` derives from `Exception`, not `HTTPError`, so it escapes the handler: a malformed `MILLM_API_URL` makes every gated tool **raise**, and because the exception skips the cache write there is no negative caching, so `/health` reports *"not probed yet"* forever and every call re-probes.
+- **Failure scenario:** A typo'd URL turns a documented graceful degradation into 32 raising tools, with the health endpoint permanently unable to say why. The MCP server's own instructions promise the opposite: *"When miLLM is down its tools return `{"unavailable": "millm", "reason": …}` — report the reason, don't retry in a loop."*
+- **Evidence:** **verified-by-live-repro** (reviewer reproduced the raise and the absent cache write)
+- **Doc reference:** `SERVER_INSTRUCTIONS`; PADR IDL-26
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Catch `Exception` in the probe, or add `InvalidURL` explicitly, and always write the negative cache entry.
+- **Effort:** S
+
+---
+
+### MIS-E2E-117 — A non-ASCII bearer token returns 500 instead of 401 on a LAN-reachable port
+- **Phase / Round:** P06 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** security
+- **Location:** `backend/src/mcp_server/server.py:81` (`BearerAuthMiddleware`)
+- **Claim:** `hmac.compare_digest` raises `TypeError` on a non-ASCII string. Starlette latin-1-decodes headers, so a bearer value containing a non-ASCII byte reaches `compare_digest` and the middleware raises — verified **HTTP 500** rather than 401, from an unauthenticated request on a port the config describes as *"LAN-reachable by design"*.
+- **Failure scenario:** An unauthenticated caller can make the MCP server emit a 500 and a server-side traceback at will. It leaks that the header is compared and nothing about the secret, so this is availability and noise rather than disclosure — but it is the authentication middleware, and the same latin-1 hazard was noted (and not filed) on the backend's internal HMAC routes in P05. Two instances of one root cause.
+- **Evidence:** **verified-by-live-repro** (reviewer reproduced the 500 through a Starlette TestClient)
+- **Doc reference:** PADR IDL-26
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Encode both sides to bytes before comparing, or reject non-ASCII with a 401 before the compare. Fix both instances together.
+- **Effort:** S
+
+---
+
+### MIS-E2E-118 — A cancelled background probe logs a traceback on every graceful shutdown
+- **Phase / Round:** P06 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** bug
+- **Location:** `backend/src/mcp_server/health_gate.py:91` (`lambda t: t.exception()` as a done callback)
+- **Claim:** Calling `.exception()` on a cancelled task re-raises `CancelledError` inside the done callback, producing `ERROR asyncio: Exception in callback` on every graceful shutdown that overlaps an in-flight probe.
+- **Failure scenario:** Cosmetic, but it puts an ERROR-level traceback in the logs on a normal shutdown, which is exactly the noise that trains an operator to ignore shutdown errors.
+- **Evidence:** verified-by-live-repro (reviewer reproduced)
+- **Doc reference:** none
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Guard with `if not t.cancelled()`.
+- **Effort:** S
+
+---
+
+### MIS-E2E-119 — The reachability harness's payload assertion is a hand-list covering 16 of 116 tools
+- **Phase / Round:** P06 / R2
+- **Source:** mutation control M21
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `backend/tests/unit/test_reachability.py:263` (`EXPECTED_CALLS`), `:329-359` (`TestCallerReachability`)
+- **Claim:** The class docstring states: *"Registration proves a tool is exposed. This proves it does something, and the right something: **re-pointing a path or deleting the call body fails here and nowhere else**."* Re-pointing `get_circuit` from `/circuits/{id}` to `/WRONG-PATH/{id}` left **all 31 reachability tests green**. `EXPECTED_CALLS` is a hand-written dict with **16 entries**; the live registry holds **116 tools**.
+- **Failure scenario:** This is not a criticism of the harness — shapes 1 and 2 are parametrized off `CATEGORY_MODULES`/`MILLM_CATEGORY_MODULES`, cover all 116, and M20 proved they bite hard on the exact defect they were written for. It is that the **one shape which is not registry-derived** is the one that proves a tool does the right thing, and it covers 14%. A tool added today gets registration coverage automatically and call coverage only if someone remembers to add a row.
+  The incidental backstop that *did* catch M21 — the contract regeneration diff — is weaker than it appears: per MIS-E2E-114 the committed contract already carries three bogus endpoint rows that the same test pins as correct, so it defends the recorded path whatever that path is.
+- **Evidence:** **verified-by-mutation** — M21 landed (confirmed), 31 reachability tests green, killed only by `test_mcp_contract_generated.py`; `EXPECTED_CALLS` counted at 16 against a live registry of 116
+- **Doc reference:** `CLAUDE.md` Reachability gate — *"Assert the **payload and the call count** — 'was called' passes against a call sending the wrong arguments"*
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** Make the gap visible rather than filling all 100 by hand: parametrize over the **registry**, assert every tool issues at least one call with a path starting `/`, and treat absence from `EXPECTED_CALLS` as an explicit `xfail`-style opt-out that has to be written down. That turns "nobody added a row" from silence into a listed exemption — the same discipline `test_causal_language_audit.py` already uses, where exemptions are `SKIPPED` with a reason so they stay visible in the output.
+- **Effort:** M
