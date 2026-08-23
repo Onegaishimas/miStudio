@@ -501,7 +501,15 @@ class ExtractionService:
                 soft_time_limit = config.get("soft_time_limit", 144000)
                 time_limit = config.get("time_limit", 172800)
 
-                if position == 1:
+                # DISPATCH THE FIRST JOB CREATED, NOT LOOP POSITION 1
+                # (MIS-E2E-066).
+                #
+                # `position` comes from `enumerate` over the REQUESTED SAEs, so
+                # if the first one is skipped — already extracted, invalid — no
+                # job ever has position 1 and NOTHING is dispatched: the batch
+                # silently does nothing. `created_jobs` counts what was actually
+                # created, so an empty list means this is the first.
+                if not created_jobs:
                     # First job - queue immediately
                     task_result = extract_features_from_sae_task.apply_async(
                         args=(sae_id, config),

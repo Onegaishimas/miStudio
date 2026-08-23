@@ -131,9 +131,17 @@ class TestChainClaimIsIdempotent:
             def __init__(self, rows): self._rows = rows
             def filter(self, *a): return self
             def with_for_update(self, **kw): return self
+            # MIS-E2E-066: the real query now orders by `batch_position`, because
+            # it takes the NEXT queued job rather than demanding an exact
+            # `position + 1` — a skipped SAE leaves a gap and stranded the tail.
+            # A fake that cannot express the real query cannot test it.
+            def order_by(self, *a): return self
             def first(self):
-                # Mirror the real predicate: only an undispatched job qualifies.
-                return next((r for r in self._rows if r.celery_task_id is None), None)
+                # Mirror the real predicate: only an undispatched job qualifies,
+                # lowest position first.
+                candidates = [r for r in self._rows if r.celery_task_id is None]
+                candidates.sort(key=lambda r: getattr(r, "batch_position", 0))
+                return candidates[0] if candidates else None
 
         class DB:
             def __init__(self, rows): self._rows = rows; self.commits = 0

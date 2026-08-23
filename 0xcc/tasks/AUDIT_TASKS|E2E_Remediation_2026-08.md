@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3175 passed / 0 failed** (baseline 2883) · frontend **1232 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3186 passed / 0 failed** (baseline 2883) · frontend **1232 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11: 11.1 ✅ 11.2 ✅ 11.4 ✅ 11.6 ✅** · 12.7–12.10 ✅ · 11.3, 11.5, 11.7–11.11 and 12.1–12.6 open |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11: 11.1–11.4 ✅ 11.6–11.9 ✅** · 12.7–12.10 ✅ · 11.5, 11.10, 11.11 and 12.1–12.6 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -168,13 +168,13 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 - [x] 11.1 ✅ Both columns widened, with migration `e2a4c81b9d17` (round-tripped up/down against the live DB; the downgrade **refuses** rather than truncating a value above the 32-bit range). ⚠️ The fresh-session half is **deferred** — widening removes the overflow that poisons the session, so the handler no longer has one to survive; hardening it is worth doing but is no longer load-bearing. Recorded rather than silently dropped. — MIS-E2E-029
 - [x] 11.2 ✅ `populate_existing()`. **And the fixture was rebuilt**, which was the finding's sharper half: the fake `_Session` returned a fresh row every call, so it had no identity map and could not exhibit the defect in either direction. It now models one — verified by removing the fix and watching the *new* test go red, which the old fixture could never have done. Sibling sweep: `training_tasks` and `neuronpedia_tasks` open a **fresh session per check**, so the trap is unique to labeling, which reuses `self.db`. — MIS-E2E-057
-- [ ] 11.3 Bind `job_batch_size` before the branch; catch `_LabelingCancelled` before the generic handler; give `max_tokens` the precedence `max_examples` has. — MIS-E2E-058, -059, -060
+- [x] 11.3 ✅ All three. `job_batch_size` bound before `if template:` (the supported no-template path died with `UnboundLocalError` at three read sites). `_LabelingCancelled` handled ahead of the generic handler — and the comment in `labeling_tasks.py` asserting *"the job row is already CANCELLED"* is now **true**; it was false precisely because the generic handler had overwritten it, which is why nobody looked. `max_tokens` takes the job's value at **both** sites, matching `max_examples`. — MIS-E2E-058, -059, -060
 - [x] 11.4 ✅ `RETRYABLE_TASK_TYPES` checked first, so an unsupported pair leaves the row untouched. The allow-list is held in step with the if/elif chain by a test that reads the branches out of the **AST** — a hand-list that can drift from the code it guards is worth little. — MIS-E2E-098
 - [ ] 11.5 Track spawned worker PIDs instead of `pkill -9 -f steering@`; bound worker spawn. HMAC-gate `POST /system/restart`. — MIS-E2E-003, -099
 - [x] 11.6 ✅ One shared `task_looks_alive()` in `task_heartbeat`, and **all five** janitors on it. The discovery test found a **sixth janitor the finding never named** — `cleanup_stuck_nlp` — which turned out to be correct by design (`ExtractionJob.celery_task_id` belongs to the extraction task, not the NLP pass). Recorded as a listed exemption **with its reason pinned**, so if an `nlp_celery_task_id` column ever appears the test says so. — MIS-E2E-092
-- [ ] 11.7 Fix the batch-extraction dispatch to track created job ids. — MIS-E2E-066
-- [ ] 11.8 Scope NLP analysis writes to the path extraction. — MIS-E2E-109
-- [ ] 11.9 Guard the template-import overwrite on `is_system`; validate the body with a schema. Same rule missed in two migrations. — MIS-E2E-108, -045
+- [x] 11.7 ✅ Dispatch keys on `not created_jobs` rather than the enumerate index (a skipped first SAE meant no job had position 1 and **nothing ran**), and the chain advances to the next queued job **by order** rather than demanding `position + 1` (a gap stranded the tail until the 3-hour reaper blamed a crashed worker). — MIS-E2E-066
+- [x] 11.8 ✅ The `feature_ids` branch now binds to `extraction_job_id`, as the no-ids branch already did, and logs when ids are dropped rather than silently analysing a subset. — MIS-E2E-109
+- [x] 11.9 ✅ Import refuses to overwrite a system template — the rule `update_template` and `delete_template` already had — and cannot grant `is_system` either. ⚠️ The **Pydantic body model is deferred** (the endpoint still takes `dict`); the overwrite hole is closed, the typing debt is recorded. — MIS-E2E-108
 - [ ] 11.10 Fix the `metadata.py` plain `alias`, give `DatasetMetadata` `extra="allow"`, and **rewrite the 13 assertions that pin the defect**. — MIS-E2E-107
 - [ ] 11.11 Frontend state: sign-before-zeroing in rebalance; exclude in-flight state from `persist`; generation tokens on the feature fetches and the cleanup abort. — MIS-E2E-121, -122, -123, -124
 
@@ -376,6 +376,13 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/workers/task_heartbeat.py` | MIS-E2E-092: `task_looks_alive()` — one rule, extracted from the janitor that already had it |
 | `backend/src/workers/cleanup_stuck_{trainings,extractions,activations,enhanced_labeling}.py` | All four off the PENDING-is-alive rule |
 | `backend/tests/unit/test_task11_correctness.py` | **New.** 14 tests, parametrized over the janitor registry with a discovery check that found the sixth |
+| `backend/src/services/labeling_service.py` | MIS-E2E-059/-060/-058: `job_batch_size` bound unconditionally; the job's `max_tokens` wins at both sites; cancellation handled before the generic handler |
+| `backend/src/workers/labeling_tasks.py` | The comment claiming the row is already CANCELLED is now true, and says it was not |
+| `backend/src/services/extraction_service.py` | MIS-E2E-066: dispatch keys on the first job CREATED, not the loop index |
+| `backend/src/workers/nlp_analysis_tasks.py` | MIS-E2E-066: advance by order past a gap. MIS-E2E-109: the ids branch bound to the path extraction |
+| `backend/src/services/labeling_prompt_template_service.py` | MIS-E2E-108: import cannot overwrite — or grant — `is_system` |
+| `backend/tests/unit/test_batch_extraction_chain.py` | Fake query taught `order_by`, so it can express the real query |
+| `backend/tests/unit/test_task11_batch_and_scope.py` | **New.** 11 tests across all six findings |
 
 ## Negative controls run
 
@@ -491,6 +498,13 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC104 | Retry wipes the row before checking the type (MIS-E2E-098) | ✅ 1 failure |
 | NC105 | One janitor reverts to the PENDING state check (MIS-E2E-092) | ✅ 1 failure |
 | NC106 | Drop a janitor from the coverage list | ✅ 1 failure |
+| NC107 | `job_batch_size` back inside the branch (MIS-E2E-059) | ✅ 1 failure |
+| NC108 | Template overwrites the job's `max_tokens` (MIS-E2E-060) | ✅ 1 failure |
+| NC109 | Cancellation handler removed (MIS-E2E-058) | ✅ 2 failures |
+| NC110 | Batch dispatch back on `position == 1` (MIS-E2E-066) | ✅ 1 failure |
+| NC111 | Advance demands `position + 1` again | ✅ 1 failure |
+| NC112 | NLP ids branch loses its scope (MIS-E2E-109) | ⚠️ **SURVIVED TWICE** — first the test matched the identifier in a log message, then `ast.walk` on the `If` found the *else* branch's filter. Fixed both; **re-run ✅ 2 failures** |
+| NC113 | Import overwrites a system template (MIS-E2E-108) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),
