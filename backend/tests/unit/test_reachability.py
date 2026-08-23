@@ -1263,3 +1263,205 @@ class TestTheDEPLOYMENTEnablesWhatTheCodeRegisters:
             "admin (irreversible deletes) is enabled in the deployment — if "
             "that is intended, change this test deliberately and say why"
         )
+
+
+# ── RCH-5: caller coverage across the WHOLE registry ───────────────────────
+#
+# MIS-E2E-119. `TestCallerReachability` above is complete within its scope, and
+# that scope is one module: `_tools_by_name()` registers `millm_circuits` and
+# nothing else, so `test_every_registered_tool_is_covered_here` compares 16
+# against 16 and passes. The live server registers **116**.
+#
+# So the one shape that proves a tool does the RIGHT thing — rather than merely
+# that it is exposed — covers 14% of the surface, and a tool added today gets
+# registration coverage automatically and call coverage only if someone
+# remembers. Re-pointing `get_circuit` to `/WRONG-PATH/{id}` left all 31
+# reachability tests green (mutation M21).
+#
+# Closing it properly means a payload fixture per tool, which is a large piece
+# of work and not one to fake. What this does instead is convert SILENCE into a
+# LISTED DECISION: every registered tool must be either asserted or explicitly
+# exempted with a reason, so the gap is visible, counted, and cannot grow
+# without someone writing down why.
+
+#: Tools with no caller assertion, and why. Adding a tool to this list is a
+#: deliberate act that leaves a record; adding one to the server is not — which
+#: is the whole difference this makes.
+#:
+#: **100 entries, generated from the live registry on 2026-08-23.** That number
+#: is the finding, written down: `EXPECTED_CALLS` asserts the payload for 16
+#: tools and the server exposes 116. Every line here is a tool whose ADDRESS is
+#: verified (shapes 1 and 2 cover all 116) and whose LETTER is not — so
+#: re-pointing its path, or changing what it sends, fails no test.
+#:
+#: Work it down rather than treating it as settled. A tool leaves this list by
+#: gaining an `EXPECTED_CALLS` entry; the guard below then fails if it is in
+#: both, or if it names a tool that no longer exists.
+_CALLER_ASSERTION_EXEMPT: dict[str, str] = {
+    "acquire_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
+    "annotate_jlens_feature": "no payload fixture yet — MIS-E2E-119 backlog",
+    "build_circuit_from_discovery": "no payload fixture yet — MIS-E2E-119 backlog",
+    "calibrate_circuit_strength": "no payload fixture yet — MIS-E2E-119 backlog",
+    "cancel_steering_task": "no payload fixture yet — MIS-E2E-119 backlog",
+    "compute_cluster_allocation": "no payload fixture yet — MIS-E2E-119 backlog",
+    "compute_feature_groups": "no payload fixture yet — MIS-E2E-119 backlog",
+    "compute_jlens_band_report": "no payload fixture yet — MIS-E2E-119 backlog",
+    "create_circuit": "no payload fixture yet — MIS-E2E-119 backlog",
+    "create_jlens_watchlist": "no payload fixture yet — MIS-E2E-119 backlog",
+    "delete_circuit": "no payload fixture yet — MIS-E2E-119 backlog",
+    "delete_experiment": "no payload fixture yet — MIS-E2E-119 backlog",
+    "delete_extraction": "no payload fixture yet — MIS-E2E-119 backlog",
+    "enter_steering_mode": "no payload fixture yet — MIS-E2E-119 backlog",
+    "exit_steering_mode": "no payload fixture yet — MIS-E2E-119 backlog",
+    "export_circuit_definition": "no payload fixture yet — MIS-E2E-119 backlog",
+    "export_circuit_slices": "no payload fixture yet — MIS-E2E-119 backlog",
+    "export_cluster_definition": "no payload fixture yet — MIS-E2E-119 backlog",
+    "find_features_by_token": "no payload fixture yet — MIS-E2E-119 backlog",
+    "find_related_features": "no payload fixture yet — MIS-E2E-119 backlog",
+    "fit_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_circuit": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_cluster_profile": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_discovery_results": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_enhanced_label": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_experiment": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_extraction_summary": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_ablation": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_correlations": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_examples": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_group_members": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_groups": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_logit_lens": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_nlp_analysis": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_feature_token_analysis": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_grouping_status": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_jlens_band_report": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_jlens_gate": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_jlens_interventions": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_jlens_readout": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_jlens_replication_report": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_steering_mode": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_steering_result": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_steering_samples": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_task_status": "no payload fixture yet — MIS-E2E-119 backlog",
+    "get_validation_manifest": "no payload fixture yet — MIS-E2E-119 backlog",
+    "import_circuit_definition": "no payload fixture yet — MIS-E2E-119 backlog",
+    "jlens_cost_estimate": "no payload fixture yet — MIS-E2E-119 backlog",
+    "jlens_readout": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_circuit_captures": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_circuits": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_cluster_profiles": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_experiments": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_extractions": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_jlens_artifacts": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_trainings": "no payload fixture yet — MIS-E2E-119 backlog",
+    "list_validation_manifests": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_activate_cluster": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_activate_profile": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_deactivate_cluster": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_deactivate_profile": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_export_cluster": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_hub_search": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_import_cluster": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_list_clusters": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_list_profiles": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_sensing_config": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_sensing_disable": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_sensing_enable": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_sensing_events": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_sensing_status": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_set_intensity": "no payload fixture yet — MIS-E2E-119 backlog",
+    "millm_status": "no payload fixture yet — MIS-E2E-119 backlog",
+    "mistudio_howto": "no payload fixture yet — MIS-E2E-119 backlog",
+    "preview_jlens_repo": "no payload fixture yet — MIS-E2E-119 backlog",
+    "promote_circuit": "no payload fixture yet — MIS-E2E-119 backlog",
+    "publish_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
+    "record_jlens_gate": "no payload fixture yet — MIS-E2E-119 backlog",
+    "record_steering_samples": "no payload fixture yet — MIS-E2E-119 backlog",
+    "reproduce_calibration": "no payload fixture yet — MIS-E2E-119 backlog",
+    "reproduce_validation": "no payload fixture yet — MIS-E2E-119 backlog",
+    "restore_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
+    "run_attribution_pass": "no payload fixture yet — MIS-E2E-119 backlog",
+    "run_circuit_discovery": "no payload fixture yet — MIS-E2E-119 backlog",
+    "run_circuit_faithfulness": "no payload fixture yet — MIS-E2E-119 backlog",
+    "run_enhanced_labeling": "no payload fixture yet — MIS-E2E-119 backlog",
+    "run_jlens_intervention": "no payload fixture yet — MIS-E2E-119 backlog",
+    "save_cluster_profile": "no payload fixture yet — MIS-E2E-119 backlog",
+    "save_experiment": "no payload fixture yet — MIS-E2E-119 backlog",
+    "search_features": "no payload fixture yet — MIS-E2E-119 backlog",
+    "start_circuit_capture": "no payload fixture yet — MIS-E2E-119 backlog",
+    "steer_combined": "no payload fixture yet — MIS-E2E-119 backlog",
+    "steer_compare": "no payload fixture yet — MIS-E2E-119 backlog",
+    "steer_sweep": "no payload fixture yet — MIS-E2E-119 backlog",
+    "steering_status": "no payload fixture yet — MIS-E2E-119 backlog",
+    "update_circuit": "no payload fixture yet — MIS-E2E-119 backlog",
+    "update_feature_label": "no payload fixture yet — MIS-E2E-119 backlog",
+    "validate_circuit_edges": "no payload fixture yet — MIS-E2E-119 backlog",
+    "validate_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
+}
+
+
+def _all_registered_tool_names(monkeypatch) -> set[str]:
+    """Every tool on the REAL built server, with EVERY category enabled.
+
+    The real build path and its real signature — same as shape 2 above. A
+    hand-called `register()` would prove the modules work and say nothing about
+    what the server actually exposes, which is the defect this whole file
+    exists to catch.
+    """
+    from src.mcp_server.config import MCPSettings
+    from src.mcp_server.server import build_server
+    from src.mcp_server.tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+
+    monkeypatch.setenv("MILLM_API_URL", "http://millm.test")
+    every_category = ",".join(
+        sorted(set(CATEGORY_MODULES) | set(MILLM_CATEGORY_MODULES))
+    )
+    settings = MCPSettings(tool_categories=every_category, allow_anonymous=True)
+    mcp, _client = build_server(settings, stdio=True)
+    return {t.name for t in asyncio.run(mcp.list_tools())}
+
+
+class TestCallerCoverageIsAccounted:
+    """Every tool is either payload-asserted or explicitly exempted."""
+
+    def test_the_registry_is_not_empty(self, monkeypatch):
+        """Negative control. A discovery step that discovers nothing turns
+        every assertion below into a tautology — the exact way three guards in
+        this audit failed OPEN."""
+        names = _all_registered_tool_names(monkeypatch)
+        assert len(names) > 50, (
+            f"only {len(names)} tools discovered — the registry walk broke"
+        )
+
+    def test_every_tool_is_asserted_or_listed(self, monkeypatch):
+        registered = _all_registered_tool_names(monkeypatch)
+        accounted = set(EXPECTED_CALLS) | set(_CALLER_ASSERTION_EXEMPT)
+        unaccounted = registered - accounted
+        assert not unaccounted, (
+            f"{len(unaccounted)} tools have neither a payload assertion nor a "
+            f"listed exemption. Add an EXPECTED_CALLS entry, or add the name to "
+            f"_CALLER_ASSERTION_EXEMPT with the reason — silence is what let "
+            f"100 of 116 tools ship with the address verified and not the "
+            f"letter:\n  " + "\n  ".join(sorted(unaccounted))
+        )
+
+    def test_the_exemption_list_has_no_stale_entries(self, monkeypatch):
+        """An exemption for a tool that no longer exists hides a real gap by
+        inflating the accounted set."""
+        registered = _all_registered_tool_names(monkeypatch)
+        stale = set(_CALLER_ASSERTION_EXEMPT) - registered
+        assert not stale, f"exemptions for tools that no longer exist: {sorted(stale)}"
+
+    def test_no_tool_is_both_asserted_and_exempted(self):
+        """An exemption alongside an assertion is a contradiction, and the kind
+        that quietly outlives the assertion it was meant to replace."""
+        both = set(EXPECTED_CALLS) & set(_CALLER_ASSERTION_EXEMPT)
+        assert not both, (
+            f"these tools have a payload assertion AND an exemption: "
+            f"{sorted(both)} — remove the exemption"
+        )
+
+    def test_no_exemption_carries_an_empty_reason(self):
+        blank = [k for k, v in _CALLER_ASSERTION_EXEMPT.items() if not v.strip()]
+        assert not blank, f"exemptions with no reason recorded: {blank}"

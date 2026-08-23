@@ -342,3 +342,64 @@ def test_no_band_constant_anywhere_in_the_jlens_surface(modname):
         f"boundaries were measured on ONE model; miStudio draws no bands unless "
         f"a band report exists for the model in front of you."
     )
+
+
+# ── 8.5 · MIS-E2E-112 — IDOR on checkpoint deletion ────────────────────────
+
+def test_the_checkpoint_delete_route_verifies_ownership():
+    """A checkpoint must not be deletable through an unrelated training's URL.
+
+    The guard exists; nothing asserted it, so removing it would have been
+    invisible. `DELETE /trainings/{tid}/checkpoints/{cid}` takes both ids and
+    the checkpoint id is globally unique — so without the cross-check, any
+    training id at all would authorise deleting any checkpoint.
+    """
+    import ast
+
+    from src.api.v1.endpoints import trainings
+
+    tree = ast.parse(inspect.getsource(trainings))
+    target = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            node.name == "delete_checkpoint"
+        ):
+            target = node
+            break
+    assert target is not None, "delete_checkpoint route not found"
+
+    body = ast.unparse(target)
+    assert "checkpoint.training_id != training_id" in body, (
+        "the route does not verify the checkpoint belongs to the training in "
+        "the URL — any training id would authorise deleting any checkpoint"
+    )
+    # And it must REFUSE, not merely notice.
+    assert "raise HTTPException" in body
+
+
+def test_the_ownership_check_precedes_the_delete():
+    """Order matters: noticing after the row is gone is not a guard."""
+    import ast
+
+    from src.api.v1.endpoints import trainings
+
+    tree = ast.parse(inspect.getsource(trainings))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            node.name == "delete_checkpoint"
+        ):
+            lines = ast.unparse(node).splitlines()
+            check = next(
+                i for i, l in enumerate(lines)
+                if "checkpoint.training_id != training_id" in l
+            )
+            delete = next(
+                i for i, l in enumerate(lines)
+                if "CheckpointService.delete_checkpoint" in l
+            )
+            assert check < delete, (
+                "the ownership check runs after the deletion — it reports a "
+                "breach instead of preventing one"
+            )
+            return
+    raise AssertionError("delete_checkpoint route not found")
