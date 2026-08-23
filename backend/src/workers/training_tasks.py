@@ -1579,8 +1579,16 @@ def train_sae_task(
                                 if sae_key in feature_activation_ema:
                                     dead_mask = feature_activation_ema[sae_key] < 0.01
                                 else:
-                                    # Fallback: per-batch detection
-                                    z = model.encode(x)
+                                    # Fallback: per-batch detection.
+                                    # MIS-E2E-083 sibling sweep: `x` is a raw
+                                    # layer activation and `encode` does not
+                                    # normalize, so dead-neuron counts on this
+                                    # fallback were measured off-distribution.
+                                    from ..ml.sparse_autoencoder import (
+                                        encode_with_training_normalization,
+                                    )
+
+                                    z = encode_with_training_normalization(model, x)
                                     dead_mask = (z == 0).all(dim=0)
                                 num_dead = dead_mask.sum().item()
 

@@ -50,7 +50,14 @@ def make_passthrough_hook(layer: int, sae, state: PassThroughState):
         # The code must be a graph node we can read gradients from. In the real
         # model, x carries grad from the frozen-param forward; in isolation
         # (toy tests) it may be a non-grad leaf, so make the code require grad.
-        f = sae.encode(xf if xf.requires_grad else xf.detach().requires_grad_(True))
+        # MIS-E2E-083: normalize the way training did. `normalize` is a scalar
+        # rescale, so the cross-layer gradient path is preserved — and now runs
+        # through the same transform the dictionary was fitted under.
+        from ..ml.sparse_autoencoder import encode_with_training_normalization
+
+        f = encode_with_training_normalization(
+            sae, xf if xf.requires_grad else xf.detach().requires_grad_(True)
+        )
         if isinstance(f, tuple):
             f = f[0]
         f.retain_grad()

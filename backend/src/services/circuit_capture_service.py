@@ -698,7 +698,17 @@ def _load_sae_sync(sae_record: "ExternalSAE", device: str):
         state_dict["encoder.weight"].shape[0] if "encoder.weight" in state_dict
         else state_dict["W_enc"].shape[1])
     architecture = (sae_record.architecture or "standard").lower()
-    sae = create_sae(architecture, hidden_dim=d_in, latent_dim=d_sae)
+    # MIS-E2E-083: carry the TRAINED normalization convention. `config` was
+    # loaded and discarded, so every SAE built here silently took the
+    # constructor default instead of the mode it was trained with — and no
+    # consumer could recover it afterwards.
+    normalize_activations = getattr(config, "normalize_activations", None) or "none"
+    sae = create_sae(
+        architecture,
+        hidden_dim=d_in,
+        latent_dim=d_sae,
+        normalize_activations=normalize_activations,
+    )
     cleaned = {k.removeprefix("model."): v for k, v in state_dict.items()}
     sae.load_state_dict(cleaned, strict=False)
     sae.to(device).eval()
@@ -738,11 +748,15 @@ def _pad_batch(batch: Dict[str, Any], tokenizer):
 
 
 def _encode_layer(sae, acts):
-    """acts [n_tokens, d_model] fp32 → z [n_tokens, d_sae] (no grad)."""
-    z = sae.encode(acts)
-    if isinstance(z, tuple):  # JumpReLU return_pre_activations styles
-        z = z[0]
-    return z
+    """acts [n_tokens, d_model] fp32 → z [n_tokens, d_sae] (no grad).
+
+    MIS-E2E-083: this called `sae.encode` bare, feeding raw activations to a
+    dictionary trained on normalized ones. Every circuit mined from a capture
+    inherited the wrong basis.
+    """
+    from ..ml.sparse_autoencoder import encode_with_training_normalization
+
+    return encode_with_training_normalization(sae, acts)
 
 
 #: What `finalize()` costs on top of the buffer itself. It concatenates every

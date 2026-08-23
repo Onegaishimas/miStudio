@@ -1365,6 +1365,40 @@ def project_decoder_gradients(model: nn.Module):
                 model.decoder.weight.grad = G_perp
 
 
+def encode_with_training_normalization(sae, x: torch.Tensor) -> torch.Tensor:
+    """Encode `x` applying the SAE's OWN training-time normalization first.
+
+    MIS-E2E-083. `encode()` does NOT normalize — `forward()` does, at line
+    ``x_normalized, norm_coeff = self.normalize(x)``, and then calls `encode`.
+    So a caller that reaches for `encode()` directly hands the dictionary raw
+    activations when it was trained on normalized ones.
+
+    The extraction path knew this and normalized inline, with a comment saying
+    why. Circuit capture, attribution, faithfulness and intervention all called
+    `encode()` bare. Every circuit discovered from a capture was therefore mined
+    from activations the dictionary was not trained to decode: the features
+    fire, the numbers are plausible, and the basis is wrong — the same
+    silent-wrong-basis shape as MIS-E2E-064, in the discovery plane rather than
+    the steering plane, and everything downstream (co-activation statistics,
+    attribution, edge validation) inherits it.
+
+    One helper rather than the same three lines in six places, because five of
+    the six had already forgotten them once.
+
+    DIFFERENTIABLE. `normalize` is a scalar rescale, so the attribution path's
+    gradient still flows — and flows through the same transform training used,
+    which is the point.
+
+    Handles the JumpReLU-style tuple return so callers do not each unpack it.
+    """
+    if getattr(sae, "normalize_activations", "none") != "none" and hasattr(sae, "normalize"):
+        x, _coeff = sae.normalize(x)
+    z = sae.encode(x)
+    if isinstance(z, tuple):  # JumpReLU return_pre_activations styles
+        z = z[0]
+    return z
+
+
 def create_sae(
     architecture_type: str,
     hidden_dim: int,
