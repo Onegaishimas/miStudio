@@ -10,7 +10,8 @@ carries the evidence, the reproduction and the proposed remediation for each.
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
-| Waves 2–9 | P0s, then correctness, then docs | ❌ not started |
+| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — 1.3 ✅ · 1.1, 1.2, 1.4, 1.5, Tasks 2–5 open |
+| Waves 3–9 | Correctness, mutations, realtime, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
 running file list.*
@@ -41,7 +42,7 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 - [ ] 1.1 `POST /labeling/models/openai`: **never attach the stored key to a caller-named host.** Allow-list the origin, and call `validate_llm_endpoint_url` on that path. — MIS-E2E-069
 - [ ] 1.2 Emit `Bearer {{OPENAI_API_KEY}}` in **both** Postman writers (`openai_labeling_service.py:406`, `:645`), matching the cURL branch. — MIS-E2E-072
-- [ ] 1.3 `decrypt_value`: distinguish "not an envelope" (legacy → return as-is, **log a counter**) from `InvalidTag` (**raise**). Fixes three findings at once. — MIS-E2E-004, -041, -056
+- [x] 1.3 ✅ `decrypt_value`: distinguishes "not an envelope" (legacy → return as-is, **log a counter**) from `InvalidTag` (**raise**). Fixes three findings at once. — MIS-E2E-004, -041, -056
 - [ ] 1.4 Add an encrypting backfill for legacy plaintext `labeling_jobs.openai_api_key` rows; the counter from 1.3 measures the exposure. — MIS-E2E-041
 - [ ] 1.5 Regression tests: a key never reaches a non-allow-listed host; no artifact file contains the key across **all three** `export_format` values. — MIS-E2E-069, -072
 
@@ -241,6 +242,10 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/services/analysis_service.py` | Cache upsert; ablation's dead precondition removed; correlations scoped to the SAE |
 | `backend/src/models/{feature,feature_analysis_cache}.py` | Declare the unique constraints that existed only in migrations |
 | `frontend/src/components/features/FeatureTokenAnalysis.tsx` | BPE marker stripped for display; continuations marked |
+| `backend/src/core/encryption.py` | `decrypt_value` raises `DecryptionError` on `InvalidTag`; legacy plaintext counted via `legacy_plaintext_reads()`; `mask_value` no longer reveals 4–7 char secrets whole |
+| `backend/src/services/app_setting_service.py` | `get_by_key` display branch masks on decrypt failure (the unmask branch deliberately propagates) |
+| `backend/src/api/v1/endpoints/settings.py` | Both response-masking sites guarded — never echo ciphertext back |
+| `backend/tests/unit/test_decrypt_fails_closed.py` | **New.** 9 tests over the not-an-envelope / InvalidTag split and short-secret masking |
 
 ## Negative controls run
 
@@ -256,6 +261,8 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC6 | Drop `calibration` from the import dict again (the real MIS-E2E-037 bug) | ✅ 1 failure |
 | NC7 | **Re-run of audit mutation M3** — drop `faithfulness` from the import dict | ✅ 1 failure *(survived during the audit)* |
 | NC8 | Move the source-scrape anchor — does the guard fail OPEN? | ✅ fails CLOSED (errors, does not silently pass) |
+| NC9 | Swallow `InvalidTag` again (the MIS-E2E-056 behaviour) | ✅ 3 failures |
+| NC10 | `mask_value` reveals short values again (MIS-E2E-061) | ✅ 1 failure |
 | NC4 | Revert `_cache_analysis` to the blind INSERT | ✅ 2 failures |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
