@@ -93,15 +93,62 @@ celery_app.conf.update(
         "src.workers.dataset_tasks.tokenize_dataset_task": {
             "queue": "datasets",  # Changed from "processing" to "datasets" for consistency
         },
+        # The two dataset tasks nothing matched (MIS-E2E-093/-097).
+        "src.workers.dataset_tasks.cancel_dataset_download": {
+            "queue": "high_priority",       # must preempt the download it stops
+        },
+        "src.workers.dataset_tasks.delete_dataset_files": {
+            "queue": "low_priority",
+        },
 
-        # Model operations: GPU bound, high priority
-        "src.workers.model_tasks.download_and_load_model": {
+        # Model operations: GPU bound, high priority.
+        #
+        # THE PREFIX HERE WAS WRONG AND SILENTLY MATCHED NOTHING
+        # (MIS-E2E-093/-097). These tasks register as `workers.model_tasks.*`,
+        # not `src.workers.model_tasks.*`, so the entry below never applied and
+        # every model task — including `extract_activations`, a GPU job — ran on
+        # the default queue. This is the recorded lesson biting a second time:
+        # `task_routes` globs match the TASK NAME, and the name is whatever the
+        # decorator registered, not the import path.
+        "workers.model_tasks.download_and_load_model": {
             "queue": "high_priority",
+        },
+        "workers.model_tasks.extract_activations": {
+            "queue": "extraction",          # GPU: the model is resident
+        },
+        "workers.model_tasks.cancel_download": {
+            "queue": "high_priority",       # must preempt the download it stops
+        },
+        "workers.model_tasks.delete_model_files": {
+            "queue": "low_priority",        # I/O cleanup
+        },
+        "workers.model_tasks.update_model_progress": {
+            "queue": "high_priority",       # a metadata write on a hot path
         },
 
         # Training operations: GPU bound, low concurrency
         "src.workers.training_tasks.*": {
             "queue": "training",
+        },
+        # THE SHORT NAMES THE MODULE GLOB ABOVE CANNOT MATCH (MIS-E2E-093/-097).
+        #
+        # `task_routes` patterns match the TASK NAME, and these three tasks are
+        # registered under bare names, so `src.workers.training_tasks.*` never
+        # applied to them and they fell to the DEFAULT queue — two GPU training
+        # jobs among them, competing with every quick task on the same worker.
+        #
+        # Found by `test_every_registered_task_routes_to_its_intended_queue`,
+        # which is driven off the live registry: 16 tasks carry short names and
+        # 13 already had explicit entries here. These three did not, and nothing
+        # would have said so.
+        "train_sae": {
+            "queue": "training",
+        },
+        "resume_training": {
+            "queue": "training",
+        },
+        "delete_extraction": {
+            "queue": "extraction",
         },
 
         # Extraction operations: GPU bound, medium concurrency
@@ -302,6 +349,13 @@ celery_app.conf.update(
         # Steering operations: GPU bound, dedicated queue for isolation
         # Steering runs in a dedicated worker with --max-tasks-per-child for memory cleanup
         "src.workers.steering_tasks.*": {
+            "queue": "steering",
+        },
+        # A GLOB, not two names. `steering.combined` — the multi-feature GPU
+        # path — and `steering.cleanup` were both missing, so they ran on the
+        # default queue while `compare` and `sweep` beside them did not
+        # (MIS-E2E-093/-097).
+        "steering.*": {
             "queue": "steering",
         },
         "steering.compare": {
