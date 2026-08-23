@@ -103,6 +103,24 @@ source: *"once a cache row passes the 7-day expiry… logit lens / correlations 
 ablation 500 permanently for that feature."* The user hit exactly that in production
 mid-audit. It is now fixed and deployed.
 
+## Verification of the audit itself
+
+| Check | Result |
+|---|---|
+| Register ids unique and contiguous | ✅ **166 headings, 166 unique, no duplicates, no gaps** in 001–166 |
+| Tree clean after every mutation | ✅ `git status --porcelain` empty; 29 mutations, all restores confirmed |
+| Suites at baseline | ✅ backend 0 failures; frontend 1211/1211 |
+| Every CONFIRMED finding has a reproduction | ✅ 78 CONFIRMED, each with evidence recorded inline |
+| Live verification ran | ✅ HTTP probes, `pg_constraint` queries, the public GitHub API, the MCP registry |
+
+**One deviation from PLAN.md, stated plainly.** The plan's verification section
+anticipated **108** round records — 12 phases × 3 rounds × 3 commands, one file each.
+There are **18**. P01 and P02 have per-command files; from P03 onward each phase has a
+single consolidated record covering all three rounds and all three commands. The
+coverage is the same and every record names which commands ran and what each found —
+but the file count does not match the criterion the plan set, and the criterion was
+not amended before diverging from it.
+
 ## Findings by severity
 
 | P0 | P1 | P2 | P3 | Total |
