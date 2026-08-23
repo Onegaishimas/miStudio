@@ -9,7 +9,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
-| **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ⏳ 7.1 ✅ · 7.2 ✅ · 7.5 ✅ · 7.3, 7.4, 7.6 open |
+| **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ⏳ 7.1 ✅ · 7.2 ✅ · 7.3 ✅ · 7.5 ✅ · 7.4, 7.6 open |
 | Waves 2–9 | P0s, then correctness, then docs | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -98,7 +98,7 @@ The root enabler behind the production 500 the user hit. **Two of the constraint
 
 - [x] 7.1 ✅ Added a guard test diffing `Base.metadata` against the migrated schema — constraints, foreign keys, indexes. This single test covers MIS-E2E-031, -033 and every future migration-only constraint. — MIS-E2E-031, -033, -048
 - [x] 7.2 ✅ Re-created the three foreign keys the ORM declares and the database lacks, or drop them from the ORM — pick one. — MIS-E2E-033
-- [ ] 7.3 Integration tests for delete cascades against a **migrated** database. Flipping all three CASCADEs on `features` currently leaves 211 tests green. — MIS-E2E-053
+- [x] 7.3 ✅ Tests for delete cascades against a **migrated** database. Flipping all three CASCADEs on `features` currently leaves 211 tests green. — MIS-E2E-053
 - [ ] 7.4 One round-trip test: build a maximal `CircuitDefinitionV1`, import, export, assert **document equality**. Field-by-field assertions only cover the fields someone remembered. — MIS-E2E-052, -037
 - [x] 7.5 ✅ Derived `REQUIRED_TABLES` from `Base.metadata`; decide deliberately whether a missing table blocks startup; test it. — MIS-E2E-032, -051, -157
 - [ ] 7.6 Narrow `check_migrations.py`'s claim to what it checks, or extend it to constraints; wire it into CI. Delete `find_column_gaps.py`. — MIS-E2E-048, -049, -022
@@ -232,6 +232,7 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/db/__init__.py` | Exports `_required_tables` instead of the removed eager constant |
 | `backend/scripts/verify_schema.py` | Imports the single source instead of carrying a copy-pasted duplicate dict |
 | `backend/tests/unit/test_schema_validator_coverage.py` | **New.** The validator had zero tests, which is why mutation M2 survived |
+| `backend/tests/unit/test_delete_cascades.py` | **New.** Six tests over CASCADE and SET NULL. Nothing exercised a delete rule, which is why M5 survived |
 | `backend/tests/unit/test_analysis_cache_upsert.py` | **New** (out-of-band). Pins the cache upsert that fixed the production 500 |
 | `backend/src/services/analysis_service.py` | Cache upsert; ablation's dead precondition removed; correlations scoped to the SAE |
 | `backend/src/models/{feature,feature_analysis_cache}.py` | Declare the unique constraints that existed only in migrations |
@@ -247,11 +248,12 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC1 | `features.training_id` ondelete CASCADE → SET NULL | ✅ 2 failures |
 | NC2 | Remove `FeatureAnalysisCache.__table_args__` (the MIS-E2E-031 shape) | ✅ 1 failure |
 | NC3 | **Re-run of audit mutation M2** — shrink the validator to a hand-list | ✅ 3 failures *(survived during the audit)* |
+| NC5 | **Re-run of audit mutation M5** — flip all 3 Feature CASCADEs to RESTRICT | ✅ 4 failures *(survived during the audit, 211 tests green)* |
 | NC4 | Revert `_cache_analysis` to the blind INSERT | ✅ 2 failures |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
-**2 of the 14 surviving audit mutations are now killed** (M2 via NC3; the cache
-divergence via NC2/NC4). Task 16.2 requires all 14.
+**3 of the 14 surviving audit mutations are now killed** — M2 (NC3), M5 (NC5), and
+the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 
 ## Provenance
 
