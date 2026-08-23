@@ -263,7 +263,21 @@ def build_steer_generator(model, tokenizer, structure, resolved_members,
         torch.manual_seed(gseed)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         handles = []
-        if dial > 0:
+        # MIS-E2E-065: `dial > 0` registered NO hooks for a negative dial and
+        # returned unmodified baseline text — which the caller records as the
+        # steered arm.
+        #
+        # Negative strength is canonical here, not an edge case: the
+        # cluster-definition contract carries `sign ∈ {1, -1}` and a member's
+        # negative strength IS its direction. So suppressive steering produced
+        # baseline output labelled as steered, silently. In the transcript
+        # recorder that writes `(dial, prompt, unsteered, steered)` rows whose
+        # two arms are byte-identical — and the entire purpose of that artifact
+        # is for a strong model to read the difference afterwards.
+        #
+        # `dial != 0` is the correct gate: zero is the baseline by definition,
+        # and every other value is a real intervention.
+        if dial != 0:
             for L, hook in _make_hook(dial).items():
                 handles.append(hook_layers[L].register_forward_hook(hook))
         gen_kwargs = dict(max_new_tokens=max_tokens, do_sample=False)

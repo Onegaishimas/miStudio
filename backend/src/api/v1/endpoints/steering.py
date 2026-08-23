@@ -176,6 +176,132 @@ def get_client_id(request: Request) -> str:
 router = APIRouter(prefix="/steering", tags=["Steering"])
 
 
+def _routed_features(request) -> list:
+    """Normalise a steering request to `[(feature_idx, layer, sae_id_or_None)]`.
+
+    Compare and combined carry `selected_features`; sweep carries a single
+    `feature_idx` / `layer` pair on the request itself. Both need the same
+    layer check, and giving them one shape is what lets one helper serve all
+    three rather than three near-copies that drift.
+    """
+    features = getattr(request, "selected_features", None)
+    if features is not None:
+        return [(f.feature_idx, f.layer, getattr(f, "sae_id", None)) for f in features]
+    return [(request.feature_idx, request.layer, None)]
+
+
+async def resolve_referenced_saes(request, sae, db) -> dict:
+    """Resolve, validate and package EVERY SAE a steering request references.
+
+    MIS-E2E-064. This was the combined endpoint's code, inline, and only the
+    combined endpoint's. Compare and sweep placed their hook at `feature.layer`
+    while always steering through the REQUEST-level SAE, discarding each
+    feature's own `sae_id` — which `SelectedFeature` has carried since Feature
+    015. Nothing validated `feature.layer == sae.layer` on those paths either.
+
+    The consequence is the worst failure mode an interpretability tool has:
+    because `d_model` is uniform across layers, the `hidden_dim != sae.d_in`
+    shape guard NEVER fires, so a feature from layer 20's dictionary is decoded
+    through layer 12's SAE and applied at layer 20 — silently, in the correct
+    shape and the wrong basis. Plausible output, meaningless, no error.
+
+    Extracted rather than copied. "Fixed one representative, never generalized"
+    is this audit's most repeated anti-pattern — five independent instances,
+    and this finding IS one of them. A shared helper is the only version of the
+    fix that cannot drift back apart.
+
+    Validation happens at SUBMIT time, never in the worker: failing in the
+    worker burns a GPU slot to produce a 500 instead of a 422.
+
+    Returns:
+        {sae_id -> SaeMeta dict} for exactly the referenced ids, JSON-safe for
+        the Celery kwargs.
+
+    Raises:
+        HTTPException: 404 / 400 for an unusable SAE, 422 for a layer mismatch.
+    """
+    # Each feature steers through the SAE trained on ITS layer (feature.sae_id ??
+    # request.sae_id). Validate — at SUBMIT time, never in the worker (which
+    # would burn a GPU slot to fail) — that each referenced SAE exists, is READY,
+    # and its layer matches every feature routed to it. Build a JSON-serializable
+    # SaeMeta map for the worker so it can load them all.
+    routed = _routed_features(request)
+
+    referenced_ids: list[str] = []
+    for _idx, _layer, f_sae_id in routed:
+        sid = f_sae_id or request.sae_id
+        if sid not in referenced_ids:
+            referenced_ids.append(sid)
+
+    sae_records = {request.sae_id: sae}
+    for sid in referenced_ids:
+        if sid not in sae_records:
+            rec = await SAEManagerService.get_sae(db, sid)
+            if not rec:
+                raise HTTPException(404, f"SAE not found: {sid}")
+            if rec.status != SAEStatus.READY.value:
+                raise HTTPException(400, f"SAE is not ready: {sid} ({rec.status})")
+            if not rec.local_path:
+                raise HTTPException(400, f"SAE has no local path: {sid}")
+            sae_records[sid] = rec
+
+    # Per-feature layer/SAE mismatch → 422 listing offenders.
+    offenders = []
+    for f_idx, f_layer, f_sae_id in routed:
+        sid = f_sae_id or request.sae_id
+        rec = sae_records[sid]
+        if rec.layer is not None and f_layer != rec.layer:
+            offenders.append({
+                "feature_idx": f_idx,
+                "layer": f_layer,
+                "sae_id": sid,
+                "sae_layer": rec.layer,
+            })
+    if offenders:
+        raise HTTPException(
+            422,
+            {
+                "code": "sae_layer_mismatch",
+                "message": "One or more features are routed to an SAE trained on a different layer.",
+                "offenders": offenders,
+            },
+        )
+
+    # Validate feature indices against each routed SAE's dimension.
+    bad_by_sae: dict = {}
+    for f_idx, _f_layer, f_sae_id in routed:
+        sid = f_sae_id or request.sae_id
+        rec = sae_records[sid]
+        if rec.n_features and f_idx >= rec.n_features:
+            bad_by_sae.setdefault(sid, []).append(f_idx)
+    if bad_by_sae:
+        raise HTTPException(
+            400,
+            f"Invalid feature indices per SAE: {bad_by_sae}. "
+            "Each index must be within its SAE's feature count.",
+        )
+
+    # Build the SaeMeta map (JSON dicts) for the worker — one entry per
+    # referenced SAE. Single-SAE requests produce a one-entry map, keeping the
+    # worker on the byte-identical single-SAE codepath.
+    sae_meta_map: dict = {}
+    for sid in referenced_ids:
+        rec = sae_records[sid]
+        rec_path = settings.resolve_data_path(rec.local_path)
+        if not rec_path.exists():
+            raise HTTPException(400, f"SAE path does not exist: {rec.local_path}")
+        sae_meta_map[sid] = {
+            "sae_id": sid,
+            "sae_path": str(rec_path),
+            "layer": rec.layer,
+            "d_model": rec.d_model,
+            "n_features": rec.n_features,
+            "architecture": rec.architecture,
+        }
+
+    return sae_meta_map
+
+
 @router.post("/compare")
 async def generate_steering_comparison_removed():
     """
@@ -778,19 +904,13 @@ async def submit_async_steering_comparison(
     if not sae_path.exists():
         raise HTTPException(400, f"SAE path does not exist: {sae.local_path}")
 
-    # Validate feature indices against SAE dimension
-    if sae.n_features:
-        invalid_features = [
-            f for f in request.selected_features
-            if f.feature_idx >= sae.n_features
-        ]
-        if invalid_features:
-            invalid_indices = [f.feature_idx for f in invalid_features]
-            raise HTTPException(
-                400,
-                f"Invalid feature indices: {invalid_indices}. "
-                f"SAE only has {sae.n_features} features."
-            )
+    # MIS-E2E-064: the shared resolver. This used to validate feature indices
+    # against the REQUEST-level SAE only, and never checked that a feature's
+    # layer matched the SAE it would be decoded through — so a cross-layer
+    # feature steered in the wrong basis with no error. The resolver validates
+    # per routed SAE and returns the map the worker needs to honour
+    # `feature.sae_id`.
+    sae_meta_map = await resolve_referenced_saes(request, sae, db)
 
     # Determine model to use
     model_id = request.model_id
@@ -821,6 +941,9 @@ async def submit_async_steering_comparison(
         kwargs={
             "request_dict": request.model_dump(mode="json"),
             "sae_id": request.sae_id,
+            # MIS-E2E-064: every referenced SAE, so each feature
+            # steers through the dictionary trained on ITS layer.
+            "sae_meta_map": sae_meta_map,
             "model_id": model_id,
             "sae_path": str(sae_path),
             "model_path": model_path,
@@ -892,6 +1015,12 @@ async def submit_async_strength_sweep(
     if not sae_path.exists():
         raise HTTPException(400, f"SAE path does not exist")
 
+    # MIS-E2E-064. Sweep had NO feature validation at all: it steered at
+    # `request.layer` through `request.sae_id`'s SAE without ever checking the
+    # two agree, and `d_model` being uniform across layers means the shape guard
+    # never catches it. Same wrong-basis defect as compare, simpler shape.
+    sae_meta_map = await resolve_referenced_saes(request, sae, db)
+
     # Determine model
     model_id = request.model_id
     if not model_id:
@@ -917,6 +1046,9 @@ async def submit_async_strength_sweep(
         kwargs={
             "request_dict": request.model_dump(mode="json"),
             "sae_id": request.sae_id,
+            # MIS-E2E-064: every referenced SAE, so each feature
+            # steers through the dictionary trained on ITS layer.
+            "sae_meta_map": sae_meta_map,
             "model_id": model_id,
             "sae_path": str(sae_path),
             "model_path": model_path,
@@ -997,83 +1129,8 @@ async def submit_async_combined_steering(
     if not sae_path.exists():
         raise HTTPException(400, f"SAE path does not exist: {sae.local_path}")
 
-    # ── Feature 015: resolve EVERY distinct SAE the request references ──────────
-    # Each feature steers through the SAE trained on ITS layer (feature.sae_id ??
-    # request.sae_id). Validate — at SUBMIT time, never in the worker (which
-    # would burn a GPU slot to fail) — that each referenced SAE exists, is READY,
-    # and its layer matches every feature routed to it. Build a JSON-serializable
-    # SaeMeta map for the worker so it can load them all.
-    referenced_ids: list[str] = []
-    for f in request.selected_features:
-        sid = f.sae_id or request.sae_id
-        if sid not in referenced_ids:
-            referenced_ids.append(sid)
-
-    sae_records = {request.sae_id: sae}
-    for sid in referenced_ids:
-        if sid not in sae_records:
-            rec = await SAEManagerService.get_sae(db, sid)
-            if not rec:
-                raise HTTPException(404, f"SAE not found: {sid}")
-            if rec.status != SAEStatus.READY.value:
-                raise HTTPException(400, f"SAE is not ready: {sid} ({rec.status})")
-            if not rec.local_path:
-                raise HTTPException(400, f"SAE has no local path: {sid}")
-            sae_records[sid] = rec
-
-    # Per-feature layer/SAE mismatch → 422 listing offenders.
-    offenders = []
-    for f in request.selected_features:
-        sid = f.sae_id or request.sae_id
-        rec = sae_records[sid]
-        if rec.layer is not None and f.layer != rec.layer:
-            offenders.append({
-                "feature_idx": f.feature_idx,
-                "layer": f.layer,
-                "sae_id": sid,
-                "sae_layer": rec.layer,
-            })
-    if offenders:
-        raise HTTPException(
-            422,
-            {
-                "code": "sae_layer_mismatch",
-                "message": "One or more features are routed to an SAE trained on a different layer.",
-                "offenders": offenders,
-            },
-        )
-
-    # Validate feature indices against each routed SAE's dimension.
-    bad_by_sae: dict = {}
-    for f in request.selected_features:
-        sid = f.sae_id or request.sae_id
-        rec = sae_records[sid]
-        if rec.n_features and f.feature_idx >= rec.n_features:
-            bad_by_sae.setdefault(sid, []).append(f.feature_idx)
-    if bad_by_sae:
-        raise HTTPException(
-            400,
-            f"Invalid feature indices per SAE: {bad_by_sae}. "
-            "Each index must be within its SAE's feature count.",
-        )
-
-    # Build the SaeMeta map (JSON dicts) for the worker — one entry per
-    # referenced SAE. Single-SAE requests produce a one-entry map, keeping the
-    # worker on the byte-identical single-SAE codepath.
-    sae_meta_map: dict = {}
-    for sid in referenced_ids:
-        rec = sae_records[sid]
-        rec_path = settings.resolve_data_path(rec.local_path)
-        if not rec_path.exists():
-            raise HTTPException(400, f"SAE path does not exist: {rec.local_path}")
-        sae_meta_map[sid] = {
-            "sae_id": sid,
-            "sae_path": str(rec_path),
-            "layer": rec.layer,
-            "d_model": rec.d_model,
-            "n_features": rec.n_features,
-            "architecture": rec.architecture,
-        }
+    # MIS-E2E-064: one shared resolver for all three steering endpoints.
+    sae_meta_map = await resolve_referenced_saes(request, sae, db)
 
     # Determine model to use
     model_id = request.model_id

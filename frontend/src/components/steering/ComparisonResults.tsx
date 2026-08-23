@@ -313,7 +313,10 @@ export function ComparisonResults({ comparison, batchResults, onSaveExperiment, 
         {metrics.perplexity !== null && (
           <span title="Perplexity">PPL: {metrics.perplexity.toFixed(2)}</span>
         )}
-        {metrics.coherence !== null && (
+        {/* `!= null` catches undefined too: MIS-E2E-063 made `coherence` a
+            genuinely-absent field ("not measured"), and `!== null` alone would
+            let an undefined through to `.toFixed` and crash the panel. */}
+        {metrics.coherence != null && (
           <span title="Coherence Score">Coh: {metrics.coherence.toFixed(2)}</span>
         )}
         {metrics.token_count !== undefined && (

@@ -1550,7 +1550,7 @@ class SteeringService:
         self,
         prompt: str,
         generated: str,
-    ) -> float:
+    ) -> Optional[float]:
         """
         Calculate semantic coherence between prompt and generation.
 
@@ -1562,17 +1562,38 @@ class SteeringService:
             generated: Generated text
 
         Returns:
-            Coherence score (0-1, higher = more coherent)
+            Coherence score (0-1, higher = more coherent), or None when the
+            embedding model is unavailable. NEVER a placeholder constant.
         """
-        # Lazy load sentence transformer
+        # MIS-E2E-063. This returned the CONSTANT 0.5 when the embedding model
+        # was unavailable — and `sentence-transformers` is in neither
+        # requirements.txt nor the venv, so the import always failed and every
+        # coherence score this product has ever displayed was 0.5.
+        #
+        # The UI renders it as a measured quality score beside real generated
+        # text, so a user comparing steering strengths sees 0.5 at every dial
+        # and reads it as "coherence is unaffected by strength" — a finding
+        # about the model, manufactured by a missing dependency. A constant must
+        # never occupy a field the user reads as a measurement; "not measured"
+        # is the honest value and both the schema (`Optional[float]`) and the
+        # frontend type (`number | null`) already carry it.
+        #
+        # `except Exception`, not `except ImportError`: the model downloads on
+        # first use, and this deployment is offline — so the *normal* failure
+        # here was never an ImportError at all, and it aborted the whole
+        # steering request instead of degrading.
         if self._sentence_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
                 self._sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
                 self._sentence_model.to(self._device)
-            except ImportError:
-                logger.warning("sentence-transformers not installed, returning default coherence")
-                return 0.5
+            except Exception as exc:
+                logger.warning(
+                    "Coherence not measured — embedding model unavailable (%s: %s). "
+                    "Install sentence-transformers to enable it.",
+                    type(exc).__name__, exc,
+                )
+                return None
 
         with torch.no_grad():
             embeddings = self._sentence_model.encode(
@@ -1595,7 +1616,7 @@ class SteeringService:
         steered_text: str,
         unsteered_text: str,
         feature_labels: List[str],
-    ) -> float:
+    ) -> Optional[float]:
         """
         Calculate behavioral score measuring steering effectiveness.
 
@@ -1608,10 +1629,14 @@ class SteeringService:
             feature_labels: Labels of steered features for context
 
         Returns:
-            Behavioral score (0-1)
+            Behavioral score (0-1), or None when it could not be measured.
         """
+        # MIS-E2E-063, same field, same rule. This one is worse in kind: the
+        # score is meant to say whether steering had an effect, so a constant
+        # here reports "steering works, moderately" whatever happened.
         if self._sentence_model is None:
-            return 0.5
+            logger.warning("Behavioral score not measured — embedding model unavailable")
+            return None
 
         with torch.no_grad():
             embeddings = self._sentence_model.encode(
@@ -1699,6 +1724,9 @@ class SteeringService:
         sae_d_model: Optional[int] = None,
         sae_n_features: Optional[int] = None,
         sae_architecture: Optional[str] = None,
+        # MIS-E2E-064: every referenced SAE, so each feature is decoded through
+        # the dictionary trained on ITS layer. None ⇒ single-SAE flow.
+        sae_meta_map: Optional[Dict[str, "SaeMeta"]] = None,
         # Progress callback for Celery tasks
         progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> SteeringComparisonResponse:
@@ -1740,6 +1768,21 @@ class SteeringService:
                 n_features=sae_n_features,
                 architecture=sae_architecture,
             )
+
+            # MIS-E2E-064. Compare placed its hook at `feature.layer` but always
+            # steered through the REQUEST-level SAE, discarding each feature's
+            # own `sae_id`. Because `d_model` is uniform across layers the
+            # `hidden_dim != sae.d_in` shape guard never fires, so a feature from
+            # layer 20's dictionary was decoded through layer 12's SAE and
+            # applied at layer 20 — right shape, wrong basis, no error. The
+            # combined path was fixed for Feature 015; this one was not.
+            steering_saes = {request.sae_id: sae}
+            if sae_meta_map:
+                steering_saes = await self.resolve_sae_map(
+                    request, sae_meta_map, force_reload=True,
+                )
+                steering_saes.setdefault(request.sae_id, sae)
+
             emit_progress(15, "Loading model...")
             # CRITICAL: Always force reload the model to avoid corruption from cached state
             # With --pool=solo, the worker doesn't restart between tasks, so cached models
@@ -1880,11 +1923,21 @@ class SteeringService:
                         layer=feature.layer,
                         strength=feature.strength,
                         label=feature.label,
+                        # MIS-E2E-064: carry the feature's OWN SAE. Dropping it
+                        # here is what routed every feature through the
+                        # request-level dictionary.
+                        sae_id=getattr(feature, "sae_id", None),
                     )
                 ]
 
-                # Register steering hooks for this single feature (now on clean model)
-                handles = self._register_steering_hooks(model, sae, single_feature_config)
+                # Register steering hooks for this single feature (now on clean
+                # model). Passing the MAP — not a single SAE — lets
+                # `_register_steering_hooks` group by (sae_id, layer) and decode
+                # each feature in its own basis; it already did so for combined.
+                handles = self._register_steering_hooks(
+                    model, steering_saes, single_feature_config,
+                    default_sae_id=request.sae_id,
+                )
 
                 try:
                     # Generate with steering for this feature
@@ -2807,6 +2860,8 @@ class SteeringService:
         sae_d_model: Optional[int] = None,
         sae_n_features: Optional[int] = None,
         sae_architecture: Optional[str] = None,
+        # MIS-E2E-064: JSON {sae_id -> SaeMeta} from the endpoint.
+        sae_meta_map: Optional[Dict[str, Dict[str, Any]]] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> Dict[str, Any]:
         """
@@ -2832,6 +2887,12 @@ class SteeringService:
         # Convert request_dict back to Pydantic model
         request = SteeringComparisonRequest(**request_dict)
 
+        # MIS-E2E-064: rehydrate the SaeMeta map so each feature can steer
+        # through its own layer's dictionary.
+        meta_map: Optional[Dict[str, SaeMeta]] = None
+        if sae_meta_map:
+            meta_map = {sid: SaeMeta(**meta) for sid, meta in sae_meta_map.items()}
+
         # Run the async method synchronously
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -2846,6 +2907,7 @@ class SteeringService:
                     sae_d_model=sae_d_model,
                     sae_n_features=sae_n_features,
                     sae_architecture=sae_architecture,
+                    sae_meta_map=meta_map,
                     progress_callback=progress_callback,
                 )
             )
