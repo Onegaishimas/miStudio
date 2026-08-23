@@ -20,8 +20,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     gnupg \
-    && echo "deb https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes.list \
-    && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776 \
+    # SCOPED KEYRING, NOT THE GLOBAL ONE (MIS-E2E-148).
+    #
+    # `apt-key adv` puts the deadsnakes key in the global trusted keyring, where
+    # it is trusted to sign packages from EVERY repository. `signed-by=` binds
+    # it to this source alone, so a compromise of the deadsnakes key cannot
+    # authorise a package from anywhere else. (`apt-key` is also deprecated and
+    # slated for removal.)
+    && gpg --no-default-keyring --keyring /usr/share/keyrings/deadsnakes.gpg \
+        --keyserver keyserver.ubuntu.com \
+        --recv-keys F23C5A6CF475977595C89F51BA6932366A755776 \
+    && echo "deb [signed-by=/usr/share/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main" \
+        > /etc/apt/sources.list.d/deadsnakes.list \
     && apt-get update && apt-get install -y --no-install-recommends \
     python3.12 \
     python3.12-venv \

@@ -56,33 +56,68 @@ k8s_migrate() {
   k8s "kubectl exec -n $K8S_NS deployment/mistudio-backend -c backend -- python -m alembic upgrade heads"
 }
 
-# Manifest location on k8s host
-K8S_MANIFEST="/home/sean/app/k8s-mistudio.hitsai.local/mistudio-deployment.yaml"
+# WHAT ARGOCD DEPLOYS, NOT A SECOND COPY (MIS-E2E-144).
+#
+# `K8S_MANIFEST` pointed at a standalone `mistudio-deployment.yaml`, a STALE
+# duplicate of what ArgoCD actually applies (`k8s/base`, via kustomize). It was
+# missing `celery-worker-cpu`, `CELERY_QUEUES`, `CELERY_WORKER_NAME` and
+# `ENVIRONMENT=production` — so the break-glass procedure REVERTED the queue-split
+# fix and the SQL-echo incident fix, at the moment it is most likely to be used.
+#
+# Override only if you know the host layout differs. If the path does not exist,
+# the deploy refuses rather than applying whatever else is lying around.
+K8S_KUSTOMIZE="${K8S_KUSTOMIZE:-$HOME/app/miStudio/k8s/base}"
 
-# Apply the deployment manifest
+# Apply the deployment manifests (kustomize overlay ArgoCD uses)
 k8s_apply() {
-  echo "=== Applying manifest from $K8S_MANIFEST ==="
-  k8s "kubectl apply -f $K8S_MANIFEST"
+  echo "=== Applying $K8S_KUSTOMIZE ==="
+  k8s "test -d $K8S_KUSTOMIZE" || {
+    echo "ERROR: $K8S_KUSTOMIZE does not exist on $K8S_HOST." >&2
+    echo "       Set K8S_KUSTOMIZE to the kustomize directory ArgoCD deploys." >&2
+    return 1
+  }
+  k8s "kubectl apply -k $K8S_KUSTOMIZE"
 }
 
-# Full deploy: pull + apply manifest + restart + wait + verify schema
+# Full deploy: pull + apply + restart + wait + verify schema
+#
+# NO `&&`-CHAIN (MIS-E2E-147). The whole body used to be one chain ending in
+# `|| echo "WARNING: Schema verification failed"`, so a failed image pull, a
+# failed apply or a failed rollout all printed a message about SCHEMA and the
+# function returned 0. A break-glass deploy could fail at step one and report
+# success with a misleading warning.
 k8s_deploy() {
-  echo "=== Pulling images ===" && \
-  k8s "docker pull hitsai/mistudio-frontend:latest && docker pull hitsai/mistudio-backend:latest" && \
-  echo "=== Applying manifest ===" && \
-  k8s "kubectl apply -f $K8S_MANIFEST" && \
-  echo "=== Restarting deployments ===" && \
-  k8s "kubectl rollout restart deployment/mistudio-backend deployment/mistudio-frontend -n $K8S_NS" && \
-  echo "=== Waiting for backend rollout ===" && \
-  k8s "kubectl rollout status deployment/mistudio-backend -n $K8S_NS --timeout=180s" && \
-  echo "=== Waiting for frontend rollout ===" && \
-  k8s "kubectl rollout status deployment/mistudio-frontend -n $K8S_NS --timeout=180s" && \
-  echo "=== Pod Status ===" && \
-  k8s "kubectl get pods -n $K8S_NS" && \
-  echo "" && \
-  echo "=== Post-Deploy Schema Verification ===" && \
-  k8s "kubectl exec -n $K8S_NS deployment/mistudio-backend -c backend -- python scripts/verify_schema.py" || \
-  echo "WARNING: Schema verification failed. Run 'k8s_schema_fix' to attempt auto-fix."
+  local step
+  _step() {
+    step="$1"; shift
+    echo "=== $step ==="
+    if ! "$@"; then
+      echo "DEPLOY FAILED at: $step" >&2
+      return 1
+    fi
+  }
+
+  _step "Pulling images" k8s "docker pull hitsai/mistudio-frontend:latest && docker pull hitsai/mistudio-backend:latest" || return 1
+  _step "Applying manifests" k8s_apply || return 1
+  # mistudio-mcp runs the SAME backend image and was never restarted here, so
+  # new MCP tools stayed invisible after a break-glass deploy (MIS-E2E-144).
+  _step "Restarting deployments" k8s "kubectl rollout restart deployment/mistudio-backend deployment/mistudio-frontend deployment/mistudio-mcp -n $K8S_NS" || return 1
+  _step "Waiting for backend rollout" k8s "kubectl rollout status deployment/mistudio-backend -n $K8S_NS --timeout=180s" || return 1
+  _step "Waiting for frontend rollout" k8s "kubectl rollout status deployment/mistudio-frontend -n $K8S_NS --timeout=180s" || return 1
+  _step "Waiting for MCP rollout" k8s "kubectl rollout status deployment/mistudio-mcp -n $K8S_NS --timeout=180s" || return 1
+
+  echo "=== Pod Status ==="
+  k8s "kubectl get pods -n $K8S_NS"
+
+  # Schema verification is ADVISORY and is the only step allowed to warn
+  # rather than fail — which is what the old trailing `||` was trying to
+  # express, and applied to everything above it by accident.
+  echo ""
+  echo "=== Post-Deploy Schema Verification ==="
+  if ! k8s "kubectl exec -n $K8S_NS deployment/mistudio-backend -c backend -- python scripts/verify_schema.py"; then
+    echo "WARNING: Schema verification failed. Run 'k8s_schema_fix' to attempt auto-fix." >&2
+  fi
+  echo "Deploy complete."
 }
 
 # Quick pod status

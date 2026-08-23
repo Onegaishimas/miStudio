@@ -8,6 +8,18 @@ metadata:
   namespace: mistudio
 spec:
   replicas: 1
+  # RECREATE, NOT ROLLING (MIS-E2E-145).
+  #
+  # This is a Deployment backed by a hostPath volume. The default RollingUpdate
+  # strategy starts the NEW pod before terminating the old one, so for a moment
+  # two postgres processes hold the same directory on the same node. Postgres
+  # refuses to start on a locked data dir — the benign outcome — and the
+  # non-benign one is two writers against one store.
+  #
+  # A StatefulSet with a PVC is the right long-term shape; `Recreate` removes
+  # the overlap today without a storage migration.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgres

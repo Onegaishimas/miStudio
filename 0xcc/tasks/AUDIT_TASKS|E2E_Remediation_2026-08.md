@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3203 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3216 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11 ✅** · **12.3 ✅ 12.5 partial 12.7–12.10 ✅** · 12.1, 12.2, 12.4, 12.6 open |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -185,12 +185,12 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 12 — Infrastructure (P1)
 
-- [ ] 12.1 Delete the root `k8s/mistudio-deployment.yaml`; have `k8s_deploy` apply `k8s/base` via kustomize. It currently reverts the queue-split and SQL-echo fixes. — MIS-E2E-144
-- [ ] 12.2 `strategy: Recreate` on postgres and redis, or StatefulSets with PVCs. — MIS-E2E-145
+- [x] 12.1 ✅ Deleted, and `k8s_deploy` applies `k8s/base` via `kubectl apply -k` — **refusing** if the path is absent rather than applying whatever else is there. README and CLAUDE.md references corrected. Also restarts `mistudio-mcp`, which runs the same backend image and was never restarted, so new MCP tools stayed invisible after a break-glass deploy. — MIS-E2E-144
+- [x] 12.2 ✅ `Recreate` on both. They are Deployments over hostPath, so the default RollingUpdate briefly runs two pods against one data directory. A StatefulSet with a PVC remains the right long-term shape; this removes the overlap without a storage migration. — MIS-E2E-145
 - [x] 12.3 ✅ Both bound to `127.0.0.1` by default, overridable via `POSTGRES_BIND` / `REDIS_BIND` for deliberate remote access. Redis is the **Celery broker**, so LAN reachability meant anyone could enqueue GPU jobs and read queued payloads — well outside the accepted posture, which concedes the API behind nginx and not the broker. ⚠️ **Redis password deferred** (binding removes the exposure; auth is defence in depth). — MIS-E2E-146
-- [ ] 12.4 Fix `k8s_deploy`'s `&&`-chain so a failed pull/apply/rollout is not reported as success. — MIS-E2E-147
+- [x] 12.4 ✅ Per-step execution with `DEPLOY FAILED at: <step>` and a non-zero return. The whole body was one `&&` chain ending in `|| echo "WARNING: Schema verification failed"`, so a failed pull, apply or rollout printed a message about **schema** and returned 0. Schema verification is now the only advisory step — which is what that trailing `||` was trying to express and applied to everything above it by accident. — MIS-E2E-147
 - [x] 12.5 ⏳ **Partial** — the frontend port is fixed (`3000:8080`; the image moved to nginx-unprivileged in `bca37c6` and only k8s and `nginx.docker.conf` were updated, so `localhost:3000` has been dead since). The `/ollama/` location, the compose worker's queue split and the `server_name` typo remain. — MIS-E2E-147
-- [ ] 12.6 Scope `MCP_TOOL_CATEGORIES` off the ingress `/api` prefix or deny `/api/internal/*` there; use `signed-by=` instead of `apt-key adv`. — MIS-E2E-148
+- [x] 12.6 ✅ All three. `/api/internal` denied at the ingress on **both** hosts — the `.net` one is internet-facing and had the same gap. `signed-by=` scopes the deadsnakes key to its own source instead of the global trusted keyring. And the fail-open guard now asserts — the **sweep found a second `pytest.skip` in the same file** that the finding did not name. — MIS-E2E-148
 - [x] 12.7 ✅ All nine removed. Verified first: **329 tests, 9 files, all passing** — whatever was once broken had been fixed and the exclusion outlived it silently. — MIS-E2E-025
 - [x] 12.8 ✅ **0 errors, and lint now gates CI.** The two `react-hooks/rules-of-hooks` errors were real: `ReadoutGrid`'s empty-readout guard sat *above* two `useMemo` calls, so an empty axis meant React saw a shorter hook list — "rendered fewer hooks than expected", which unmounts the tree. Assessed unreachable because the backend emits `types` and `layers_by_type` from one tuple; that is a property of today's backend, not of the component, so the guard moved below the hooks.
   Also real: a regex escaping `(`/`)`/`[` **inside a character class**, and three `catch (e) { throw e }` wrappers that only cost the original stack frame. The rest were unused bindings — fixed by configuring the `_` convention the codebase already used (it was honoured for *arguments* only, so `const { [k]: _, ...rest }`, where the binding is **required syntax**, was an error that could not be removed).
@@ -397,6 +397,14 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/api/v1/endpoints/system.py` | MIS-E2E-099: `/system/restart` gated on the internal token (`settings` was not even imported) |
 | `docker-compose.yml` | MIS-E2E-146: postgres and the Celery broker bound to loopback. MIS-E2E-147: frontend `3000:8080` |
 | `backend/tests/unit/test_privilege_operations.py` | **New.** 8 tests; `pkill` asserted as a parsed CALL, and the restart exercised in all three directions |
+| `k8s/mistudio-deployment.yaml` | **Deleted** (MIS-E2E-144) — a stale second copy `k8s_deploy` re-applied |
+| `scripts/k8s-helpers.sh` | MIS-E2E-144/-147: applies `k8s/base` via kustomize, restarts `mistudio-mcp`, and fails per-step instead of one `&&` chain |
+| `k8s/base/{postgres,redis}.yaml` | MIS-E2E-145: `strategy: Recreate` over hostPath |
+| `k8s/base/ingress.yaml` | MIS-E2E-148: `/api/internal` denied on **both** hosts |
+| `backend/Dockerfile` | MIS-E2E-148: `signed-by=` instead of the global `apt-key adv` |
+| `backend/tests/unit/test_worker_queue_coverage.py` | MIS-E2E-148: two fail-open `pytest.skip`s → assertions (the finding named one) |
+| `README.md` · `CLAUDE.md` | Manifest references point at `k8s/base/` |
+| `backend/tests/unit/test_infrastructure_invariants.py` | **New.** 12 tests; the ingress check is parametrised over the hosts it finds, which is how the `.net` gap surfaced |
 
 ## Negative controls run
 
@@ -527,6 +535,13 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC119 | A spawn site stops recording its pid | ✅ 1 failure — a sweep over an unpopulated set kills nothing |
 | NC120 | `/system/restart` drops the token (MIS-E2E-099) | ✅ 3 failures |
 | NC121 | Token compared with `==` instead of `compare_digest` | ⚠️ **SURVIVED** — my own docstring named `compare_digest` while explaining why `==` is wrong. Parsed the call instead; **re-run ✅ 1 failure** |
+| NC122 | postgres back to RollingUpdate (MIS-E2E-145) | ✅ 1 failure |
+| NC123 | Redis published on 0.0.0.0 again (MIS-E2E-146) | ✅ 1 failure |
+| NC124 | Compose frontend back to `:80` (MIS-E2E-147) | ✅ 1 failure |
+| NC125 | Ingress drops the `.net` host's deny (MIS-E2E-148) | ✅ 1 failure |
+| NC126 | `k8s_deploy` stops reporting step failure (MIS-E2E-147) | ✅ 1 failure |
+| NC127 | `apt-key`-style global trust restored (MIS-E2E-148) | ✅ 1 failure |
+| NC128 | The stale standalone manifest returns (MIS-E2E-144) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

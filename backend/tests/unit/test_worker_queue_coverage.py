@@ -36,8 +36,15 @@ DYNAMIC_QUEUES = {"steering"}
 
 
 def _worker_containers():
-    if not MANIFEST.exists():           # pragma: no cover - repo layout guard
-        pytest.skip(f"manifest not found at {MANIFEST}")
+    # FAIL CLOSED (MIS-E2E-148). This used to `pytest.skip` when the manifest
+    # moved — the FOURTH source-scrape guard in this audit to fail open. A guard
+    # that silently disappears when its input moves is worse than no guard,
+    # because the green run reads as evidence.
+    assert MANIFEST.exists(), (
+        f"manifest not found at {MANIFEST}. This guard checks that every Celery "
+        f"queue has a worker consuming it; if the manifest moved, point it at "
+        f"the new path rather than letting the check vanish."
+    )
     workers = {}
     for doc in yaml.safe_load_all(MANIFEST.read_text()):
         if not doc or doc.get("kind") != "Deployment":
@@ -172,8 +179,14 @@ class TestProductionEnvironmentIsDeclared:
     """
 
     def test_every_container_declares_environment_production(self):
-        if not MANIFEST.exists():          # pragma: no cover
-            pytest.skip(f"manifest not found at {MANIFEST}")
+        # FAIL CLOSED, like `_worker_containers` above (MIS-E2E-148). The
+        # sibling skip was the one the finding named; this is the one the
+        # sweep found.
+        assert MANIFEST.exists(), (
+            f"manifest not found at {MANIFEST}. This guard exists because a "
+            f"missing ENVIRONMENT=production turned on SQL echo and rotated "
+            f"away the window a 2026-07-26 incident needed; do not let it skip."
+        )
 
         missing = []
         for doc in yaml.safe_load_all(MANIFEST.read_text()):

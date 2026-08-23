@@ -33,6 +33,24 @@ spec:
     - host: k8s-mistudio.hitsai.local
       http:
         paths:
+          # DEFENCE IN DEPTH FOR /api/internal (MIS-E2E-148).
+          #
+          # The `/api` prefix below exposes `/api/internal/*`, which BOTH nginx
+          # configs deny as security-critical. The endpoints themselves verify
+          # an HMAC token (checked correct in P05), so what was missing is the
+          # layer, not the defence — but the two nginx configs deny it for a
+          # reason and the ingress should agree with them.
+          #
+          # A more specific path wins over the `/api` prefix, so routing
+          # `/api/internal` at a service that does not exist makes the ingress
+          # return 503 rather than forwarding.
+          - path: /api/internal
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-denied
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:
@@ -50,6 +68,16 @@ spec:
     - host: k8s-mistudio.hitsai.net
       http:
         paths:
+          # Same deny as the .local host above (MIS-E2E-148). Fixing one host
+          # and not its sibling is this audit's most repeated anti-pattern, and
+          # this is the INTERNET-facing one.
+          - path: /api/internal
+            pathType: Prefix
+            backend:
+              service:
+                name: mistudio-denied
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:

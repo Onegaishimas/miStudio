@@ -44,7 +44,7 @@ yes
 - **Services Status:** K8s (mistudio namespace) ✅, Docker Compose (192.168.244.222) ✅
   - Backend (port 8000) ✅, Frontend (nginx-unprivileged, port 8080→80) ✅
   - PostgreSQL ✅, Redis ✅, Celery Worker ✅, Celery Beat ✅, Nginx ✅
-- **K8s Manifest:** Restored and in sync at /home/sean/app/k8s-mistudio.hitsai.local/mistudio-deployment.yaml
+- **K8s Manifest:** `k8s/base/` (kustomize). The standalone `k8s/mistudio-deployment.yaml` was DELETED (MIS-E2E-144): it was a stale second copy that `k8s_deploy` re-applied, reverting the queue-split and SQL-echo fixes.
 - **Pending (deferred):**
   - Backend non-root container (entrypoint refactor + K8s fsGroup — its own session)
   - Pytest 9 bump for miLLM (pre-existing test env issues, not blocking)
@@ -150,7 +150,7 @@ k8s_deploy                      # Pull + restart + verify
 | Namespace | mistudio |
 | Domain | k8s-mistudio.hitsai.local |
 | GPU | NVIDIA RTX 3090 (24GB) |
-| Manifest | k8s/mistudio-deployment.yaml |
+| Manifest | k8s/base/ (kustomize — what ArgoCD deploys) |
 
 ### Service Status Check
 ```bashPlease
