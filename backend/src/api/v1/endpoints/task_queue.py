@@ -23,6 +23,21 @@ from ....schemas.task_queue import (
 
 logger = logging.getLogger(__name__)
 
+#: The `(task_type, entity_type)` pairs `retry_task` can actually dispatch.
+#:
+#: MIS-E2E-098. This exists so the endpoint can refuse BEFORE
+#: `increment_retry_count` wipes the row's failure evidence and commits. Kept
+#: in step with the if/elif chain by
+#: `test_retry_does_not_destroy_evidence.py::test_every_dispatch_branch_is_listed`,
+#: which reads the branches out of the AST — a hand-list that can drift from the
+#: code it guards is worth very little.
+RETRYABLE_TASK_TYPES: frozenset[tuple[str, str]] = frozenset({
+    ("download", "model"),
+    ("download", "dataset"),
+    ("tokenization", "dataset"),
+})
+
+
 router = APIRouter()
 
 
@@ -847,6 +862,33 @@ async def retry_task(
 
     # Fetch HF token from encrypted app_settings — never stored in retry_params
     hf_token = await AppSettingService.get_decrypted_value(db, "hf_token")
+
+    # RESOLVE THE BRANCH BEFORE TOUCHING THE ROW (MIS-E2E-098).
+    #
+    # `increment_retry_count` is not a counter increment. It sets
+    # status="queued", error_message=None, progress=0.0, completed_at=None,
+    # started_at=None — and then COMMITS. It used to run before the dispatch
+    # chain below.
+    #
+    # So for any `(task_type, entity_type)` pair with no branch, the row was
+    # committed as queued with its error message DESTROYED, nothing was
+    # dispatched, and the caller got a 400. That row is then permanently
+    # stranded: it no longer appears under /failed because its status is not
+    # failed, nothing will ever process it because nothing was queued, and
+    # pressing Retry again just repeats the sequence. The one artifact saying
+    # WHY the job failed is gone on the first click, irrecoverably — and that
+    # click also returned an error, so the user has no reason to think anything
+    # was written at all.
+    #
+    # Refusing first costs nothing and leaves the row exactly as it was.
+    if (task.task_type, task.entity_type) not in RETRYABLE_TASK_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported task type '{task.task_type}' for entity type "
+                f"'{task.entity_type}'"
+            ),
+        )
 
     # Increment retry count
     await TaskQueueService.increment_retry_count(db, task_queue_id)

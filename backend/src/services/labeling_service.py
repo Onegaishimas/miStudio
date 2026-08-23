@@ -607,8 +607,25 @@ class LabelingService:
         notice, which works regardless of pool type.
         """
         try:
+            # `populate_existing()`, OR THIS CHECK CANNOT WORK (MIS-E2E-057).
+            #
+            # The session is configured `expire_on_commit=False`, so a plain
+            # re-query returns the IDENTITY-MAPPED object already loaded in this
+            # session — not fresh database state. The cancel is written by the
+            # API on a different connection, so this loop could never see it.
+            #
+            # The user presses Cancel, the API writes CANCELLED, the job labels
+            # every remaining feature and then writes COMPLETED *over* the
+            # cancel. That is the exact production symptom the cancel feature
+            # was built to fix.
+            #
+            # Why no test caught it: the existing fake `_Session` returns a
+            # fresh row on every call. It has no identity map, so the fixture
+            # cannot exhibit the behaviour under test — fixtures agreeing by
+            # construction.
             row = (
                 self.db.query(LabelingJob)
+                .populate_existing()
                 .filter(LabelingJob.id == labeling_job_id)
                 .first()
             )

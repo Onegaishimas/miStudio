@@ -34,24 +34,65 @@ from src.services.labeling_service import LabelingService
 
 
 class _Query:
-    def __init__(self, row):
-        self._row = row
+    """A query that models SQLAlchemy's IDENTITY MAP (MIS-E2E-057).
+
+    The previous fake returned a fresh row on every `first()`, so it could not
+    exhibit the behaviour under test: the real session is configured
+    `expire_on_commit=False`, and a plain re-query hands back the object already
+    loaded rather than fresh database state. A cancel written by the API on
+    another connection was therefore invisible to the running job, which then
+    wrote COMPLETED over it.
+
+    This fake now behaves the same way — `first()` returns the CACHED row unless
+    `populate_existing()` was called — so the test can fail when the fix is
+    removed. That it could not before is why the defect shipped.
+    """
+
+    def __init__(self, session, model):
+        self._session = session
+        self._model = model
+        self._populate = False
+
+    def populate_existing(self):
+        self._populate = True
+        return self
 
     def filter(self, *a):
         return self
 
     def first(self):
-        return self._row
+        if self._populate:
+            # Refresh from "the database", i.e. whatever another connection
+            # has since written.
+            self._session.cached = self._session.db_row
+            self._session.refreshes += 1
+        return self._session.cached
 
 
 class _Session:
     def __init__(self, row):
-        self.row = row
+        # `cached` is what the identity map holds; `db_row` is the real state.
+        # They start identical and diverge when something else writes.
+        self.cached = row
+        self.db_row = row
         self.queries = 0
+        self.refreshes = 0
+
+    # Kept for tests that read or SET the loaded row. A setter writes through
+    # to both, because a test assigning `session.row = None` means "the row is
+    # gone", not "the cache is stale".
+    @property
+    def row(self):
+        return self.cached
+
+    @row.setter
+    def row(self, value):
+        self.cached = value
+        self.db_row = value
 
     def query(self, model):
         self.queries += 1
-        return _Query(self.row)
+        return _Query(self, model)
 
 
 def _service(status):
@@ -160,4 +201,49 @@ class TestLoopsAreInstrumented:
         assert loops > 0, "loop pattern changed; update this test"
         assert checks >= loops, (
             f"{loops} labeling batch loop(s) but only {checks} cancellation check(s)"
+        )
+
+
+class TestTheFixtureCanActuallyExhibitTheDefect:
+    """MIS-E2E-057's second half: the fixture, not just the code.
+
+    The finding's sharpest point was not the missing `populate_existing()` — it
+    was that the test's fake session had no identity map, so it could not have
+    caught the bug in either direction. These tests hold the FAKE to the
+    behaviour it is standing in for.
+    """
+
+    def test_a_stale_identity_map_hides_an_external_write(self):
+        """Without `populate_existing`, a cancel written elsewhere is invisible.
+
+        This is the production symptom, reproduced against the fake.
+        """
+        svc, row = _service(LabelingStatus.LABELING.value)
+        # Another connection cancels the job.
+        svc.db.db_row = SimpleNamespace(
+            id="job_1", status=LabelingStatus.CANCELLED.value
+        )
+
+        # A plain query still sees the cached row...
+        assert svc.db.query(None).filter().first().status == (
+            LabelingStatus.LABELING.value
+        )
+        # ...and only a refreshing one sees the truth.
+        assert svc.db.query(None).populate_existing().filter().first().status == (
+            LabelingStatus.CANCELLED.value
+        )
+
+    def test_the_cancel_check_observes_an_external_write(self):
+        """End to end: the loop must notice a cancel it did not write."""
+        svc, _ = _service(LabelingStatus.LABELING.value)
+        svc.db.db_row = SimpleNamespace(
+            id="job_1", status=LabelingStatus.CANCELLED.value
+        )
+
+        with pytest.raises(LabelingService._LabelingCancelled):
+            svc._raise_if_cancelled("job_1")
+
+        assert svc.db.refreshes == 1, (
+            "the check did not refresh, so it read the identity map and could "
+            "never have seen the cancel"
         )

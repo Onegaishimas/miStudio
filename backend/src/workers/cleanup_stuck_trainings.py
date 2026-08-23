@@ -56,15 +56,22 @@ def cleanup_stuck_trainings_task(self):
                 task_is_running = False
 
                 if training.celery_task_id:
-                    from src.core.celery_app import get_task_status
-                    task_status = get_task_status(training.celery_task_id)
+                    # MIS-E2E-092: `state in (PENDING, STARTED, RETRY)` can never be
+                    # false for a row with a task id — Celery reports PENDING for any
+                    # id it holds no result for, so a dead worker looks identical to a
+                    # queued one. `task_looks_alive` is the rule
+                    # `cleanup_stuck_circuit_runs` already proved, extracted.
+                    from src.workers.task_heartbeat import task_looks_alive
 
-                    # Consider task running if in active states
-                    if task_status['state'] in ['PENDING', 'STARTED', 'RETRY']:
-                        task_is_running = True
+                    task_is_running = task_looks_alive(
+                        training.celery_task_id,
+                        training,
+                        started=training.status == TrainingStatus.RUNNING.value,
+                    )
+                    if task_is_running:
                         logger.info(
-                            f"Training {training.id} has active Celery task "
-                            f"{training.celery_task_id} ({task_status['state']}), skipping cleanup"
+                            f"Training {training.id} has an active Celery task "
+                            f"{training.celery_task_id}, skipping cleanup"
                         )
 
                 if not task_is_running:

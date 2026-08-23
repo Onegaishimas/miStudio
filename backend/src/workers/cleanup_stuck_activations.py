@@ -55,14 +55,22 @@ def cleanup_stuck_activations_task(self):
                 task_is_running = False
 
                 if extraction.celery_task_id:
-                    from src.core.celery_app import get_task_status
-                    task_status = get_task_status(extraction.celery_task_id)
 
-                    if task_status['state'] in ['PENDING', 'STARTED', 'RETRY']:
-                        task_is_running = True
+                    # MIS-E2E-092: see task_looks_alive — a dead worker and a
+                    # queued task are both PENDING, so the old state check could
+                    # never be false for a row carrying a task id.
+                    from src.workers.task_heartbeat import task_looks_alive
+
+                    task_is_running = task_looks_alive(
+                        extraction.celery_task_id,
+                        extraction,
+                        started=str(getattr(extraction, "status", "")).lower()
+                        in ("extracting", "running", "processing"),
+                    )
+                    if task_is_running:
                         logger.info(
-                            f"Activation extraction {extraction.id} has active Celery task "
-                            f"{extraction.celery_task_id} ({task_status['state']}), skipping cleanup"
+                            f"Activation extraction {extraction.id} has an active Celery "
+                            f"task {extraction.celery_task_id}, skipping cleanup"
                         )
 
                 if not task_is_running:
