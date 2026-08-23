@@ -71,7 +71,7 @@ A MechInterp environment requires exact versions of PyTorch, Transformers, spaCy
 
 ## Kubernetes
 
-Kubernetes is the recommended deployment method for shared lab environments and multi-user research clusters. The manifest at `k8s/mistudio-deployment.yaml` deploys the full miStudio stack into a dedicated `mistudio` namespace.
+Kubernetes is the recommended deployment method for shared lab environments and multi-user research clusters. The kustomize base at `k8s/base/` deploys the full miStudio stack into a dedicated `mistudio` namespace. (It is also what ArgoCD applies, so a manual `kubectl apply -k` and a GitOps sync converge on the same thing.)
 
 ### Architecture
 
@@ -142,56 +142,46 @@ sudo chown -R 1000:1000 /data/mistudio
 
 The `/data/mistudio/data` directory holds all miStudio working data — downloaded models, datasets, SAE weights, activations, and checkpoints. Size this volume accordingly (500 GB+ recommended for active research).
 
-### Step 2: Configure the Manifest
+### Step 2: Create the Secret and set your hostname
 
-Open `k8s/mistudio-deployment.yaml` and update the following before applying:
+:::danger This section used to describe editing a manifest that no longer exists
+It told you to open `k8s/mistudio-deployment.yaml` and edit `POSTGRES_PASSWORD`
+and `SECRET_KEY` in place. That manifest was a **stale duplicate** of
+`k8s/base` — the live deployment reads those values from a Kubernetes Secret
+via `secretKeyRef`, so editing them there changed nothing that ArgoCD applies.
+The file has since been deleted (MIS-E2E-144, MIS-E2E-152).
+:::
 
-**Node selector** — pin all GPU pods to your GPU node:
-```yaml
-nodeSelector:
-  kubernetes.io/hostname: your-gpu-node-name   # replace mcs-lnxgpu01
+Every per-install value lives in one Secret. See
+[the K8s install guide](/getting-started/install-guide-k8s) for the full walk-through.
+
+```bash
+PG_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+SK=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+
+kubectl create namespace mistudio --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic mistudio-secrets -n mistudio \
+  --from-literal=postgres-password="$PG_PASS" \
+  --from-literal=database-url="postgresql+asyncpg://mistudio:${PG_PASS}@postgres:5432/mistudio" \
+  --from-literal=database-url-sync="postgresql+psycopg2://mistudio:${PG_PASS}@postgres:5432/mistudio" \
+  --from-literal=secret-key="$SK" \
+  --from-literal=mcp-auth-token="$(openssl rand -hex 32)"
 ```
 
-**Domain names** — update the ingress hosts and hostAlias to match your environment:
-```yaml
-# In hostAliases:
-- ip: "192.168.x.x"           # Your GPU node IP
-  hostnames:
-    - "k8s-mistudio.yourdomain.com"
+**Hostnames** live in `k8s/base/ingress.yaml`; edit them to your domain.
 
-# In Ingress rules:
-- host: k8s-mistudio.yourdomain.com
-```
+**GPU node pin** is a commented `nodeSelector` in `k8s/base/backend.yaml` —
+uncomment it only if your cluster needs the pin.
 
-**Secrets** — change all default credentials before deploying to a shared environment:
-```yaml
-# PostgreSQL
-- name: POSTGRES_PASSWORD
-  value: "change-me"           # also update DATABASE_URL and DATABASE_URL_SYNC
-
-# Backend secret key (used for AES-256-GCM encryption of API keys in settings)
-- name: SECRET_KEY
-  value: "change-me-to-a-long-random-string"
-```
-
-**Optional integrations:**
-```yaml
-# Ollama (for local LLM labeling) — comment out if not used
-- name: OLLAMA_URL
-  value: http://ollama-proxy:11434
-
-# Neuronpedia local instance — comment out if not used
-- name: NEURONPEDIA_LOCAL_URL
-  value: http://k8s-neuron.yourdomain.com
-- name: NEURONPEDIA_LOCAL_DB_URL
-  value: postgresql://neuronpedia:password@host/neuronpedia
-```
+**Optional integrations** (Ollama, a local Neuronpedia) are plain env vars in
+`k8s/base/backend.yaml`; comment them out if unused.
 
 ### Step 3: Deploy
 
 ```bash
 # Apply the full manifest
-kubectl apply -f k8s/mistudio-deployment.yaml
+kubectl apply -k k8s/base
 
 # Watch pods come up
 kubectl get pods -n mistudio -w

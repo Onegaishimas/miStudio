@@ -95,7 +95,9 @@ VRAM is the binding constraint — system RAM cannot substitute for it. Model we
 
 miStudio ships with two production deployment paths. Both are covered in detail in the manual, including hardware configuration, first-run setup, and domain/hosts file configuration.
 
-The **Docker Compose** path is the recommended starting point for single-machine deployments. A single `./start-mistudio.sh` command starts all six services in the correct order and handles inter-service networking. The NVIDIA Container Toolkit is the only prerequisite.
+The **Docker Compose** path is the recommended starting point for single-machine deployments. Copy `.env.example` to `.env`, then `docker compose up -d` brings up the stack — Postgres, Redis, nginx, the backend, the Celery workers and the frontend — in the correct order. The NVIDIA Container Toolkit is the only prerequisite.
+
+> This previously pointed at `./start-mistudio.sh`, which **cannot work for a fresh clone**: it hardcodes `PROJECT_ROOT=/home/x-sean/app/miStudio` under `set -e`, runs the backend, Celery and frontend *on the host* from a `backend/venv/` it never creates, and serves a different domain than the one documented beside it. That script is a development convenience for one machine; the Compose path is the one that is verified to work. (MIS-E2E-162)
 
 → [Docker Compose Installation Guide](https://onegaishimas.github.io/miStudio/getting-started/install-guide-compose)
 

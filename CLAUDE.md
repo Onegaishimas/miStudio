@@ -14,7 +14,7 @@ yes
 - **Last Session:** July 17, 2026 — sensing enhancements per /goal: span highlighting (context_parts {before,span,after} via PREFIX decodes — SP-safe; migration 010; <mark> in detail), history dedup (LCP boundary; ANY re-arm clears history; truncation caps at last-reported; never-shrink guard; SENSING_DEDUP_HISTORY), quorum default = ALL sensable members, min_k runtime override (PUT /api/sensing/{id}/config, sensing_overrides stripped on export, panel input + reset, sensable-ceiling validation, millm_sensing_config MCP tool). Review R1: 23 findings/17 fixed (`0xcc/reviews/review_sensing_enhancements_2026-07-17.md`). Suites: backend 1108 / admin-ui 209.
 - **Current Task:** None — **BRD-MIS-CLUSTERS-001 increment CLOSED (2026-07-16)**. Features 012/013/014 implemented, 3× review iterations each (28/28/15 findings), GitOps-deployed, Playwright E2E-verified (profile-titled Blended results + applied-count, budget bar/λ dial, low-cohesion gate, profile save/load/import/export). **013 validation gate PASSED after fitting γ=0** — the 1/G gain boost overdrove ~2× on all test clusters; B = B_dir/max(G,floor)^γ with default γ=0 (IDL-29 step-5 amendment; full data `0xcc/docs/cluster-strength-validation.md`). Review records: `.claude/context/sessions/review_feature01{2,3,4}_*_2026-07-16.md`.
 - **Active Work:** None. Next natural step: follow-on BRD (MILLM import / unified MCP / Open WebUI / HF-marketplace publishing — research ready at `0xcc/docs/hf-marketplace-cluster-definitions-research.md`)
-- **Circuits arc doc chain COMPLETE (2026-07-19):** BRD-MIS-CIRCUITS-001 + BRD-MIS-CIRCUITS-002 (rigor supplement: evidence ladder, statistics, attribution, intervention v2, faithfulness, Tier-2.5 readiness — consumed as ONE unit, 002 wins conflicts; Appendix A is normative math) → PPRD v3.9 (rows 16–19, §3.16–3.19) + PADR v3.0 (IDL-31..36) + four feature chains: 015 MultiSAE_Steering (hazards-v2), 016 Circuit_Discovery v2.0 (capture+stats+granularities+attribution), 017 Circuit_Validation (intervention/ES-vs-null/faithfulness/manifests), 018 Circuit_Portability (ladder/edge-typing/contract/projection — SEQUENCED FIRST: its ladder enum + contract gate the increment; then 016 → 017 → 015-hazards). SUBSTRATE pilot = research track only (BRD-MIS-SUBSTRATE-001.seed.md; no PPRD row). Next: execute 018 Phases 1–2 via 007_process-task-list.md.
+- **Circuits arc doc chain COMPLETE (2026-07-19):** BRD-MIS-CIRCUITS-001 + BRD-MIS-CIRCUITS-002 (rigor supplement: evidence ladder, statistics, attribution, intervention v2, faithfulness, Tier-2.5 readiness — consumed as ONE unit, 002 wins conflicts; Appendix A is normative math) → PPRD v3.9 (rows 16–19, §3.16–3.19) + PADR v3.0 (IDL-31..36) + four feature chains: 015 MultiSAE_Steering (hazards-v2), 016 Circuit_Discovery v2.0 (capture+stats+granularities+attribution), 017 Circuit_Validation (intervention/ES-vs-null/faithfulness/manifests), 018 Circuit_Portability (ladder/edge-typing/contract/projection — SEQUENCED FIRST: its ladder enum + contract gate the increment; then 016 → 017 → 015-hazards). SUBSTRATE pilot = research track only (BRD-MIS-SUBSTRATE-001.seed.md; no PPRD row). Next: execute 018 Phases 1–2 via 008_process-task-list.md.
 - **New BRD (2026-07-15):** BRD-MIS-CLUSTERS-001 — rename Feature Groups→Clusters (UI), verify+trustworthy combined-strength steering, principled budget model (frequency-derived total budget, similarity-weighted allocation, budget-preserving rebalance), cluster authoring (name+narrative+tuned strengths), portable JSON cluster-definition export/import. **miStudio-only this increment**; MILLM import + unified MCP + Open WebUI captured as future_considerations for a follow-on BRD. Locked decisions: two-BRDs split, UI-only rename, sim-weighted allocation, marketplace=vision.
 - **Deferred (separate initiative, awaiting user sign-off):** CI/CD → miLLM-style selective rebuilds + ArgoCD Image Updater (plan at `0xcc/plans/CICD-ArgoCD-ImageUpdater-Migration.md`, open decisions in §5 — NOT started, do not interleave with feature work)
 - **Completed:**
@@ -64,20 +64,24 @@ All implementation MUST match the Mock UI specification exactly.
 ## Application Startup
 
 ### Complete Startup (All Services)
-```bash
-# ONE COMMAND to start everything:
-./start-mistudio.sh
 
-# This starts (in order):
-# 1. Docker services (PostgreSQL, Redis, Nginx)
-# 2. Celery worker
-# 3. Backend (FastAPI on port 8000)
-# 4. Frontend (Vite on port 3000)
-#
-# Access at: http://mistudio.hitsai.local
+```bash
+cp .env.example .env      # first run only
+docker compose up -d
 ```
 
-**IMPORTANT**: Before first run, add domain to /etc/hosts:
+`docker-compose.yml` declares **10** services. Everything runs in containers.
+
+**⚠ `./start-mistudio.sh` is NOT the general startup path (MIS-E2E-162).** It
+hardcodes `PROJECT_ROOT=/home/x-sean/app/miStudio` under `set -e`, so it aborts
+on any other clone; it starts only five containers from `docker-compose.dev.yml`
+and runs the backend, Celery and the frontend **on the host** from a
+`backend/venv/` it never creates; and it serves `dev-mistudio.hitsai.local`, not
+the domain this file used to name beside it — so the `/etc/hosts` line below was
+for a URL the script never served. It is a development convenience for one
+machine. The four other repo shell scripts hardcode the same home directory.
+
+**Before first run**, add the domain to /etc/hosts:
 ```bash
 sudo bash -c 'echo "127.0.0.1  mistudio.hitsai.local" >> /etc/hosts'
 ```
@@ -333,14 +337,22 @@ pgrep -f celery  # Celery worker should be running
    - `[###]_FTASKS|[feature-name].md` → `0xcc/tasks/` (Task List)
 
 ### Instruction Documents Reference
-- `0xcc/instruct/001_create-project-prd.md` - Creates project vision and feature breakdown
-- `0xcc/instruct/002_create-adr.md` - Establishes tech stack and standards
-- `0xcc/instruct/003_create-feature-prd.md` - Details individual feature requirements
-- `0xcc/instruct/004_create-tdd.md` - Creates technical architecture and design
-- `0xcc/instruct/005_create-tid.md` - Provides implementation guidance and coding hints
-- `0xcc/instruct/006_generate-tasks.md` - Generates actionable development tasks
-- `0xcc/instruct/007_process-task-list.md` - Guides task execution and progress tracking
-- `0xcc/instruct/008_housekeeping.md` - Session management and context preservation
+> **These were all off by one (MIS-E2E-155).** `001_generate-brd.md` was added at
+> the front of the sequence and this list was never renumbered, so every entry
+> named a real file that performs a DIFFERENT action — `007` was described as
+> "process task list" while `007_generate-tasks.md` generates them, and
+> `008_housekeeping.md` does not exist at all. Following any of these by number
+> ran the wrong step. Verified against `ls 0xcc/instruct/`.
+
+- `0xcc/instruct/000_README.md` - How the document chain fits together
+- `0xcc/instruct/001_generate-brd.md` - Frames an increment as business requirements
+- `0xcc/instruct/002_create-project-prd.md` - Creates project vision and feature breakdown
+- `0xcc/instruct/003_create-adr.md` - Establishes tech stack and standards
+- `0xcc/instruct/004_create-feature-prd.md` - Details individual feature requirements
+- `0xcc/instruct/005_create-tdd.md` - Creates technical architecture and design
+- `0xcc/instruct/006_create-tid.md` - Provides implementation guidance and coding hints
+- `0xcc/instruct/007_generate-tasks.md` - Generates actionable development tasks
+- `0xcc/instruct/008_process-task-list.md` - Guides task execution and progress tracking
 
 ## Document Inventory
 
@@ -375,7 +387,7 @@ pgrep -f celery  # Celery worker should be running
 ### Feature 020 (= files 019_*) — Circuit Strength Calibration (doc chain COMPLETE, impl PLANNED 2026-07-21)
 - ✅ 019_FPRD/FTDD/FTID/FTASKS|Circuit_Calibration — **files are `019_*`, product feature is PPRD row 20** (the +1 offset above; not an error). The arc's next step. Grounded in the served-circuit finding: placeholder strengths shipped fluent-but-FALSE at "usable" 1.40; usable band was ~0.4–0.6 effective.
 - ✅ PPRD v3.10 (row 20, §3.20) · ✅ PADR v3.1 (IDL-37: two-detector usable-band search — onset by output-drift, correctness cliff by LLM judge on generated NEUTRAL-topic falsifiable probes; adaptive bisection; additive nullable `calibration` block clamps intensity_range to [onset,cliff]; badge not gate; provisional cross-plane)
-- Next: execute 019 Phase 1 (schema/contract) via 007_process-task-list.md. Contract crosses to miLLM (additive nullable) — schema-sync + vendored-identity guards are acceptance-blocking.
+- Next: execute 019 Phase 1 (schema/contract) via 008_process-task-list.md. Contract crosses to miLLM (additive nullable) — schema-sync + vendored-identity guards are acceptance-blocking.
 
 ### Steered Transcript Recorder — BRD-MIS-RECORDER-001 (✅ CLOSED 2026-07-22)
 - ✅ 0xcc/prds/BRD-MIS-RECORDER-001.md · ✅ PADR IDL-38 (v3.2 → corrected: whole-layer resid_post hook target, not "residual"). No FPRD/FTASKS — BRD-driven increment.
@@ -724,7 +736,7 @@ The application uses a consistent WebSocket-first approach for all real-time upd
   - Created comprehensive Project PRD (000_PPRD|miStudio.md) based on Mock UI specification
   - Updated CLAUDE.md with project name, status, and UI reference priority
   - Established Mock UI as PRIMARY reference for all implementation
-- **Next:** Create Architecture Decision Record using 0xcc/instruct/002_create-adr.md
+- **Next:** Create Architecture Decision Record using 0xcc/instruct/003_create-adr.md
 - **Files Created:**
   - 0xcc/prds/000_PPRD|miStudio.md (14,000+ lines)
   - Updated CLAUDE.md with project context
@@ -1028,7 +1040,7 @@ project-root/
 - **PRIMARY UI REFERENCE:** 0xcc/project-specs/reference-implementation/Mock-embedded-interp-ui.tsx
 - **Tech Specification:** 0xcc/project-specs/core/miStudio_Specification.md
 - **Tech Standards:** 0xcc/adrs/000_PADR|miStudio.md
-- **Housekeeping Guide:** 0xcc/instruct/008_housekeeping.md
+- **Housekeeping Guide:** (removed — there is no 008_housekeeping.md; see 000_README.md)
 
 ---
 

@@ -223,40 +223,74 @@ Ask the user:
 
 Clone the repository (run from the machine with kubectl access):
 ```bash
-git clone https://github.com/Onegaishimas/miStudio.git
-cd miStudio
-cp k8s/mistudio-deployment.yaml k8s/mistudio-deployment.local.yaml
+# Nothing to copy or sed. The deployment is a kustomize base you apply
+# directly; the values that differ per cluster live in a Secret and (if you
+# need it) a nodeSelector.
 ```
 
-Work with `mistudio-deployment.local.yaml` for all edits — this keeps the checked-in manifest untouched. Apply the following substitutions:
+:::danger These steps used to be four `sed` substitutions — none of which matched
+This guide previously told you to copy `k8s/mistudio-deployment.yaml` and run four
+`sed -i` commands against it. **None of the four target strings existed in the
+shipped manifest** — it had been refactored to `secretKeyRef` against a
+`mistudio-secrets` Secret, and `nodeSelector` was commented out.
 
-**Node selector:**
+`sed` exits 0 on zero matches, so every step appeared to succeed. You would
+believe you had set a strong `SECRET_KEY` — the key protecting your stored API
+keys — and a database password, having set neither.
+
+One was worse than a no-op:
+`sed -i "s/value: mistudio$/value: $POSTGRES_PASSWORD/g"` matched only
+`POSTGRES_DB: mistudio` and `POSTGRES_USER: mistudio`, so it **renamed your
+database and your database user to the password string** and still set no
+password.
+
+Recorded as MIS-E2E-152. That manifest has since been deleted outright
+(MIS-E2E-144) — it was a stale duplicate of `k8s/base`.
+:::
+
+### 1. Create the Secret
+
+Every value that differs per install lives here. `k8s/mistudio-secrets.yaml.example`
+documents the same thing:
+
 ```bash
-sed -i "s/mcs-lnxgpu01/$GPU_NODE/g" k8s/mistudio-deployment.local.yaml
+PG_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+SK=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+MCP_TOKEN=$(openssl rand -hex 32)
+
+kubectl create namespace mistudio --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic mistudio-secrets -n mistudio \
+  --from-literal=postgres-password="$PG_PASS" \
+  --from-literal=database-url="postgresql+asyncpg://mistudio:${PG_PASS}@postgres:5432/mistudio" \
+  --from-literal=database-url-sync="postgresql+psycopg2://mistudio:${PG_PASS}@postgres:5432/mistudio" \
+  --from-literal=secret-key="$SK" \
+  --from-literal=mcp-auth-token="$MCP_TOKEN"
 ```
 
-**Host IP and domain:**
+**Verify it exists before deploying** — unlike `sed`, this one tells you if it
+did not work:
+
 ```bash
-sed -i "s/192\.168\.244\.61/$GPU_NODE_IP/g" k8s/mistudio-deployment.local.yaml
-sed -i "s/k8s-mistudio\.hitsai\.local/$DOMAIN/g" k8s/mistudio-deployment.local.yaml
-sed -i "s/k8s-mistudio\.hitsai\.net/$DOMAIN/g" k8s/mistudio-deployment.local.yaml
+kubectl get secret mistudio-secrets -n mistudio \
+  -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2
+# expect: postgres-password, database-url, database-url-sync, secret-key, mcp-auth-token
 ```
 
-**PostgreSQL password** (update both `POSTGRES_PASSWORD` value and all `DATABASE_URL` / `DATABASE_URL_SYNC` values):
+### 2. Pin to your GPU node (optional)
+
+`k8s/base/backend.yaml` carries a commented `nodeSelector`. Uncomment it and set
+your node's hostname only if your cluster needs the pin; default scheduling is
+fine otherwise.
+
 ```bash
-sed -i "s/value: mistudio$/value: $POSTGRES_PASSWORD/g" k8s/mistudio-deployment.local.yaml
-sed -i "s|mistudio:mistudio@postgres|mistudio:$POSTGRES_PASSWORD@postgres|g" k8s/mistudio-deployment.local.yaml
+kubectl get nodes -o custom-columns=NAME:.metadata.name,GPU:.status.capacity.'nvidia\.com/gpu'
 ```
 
-**SECRET_KEY:**
-```bash
-sed -i "s/mistudio-secret-key-change-in-production/$SECRET_KEY/g" k8s/mistudio-deployment.local.yaml
-```
+### 3. Set your hostname
 
-Verify the substitutions look correct before applying:
-```bash
-grep -E "hostname|SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL|host:" k8s/mistudio-deployment.local.yaml
-```
+The ingress in `k8s/base/ingress.yaml` lists the hostnames it answers on. Edit
+them to your domain, or add yours alongside.
 
 ---
 

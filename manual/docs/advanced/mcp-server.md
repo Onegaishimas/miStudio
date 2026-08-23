@@ -24,7 +24,7 @@ echo "MCP_AUTH_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose --profile mcp up -d
 ```
 
-**Kubernetes:** add `mcp-auth-token` to the `mistudio-secrets` Secret and apply the `mistudio-mcp` Deployment/Service/Ingress included in `k8s/mistudio-deployment.yaml`. The shipped Ingress (streaming-friendly nginx annotations: `proxy-buffering off`, 3600s read timeout) serves three routes:
+**Kubernetes:** add `mcp-auth-token` to the `mistudio-secrets` Secret and apply the `mistudio-mcp` Deployment/Service/Ingress in `k8s/base/mcp.yaml`. The shipped Ingress (streaming-friendly nginx annotations: `proxy-buffering off`, 3600s read timeout) serves three routes:
 
 - `http://mcp-mistudio.hitsai.local/mcp` and `http://mcp-mistudio.hitsai.net/mcp` — dedicated MCP hosts with full path space (`/health` works too). These resolve **only where you make them resolve** (hosts file or local DNS pointing at the ingress IP); the `.net` name is not published in public DNS unless you do so yourself.
 - `http://k8s-mistudio.hitsai.local/mcp` — path route on the shared miStudio host, kept for compatibility.
