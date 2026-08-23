@@ -42,7 +42,17 @@ class LayerProfile:
     autocorrelation: Optional[float] = None
     autocorrelation_null: Optional[float] = None
     effective_dimensionality: Optional[float] = None
+    #: STRUCTURALLY ABSENT in the J-lens band pipeline, and correctly so.
+    #: `occupancy` measures how much of a SPARSITY BUDGET a decomposition uses,
+    #: and this pipeline has no budget — it reads residuals through a Jacobian,
+    #: it does not decompose them under a k. `None` here is the dataclass's own
+    #: convention for "not computable", not a gap (MIS-E2E-088 re-check: the
+    #: finding listed it alongside `excess_fve`, but its remaining references
+    #: are docstrings, not dead calls).
     occupancy: Optional[float] = None
+    #: Populated since MIS-E2E-088. This WAS always None because nothing called
+    #: `excess_fve`, so the random-direction control `control_seed` exists to
+    #: make reproducible never ran.
     excess_fve: Optional[float] = None
     # Described, never scored (BR-004).
     next_token_agreement: Optional[float] = None
@@ -130,7 +140,34 @@ def fraction_variance_explained(
             f"directions {directions.shape[1]}"
         )
     x = activations.to(torch.float64)
-    basis = torch.linalg.qr(directions.to(torch.float64).T).Q
+    d = directions.to(torch.float64).T          # [d_model, k]
+
+    # RANK, NOT COLUMN COUNT (MIS-E2E-088).
+    #
+    # `torch.linalg.qr(...).Q` returns as many orthonormal columns as the input
+    # has, PADDING with arbitrary directions when the input is rank-deficient.
+    # Those padded directions explain variance the real directions do not, and
+    # the answer comes back as though they had. Reproduced: four DUPLICATE
+    # directions report FVE 0.378 against a true 0.083 — a 4.5x overstatement.
+    #
+    # BR-002 is this product's load-bearing honesty rule: bands render only from
+    # a measured report, never a constant, so that no borrowed boundary is
+    # presented as measured. A report can satisfy that rule perfectly and still
+    # be wrong about its content, which is what this was.
+    #
+    # SVD gives the rank and an orthonormal basis for the actual span in one
+    # step. The tolerance is the standard `max(m, n) * eps * sigma_max`.
+    u, sigma, _ = torch.linalg.svd(d, full_matrices=False)
+    if sigma.numel() == 0:
+        return 0.0
+    tol = max(d.shape) * torch.finfo(torch.float64).eps * float(sigma[0])
+    rank = int((sigma > tol).sum())
+    if rank == 0:
+        # Degenerate directions span nothing, so they explain nothing. Zero is
+        # the correct answer; padding would have invented a subspace.
+        return 0.0
+    basis = u[:, :rank]
+
     projected = x @ basis @ basis.T
     total = float((x**2).sum())
     if total <= 0:
@@ -233,12 +270,32 @@ def derive_boundaries(profiles: Sequence[LayerProfile]) -> Optional[Dict[str, in
     if not torch.isfinite(values).all() or float(values.max()) <= median:
         return None
 
-    above = [i for i, v in enumerate(values.tolist()) if v > median]
-    if not above:
+    # SUSTAINED, as the docstring has always claimed (MIS-E2E-088).
+    #
+    # This took `above[0]` — the FIRST layer over the median — so a single noisy
+    # layer set `workspace_start`, including at layer 0, which yields an EMPTY
+    # sensory band. "First sustained rise" was documented and first-crossing was
+    # implemented.
+    #
+    # Two consecutive layers is the minimum that can distinguish a rise from a
+    # spike, and the bar is kept there deliberately: a longer run would start
+    # discarding genuinely narrow workspaces on small models, and BR-002's
+    # answer to "cannot tell" is None, not a guess.
+    run = [i for i, v in enumerate(values.tolist()) if v > median]
+    above_set = set(run)
+    sustained = [i for i in run if (i + 1) in above_set or (i - 1) in above_set]
+    if not sustained:
+        # Every crossing is an isolated spike: no rise to locate.
         return None
 
-    workspace_index = above[0]
-    peak_index = int(torch.argmax(values))
+    workspace_index = sustained[0]
+    # THE SAME DEFECT ON THE OTHER BOUNDARY. `peak_index` was a raw argmax over
+    # every layer, so an isolated late spike could set `motor_start` exactly as
+    # an isolated early one could set `workspace_start`. The docstring says
+    # "final SUSTAINED rise" for both. Restricting the argmax to the sustained
+    # set is what makes the two boundaries obey the same rule — found by the
+    # fixture for the workspace test, not by the finding.
+    peak_index = max(sustained, key=lambda i: float(values[i]))
     # The motor band starts at the last sustained rise, which is at or after the
     # peak. If the peak IS the first rise there is no three-way split to make.
     if peak_index <= workspace_index:

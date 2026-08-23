@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import torch
 
 from ..ml.jlens_metrics import (
+    excess_fve,
     LayerProfile,
     cross_layer_cka,
     effective_dimensionality,
@@ -155,6 +156,24 @@ def compute_band_report(
                 # dressed as a measurement.
                 effective_dimensionality=(
                     effective_dimensionality(jacobians[layer])
+                    if jacobians and layer in jacobians
+                    else None
+                ),
+                # MIS-E2E-088: WIRED. `excess_fve` had no production caller, so
+                # the random-direction control that `control_seed` exists to
+                # make reproducible never ran — and the field was always None
+                # while the schema documented the control as part of the report.
+                #
+                # Both inputs were already collected here: `stacked` is this
+                # layer's residuals and `jacobians[layer]` its directions.
+                # Nothing needed plumbing; the call was simply absent.
+                #
+                # The raw FVE is deliberately NOT published. Its own docstring
+                # says why: any k directions explain some variance and k random
+                # ones explain a surprising amount, so the figure means nothing
+                # until it is stated as an excess over that control.
+                excess_fve=(
+                    excess_fve(stacked, jacobians[layer], control_seed=control_seed)
                     if jacobians and layer in jacobians
                     else None
                 ),

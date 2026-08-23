@@ -534,8 +534,8 @@ def test_layer_scales_round_trip_through_the_written_config(tmp_path):
         prompts_seen = 100
         converged = False
         convergence_delta = 1e-3
-        residual_mean = {24: 0.01, 25: 0.02}
-        residual_max = {24: 0.03, 25: 0.04}
+        position_spread_mean = {24: 0.01, 25: 0.02}
+        position_spread_max = {24: 0.03, 25: 0.04}
 
     class _Loaded:
         name = "org/model"
