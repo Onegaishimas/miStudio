@@ -8,7 +8,7 @@ Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
 **Count:** 166
 
-> ### ⚠ ACT NOW — MIS-E2E-143
+> ### ⚠ MIS-E2E-143 — mechanism FIXED 2026-08-23; **credential rotation still outstanding**
 > An SSH password for the GPU node, five database dumps, and this audit's own
 > findings register are **published in a public GitHub repository**. The
 > `sync-to-clean` filter removes them from the tip commit and force-pushes the
@@ -2579,6 +2579,37 @@ audit's strict record-only rule, made deliberately and noted in the round record
   4. Review the dumps for credential and prompt content; rotate anything they hold.
   5. Add a CI check that greps the *published* tree's history for the exclusion list and fails the sync.
 - **Effort:** M (S for steps 1–2, which stop the bleeding)
+- **FIXED 2026-08-23 (mechanism), user action outstanding (rotation):**
+  - `sync-to-clean.yml` now builds an **orphan commit** (`git checkout --orphan`) and
+    pushes that. The published repo contains exactly one commit and no parents, so
+    there is no history to leak — excluded **by construction**, not by policy. Checkout
+    is `fetch-depth: 1`: a snapshot needs no history, and fetching one is what made the
+    old failure possible.
+  - **A second leak path was found and closed during the fix.** The first draft kept the
+    old tag-forwarding step. `git push <remote> <source-tag>` pushes the objects needed
+    to complete the tag — the source commit **and all its ancestors** — which would have
+    reintroduced the entire history through the tag. Proved locally: pushing a source tag
+    to a single-commit mirror took it from 1 commit to 2, the second being the commit the
+    snapshot had just dropped. Tags now point at the **orphan** (`git tag -f "$TAG" HEAD`).
+  - A **Verify** step clones the published mirror and asserts (a) exactly one commit and
+    (b) no excluded path in **any** commit — `git log --all -- <path>`, which finds a path
+    in any tree, reachable or not. It also asserts `docs/schemas` and `docs/mcp-contract.md`
+    **are** present, since mirror tests and external consumers depend on them.
+  - **The gate was tested against a violation before being trusted.** A mirror was built
+    the old way (full history + filter commit) and the same gate run against it: it failed,
+    naming `0xcc`, `CLAUDE.md` and `scripts`. A guard never seen to fail is not a guard —
+    four source-scrape guards in this audit failed open.
+  - `scripts/k8s-helpers.sh` no longer contains a credential: key-based auth
+    (`ssh -o BatchMode=yes`), host and user from the environment, and
+    `StrictHostKeyChecking=no` removed — it accepted any host key, so the connection was
+    unauthenticated in both directions. Sibling sweep found no other committed credential
+    and no other `sshpass` user.
+  - **STILL REQUIRED — user action:** rotate the GPU node's SSH password. Per the locked
+    decision the already-published objects are being left in place, so **rotation is the
+    only mitigation** for that half. The published literal is `pass`.
+  - **Accepted residual risk:** the previously-published objects remain retrievable by SHA
+    (GitHub serves unreachable commits). That includes the 135-finding snapshot of this
+    register. Future syncs publish none of it.
 
 ---
 
