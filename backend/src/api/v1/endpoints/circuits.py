@@ -200,6 +200,17 @@ async def import_circuit(payload: Dict[str, Any], request: Request,
             "budget": defn.budget.model_dump(mode="json") if defn.budget else None,
             "faithfulness": (defn.faithfulness.model_dump(mode="json")
                              if defn.faithfulness else None),
+            # MIS-E2E-037: this key was simply absent. CircuitService.create
+            # reads data.get("calibration") and the column has existed all
+            # along, so an imported circuit silently lost its whole calibrated
+            # band — onset, sweet_spot, cliff, probe_set, and the `provisional`
+            # honesty marker — while budget.intensity_range kept the clamped
+            # numbers those measurements produced. IDL-37 clause 5 exists so the
+            # probe set TRAVELS for a cheap serve-time re-verify; dropping it
+            # defeats the decision on the way in while the export honours it on
+            # the way out.
+            "calibration": (defn.calibration.model_dump(mode="json")
+                            if defn.calibration else None),
             "discovery": (defn.discovery.model_dump(mode="json")
                           if defn.discovery else None),
         })

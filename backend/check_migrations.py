@@ -171,7 +171,22 @@ async def main():
                 print(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col} {pg_type};")
     else:
         print("\n" + "=" * 80)
-        print("✅ No migration gaps found! All models match the database schema.")
+        # NARROWED CLAIM (MIS-E2E-048). This compares COLUMN NAMES only — it
+        # reads information_schema.columns against table.columns and diffs the
+        # name sets. It does not look at pg_constraint, so it says nothing about
+        # foreign keys, unique constraints or indexes.
+        #
+        # It previously printed "All models match the database schema", and did
+        # so on a database with five proven constraint divergences: three
+        # foreign keys declared on models and absent from the DB, and two unique
+        # constraints present in the DB and absent from the models. A claim
+        # broader than the check is worse than no check, because it stops the
+        # next person looking.
+        #
+        # Constraints are covered by tests/unit/test_orm_matches_migrated_schema.py.
+        print("✅ No COLUMN gaps found — every model column exists in the database.")
+        print("   Scope: column names only. Constraints, indexes and types are NOT")
+        print("   checked here — see tests/unit/test_orm_matches_migrated_schema.py.")
         print("=" * 80)
 
 

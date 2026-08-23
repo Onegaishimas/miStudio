@@ -13,8 +13,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
-# Required tables and their critical columns
-# Format: {table_name: [required_columns]}
+# DERIVED FROM THE ORM, NOT HAND-MAINTAINED.
+#
+# This used to be a literal dict of 17 tables. The ORM declares 36, so every
+# table added in the last year — circuits, validation_manifests,
+# cluster_profiles, steering_record_runs, agent_approval_requests,
+# dismissed_operations — went unchecked, and the validator logged
+# "Schema validation passed" on a database missing all of them (MIS-E2E-032).
+# The anti-drift tool was itself drifting, and by exactly the mechanism it
+# existed to detect.
+#
+# PADR IDL-16 claims this validator "compares live DB schema against SQLAlchemy
+# model metadata". It now does.
+def _required_tables() -> dict:
+    """Every mapped table, with its non-nullable columns as the required set.
+
+    Non-nullable is the right bar: a nullable column can legitimately be absent
+    from an older database mid-migration, but a NOT NULL column that is missing
+    means an INSERT will fail at runtime.
+    """
+    from ..core.database import Base
+    from .. import models  # noqa: F401 — import registers every table
+
+    required = {}
+    for name, table in Base.metadata.tables.items():
+        cols = [c.name for c in table.columns if not c.nullable]
+        required[name] = cols or [c.name for c in table.primary_key]
+    return required
+
+
+# NOT evaluated at import. `schema_validator` is imported early — before every
+# model module has been loaded — so an eager call here saw only 15 of the 36
+# tables, silently reproducing the very gap this change removes. It is resolved
+# at validation time instead, when the registry is complete.
 REQUIRED_TABLES = {
     # Core tables
     "models": ["id", "name", "status", "created_at"],
@@ -107,7 +138,7 @@ async def validate_schema(
         SchemaValidationError: If validation fails and raise_on_error is True
     """
     if required_tables is None:
-        required_tables = REQUIRED_TABLES
+        required_tables = _required_tables()
 
     existing_tables = await get_existing_tables(db)
 
