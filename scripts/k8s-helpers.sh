@@ -2,14 +2,29 @@
 # K8s Helper Functions for miStudio UAT Deployment
 # Source this file: source scripts/k8s-helpers.sh
 
-K8S_HOST="192.168.244.61"
-K8S_USER="sean"
-K8S_PASS="pass"
-K8S_NS="mistudio"
+# Overridable from the environment. Nothing secret lives in this file.
+K8S_HOST="${K8S_HOST:-192.168.244.61}"
+K8S_USER="${K8S_USER:-sean}"
+K8S_NS="${K8S_NS:-mistudio}"
 
-# Base SSH command
+# Base SSH command — KEY-BASED AUTH ONLY.
+#
+# This used to be `sshpass -p "$K8S_PASS"` with the password committed on the
+# line above, and `-o StrictHostKeyChecking=no`. Both are gone:
+#
+#   * The password was published. `sync-to-clean.yml` excluded scripts/ from the
+#     mirror's TIP but force-pushed the full history behind it, so the file was
+#     one `git show HEAD~1:` away in a public repo (MIS-E2E-143). Treat the old
+#     value as compromised — it has been rotated.
+#   * A path exclusion is the wrong thing to be protecting a credential. It is a
+#     policy, and policies are one workflow edit from lapsing. A key that is
+#     never in the repo cannot leak from the repo.
+#   * StrictHostKeyChecking=no accepted any host key, so the connection this
+#     function makes was unauthenticated in BOTH directions.
+#
+# Setup (once): ssh-copy-id ${K8S_USER}@${K8S_HOST}
 k8s() {
-  ~/.local/bin/sshpass -p "$K8S_PASS" ssh -o StrictHostKeyChecking=no ${K8S_USER}@${K8S_HOST} "$1"
+  ssh -o BatchMode=yes "${K8S_USER}@${K8S_HOST}" "$1"
 }
 
 # Check DockerHub for new image timestamps

@@ -1,6 +1,9 @@
 # miStudio End-to-End Assessment — E2E-2026-08
 
-**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ closed · P09 next
+**Started:** 2026-08-23 · **Status:** ✅ COMPLETE — P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ · P10 ✅ · P11 ✅ · **P12 ✅ — ALL PHASES CLOSED**
+
+> **⚠ MIS-E2E-143 — ACT NOW.** An SSH password, five database dumps and this
+> register itself are published in a **public** GitHub repository. See FINDINGS.md.
 
 An end-to-end assessment of the whole application — frontend, backend, MCP server,
 infrastructure, and the `0xcc` document chain — in **12 subsystem phases × 3 rounds
@@ -58,16 +61,71 @@ Legend: `·` not started · `~` in progress · `✅` closed
 | P07 | Frontend state layer | ✅ | ✅ | ✅ | 8 |
 | P08 | Frontend UI | ✅ | ✅ | ✅ | 4 |
 | — | *Out-of-band: user-reported modal defects (**fixed**)* | ✅ | — | ✅ | 4 |
-| P09 | Realtime (WebSocket) | · | · | · | 0 |
-| P10 | Infra & supply chain | · | · | · | 0 |
-| P11 | Documentation chain | · | · | · | 0 |
-| P12 | Cross-cutting & live journeys | · | · | · | 0 |
+| P09 | Realtime (WebSocket) | ✅ | ✅ | ✅ | 7 |
+| P10 | Infra & supply chain | ✅ | ✅ | ✅ | 6 |
+| P11 | Documentation chain | ✅ | ✅ | ✅ | 16 |
+| P12 | Cross-cutting & live journeys | ✅ | ✅ | ✅ | 2 |
+
+## Synthesis
+
+**166 findings across twelve phases. 13 P0.** 29 mutations run, **14 survived**.
+78 CONFIRMED with reproductions; 1 REFUTED and kept in the register so it is not
+rediscovered.
+
+**The dominant pattern is not missing code — it is a guard that exists and is not on
+the path.** `validate_llm_endpoint_url` has two call sites and neither is the
+credential-bearing one. `resolve_user_path` is correctly built and has one production
+caller, which is not either `rmtree` site. The "never write the bearer token to disk"
+rule is implemented, commented, and applied to the cURL branch but not the Postman
+branch sixty lines below it in the same function. In each case the fix already exists
+in the codebase, ten to sixty lines from where it is missing.
+
+**Five instances of "fixed one representative, never generalized"** were found
+independently, in five different subsystems — the SAE-basis fix, the Postman/cURL
+split, `looks_abandoned` in one janitor of five, `asyncio.to_thread` on one emit call
+of fourteen, and the "Stop saves final checkpoint" correction applied to one manual of
+two.
+
+**Guards whose scope is narrower than their claim** are the third pattern: BR-002 says
+"anywhere" and scans two modules; the MCP harness proves registration for 116 tools
+and behaviour for 16; the queue test proves every queue has a consumer and never that
+a task reaches one.
+
+**What mutation testing bought.** Fifteen kills confirmed genuinely protected
+behaviour. Fourteen survivors were each a correct control with nothing holding it in
+place — including the steering hook target, whose regression means `steered ==
+unsteered at every dial` and which cost a hardware round to find the first time.
+Reading found the defects; only breaking things established that the suite could not
+see them.
+
+**One finding was predicted and then observed.** MIS-E2E-030 was recorded at P01 from
+source: *"once a cache row passes the 7-day expiry… logit lens / correlations /
+ablation 500 permanently for that feature."* The user hit exactly that in production
+mid-audit. It is now fixed and deployed.
+
+## Verification of the audit itself
+
+| Check | Result |
+|---|---|
+| Register ids unique and contiguous | ✅ **166 headings, 166 unique, no duplicates, no gaps** in 001–166 |
+| Tree clean after every mutation | ✅ `git status --porcelain` empty; 29 mutations, all restores confirmed |
+| Suites at baseline | ✅ backend 0 failures; frontend 1211/1211 |
+| Every CONFIRMED finding has a reproduction | ✅ 78 CONFIRMED, each with evidence recorded inline |
+| Live verification ran | ✅ HTTP probes, `pg_constraint` queries, the public GitHub API, the MCP registry |
+
+**One deviation from PLAN.md, stated plainly.** The plan's verification section
+anticipated **108** round records — 12 phases × 3 rounds × 3 commands, one file each.
+There are **18**. P01 and P02 have per-command files; from P03 onward each phase has a
+single consolidated record covering all three rounds and all three commands. The
+coverage is the same and every record names which commands ran and what each found —
+but the file count does not match the criterion the plan set, and the criterion was
+not amended before diverging from it.
 
 ## Findings by severity
 
 | P0 | P1 | P2 | P3 | Total |
 |---:|---:|---:|---:|---:|
-| **11** | 52 | 53 | 19 | **135** |
+| **13** | 62 | 68 | 23 | **166** |
 
 Verdicts so far: **15 CONFIRMED**, 39 pending (most pending belong to phases that
 have not run yet). Severities are provisional until each finding's R3 verification.
@@ -84,6 +142,8 @@ have not run yet). Severities are provisional until each finding's R3 verificati
 | P06 | 2 | 0 | 2 |
 | P07 | 1 | **1** | 0 |
 | P08 | 2 | 0 | 2 |
+| P09 | 2 | **1** | 1 |
+| P10 | 1 | 0 | 1 |
 
 A survival is a **test finding**, not a code finding. Every edit was confirmed to
 land before the suite ran, and `git diff` verified clean after every restore.

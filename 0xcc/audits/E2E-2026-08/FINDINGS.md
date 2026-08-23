@@ -6,8 +6,16 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 135
-**Last id issued:** MIS-E2E-135
+**Count:** 166
+
+> ### ⚠ MIS-E2E-143 — mechanism FIXED 2026-08-23; **credential rotation still outstanding**
+> An SSH password for the GPU node, five database dumps, and this audit's own
+> findings register are **published in a public GitHub repository**. The
+> `sync-to-clean` filter removes them from the tip commit and force-pushes the
+> full unfiltered history, so all of it is readable one commit back. Verified
+> against the live public repo. Rotate the credential and make the mirror
+> private before anything else in this register.
+**Last id issued:** MIS-E2E-166
 
 ---
 
@@ -2402,3 +2410,562 @@ audit's strict record-only rule, made deliberately and noted in the round record
 - **Verification (R3):** CONFIRMED
 - **Proposed remediation:** A single resolver — "give me the training/model behind this feature" — that walks the SAE row, and a sweep of every direct `Feature.training_id` read. MIS-E2E-100 is still open and is the third instance.
 - **Effort:** M
+
+---
+
+## P09 — Realtime (WebSocket end to end)
+
+---
+
+### MIS-E2E-136 — Sync WebSocket emits POST to the API's own event loop and can freeze it
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/workers/websocket_emitter.py:106`; callers `api/v1/endpoints/models.py:630,1031,1133`, `api/v1/endpoints/datasets.py:1279,1289`, `services/extraction_service.py:845`
+- **Claim:** `emit_progress` is **synchronous** and issues an HTTP POST to `/api/internal/ws/emit` — the backend's *own* endpoint. When it is called from inside an `async def` handler, the coroutine blocks the single event loop while waiting for a response that only that same loop can produce. Reproduced by the reviewer with a minimal uvicorn app: `ReadTimeout` after 5.01 s, the event dropped, and the whole API frozen for the duration. `datasets.py` calls it twice in sequence, so ~10 s.
+- **Failure scenario:** Self-deadlock under a single worker. Every other request — including WebSocket emissions and training dispatch — stalls for the timeout, and the progress event that caused it is lost anyway.
+- **The fix exists and was not generalized.** `training_service.py:328` wraps the same call: `await asyncio.to_thread(emit_deletion_progress, …)`, under a comment reading *"Run emit_deletion_progress in thread pool to avoid blocking async loop."* The author understood the hazard at that one site. Counted across the three exposed files: **13 sync `emit_*` calls, zero `to_thread`.**
+- **Evidence:** **verified-by-live-repro** — the reviewer reproduced the deadlock against a minimal uvicorn app; the defended site and the 13 undefended calls counted directly
+- **Doc reference:** PADR IDL-12; the architect persona already records *"In-process HTTP loopback: BackgroundMonitor runs inside FastAPI yet POSTs to its own `/api/internal/ws/emit`"*
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** From async contexts call `ws_manager.emit_event()` **directly** rather than looping back over HTTP — the recorded architectural recommendation. `asyncio.to_thread` is the stopgap the one fixed site already uses.
+- **Effort:** M
+- **Note:** the fourth "fixed one representative, never generalized" instance in this audit (MIS-E2E-064, 072, 092, this).
+
+---
+
+### MIS-E2E-137 — The retry that guarantees delivery catches the wrong exception
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/workers/websocket_emitter.py:128` (`except httpx.TimeoutException`) versus `:138` (`except Exception` → `return False`)
+- **Claim:** The retry loop retries **only** `httpx.TimeoutException`. Verified against the installed httpx:
+  ```
+  ConnectError          is TimeoutException? False
+  RemoteProtocolError   is TimeoutException? False
+  ReadTimeout           is TimeoutException? True
+  ```
+  `ConnectError` and `RemoteProtocolError` fall through to the generic handler, which logs and returns `False` **immediately** — so `retries=3` yields zero retries for them.
+- **Failure scenario:** `RemoteProtocolError` is precisely what a **stale pooled connection** produces after a backend restart — the single scenario the retries exist for. The events configured with `retries=3` are the ones the code treats as must-not-lose: `steering:completed`, `neuronpedia:push_completed`, `enhanced_labeling:completed`. A terminal event silently dropped leaves the UI showing a job in progress forever, which is the failure mode this product has been bitten by repeatedly.
+- **Evidence:** **verified-by-live-repro** — the exception hierarchy checked against the installed httpx; both handlers read
+- **Doc reference:** PADR IDL-12
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Retry on `httpx.TransportError` (the parent of both timeout and connection failures), keeping the immediate return only for genuine HTTP error statuses.
+- **Effort:** S
+
+---
+
+### MIS-E2E-138 — Duplicate Socket.IO handlers silently disable the acks and strip the exported manager
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/core/websocket.py:281` versus `backend/src/main.py:93-118`
+- **Claim:** Both modules register `@sio.event` handlers for the same events. Verified against live `python-socketio` 5.16.2: a later registration **silently overwrites** the earlier one. `main.py` wins, so `core/websocket.py`'s handlers never run — the `subscribed` / `unsubscribed` acknowledgements never fire, and the `__all__`-exported `ws_manager` singleton is never populated.
+- **Failure scenario:** Any consumer importing `ws_manager` to inspect subscriptions sees a permanently empty registry — including the direct-emit path MIS-E2E-136 recommends. And the client-side ack the frontend's `WebSocketContext` listens for (`'subscribed'`, `'unsubscribed'`) never arrives, so its queueing logic can never confirm a subscription landed.
+- **Evidence:** **verified-by-live-repro** (reviewer confirmed the overwrite behaviour against the installed library)
+- **Doc reference:** PADR IDL-1, IDL-12
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Register once. Given MIS-E2E-105 also needs `subscribe` hardened, do both in the surviving handler.
+- **Effort:** S
+
+---
+
+### MIS-E2E-139 — The system monitor can die silently and permanently
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/services/background_monitor.py:83` (`start`), `:61` (`stop`)
+- **Claim:** A crash during `_monitor_loop` setup leaves `_running = True`. `start()` then refuses to restart ("already running") and **nothing is logged**, so every `system/*` channel — CPU, memory, disk, network, per-GPU — goes permanently silent. Separately, `stop()` catches only `CancelledError`, so a dead loop's exception re-raises out of the FastAPI lifespan shutdown and `_http_client` is never closed.
+- **Failure scenario:** The Monitor page freezes with no error. This is the same shape as the recorded P0 where system-metrics emission 403'd silently — the frontend fallback keys on *connection*, not data freshness, so a live socket delivering nothing looks healthy.
+- **Evidence:** verified-by-live-repro (reviewer mirrored the start/stop logic faithfully and reproduced the state)
+- **Doc reference:** PADR IDL-5; `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Reset `_running` in a `finally`; log the setup failure; broaden `stop()`'s handler.
+- **Effort:** S
+
+---
+
+### MIS-E2E-140 — `subscribe` accepts any type and any quantity of channels
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** security
+- **Location:** `backend/src/core/websocket.py:107`
+- **Claim:** The client-supplied `channel` is neither type-checked nor bounded. A list raises `TypeError: unhashable type`; a non-dict payload raises `AttributeError`. The reviewer created **50,000 channels** from an unauthenticated client in a test.
+- **Failure scenario:** Compounds MIS-E2E-105 (any origin, no auth, any channel name): the same connection can also exhaust the subscription registry or crash the handler with a malformed payload. Recorded as a distinct finding because fixing 105's origin check does not add validation, and vice versa.
+- **Evidence:** **verified-by-live-repro** (reviewer exercised both the type errors and the unbounded growth)
+- **Doc reference:** PADR IDL-1
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Validate the payload shape and the channel against a known pattern; cap subscriptions per connection.
+- **Effort:** S
+
+---
+
+### MIS-E2E-141 — Two emitter defects: a wrong event name and an unlocked, never-closed client
+- **Phase / Round:** P09 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** bug
+- **Location:** `backend/src/workers/websocket_emitter.py:838` (`emit_system_metrics`), `:43` (`_get_http_client`)
+- **Claim:**
+  1. `emit_system_metrics` emits the event name `"metrics"` while every sibling emitter and the whole frontend use `"system:metrics"`. It has no callers today, so it delivers nothing to nobody — **and returns `True`**.
+  2. `_get_http_client()`'s lazy initialisation has no lock (a race under any non-default `CELERY_POOL`) and the client is never closed at shutdown.
+- **Failure scenario:** (1) is a latent trap: the first caller to use it will get a silent no-op with a success return. (2) leaks a connection pool per worker process.
+- **Evidence:** verified-by-live-repro (the name mismatch and the absent lock read directly)
+- **Doc reference:** PADR IDL-12 (WebSocket Emission Standardization) — the IDL this violates
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Rename the event; guard the lazy init and close the client in the lifespan.
+- **Effort:** S
+
+---
+
+## P09 — R2 (mutation controls)
+
+---
+
+### MIS-E2E-142 — Nothing pins which emit failures are retried
+- **Phase / Round:** P09 / R2
+- **Source:** mutation control M26
+- **Severity:** P2
+- **Type:** test-gap
+- **Location:** `backend/src/workers/websocket_emitter.py:128`
+- **Claim:** Changing the retry handler from `except httpx.TimeoutException` to `except httpx.TransportError` — which flips a `ConnectError`/`RemoteProtocolError` from *abandoned immediately* to *retried three times with backoff* — left the suite green. No test asserts which failures are retried, in either direction.
+- **Failure scenario:** The narrow catch of MIS-E2E-137 is therefore not a pinned decision but unobserved behaviour, and a fix to it would be equally unobserved. The events configured `retries=3` are the terminal ones — `steering:completed`, `neuronpedia:push_completed`, `enhanced_labeling:completed` — where a silent drop leaves the UI showing a finished job as still running.
+- **Evidence:** **verified-by-mutation** — M26 landed, suite green, restore confirmed
+- **Doc reference:** PADR IDL-12
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** Two tests: a `ReadTimeout` retries and eventually succeeds; a `RemoteProtocolError` does the same. Fix MIS-E2E-137 and use these as its negative control.
+- **Effort:** S
+- **Method note:** this mutation applied the *fix* rather than breaking the code. Where a finding claims behaviour is wrong, checking that the corrected behaviour is also unobserved tells you whether the fix will stay fixed.
+
+---
+
+## P10 — Infra & supply chain
+
+---
+
+### MIS-E2E-143 — The public mirror publishes everything the filter exists to withhold, including an SSH password
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high; confirmed against the live public repository
+- **Severity:** **P0 — ACT NOW**
+- **Type:** security
+- **Location:** `.github/workflows/sync-to-clean.yml:27-78`; `scripts/k8s-helpers.sh:7`
+- **Claim:** `sync-to-clean.yml` checks out with `fetch-depth: 0`, `rm -rf`s the excluded paths, commits **one filter commit**, and then `git push --force` to `hitsainet/miStudio`. That publishes the **entire unfiltered history** with a single cleanup commit on top. The filter therefore removes the files from the **tip** and from nowhere else — every excluded path is readable one commit back.
+- **Verified against the live public repository** (`hitsainet/miStudio`, `"visibility": "public"`, `"private": false`), comparing the tip against its parent `ef270db`:
+  ```
+  path                                      tip      history
+  scripts/k8s-helpers.sh                    404      PRESENT   ← contains K8S_PASS=
+  backups/mistudio_db_20251218_035811.sql.gz 404     PRESENT   ← database dump
+  CLAUDE.md                                 404      PRESENT
+  0xcc/audits/E2E-2026-08/FINDINGS.md       404      PRESENT   ← this audit
+  scripts/backup-db.sh                      404      PRESENT
+  ```
+- **Failure scenario — three distinct exposures, all live:**
+  1. **`scripts/k8s-helpers.sh:7` hardcodes `K8S_PASS` — the SSH password for the GPU node** (`192.168.244.61`, user `sean`), used with `StrictHostKeyChecking=no`. It is published and world-readable. **This credential must be treated as compromised and rotated.**
+  2. **Five database dumps** (`backups/*.sql.gz`) are published. This supersedes MIS-E2E-008, which recorded them as *"stripped from the public mirror, but in this repo's history"* — they are in the **public** repo's history. Their contents determine whether encrypted API-key envelopes and user prompt text are also exposed.
+  3. **This audit's own `FINDINGS.md` is published**, and it is a complete, indexed inventory of 142 unremediated defects including 11 P0 security holes with reproduction steps. It reached the public repo through the merge that deployed the Feature Detail fixes.
+- **Why the filter looked correct:** it does exactly what its comments say — the exclusion list is right, the intent is right, and `docs/schemas/` and `mcp-contract.md` are correctly preserved. Nothing about reading the workflow reveals the problem, because the defect is not in *what* it removes but in the fact that `--force`-pushing a full history makes removal-at-the-tip meaningless. `docker-images.yml` even documents the mechanism in passing — *"HEAD~1 is the unfiltered source tip"* — as a build-detection nuance, not as a disclosure.
+- **Evidence:** **verified-by-live-repro against the public GitHub API** — repository visibility, tip 404s, and parent-commit presence for five paths
+- **Doc reference:** `.github/workflows/sync-to-clean.yml`; supersedes MIS-E2E-007 and MIS-E2E-008 in severity and scope
+- **Verification (R3):** **CONFIRMED**
+- **Proposed remediation, in order:**
+  1. **Rotate the GPU node's SSH password now**, and move `k8s-helpers.sh` to key-based auth reading from the environment. Assume the current value is known.
+  2. **Make the mirror private** until the history is dealt with — one setting, immediate, reversible.
+  3. **Rewrite the mirror's history**: publish a squashed single commit, or filter with `git filter-repo` before pushing. A force-push of full history can never be filtered by deleting files at the tip.
+  4. Review the dumps for credential and prompt content; rotate anything they hold.
+  5. Add a CI check that greps the *published* tree's history for the exclusion list and fails the sync.
+- **Effort:** M (S for steps 1–2, which stop the bleeding)
+- **FIXED 2026-08-23 (mechanism), user action outstanding (rotation):**
+  - `sync-to-clean.yml` now builds an **orphan commit** (`git checkout --orphan`) and
+    pushes that. The published repo contains exactly one commit and no parents, so
+    there is no history to leak — excluded **by construction**, not by policy. Checkout
+    is `fetch-depth: 1`: a snapshot needs no history, and fetching one is what made the
+    old failure possible.
+  - **A second leak path was found and closed during the fix.** The first draft kept the
+    old tag-forwarding step. `git push <remote> <source-tag>` pushes the objects needed
+    to complete the tag — the source commit **and all its ancestors** — which would have
+    reintroduced the entire history through the tag. Proved locally: pushing a source tag
+    to a single-commit mirror took it from 1 commit to 2, the second being the commit the
+    snapshot had just dropped. Tags now point at the **orphan** (`git tag -f "$TAG" HEAD`).
+  - A **Verify** step clones the published mirror and asserts (a) exactly one commit and
+    (b) no excluded path in **any** commit — `git log --all -- <path>`, which finds a path
+    in any tree, reachable or not. It also asserts `docs/schemas` and `docs/mcp-contract.md`
+    **are** present, since mirror tests and external consumers depend on them.
+  - **The gate was tested against a violation before being trusted.** A mirror was built
+    the old way (full history + filter commit) and the same gate run against it: it failed,
+    naming `0xcc`, `CLAUDE.md` and `scripts`. A guard never seen to fail is not a guard —
+    four source-scrape guards in this audit failed open.
+  - `scripts/k8s-helpers.sh` no longer contains a credential: key-based auth
+    (`ssh -o BatchMode=yes`), host and user from the environment, and
+    `StrictHostKeyChecking=no` removed — it accepted any host key, so the connection was
+    unauthenticated in both directions. Sibling sweep found no other committed credential
+    and no other `sshpass` user.
+  - **STILL REQUIRED — user action:** rotate the GPU node's SSH password. Per the locked
+    decision the already-published objects are being left in place, so **rotation is the
+    only mitigation** for that half. The published literal is `pass`.
+  - **Accepted residual risk:** the previously-published objects remain retrievable by SHA
+    (GitHub serves unreachable commits). That includes the 135-finding snapshot of this
+    register. Future syncs publish none of it.
+
+---
+
+### MIS-E2E-144 — `k8s_deploy` re-applies a stale manifest and reverts two shipped fixes
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `k8s/mistudio-deployment.yaml:220` versus `k8s/base/backend.yaml`; `scripts/k8s-helpers.sh:60`
+- **Claim:** ArgoCD deploys `k8s/base` (via kustomize). The root `k8s/mistudio-deployment.yaml` is a second, **stale** copy: it is missing `celery-worker-cpu`, `CELERY_QUEUES`, `CELERY_WORKER_NAME` and `ENVIRONMENT=production`. `k8s_deploy` — documented as break-glass — re-applies that file, which **reverts the queue-split fix and the SQL-echo incident fix** on a cluster that currently has them. The guard test reads only `k8s/base`, so it cannot see the divergence.
+- **Failure scenario:** The emergency procedure silently undoes two incident fixes, at the moment it is most likely to be used. Compounding: `k8s_deploy` never restarts `mistudio-mcp`, which runs the same backend image, so new MCP tools stay invisible after a break-glass deploy.
+- **Evidence:** verified-by-live-repro (both manifests diffed; the guard's path scope read)
+- **Doc reference:** `CLAUDE.md` K8s Helper Commands; memory `mistudio-gitops-cicd`
+- **Verification (R3):** pending
+- **Proposed remediation:** Delete the root manifest and have `k8s_deploy` apply `k8s/base` via kustomize, so there is one source of truth. Extend the guard to fail if a second manifest defines the same Deployments.
+- **Effort:** S
+
+---
+
+### MIS-E2E-145 — Postgres and Redis run as RollingUpdate Deployments over hostPath
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `k8s/base/postgres.yaml:10` (and the redis manifest)
+- **Claim:** Both are `Deployment`s with the default `RollingUpdate` strategy backed by `hostPath` volumes. A rollout therefore starts the new pod **before** terminating the old one, and both mount the same data directory. Postgres wedges on `postmaster.pid`; Redis clobbers `dump.rdb`. The backend Deployment already uses `Recreate` — the pattern is known and was applied to the stateless component, not the stateful ones.
+- **Failure scenario:** Any change to either manifest — an image bump, a resource tweak, a config change — risks corrupting the database on a shared data directory. It has not fired only because these manifests rarely change.
+- **Evidence:** plausible (read-only) — the strategy and volume type read from the manifests
+- **Doc reference:** PADR deployment standards
+- **Verification (R3):** pending
+- **Proposed remediation:** `strategy: Recreate` on both, or move to StatefulSets with real PVCs.
+- **Effort:** S
+
+---
+
+### MIS-E2E-146 — Compose publishes an unauthenticated Redis and a known-password Postgres on all interfaces
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** security
+- **Location:** `docker-compose.yml:25` (postgres `5432:5432`, `devpassword`), `:61` (redis `6379:6379`, no auth)
+- **Claim:** Both are published on `0.0.0.0`. The Redis instance is the **Celery broker**, so anyone on the LAN can enqueue tasks — which in this product means starting GPU jobs, and reaching the task payloads of jobs already queued.
+- **Failure scenario:** Broader than the accepted no-app-auth posture (MIS-E2E-002): that posture concedes the *API*, behind nginx. This is the broker and the database, direct, bypassing nginx entirely. A LAN attacker enqueues a Celery task or reads the database with a password committed to the repo.
+- **Evidence:** verified-by-live-repro (port bindings read; `mistudio-postgres` is currently listening on `0.0.0.0:5432` on this host)
+- **Doc reference:** MIS-E2E-002
+- **Verification (R3):** pending
+- **Proposed remediation:** Bind to `127.0.0.1:` in the published ports, and set a Redis password.
+- **Effort:** S
+
+---
+
+### MIS-E2E-147 — Five infra defects that make a deployment or a diagnosis wrong
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `docker-compose.yml:269`, `:188`; `nginx/nginx.docker.conf:32`; `scripts/k8s-helpers.sh:69`; `nginx/nginx.conf:46`
+- **Claim:**
+  1. **The compose frontend is unreachable.** Published `3000:80`, but commit `bca37c6` moved the image to nginx-unprivileged on **8080** and updated only k8s and `nginx.docker.conf`. `http://localhost:3000` is dead.
+  2. **`k8s_deploy` reports success on failure.** The whole `&&` chain ends in one `|| echo "Schema verification failed"`, so a failed pull, apply or rollout is misreported and the function returns 0.
+  3. **No `/ollama/` location in `nginx.docker.conf`.** The labeling default `/ollama/v1` hits the SPA catch-all and returns `index.html` with a **200** — surfacing as "no models found" rather than a routing error.
+  4. **The compose worker consumes every queue on one solo slot** — the exact head-of-line-blocking incident the k8s deployment fixed by adding a second worker.
+  5. **`nginx.conf:46` `server_name` typo** — `192.168.224.222` where the CORS map says `.244.`. Works only because it is the default server block.
+- **Failure scenario:** (2) is the sharpest: the break-glass deploy path reports success when it failed, and (1) means the documented dev URL has been broken since `bca37c6`.
+- **Evidence:** verified-by-live-repro (each read at source; the port change traced to its commit)
+- **Verification (R3):** pending
+- **Proposed remediation:** Individually small; (2) first.
+- **Effort:** M
+
+---
+
+### MIS-E2E-148 — Two guards that fail open, and a keyring that trusts too much
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** debt
+- **Location:** `backend/tests/unit/test_worker_queue_coverage.py:40`; `k8s/base/ingress.yaml:36`; `backend/Dockerfile:24`
+- **Claim:**
+  1. The manifest guard `pytest.skip`s if the manifest path moves — **fails open**, the fourth source-scrape guard in this audit to do so.
+  2. `ingress.yaml:36`'s `/api` prefix exposes `/api/internal/*`, which **both** nginx configs deny as security-critical. Mitigated by the HMAC check on those two endpoints (verified correct in P05), so the defence-in-depth layer is missing rather than the defence.
+  3. `backend/Dockerfile:24` uses `apt-key adv`, putting the deadsnakes key in the **global** trusted keyring — trusted for all repositories. `signed-by=` scopes it.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** pending
+- **Effort:** S
+
+---
+
+## P11 — Documentation chain conformance
+
+---
+
+### MIS-E2E-149 — The sentence that cost a real SAE is still live in the second manual
+- **Phase / Round:** P11 / R1
+- **Severity:** **P1** *(safety — this exact wording has already destroyed a training run)*
+- **Type:** doc-drift
+- **Location:** `docs/miStudio_Manual.md:349`
+- **Claim:** `- **Stop:** Gracefully end training (saves final checkpoint)`
+- **Reality:** `trainings.py:247-251` — `action == "stop"` calls `stop_training` and `revoke_task(terminate=True)` and nothing else. Only `stop_and_finalize` (`:252-274`) dispatches `finalize_training_from_checkpoint_task`, which writes `community_format/` — the only artifact downstream reads.
+- **Why it matters:** this is not *comparable* to the recorded incident, it is **the identical sentence**. `CLAUDE.md` records that this line in `manual/docs/core-workflow/sae-training.md` *"was factually wrong and is what cost a real run"* — `train_969e90af`, granite-4.1-8b, FVU 0.065, zero dead neurons, stopped at step 10,300, SAE forfeited. That page **was** fixed: `:183` now carries `:::warning Stop does not save an importable SAE`. `docs/miStudio_Manual.md` was not. It is a 599-line standalone "Complete User Manual", last substantively edited 2026-04-08, and it is indexed in `.understand-anything/knowledge-graph.json`, so an agent querying the repo's own knowledge graph can be served the uncorrected text.
+- **Evidence:** **verified-by-live-repro** — both manuals and the endpoint read; the corrected warning and the uncorrected sentence quoted above
+- **Verification (R3):** **CONFIRMED**
+- **Proposed remediation:** Fix the line. Then decide whether `docs/miStudio_Manual.md` should exist at all — it predates MCP, clusters, circuits and J-Lens (zero hits for any of them). A second, stale manual is a second place for every future correction to miss.
+- **Effort:** S
+
+---
+
+### MIS-E2E-150 — The manual's fix for a startup refusal removes authentication from a LAN-bound server
+- **Phase / Round:** P11 / R1
+- **Severity:** **P1**
+- **Type:** security
+- **Location:** `manual/docs/advanced/mcp-server.md:37`, `:64`, `:140`; `backend/src/mcp_server/server.py:102`
+- **Claim:** The page states the server binds `0.0.0.0:8765` with a **"bearer token always required"**, and `MCP_AUTH_TOKEN` is *(required)* — startup refused if empty. Its troubleshooting remedy at `:140` is: *"Set the token in `.env` (or `MCP_ALLOW_ANONYMOUS=true` for stdio dev only)"*.
+- **Reality:** `MCP_ALLOW_ANONYMOUS` is **not** stdio-restricted. `server.py:102` reads `if not settings.auth_token and not (settings.allow_anonymous or stdio)` — the flag **alone** satisfies the guard on the HTTP transport. `__main__.py:36-40` then adds `BearerAuthMiddleware` only when a token is set, otherwise logs a warning and serves on `settings.host`, default `0.0.0.0`.
+- **Why it matters:** an operator hitting the startup error follows the documented remedy and gets a LAN-reachable **unauthenticated** MCP server exposing `delete_circuit`, GPU steering and label write-back — on the same page that told them a bearer token is always required. **And the guard's own error message repeats the false claim**: *"Set a token, or set MCP_ALLOW_ANONYMOUS=true for local stdio development only."* The code says "stdio only" in prose and does not enforce it.
+- **Evidence:** **verified-by-live-repro** — the guard, the middleware branch, and both strings read directly
+- **Verification (R3):** **CONFIRMED**
+- **Proposed remediation:** Make the flag actually stdio-only (`allow_anonymous and stdio`), which is what both the manual and the error message already promise.
+- **Effort:** S
+
+---
+
+### MIS-E2E-151 — Dataset cancel is documented as conservative and deletes unrelated tokenizations
+- **Phase / Round:** P11 / R1
+- **Severity:** **P1** *(data loss)*
+- **Type:** bug
+- **Location:** `manual/docs/core-workflow/dataset-management.md:21`, `:37`; `backend/src/workers/dataset_tasks.py:1357-1367`; `backend/src/api/v1/endpoints/datasets.py:710-712`
+- **Claim:** The manual says cancelling during post-download processing *"keeps the raw files so you can retry without re-downloading"*, and that each tokenization *"can be cancelled or deleted **independently**"*.
+- **Reality:** the cancel worker iterates **all** `dataset.tokenizations` and `shutil.rmtree`s every `tokenized_path`, ungated by status and ungated by which job is being cancelled — while the raw-file cleanup immediately above it (`:1348`) *is* status-gated. DB rows survive, so previously-COMPLETED tokenizations still render in the UI pointing at deleted directories. Separately `datasets.py:710-712` carries `# Note: We don't have task_id stored, so we can't revoke the specific task` and calls `cancel_task` with no `task_id`, so the revoke branch is dead and the worker keeps running.
+- **Why it matters:** the same shape as the SAE-forfeit incident — an operation the manual describes as conservative destroys an unrelated artifact. The per-tokenization cancel path *is* correctly scoped, which is exactly what makes the "independently" claim misleading.
+- **Evidence:** verified-by-live-repro (all three sites read)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-152 — The K8s install guide's `sed` steps match nothing, and one renames the database
+- **Phase / Round:** P11 / R1
+- **Severity:** P1
+- **Type:** doc-drift
+- **Location:** `manual/docs/getting-started/install-guide-k8s.md:234-257`; same prose at `installation.md:147-175`
+- **Claim:** Four `sed -i` substitutions set the GPU node, node IP, `SECRET_KEY` and Postgres password in `k8s/mistudio-deployment.yaml`.
+- **Reality:** **none of the four target strings occur in the shipped manifest.** It was refactored to `secretKeyRef` against a `mistudio-secrets` Secret; `nodeSelector` is commented out. Worse, `sed -i "s/value: mistudio$/value: $POSTGRES_PASSWORD/g"` matches only `POSTGRES_DB: mistudio` and `POSTGRES_USER: mistudio` — it **renames the database and the user to the password string** and never sets a password. Neither install page mentions `k8s/mistudio-secrets.yaml.example` or the `kubectl create secret` step.
+- **Why it matters:** `sed` exits 0 on zero matches, so every step "succeeds". The user believes they set a strong `SECRET_KEY` — the key protecting stored API keys — and a DB password. They set neither, and may have renamed the database.
+- **Evidence:** verified-by-live-repro (grep count 0 for each target string)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-153 — Five shipped features have no doc→code traceability at all
+- **Phase / Round:** P11 / R1
+- **Severity:** P1
+- **Type:** debt
+- **Location:** `0xcc/tasks/024_`–`028_FTASKS`; PPRD §2.1 rows 25–29; `CLAUDE.md` Document Inventory
+- **Claim:** PPRD marks rows 25–29 "Planned"; the CLAUDE.md Document Inventory has **no entry at all** for files `024_`–`028_`; and those five FTASKS are exactly the ones missing `## Relevant Files`.
+- **Reality:** substantial implementation exists for all five — `jlens_annotation.py`, `jlens_watchlist.py` (024); `jlens_intervention.py` + its worker (025); `jspace_claims.py` + `frontend/src/config/jspaceClaims.ts` (026); 20 MCP tools (028). Their FTASKS run 68–100% checked.
+- **Why it matters:** the most recent tranche of work is invisible to **every** documented navigation path at once. There is no way to answer "what code implements feature 26?" from the doc chain.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-154 — 22 `Relevant Files` entries point at files that were never written
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** worst: `003_FTASKS|SAE_Training` (3), `004_FTASKS|Feature_Discovery` (3), `008_FTASKS|System_Monitoring` (3)
+- **Claim:** 273 paths extracted from the 23 FTASKS that have the section; **50 do not resolve**. Of those, 21 are relative-path style (cosmetic) and 7 are explicitly labelled "To Create". **22 are genuinely dead.**
+- **The important part:** `git log --all --diff-filter=A` on 15 of the 22 shows **15 of 15 have zero add-commits in the entire repository history**. They are not renames or deletions — they never existed. E.g. `003_FTASKS:248-256` has four `[x]` boxes for a `TrainingForm.tsx` that has never existed. The capability exists (inline SVG charts in `TrainingCard.tsx:989-1059`), so this is a documentation defect — **except** Task 7.7's `- [x] Zoom and pan`, which has no implementation anywhere.
+- **Why it matters:** for features 001–008 the sections appear to have been authored **from the design documents, not from the implementation**. The framework's documented join key is least reliable exactly where the docs claim 100% completion. Where the practice *is* followed it works: 013, 020 and 023 have zero dead paths and were verified against their commit windows.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-155 — CLAUDE.md's own framework references are off by one, and point the reader at the wrong action
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `CLAUDE.md:336-343`, `:727`, `:1031`, `:17`, `:378`
+- **Claim:** The "Instruction Documents Reference" lists `001_create-project-prd.md` … `008_housekeeping.md`.
+- **Reality:** the directory holds `001_generate-brd.md`, `002_create-project-prd.md`, … `008_process-task-list.md`. **Every listed filename except `000_README.md` does not exist**, and `008_housekeeping.md` exists nowhere.
+- **Why it matters:** worse than dead links, because the *numbers* still resolve to real but **wrong** documents. `CLAUDE.md:17` and `:378` both record the standing next action as *"execute … via `007_process-task-list.md`"* — but `007_` is now `generate-tasks.md`. Following CLAUDE.md's own instruction **re-generates the backlog instead of working it**.
+- **Evidence:** verified-by-live-repro (`test -e` on each; both files' opening lines read to confirm semantics)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-156 — IDL-5's architecture is inverted, and the error is propagated across five documents
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2532-2536`; propagated to `README.md:54,82`, `CLAUDE.md:642,654,828,838,849`, `008_FTASKS:94,206`, `008_FTDD:181-193`, `PPRD:396`
+- **Claim:** IDL-5 — *"Use Celery Beat scheduled task for system monitoring · Task: `collect_system_metrics` · Interval: Every 2 seconds"*.
+- **Reality:** no task named `collect_system_metrics` exists. `beat_schedule` contains only janitors, the pruner, the GPU watchdog and the steering reconciler. Collection is an **asyncio loop inside the FastAPI process** (`background_monitor.py:31,72-90`, started at `main.py:57`). The code says so explicitly at `celery_app.py:341-343`: *"System metrics monitoring runs as an asyncio background task … (not Celery)"*. Only the 2 s interval survives.
+- **Why it matters:** an operator debugging a dead dashboard inspects Celery Beat, which has nothing to do with it. And because collection lives in the API process, metrics stop on backend restart and duplicate across replicas — neither of which "Celery Beat" implies. **The correction reached exactly one document**: the 2026-07-10 review deleted `workers/system_monitor_tasks.py` and fixed `008_FPRD`, leaving five others asserting the deleted architecture.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-157 — IDL-16's schema guard cannot do what the PADR says and cannot block startup
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2767-2769`; `backend/src/db/schema_validator.py`
+- **Claim:** *"Startup validator compares live DB schema against SQLAlchemy model metadata · detects missing columns, type mismatches, missing indexes · optionally blocks startup on critical mismatches."*
+- **Reality:** it uses **no SQLAlchemy metadata**. `REQUIRED_TABLES` is a hand-maintained literal of 17 tables against 36 declared — `circuits`, `validation_manifests`, `agent_approval_requests`, `cluster_profiles`, `app_settings` and `steering_record_runs` are never checked, so the anti-drift tool drifts. It selects `column_name` only and diffs sets of names: no type check, no index check. Startup **cannot** be blocked — `validate_schema_on_startup` hardcodes `raise_on_error=False` and `main.py:52-55` continues anyway.
+- **Why it matters:** the mechanism the PADR names as the defence against schema drift is a name-only spot check over less than half the schema that can never fail the boot. Three claims, none true.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Related:** MIS-E2E-032, MIS-E2E-048, MIS-E2E-051
+- **Effort:** M
+
+---
+
+### MIS-E2E-158 — IDL-1 and IDL-12 document channel and event conventions the code does not use
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2443`, `:2451-2455`, `:2691`, `:2694`; restated in CLAUDE.md's "Real-time Updates Architecture"
+- **Claim:** channel pattern `{entity_type}/{entity_id}` with a table listing `training/{id}`, `extraction/{id}`, `model/{id}`, `dataset/{id}`; events *"lowercase with underscores (e.g. `download_progress`, `labeling_results`)"*; and *"standardize all WebSocket emissions through `websocket_emitter.py`"*.
+- **Reality:** channels are **pluralised with a sub-path** — `trainings/{id}/progress`, `models/{id}/progress`, `datasets/{id}/tokenization/{tid}`. Subscribing per the PADR table yields silence. Events are colon-delimited `namespace:event` (`training:progress`, `system:metrics`); **neither cited example event exists**. And the highest-frequency emitter bypasses the standard emitter entirely — `background_monitor.py:174-197` builds its own httpx client and POSTs directly.
+- **Evidence:** verified-by-live-repro; the frontend matches the code, not the PADR
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-159 — IDL-11's resilience decisions are unimplemented, and the exemplar task inverts one
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2663`, `:2666`, `:2670-2679`
+- **Claim:** retry with exponential backoff (`max_retries=3`, `countdown=60s`), a **dead-letter queue**, and a `training_task` code block showing `soft_time_limit=3600` and `raise self.retry(countdown=60 * (2 ** retries))`.
+- **Reality:** no dead-letter queue exists anywhere. No exponential backoff — the only `countdown` in `backend/src` is in a docstring, and both real `self.retry()` sites pass none. The exemplar contradicts the snippet: `training_tasks.py:193-199` sets no `max_retries`, no `soft_time_limit`, and `acks_late=False` — a per-task **override** of the global `task_acks_late=True`.
+- **Why it matters:** `README.md:52` leans on this — *"The queue is durable: restarting the application does not lose queued or in-progress tasks."* The global settings support that; the flagship task opts out of it.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-160 — The manual describes a Settings PIN that gates one tab of five, and not the destructive one
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `manual/docs/advanced/settings-reference.md:56-58`, `:67`; `frontend/src/components/panels/SettingsPanel.tsx:67-71`
+- **Claim:** *"the **panel** can be locked behind a PIN … from then on, opening Settings prompts for it once per session."*
+- **Reality:** only the `api_keys` tab is wrapped in `<PinGate>`. The panel and tab bar render unconditionally. The **un-gated Storage tab** is the control that arms irreversible checkpoint deletion — `checkpoint_prune_dry_run`, where `false` means files are deleted.
+- **Why it matters:** compounds with MIS-E2E-055 (the PIN is readable, rewritable and deletable through `/settings`) and MIS-E2E-002. `installation.md:74` recommends Kubernetes for *"shared lab environments and multi-user research clusters"*, and `reference/api/overview.md` never states the API is unauthenticated — so the PIN is the manual's **only** mention of access control, and it reads as a security model that does not exist.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-161 — MCP docs omit a default-enabled category holding a GPU intervention tool
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `manual/docs/advanced/mcp-server.md:65`, `:87`, `:96`; `PADR:2968`
+- **Claim:** the default `MCP_TOOL_CATEGORIES` is documented as `read,groups,steering,labeling,experiments,profiles,jobs,circuits`; the catalog is headed "13 categories"; and *"add `admin` to enable destructive deletes"*, with `admin` marked off by default.
+- **Reality:** `config.py:15` includes **`jlens`** in the defaults — 20 tools including `run_jlens_intervention`, a real GPU intervention — and the category is **absent from the catalog entirely**. An operator copying the documented default into `.env` silently disables it. And `delete_circuit` is registered in the default-on `circuits` category, not `admin`, so leaving `admin` off per the manual still hands an agent a destructive delete. IDL-26 enumerates 7 categories where the code defines 14.
+- **Evidence:** verified-by-live-repro; distinct from MIS-E2E-017 (the 92-vs-116 count)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-162 — README's startup path cannot work for a fresh clone
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `README.md:98`; `CLAUDE.md:57-79`; `start-mistudio.sh`
+- **Claim:** *"A single `./start-mistudio.sh` command starts all six services… The NVIDIA Container Toolkit is the only prerequisite."* CLAUDE.md: *"ONE COMMAND to start everything"*, access at `http://mistudio.hitsai.local`.
+- **Reality:** the script hardcodes `PROJECT_ROOT="/home/x-sean/app/miStudio"` and runs `set -e`, so `cd "$PROJECT_ROOT/backend"` aborts on any other clone. It starts only five containers from `docker-compose.dev.yml` and runs backend, Celery and frontend **on the host** — requiring a pre-existing `backend/venv/` it never creates, plus Node, `lsof` and `fuser`. Its domain is `dev-mistudio.hitsai.local`, not the documented one, so the `/etc/hosts` instruction produces an unreachable URL. `docker-compose.yml` declares 10 services, not six. The four other repo shell scripts hardcode the same home directory.
+- **Why it matters:** it is the first thing a new user runs. Note the **real** Compose quickstart (`docker compose up -d`, per `install-guide-compose.md`) was verified to work — the defect is README pointing at the wrong script.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-163 — CLAUDE.md contradicts itself on status, counts and paths
+- **Phase / Round:** P11 / R1
+- **Severity:** P3
+- **Type:** doc-drift
+- **Location:** `CLAUDE.md:5`, `:43`, `:47`, `:375`, `:436`, `:441`
+- **Claim / reality:**
+  - `:43` *"995 passed, 4 skipped"* vs `:5` *"backend 2461, frontend 1149"* vs measured **2,883 collected / 1,211**. Stale by ~2.9×.
+  - `:47` names a manifest at `/home/sean/app/…` — a user that does not exist (`x-sean`) — while `:153` gives the correct in-repo path.
+  - `:375` *"Feature 020 … impl PLANNED"* vs `:19` *"✅ FEATURE 20 … CLOSED"*.
+  - `:441` *"Feature 022 … ⏳ In progress"* vs `:5` *"Shipped: … `021_*`"*.
+  - `:436`/`:470` say `/jlens/readout` **returns 501**. Grep for `501` across `api/v1/endpoints/` returns **zero hits**; `jlens.py` implements readout, probe, fit, band-report, gate and annotate, and 29 files exist under `frontend/src/components/jlens/`. Understated status invites re-implementing shipped work.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-164 — Four smaller doc defects
+- **Phase / Round:** P11 / R1
+- **Severity:** P3
+- **Type:** doc-drift
+- **Location / claim:**
+  1. `README.md:50` enumerates *"Every panel"* and omits **Clusters, Circuits and J-Lens** — the registry declares 13. README mentions the MCP server, circuits, clusters and J-Lens **nowhere**; it is roughly PPRD rows 11–29 out of date while presenting itself as exhaustive.
+  2. `manual/docs/reference/data-model.md:9` states the page is *"verified against the ORM models"* — it asserts a verification it does not have (see MIS-E2E-050, 11 tables missing).
+  3. `install-guide-compose.md:341` documents `NGINX_HTTP_PORT`, which appears nowhere in the repo; the port is hardcoded at `docker-compose.yml:281`.
+  4. `PADR:2718` (IDL-13) claims `model_loader.py` uses `discover_transformer_structure` — it never imports it, carrying only a pointer comment. The substantive claim (no architecture whitelist) **holds**: `SUPPORTED_ARCHITECTURES` exists nowhere.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+## P12 — Cross-cutting synthesis & live journeys
+
+---
+
+### MIS-E2E-165 — Live confirmation: the PIN hash is served unmasked by the production API
+- **Phase / Round:** P12 / live verification
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** live `GET /api/v1/settings` on `k8s-mistudio.hitsai.local`
+- **Claim:** MIS-E2E-055 predicted this from source. Confirmed against the running deployment:
+  ```
+  settings rows returned: 9
+  key=settings_pin_hash  is_sensitive=False  masked=False  value_len=150
+  >>> EXPOSED: returned in the clear, not masked
+  ```
+  A 150-character PBKDF2 salt+hash, unauthenticated, from a single GET. The PIN space is four digits — 10,000 offline candidates.
+- **Verification (R3):** **CONFIRMED LIVE.** This closes MIS-E2E-055's most severe branch: it is not a latent code defect, it is currently exposed on the deployment the team uses.
+- **Honest qualifier:** the same probe reported "sensitive rows correctly masked: 0" — that is because **no sensitive rows are currently populated** (no API keys stored right now), not because masking is broken. Masking of `is_sensitive` rows was verified correct at source in P02. The PIN's exposure is caused by it being written `is_sensitive=False`, not by a masking failure.
+- **Effort:** M (see MIS-E2E-055)
+
+---
+
+### MIS-E2E-166 — Live confirmation: no authorization layer exists on destructive routes
+- **Phase / Round:** P12 / live verification
+- **Severity:** P2 *(the posture is accepted; this records that it is real in production)*
+- **Type:** security
+- **Location:** live, `k8s-mistudio.hitsai.local`
+- **Claim:** Probed with **nonexistent ids**, so nothing was deleted. A 401/403 would prove an auth layer; a 404/422 proves the request reached the handler and failed only on the object:
+  ```
+  DELETE /api/v1/trainings/train_NOPE_audit    404
+  DELETE /api/v1/circuits/crc_NOPE_audit       404
+  DELETE /api/v1/settings/nonexistent_audit_key 404
+  DELETE /api/v1/datasets/ds_NOPE_audit        422
+  ```
+  No route returned 401 or 403. The handler is reached in every case.
+- **Why it is P2 and not P0:** MIS-E2E-002 records the no-app-auth posture as **accepted** — nginx plus network isolation is the intended control. This finding is not "there is no auth"; it is the live confirmation that the posture is real in production, which the accepted-posture decision was taken *about*. It is recorded so the remediation tasklist's PADR-IDL item (MIS-E2E-002) has evidence attached rather than an assumption.
+- **What it does NOT excuse:** MIS-E2E-055/165 (the PIN, whose entire threat model is the population the boundary admits), MIS-E2E-069 (credential exfiltration), MIS-E2E-070/071 (arbitrary `rmtree`), MIS-E2E-099 (restart loop), MIS-E2E-003 (`pkill`/`Popen`), and MIS-E2E-105 (any-origin WebSocket, which changes *who* can reach the host).
+- **Verification (R3):** **CONFIRMED LIVE**
+- **Effort:** — (covered by MIS-E2E-002)
