@@ -85,14 +85,21 @@ export function ReadoutGrid({
   onSelect,
   onHover,
 }: ReadoutGridProps) {
-  if (axis.length === 0 || tokens.length === 0) {
-    return (
-      <p className="text-xs text-slate-500 dark:text-slate-500">
-        This readout carries no layers for the selected lens.
-      </p>
-    );
-  }
-
+  // NO EARLY RETURN BEFORE THE HOOKS (MIS-E2E-023).
+  //
+  // The empty-readout guard used to sit here, above two `useMemo` calls, so on
+  // a render where `axis` or `tokens` was empty React saw a SHORTER hook list
+  // than on the previous render — "rendered fewer hooks than expected", which
+  // unmounts the tree. Two `react-hooks/rules-of-hooks` errors, unreported
+  // because lint does not run in CI (MIS-E2E-024).
+  //
+  // It was assessed as unreachable in practice, because the backend emits
+  // `types` and `layers_by_type` from the same tuple so the axis is never empty
+  // when tokens are not. That makes it a latent crash rather than a live one —
+  // and "currently unreachable" is a property of today's backend, not of this
+  // component. Moving the guard below the hooks costs nothing and removes the
+  // dependency on that coincidence.
+  //
   // Descending layer order: the output end of the stack reads at the top, which
   // is how the trajectory is described everywhere else in the product.
   const rows = axis.map((layer, i) => ({ layer, i })).reverse();
@@ -138,6 +145,16 @@ export function ReadoutGrid({
     logitAxis.forEach((layer, i) => map.set(layer, i));
     return map;
   }, [logitAxis]);
+
+  // Every hook above runs unconditionally on every render; only now is it safe
+  // to return early.
+  if (axis.length === 0 || tokens.length === 0) {
+    return (
+      <p className="text-xs text-slate-500 dark:text-slate-500">
+        This readout carries no layers for the selected lens.
+      </p>
+    );
+  }
 
   return (
     <div>

@@ -643,7 +643,7 @@ describe('ModelDownloadForm', () => {
       fireEvent.click(button);
 
       await waitFor(() => {
-        const errorText = screen.getByText((content, element) => {
+        const errorText = screen.getByText((content, _element) => {
           return content.includes('Could not discover transformer layers');
         });
         expect(errorText).toBeInTheDocument();

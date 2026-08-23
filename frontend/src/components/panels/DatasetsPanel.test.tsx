@@ -19,7 +19,7 @@ vi.mock('../../stores/datasetsStore');
 
 // Mock child components to isolate DatasetsPanel logic
 vi.mock('../datasets/DownloadForm', () => ({
-  DownloadForm: ({ onDownload }: { onDownload: Function }) => (
+  DownloadForm: ({ onDownload }: { onDownload: (...args: unknown[]) => unknown }) => (
     <div data-testid="download-form">
       <button
         onClick={() =>
@@ -39,8 +39,8 @@ vi.mock('../datasets/DatasetCard', () => ({
     onDelete,
   }: {
     dataset: any;
-    onClick: Function;
-    onDelete: Function;
+    onClick: (...args: unknown[]) => unknown;
+    onDelete: (...args: unknown[]) => unknown;
   }) => (
     <div data-testid={`dataset-card-${dataset.id}`}>
       <span>{dataset.name}</span>
@@ -56,7 +56,7 @@ vi.mock('../datasets/DatasetDetailModal', () => ({
     onClose,
   }: {
     dataset: any;
-    onClose: Function;
+    onClose: (...args: unknown[]) => unknown;
   }) => (
     <div data-testid="detail-modal">
       <span>{dataset?.name}</span>

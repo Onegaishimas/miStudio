@@ -16,7 +16,7 @@
  *   * return the sampling eta during phase 2                    -> ETA test fails
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, _beforeEach, afterEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
 import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { ExtractionJobCard } from './ExtractionJobCard';

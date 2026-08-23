@@ -176,6 +176,48 @@ def get_fallback_format(quant_format: QuantizationFormat) -> Optional[Quantizati
     return fallback_chain.get(quant_format)
 
 
+def estimate_parameter_count(config) -> Optional[int]:
+    """Parameter count from the config alone, before any weight is downloaded.
+
+    Standard decoder arithmetic: embeddings + per-layer attention and MLP. Only
+    an ESTIMATE — MoE, tied embeddings and multimodal towers all shift it — so
+    the caller treats a shortfall as advisory sizing, not a measurement, and
+    `preflight_gpu_capacity` skips entirely when this returns None.
+
+    Reads through a sub-config when the top level has no `hidden_size`: unified
+    and multimodal configs keep the text fields nested, which is the same shape
+    that broke `vocab_size` (MIS-E2E-083's sibling, reported the same day).
+    """
+    def _get(name: str) -> Optional[int]:
+        value = getattr(config, name, None)
+        if isinstance(value, int) and value > 0:
+            return value
+        for attr in dir(config):
+            if attr.startswith("_"):
+                continue
+            try:
+                child = getattr(config, attr)
+            except Exception:
+                continue
+            nested = getattr(child, name, None)
+            if isinstance(nested, int) and nested > 0:
+                return nested
+        return None
+
+    hidden = _get("hidden_size")
+    layers = _get("num_hidden_layers")
+    vocab = _get("vocab_size")
+    if not (hidden and layers and vocab):
+        return None
+
+    intermediate = _get("intermediate_size") or 4 * hidden
+    # Attention: q,k,v,o ≈ 4·h². MLP: gate/up/down ≈ 3·h·i (2 for non-gated,
+    # rounded up deliberately — under-estimating defeats the point).
+    per_layer = 4 * hidden * hidden + 3 * hidden * intermediate
+    embeddings = 2 * vocab * hidden          # input + output, untied worst case
+    return int(layers * per_layer + embeddings)
+
+
 def load_model_from_hf(
     repo_id: str,
     quant_format: QuantizationFormat = QuantizationFormat.FP16,
@@ -235,6 +277,27 @@ def load_model_from_hf(
 
         # Extract architecture configuration
         arch_config = extract_architecture_config(config)
+
+        # WILL THIS FIT? ASK BEFORE SPENDING THE MINUTES (live 2026-08-23).
+        #
+        # An extraction on gemma-4-12B-it ran 2m47s and died with "CUDA out of
+        # memory. Tried to allocate 120.00 MiB. GPU 0 has a total capacity of
+        # 23.56 GiB of which 113.06 MiB is free" — the weights had taken the
+        # card and the first forward pass had nowhere to go. A 12B model at FP16
+        # is ~24 GB of weights on a 23.56 GB card; it was never going to fit,
+        # and nothing said so.
+        #
+        # The check lives HERE rather than at the ten call sites, because a
+        # guard added to one caller and not its siblings is this codebase's most
+        # repeated defect. The config is already loaded above, so the parameter
+        # count is available before a single weight is fetched.
+        from ..services.resource_config import preflight_gpu_capacity
+
+        preflight_gpu_capacity(
+            params_count=estimate_parameter_count(config),
+            quantization=quant_format.value,
+            model_name=repo_id,
+        )
 
         # Get quantization configuration
         quantization_config = get_quantization_config(quant_format)

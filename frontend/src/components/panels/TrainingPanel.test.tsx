@@ -33,7 +33,7 @@ vi.mock('../training/TrainingCard', () => ({
   }: {
     training: any;
     isSelected: boolean;
-    onToggleSelect: Function;
+    onToggleSelect: (...args: unknown[]) => unknown;
   }) => (
     <div data-testid={`training-card-${training.id}`}>
       <span>{training.id}</span>

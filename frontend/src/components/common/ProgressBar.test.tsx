@@ -273,7 +273,7 @@ describe('ProgressBar', () => {
 
     it('should handle NaN progress by clamping to 0', () => {
       const { container } = render(<ProgressBar progress={NaN} />);
-      const fill = container.querySelector('.bg-emerald-500') as HTMLElement;
+      const _fill = container.querySelector('.bg-emerald-500') as HTMLElement;
 
       // Math.max(0, Math.min(100, NaN)) returns NaN
       // In React, setting style.width to NaN% may result in empty string
@@ -384,7 +384,7 @@ describe('ProgressBar', () => {
 
       expect(screen.getByText('60.0%')).toBeInTheDocument();
 
-      rerender(<div>{false && <ProgressBar progress={60} />}</div>);
+      rerender(<div />);   // render nothing
       expect(screen.queryByText('60.0%')).not.toBeInTheDocument();
     });
 

@@ -403,7 +403,7 @@ export function SteeringPanel() {
                                         await recoverTaskResult(recoveryTaskId.trim());
                                         setRecoveryTaskId('');
                                         setShowRecentDropdown(false);
-                                      } catch (err) {
+                                      } catch (_err) {
                                         // Error is set in store
                                       } finally {
                                         setIsRecovering(false);

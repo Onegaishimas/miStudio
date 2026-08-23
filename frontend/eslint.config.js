@@ -23,7 +23,25 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // The `_` prefix is this codebase's "deliberately unused" convention, and
+      // it was only honoured for ARGUMENTS. Variables, caught errors and
+      // destructuring rest-siblings were still errors — including
+      // `const { [k]: _, ...rest }`, where the binding is REQUIRED syntax for
+      // omitting a key and cannot be removed at all.
+      //
+      // Lint has never run in CI (MIS-E2E-024), so none of this was visible.
+      // Turning it on without this is how a mechanical clean-up ends up
+      // deleting bindings the code needs.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },

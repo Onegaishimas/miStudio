@@ -285,13 +285,13 @@ describe('StatusBadge', () => {
 
     it('should work with conditional rendering', () => {
       const showBadge = true;
-      const { container, rerender } = render(
+      const { _container, rerender } = render(
         <div>{showBadge && <StatusBadge status="ready" />}</div>
       );
 
       expect(screen.getByText('Ready')).toBeInTheDocument();
 
-      rerender(<div>{false && <StatusBadge status="ready" />}</div>);
+      rerender(<div />);   // render nothing
       expect(screen.queryByText('Ready')).not.toBeInTheDocument();
     });
 

@@ -177,7 +177,7 @@ export function ProfilesMenu() {
                 </button>
                 <button
                   onClick={() => {
-                    // eslint-disable-next-line no-alert
+                     
                     if (window.confirm(`Delete cluster profile “${p.name}”? This cannot be undone.`)) {
                       void deleteProfile(p.id);
                     }
