@@ -318,3 +318,77 @@ def test_every_instruct_reference_names_a_file_that_exists():
         f"CLAUDE.md references instruction files that do not exist: "
         f"{sorted(missing)}. On disk: {sorted(on_disk)}"
     )
+
+
+# ── MIS-E2E-156 · the system-monitor architecture, in five documents ───────
+
+_PROPAGATED_TO = [
+    REPO / "README.md",
+    REPO / "CLAUDE.md",
+    REPO / "0xcc" / "prds" / "000_PPRD|miStudio.md",
+    REPO / "0xcc" / "adrs" / "000_PADR|miStudio.md",
+]
+
+
+def test_no_celery_task_named_collect_system_metrics_exists():
+    """The premise. IDL-5 named a task that is not in the codebase.
+
+    If it existed, five documents would have been right and this whole
+    correction would be the error.
+    """
+    from src.core.celery_app import celery_app
+
+    assert not any("collect_system_metrics" in name for name in celery_app.tasks), (
+        "the task IDL-5 named now exists; re-check the correction"
+    )
+    scheduled = {
+        entry.get("task", "") for entry in (celery_app.conf.beat_schedule or {}).values()
+    }
+    assert not any("system_metric" in t for t in scheduled), (
+        f"beat_schedule now runs a system-metrics task: {sorted(scheduled)}"
+    )
+
+
+def test_the_monitor_really_is_an_asyncio_task_in_the_api_process():
+    """The positive half — the architecture the docs now describe."""
+    import inspect
+
+    from src import main
+    from src.services.background_monitor import BackgroundMonitor
+
+    assert "asyncio.create_task" in inspect.getsource(BackgroundMonitor.start)
+    assert "background_monitor" in inspect.getsource(main).lower(), (
+        "main.py no longer starts the monitor; the docs describe a lifespan hook"
+    )
+
+
+@pytest.mark.parametrize("path", _PROPAGATED_TO, ids=lambda p: p.name)
+def test_every_document_names_the_real_monitor_implementation(path):
+    """Assert the POSITIVE fact, not the absence of the wrong one.
+
+    My first version searched for lines mentioning both "Celery Beat" and
+    "system monitoring" without a correction marker. Control C136 walked
+    straight through it: re-adding the false claim to a line that ALSO carries
+    the correction note satisfied both conditions at once. A negative check over
+    prose is very hard to make bite.
+
+    So each document that describes system-metric collection must NAME the
+    implementation. `background_monitor` is unambiguous, appears nowhere by
+    accident, and a document that reverts to describing Celery Beat will not
+    contain it.
+    """
+    assert path.exists(), f"{path} moved — guard is vacuous"
+    text = path.read_text().lower()
+
+    describes_metrics = any(
+        w in text for w in ("system monitoring", "system metrics", "monitoring metrics")
+    )
+    if not describes_metrics:
+        pytest.skip(f"{path.name} does not describe system-metric collection")
+
+    assert "background_monitor" in text, (
+        f"{path.name} describes system-metric collection without naming "
+        f"`background_monitor` — the asyncio task in the FastAPI process that "
+        f"actually does it. Five documents once attributed this to Celery Beat "
+        f"and a task (`collect_system_metrics`) that does not exist."
+    )

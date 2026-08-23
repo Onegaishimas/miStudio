@@ -12,7 +12,7 @@
 export const BRAND = {
   name: 'MechInterp Studio',
   shortName: 'miStudio',
-  tagline: 'Edge AI Feature Discovery Platform',
+  tagline: 'AI Feature Discovery Platform',
   description: 'Professional tool for training and analyzing Sparse Autoencoders',
   version: '0.1.0',
   repository: 'https://github.com/Onegaishimas/miStudio',

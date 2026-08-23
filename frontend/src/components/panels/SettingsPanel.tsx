@@ -67,7 +67,13 @@ export function SettingsPanel() {
       {activeTab === 'endpoints' && <EndpointsTab />}
       {activeTab === 'api_keys' && <PinGate><ApiKeysTab /></PinGate>}
       {activeTab === 'labeling' && <LabelingTab />}
-      {activeTab === 'storage' && <StorageTab />}
+      {/* PIN-GATED (MIS-E2E-160). The Storage tab arms step-granular
+          checkpoint retention — irreversible deletion of training checkpoints —
+          and was the one destructive surface in Settings left ungated while
+          `api_keys` beside it was protected. `settings-reference.md` described
+          the gate as covering "sensitive settings", which a reader would
+          reasonably take to include this. */}
+      {activeTab === 'storage' && <PinGate><StorageTab /></PinGate>}
       {activeTab === 'display' && <DisplayTab />}
     </div>
   );

@@ -53,10 +53,26 @@ Display preferences (theme, sidebar collapse) are controlled from the header and
 
 ## PIN Protection
 
-Because Settings holds API keys, the panel can be locked behind a PIN:
+Because Settings holds API keys and arms irreversible checkpoint deletion, **two tabs** can be
+locked behind a PIN:
 
-- Set a PIN in the API Keys tab; from then on, opening Settings prompts for it once per session
-- The PIN is stored as a **PBKDF2-SHA256** hash — it is not recoverable, only resettable
+- Set a PIN in the **API Keys** tab. From then on, opening **API Keys** or **Storage** prompts for
+  it once per session.
+- The PIN is stored as a **PBKDF2-SHA256** hash — it is not recoverable, only resettable.
+
+:::warning What the PIN is, and is not
+The PIN is a **UI affordance**, not authentication.
+
+- It gates **two tabs**, not the panel. Endpoints, Labeling and Display open without it, and the
+  tab bar always renders. This page previously said *"the panel can be locked"*, which is not what
+  the code does (MIS-E2E-160) — and until that was fixed the **Storage** tab, which arms
+  irreversible checkpoint deletion, was the one destructive surface left ungated.
+- **It does not gate the API.** Every setting reachable through the UI is reachable over HTTP
+  without it. miStudio has no per-user authentication by design — see PADR IDL-47 for the posture,
+  its boundary and what invalidates it.
+- Treat it as "stop me clicking the wrong thing", never as access control. If you need real access
+  control, the network boundary is where it lives.
+:::
 
 **Forgot your PIN?** Set the environment variable on the backend and restart:
 

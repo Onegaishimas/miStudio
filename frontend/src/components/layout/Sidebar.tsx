@@ -78,7 +78,7 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
             <div className="overflow-hidden min-w-0 flex-1">
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">MechInterp Studio</div>
               <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
-                Edge AI Feature Discovery
+                AI Feature Discovery
               </div>
             </div>
           )}

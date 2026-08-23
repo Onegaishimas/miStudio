@@ -155,3 +155,96 @@ def test_the_queue_coverage_guard_fails_closed():
     src = (REPO / "backend" / "tests" / "unit" / "test_worker_queue_coverage.py").read_text()
     assert "pytest.skip(f\"manifest not found" not in src
     assert "assert MANIFEST.exists()" in src
+
+
+# ── MIS-E2E-005 / -160 · the PIN bypass and what the PIN gates ─────────────
+
+def test_the_pin_bypass_defaults_to_false():
+    """`MISTUDIO_BYPASS_PIN=true` opens Settings with no PIN. It is a recovery
+    path requiring filesystem access, and must never be the default."""
+    from src.core.config import Settings
+
+    assert Settings.model_fields["bypass_settings_pin"].default is False
+
+
+def _env_pairs_in_yaml(path: Path) -> dict[str, str]:
+    """`{ENV_NAME: value}` across every container in a k8s manifest.
+
+    PARSED, not grepped. My first version scanned line by line for a name and
+    "true" on the SAME line — but a Kubernetes env entry puts them on separate
+    lines:
+
+        - name: MISTUDIO_BYPASS_PIN
+          value: "true"
+
+    so the check could never fire. Mutation control C139 walked straight
+    through it.
+    """
+    pairs: dict[str, str] = {}
+    for doc in yaml.safe_load_all(path.read_text()):
+        if not doc:
+            continue
+        spec = (doc.get("spec") or {}).get("template", {}).get("spec", {})
+        for container in spec.get("containers", []) or []:
+            for entry in container.get("env", []) or []:
+                if "name" in entry and "value" in entry:
+                    pairs[entry["name"]] = str(entry["value"])
+    return pairs
+
+
+def test_no_shipped_manifest_enables_the_pin_bypass():
+    """`MISTUDIO_BYPASS_PIN=true` opens Settings with no PIN.
+
+    It is a recovery path requiring filesystem access. Left on in a manifest it
+    is indistinguishable from a product with no PIN at all — and unlike a code
+    default, nothing surfaces it.
+    """
+    offenders = []
+    checked = 0
+
+    for path in K8S_BASE.glob("*.yaml"):
+        checked += 1
+        for name, value in _env_pairs_in_yaml(path).items():
+            if name == "MISTUDIO_BYPASS_PIN" and value.lower() == "true":
+                offenders.append(f"{path.name}: {name}={value}")
+
+    # Compose and the env template are flat text, so a line scan is right there.
+    for path in (COMPOSE, REPO / "docker-compose.dev.yml", REPO / ".env.example"):
+        if not path.exists():
+            continue
+        checked += 1
+        for line in path.read_text().splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            if "MISTUDIO_BYPASS_PIN" in line and "true" in line.lower():
+                offenders.append(f"{path.name}: {line.strip()}")
+
+    assert checked >= 5, f"only {checked} deployment artifacts checked — scan broke"
+    assert not offenders, f"the PIN bypass is enabled in a shipped artifact: {offenders}"
+
+
+def test_the_manifest_env_parser_actually_finds_variables():
+    """Negative control for the parser. If it returned nothing, the check above
+    would pass against a manifest that DOES enable the bypass — which is exactly
+    how its first version failed."""
+    found = {}
+    for path in K8S_BASE.glob("*.yaml"):
+        found.update(_env_pairs_in_yaml(path))
+    assert len(found) > 5, f"parsed only {len(found)} env vars from k8s/base: {found}"
+    assert "ENVIRONMENT" in found, "a known env var is missing — the parser is wrong"
+
+
+def test_both_sensitive_settings_tabs_are_pin_gated():
+    """MIS-E2E-160. Only `api_keys` was wrapped in `<PinGate>`.
+
+    The **Storage** tab arms step-granular checkpoint retention — irreversible
+    deletion, where `checkpoint_prune_dry_run: false` means files go — and it
+    was the one destructive surface in Settings left ungated, while the manual
+    described the whole panel as lockable.
+    """
+    panel = (REPO / "frontend" / "src" / "components" / "panels" / "SettingsPanel.tsx").read_text()
+    for tab, component in (("api_keys", "ApiKeysTab"), ("storage", "StorageTab")):
+        needle = f"activeTab === '{tab}' && <PinGate><{component} /></PinGate>"
+        assert needle in panel, (
+            f"the {tab} tab is not wrapped in <PinGate>; expected `{needle}`"
+        )

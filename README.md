@@ -51,7 +51,7 @@ miStudio runs as a coordinated stack of six services. Each has a specific respon
 
 **Celery Worker** — Executes all GPU-intensive and long-running tasks off the main API thread: SAE training, activation extraction, feature labeling, model downloads, Neuronpedia pushes. Multiple workers can run in parallel and are GPU-aware — jobs are routed to specific CUDA devices based on available VRAM. The queue is durable: restarting the application does not lose queued or in-progress tasks.
 
-**Celery Beat** — Handles scheduled and periodic tasks: system monitoring metrics (CPU, GPU, RAM, disk, network emitted every 2 seconds via WebSocket to the Dashboard), cleanup jobs, and other background maintenance.
+**Celery Beat** — Handles scheduled and periodic tasks: the stuck-job janitors, checkpoint pruning, the GPU watchdog and the steering reconciler. *(System monitoring is **not** among them — it is an asyncio task inside the FastAPI process, `services/background_monitor.py`. MIS-E2E-156.)*
 
 **PostgreSQL** — The source of truth for all experiment state. Every dataset, model, training run, extraction job, SAE, label, steering result, template, and settings value is stored here with exact configuration. This is what makes miStudio's research reproducible by default: you can return to any experiment from any point in the past and know exactly what parameters produced those results.
 
@@ -79,7 +79,7 @@ For multi-GPU setups, miStudio partitions work: one GPU stays dedicated to the b
 
 **Settings & Encryption** — Application settings including API keys are stored in PostgreSQL with AES-256-GCM encryption. The Settings panel provides a tabbed interface for configuring LLM endpoints (OpenAI, OpenAI-compatible, local), API keys, labeling defaults, and display preferences — all without editing config files.
 
-**System Monitor** — Real-time dashboard showing per-GPU utilization, memory, temperature, and power; CPU utilization; RAM and swap; disk I/O; and network I/O. All metrics stream via WebSocket from Celery Beat every 2 seconds.
+**System Monitor** — Real-time dashboard showing per-GPU utilization, memory, temperature, and power; CPU utilization; RAM and swap; disk I/O; and network I/O. All metrics stream via WebSocket every 2 seconds from an asyncio task inside the backend process — so collection stops and resumes with a backend restart, and duplicates if the backend is scaled out.
 
 ---
 

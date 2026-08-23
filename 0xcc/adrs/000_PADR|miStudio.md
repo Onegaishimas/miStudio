@@ -2440,22 +2440,44 @@ This section documents key architectural decisions made during the MVP implement
 **Decision:** Implement WebSocket-first pattern with automatic HTTP polling fallback for all progress tracking.
 
 **Implementation:**
-- Channel pattern: `{entity_type}/{entity_id}` (e.g., `training/abc123`)
+- Channel pattern: `{entity_type_plural}/{entity_id}/{sub_path}` (e.g. `trainings/abc123/progress`)
+- Event names are **colon-delimited** `namespace:event` (e.g. `training:progress`,
+  `system:metrics`) — not lowercase-with-underscores
 - Celery tasks emit via internal HTTP endpoint: `POST /api/internal/ws/emit`
 - Frontend hooks detect WebSocket disconnection and enable polling
 - Reconnection automatically disables polling
 
-**Channels Implemented:**
+**CORRECTED 2026-08-23 (MIS-E2E-158).** The table below previously listed singular channels with no
+sub-path — `training/{id}`, `model/{id}`, `dataset/{id}` — and described events as *"lowercase with
+underscores (e.g. `download_progress`, `labeling_results`)"*. **Subscribing per that table yields
+silence**, and neither cited example event exists. The frontend matched the code, not this document,
+so only a reader of the PADR was misled.
+
+**Channels Implemented** (verified against `workers/websocket_emitter.py`):
 | Channel | Events | Purpose |
 |---------|--------|---------|
-| `training/{id}` | progress, completed, failed | SAE training |
-| `extraction/{id}` | progress, completed, failed | Feature extraction |
-| `model/{id}` | download_progress | Model downloads |
-| `dataset/{id}` | progress | Dataset operations |
-| `labeling/{id}` | progress, results | Auto-labeling |
-| `system/gpu/{id}` | metrics | GPU monitoring |
-| `system/cpu` | metrics | CPU monitoring |
-| `system/memory` | metrics | Memory monitoring |
+| `trainings/{id}/progress` | `training:progress`, `training:completed`, `training:failed` | SAE training |
+| `trainings/{id}/checkpoints` | `checkpoint_created` | Checkpoint creation |
+| `trainings/{id}/deletion` | `training:deletion_progress` | Training deletion |
+| `extraction/{id}` | `extraction:progress`, `extraction:completed`, `extraction:failed` | Feature extraction |
+| `models/{id}/progress` | `model:download_progress` | Model downloads |
+| `models/{id}/extraction` | `model:extraction_progress` | Activation extraction |
+| `datasets/{id}/progress` | `dataset:progress` | Dataset download/processing |
+| `datasets/{id}/tokenization/{tid}` | `tokenization:progress` | Per-tokenization progress |
+| `labeling/{id}/progress`, `labeling/{id}/results` | `labeling:*` | Auto-labeling |
+| `enhanced_labeling/{id}` | `enhanced_labeling:*` | Two-pass labeling |
+| `sae/{id}/{download,upload,extraction}` | `sae:*` | SAE registry operations |
+| `neuronpedia/{id}/export`, `neuronpedia/push/{id}` | `neuronpedia:*` | Neuronpedia export |
+| `steering/{id}` | `steering:*` | Async steering tasks |
+| `system/{cpu,memory,disk,network}`, `system/gpu/{id}` | `system:metrics` | Resource monitoring |
+| `mcp/approvals` | approval events | MCP approval gate |
+
+:::note One emitter bypasses the standard path
+IDL-12 says *"standardize all WebSocket emissions through `websocket_emitter.py`"*. The
+**highest-frequency** emitter does not: `background_monitor.py` builds its own httpx client and
+POSTs directly. Recorded rather than silently excepted — the standard is still the standard, and
+that emitter is the one place to reconcile.
+:::
 
 ---
 
@@ -2524,19 +2546,39 @@ sae_directory/
 
 ---
 
-### IDL-5: Celery Beat for System Monitoring
+### IDL-5: In-process asyncio task for system monitoring (superseded "Celery Beat", MIS-E2E-156)
 
 **Date:** 2025-10-22
 **Context:** System metrics need periodic collection independent of user requests.
 
-**Decision:** Use Celery Beat scheduled task for system monitoring.
+**Decision:** Collect system metrics from an **asyncio background task inside the FastAPI
+process**, not Celery Beat.
 
 **Configuration:**
-- Task: `collect_system_metrics`
+- Implementation: `services/background_monitor.py`, started from `main.py`'s lifespan
 - Interval: Every 2 seconds
-- Output: WebSocket emission to system/* channels
+- Output: WebSocket emission to `system/*` channels
 
-**Rationale:** Ensures consistent metric collection regardless of frontend state.
+**CORRECTED 2026-08-23 (MIS-E2E-156).** This decision previously read *"Use Celery Beat scheduled
+task for system monitoring · Task: `collect_system_metrics`"*. **No such task exists**, and
+`beat_schedule` contains only the janitors, the pruner, the GPU watchdog and the steering
+reconciler. `celery_app.py` says so in a comment: *"System metrics monitoring runs as an asyncio
+background task … (not Celery)"*. Only the 2 s interval survived from the original text.
+
+The 2026-07-10 review deleted `workers/system_monitor_tasks.py` and corrected `008_FPRD` — and left
+**five other documents** asserting the deleted architecture (README, CLAUDE.md, 008_FTASKS,
+008_FTDD, PPRD). This is the correction reaching the rest of them.
+
+**Consequences of the real architecture** — which "Celery Beat" does not imply, and which anyone
+debugging a dead dashboard needs to know:
+- Collection stops when the backend restarts, and resumes with it.
+- It runs per API replica, so metrics duplicate if the backend is scaled out.
+- A crash during monitor startup used to leave it permanently dead and silent (MIS-E2E-139, fixed).
+- Inspecting Celery Beat when the dashboard freezes tells you nothing.
+
+**Rationale:** The metrics are read from the host the API runs on and are pushed over that process's
+own WebSocket. Routing them through a broker adds a hop and a failure mode without adding a
+guarantee.
 
 ---
 
@@ -2659,15 +2701,32 @@ def sanitize_value(value):
 
 **Decision:** Implement comprehensive resilience patterns in Celery tasks.
 
-**Improvements:**
-- Task retry with exponential backoff (`max_retries=3`, `countdown=60s`)
-- Graceful shutdown handlers for SIGTERM/SIGINT
-- Task state persistence for resume capability
-- Dead letter queue for failed tasks
-- Improved error messages with stack traces
+**CORRECTED 2026-08-23 (MIS-E2E-159).** This listed five improvements as decided; two do not
+exist and the exemplar contradicted the real code. Split below into what IS implemented and what
+was aspiration.
 
-**Configuration:**
+**Implemented:**
+- Graceful shutdown handlers for SIGTERM/SIGINT
+- `task_acks_late=True` **globally**, so a task killed mid-flight is redelivered rather than lost
+- Task state persistence in the `task_queue` table, which is what the Monitor page reads
+- Full stack traces on failure (`error_traceback`)
+- **Janitors** rather than broker-level retry: `cleanup_stuck_*` reclaim rows whose worker died
+  (see MIS-E2E-092 — they now share one `task_looks_alive` rule)
+
+**NOT implemented, despite the original text:**
+- **No dead-letter queue.** None exists anywhere in the codebase.
+- **No exponential backoff.** The only `countdown` in `backend/src` is inside a docstring; both real
+  `self.retry()` sites pass none.
+
+**The exemplar below was aspirational and contradicted the flagship task.** `training_tasks.py`
+sets no `max_retries`, no `soft_time_limit`, and `acks_late=False` — a per-task **override** of the
+global `task_acks_late=True`. That matters because `README.md` leans on the global setting
+(*"restarting the application does not lose queued or in-progress tasks"*): the setting supports
+that claim and the flagship task opts out of it. Kept here as the shape a resilient task WOULD
+take, explicitly labelled, rather than deleted and forgotten.
+
 ```python
+# ASPIRATIONAL — not what training_tasks.py does. See above.
 @celery_app.task(bind=True, max_retries=3, soft_time_limit=3600)
 def training_task(self, training_id: str):
     try:
@@ -2679,7 +2738,9 @@ def training_task(self, training_id: str):
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
 ```
 
-**Rationale:** Production-grade reliability for long-running ML operations.
+**Rationale:** Production-grade reliability for long-running ML operations. **Tracked debt:** decide
+whether `training_tasks`' `acks_late=False` override is deliberate (a long GPU job should perhaps
+not be redelivered blindly) and either document the reason beside it or remove the override.
 
 ---
 
@@ -2691,7 +2752,10 @@ def training_task(self, training_id: str):
 **Decision:** Standardize all WebSocket emissions through `websocket_emitter.py`.
 
 **Event Naming Convention:**
-- Events: lowercase with underscores (e.g., `download_progress`, `labeling_results`)
+- Events: **colon-delimited** `namespace:event` (e.g. `training:progress`, `system:metrics`)
+- CORRECTED 2026-08-23 (MIS-E2E-158): this read *"lowercase with underscores (e.g.
+  `download_progress`, `labeling_results`)"* and **neither example exists**. See IDL-1 for the
+  verified channel and event table.
 - Channels: entity type/id pattern (e.g., `dataset/{id}`, `labeling/{id}`)
 
 **Emission Pattern:**
@@ -2764,11 +2828,27 @@ def emit_progress(entity_type: str, entity_id: str, event: str, data: dict):
 **Decision:** Implement startup schema validation and migration gap analysis.
 
 **Implementation:**
-- Startup validator compares live DB schema against SQLAlchemy model metadata
-- Migration gap analyzer detects missing columns, type mismatches, missing indexes
-- Warnings logged at startup; optionally blocks startup on critical mismatches
+- Startup validator compares the live DB against **`Base.metadata`**, derived — every mapped table,
+  with its NOT NULL columns as the required set
+- Checks **table and column presence by name**. It does **not** check types or indexes.
+- Warnings are logged at startup; startup is **never blocked** (`validate_schema_on_startup` calls
+  `validate_schema(raise_on_error=False)` and `main.py` continues regardless)
 
-**Rationale:** Catch schema drift early, prevent silent data issues in production.
+**CORRECTED 2026-08-23 (MIS-E2E-157).** This previously claimed three things, none of which were
+true: that it compared against SQLAlchemy metadata (it used a **hand-maintained literal of 17
+tables** against 36 declared, so the anti-drift tool was itself drifting — `circuits`,
+`validation_manifests`, `agent_approval_requests`, `cluster_profiles`, `app_settings` and
+`steering_record_runs` were never checked); that it detected type mismatches and missing indexes
+(it diffed column NAMES); and that it could optionally block startup (it cannot, and no caller
+asks it to).
+
+The first of those is now **true rather than corrected**: `_required_tables()` derives from
+`Base.metadata` (MIS-E2E-032, 17 → 35 tables), resolved lazily because an eager call at import time
+saw only 15 of them. The other two are stated as limits instead of capabilities.
+
+**Rationale:** Catch schema drift early. Type and index checking is deliberately out of scope —
+SQLAlchemy's type objects do not round-trip through reflection cleanly enough to assert on without
+false positives, and a guard that cries wolf gets disabled.
 
 ---
 
