@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 75
-**Last id issued:** MIS-E2E-075
+**Count:** 78
+**Last id issued:** MIS-E2E-078
 
 ---
 
@@ -1264,7 +1264,7 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Failure scenario:** `export_format` defaults to `"both"`, so **the default path writes the plaintext key** — the fix applied to cURL is bypassed by the default. One file is written per feature labelled, so a single run scatters hundreds of copies of the key across the persistent `/data` volume, which is mounted into the backend and Celery pods and included in backups. The scenario the cURL comment anticipates — attaching the artifact to a bug report — then ships the key to wherever that report goes.
 - **Evidence:** verified-by-live-repro (both blocks and the hardened cURL comment read; `export_format` default traced to `schemas/labeling.py:98`)
 - **Doc reference:** PADR IDL-20; the in-code comment at `:335-339` is the project's own statement of the rule this violates
-- **Verification (R3):** pending — sweep `data_dir/tmp_api` for already-written collections
+- **Verification (R3):** **CONFIRMED in code; NOT materialised on this machine.** The sweep was run: `tmp_api/` holds 27 files across three labeling runs, including **9 Postman collections**, and **not one contains an `Authorization` header** — zero matches for the string across every file. Those runs used a keyless local endpoint, so the `if self.api_key and self.api_key not in ["not-needed","dummy-key-not-required"]` guard skipped the header entirely. The defect is real and fires the first time a real OpenAI key is used with `save_requests_for_testing`; it has not yet fired here. Recorded precisely because "sweep and rotate" was the proposed remediation and the sweep came back clean — the urgency is lower than the finding first implied, and the register should say so.
 - **Proposed remediation:** Emit `Bearer {{OPENAI_API_KEY}}` (a Postman variable) in both writers. Add a regression test that scans every file produced by both functions **across all three `export_format` values** for the key — the existing coverage evidently exercised only the cURL branch. Then sweep and rotate: three `tmp_api/` directories already exist in this working tree.
 - **Effort:** S
 - **Note:** this is the "fixed one representative, never generalized" anti-pattern, with the two sites sixty lines apart in one function.
@@ -1316,3 +1316,58 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Verification (R3):** pending
 - **Proposed remediation:** Validate the endpoint. Build the manifest config from an **explicit allow-list of keys**, not `cfg` wholesale. And extend `manifest_service._assert_no_paths` — which already walks payloads rejecting `/data/` and `/home/` strings — into an `_assert_no_secrets` that rejects keys matching `*key*`/`*token*`/`*secret*`. The guard shape already exists; it just does not cover this class.
 - **Effort:** M
+
+---
+
+### MIS-E2E-076 — IDL-38's "one steering core" is two; the user-facing path is the unmigrated one
+- **Phase / Round:** P02 / R1
+- **Source:** /review (IDL conformance)
+- **Severity:** P2
+- **Type:** debt
+- **Location:** `backend/src/services/steering_core.py` (317 lines, `build_steer_generator`) vs `backend/src/services/steering_service.py:1127` (`_create_steering_hook`) and `:1273` (`_register_steering_hooks`)
+- **Claim:** PADR IDL-38 is titled *"Steered transcript recorder — **one steering core**, general recorder, transcript-carrying manifests"*, and `steering_recorder_service.py:10` states it is *"Built on the unified `steering_core` (the same generation core calibration uses)"*. In practice `build_steer_generator` has exactly **two** consumers — the recorder and `circuit_calibration_service`. Every user-facing steering path (`/steering/compare`, `/steering/sweep`, `/steering/combined`, the Steering panel) runs `steering_service`'s **own independent** hook implementation. There are two steering cores, and the one the product's primary feature uses is not the unified one.
+- **Failure scenario:** Not a runtime bug — an explanation for a class of them. Every steering fix must now be applied twice, and the record shows it is not: MIS-E2E-064 (compare and sweep steering in the wrong SAE basis) is a defect of the `steering_service` path that was fixed only for `combined`, while MIS-E2E-065 (a negative dial silently returning baseline) is a defect of the `steering_core` path. The two implementations have **different bugs**, which is the signature of a duplication that the docs record as resolved.
+- **Refuted sub-hypothesis, recorded so it is not re-run:** the sharpest version of this — that the hardware-only hook-target fix (*"additive steering MUST hook `structure.layers_module[L]` (resid_post), not the discovered `"residual"` RMSNorm, which renormalizes the vector away"*) reached only `steering_core` — is **false**. `steering_service._get_target_module:1113-1117` calls `discover_transformer_structure` and returns `layers_module[layer]`, the whole decoder layer. Both implementations hook the correct target. That fix was generalized; the SAE-routing fix was not.
+- **Evidence:** verified-by-live-repro — consumer grep for `build_steer_generator`; both hook-target resolutions read
+- **Doc reference:** PADR IDL-38; memory `steering-hook-target-whole-layer`
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Migrate `steering_service`'s compare/sweep/combined onto `build_steer_generator`, which is what IDL-38 already says happened. Until then, treat every steering finding as "which of the two?" and check both — and amend IDL-38 to describe what shipped.
+- **Effort:** L
+
+---
+
+## P02 — R2 (adversarial re-review + mutation controls)
+
+---
+
+### MIS-E2E-077 — The force-encryption control for credentials has no test
+- **Phase / Round:** P02 / R2
+- **Source:** mutation control M7
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `backend/src/services/app_setting_service.py:22` (`_SENSITIVE_KEYS`), `:45` (`is_sensitive = data.key in _SENSITIVE_KEYS or data.is_sensitive`)
+- **Claim:** Removing `openai_api_key` from `_SENSITIVE_KEYS` left **40 tests green**. That frozenset is the server-side guarantee that a credential is encrypted at rest **regardless of what the client claims** — with it gone, a request carrying `is_sensitive: false` stores the operator's OpenAI key in plaintext in `app_settings`.
+- **Failure scenario:** The control is correct and unprotected. R1's `/security-review` listed it under "verified clean" and described it accurately — *"forces encryption server-side regardless of the client's `is_sensitive` flag (blocking a plaintext downgrade)"*. Reading established that the control exists and is right; only breaking it established that nothing keeps it right. A refactor that reorganises the set, or a new credential key added without being added here, silently stores plaintext with a green suite.
+- **Evidence:** **verified-by-mutation** — M7 landed (1 deletion confirmed), suite green, restore verified clean
+- **Doc reference:** PADR IDL-20 (DB-backed settings with AES-256-GCM)
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** A test that upserts each `_SENSITIVE_KEYS` member with `is_sensitive: false` and asserts the stored column is **not** the plaintext value. Parametrize it over the set so a newly added key inherits the coverage instead of needing to be remembered.
+- **Effort:** S
+
+---
+
+### MIS-E2E-078 — The hardware-only steering hook-target fix is unpinned on both implementations
+- **Phase / Round:** P02 / R2
+- **Source:** mutation controls M8 and M9
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `backend/src/services/steering_service.py:1113-1117` (`_get_target_module`); `backend/src/services/steering_core.py:236`
+- **Claim:** Regressing the steering hook target from the whole decoder layer back to a norm submodule — the historically-wrong target — leaves the suite green on **both** paths: 84 tests for `steering_service`, 200 for `steering_core`.
+- **Failure scenario:** This is the Recorder increment's headline defect (commit 91b5a6c). Additive steering must hook `structure.layers_module[L]` (resid_post); hooking the discovered `"residual"` module — a post-attention RMSNorm on LFM2 — **renormalises the steering vector away**, producing `steered == unsteered at every dial`. Four static review rounds and the whole unit suite missed it originally; only a hardware run found it. Nothing has changed: the regression is still invisible to the suite, on both implementations.
+  `steering_core.py:229-236` carries a detailed comment explaining exactly why the RMSNorm target is wrong and that hooking the layer output *"survives, so the recorded transcript matches what miLLM serves."* **The trap is documented in prose and enforced by nothing.**
+- **Evidence:** **verified-by-mutation** — M8 and M9 both landed (confirmed by `git diff --stat`), both suites green, both restores verified clean
+- **Doc reference:** PADR IDL-38; memory `steering-hook-target-whole-layer`; commit 91b5a6c
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** A test asserting the module handed to `register_forward_hook` **is** `structure.layers_module[L]` and is not a norm submodule — cheap, needs no GPU, and would have failed before the hardware round. Add it to both implementations while both exist (MIS-E2E-076). Then re-run this mutation as a negative control to prove the new test bites.
+- **Effort:** S
+- **Note:** the standing rule — *mutate the previous round's fix; if it does not fail loudly, that round produced an unpinned fix* — is satisfied here in the negative, for a fix that cost a hardware round to find.
