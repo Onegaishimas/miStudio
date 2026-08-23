@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3186 passed / 0 failed** (baseline 2883) · frontend **1232 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3195 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11: 11.1–11.4 ✅ 11.6–11.9 ✅** · 12.7–12.10 ✅ · 11.5, 11.10, 11.11 and 12.1–12.6 open |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11: all but 11.5 ✅** · 12.7–12.10 ✅ · 11.5 and 12.1–12.6 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -175,8 +175,13 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 11.7 ✅ Dispatch keys on `not created_jobs` rather than the enumerate index (a skipped first SAE meant no job had position 1 and **nothing ran**), and the chain advances to the next queued job **by order** rather than demanding `position + 1` (a gap stranded the tail until the 3-hour reaper blamed a crashed worker). — MIS-E2E-066
 - [x] 11.8 ✅ The `feature_ids` branch now binds to `extraction_job_id`, as the no-ids branch already did, and logs when ids are dropped rather than silently analysing a subset. — MIS-E2E-109
 - [x] 11.9 ✅ Import refuses to overwrite a system template — the rule `update_template` and `delete_template` already had — and cannot grant `is_system` either. ⚠️ The **Pydantic body model is deferred** (the endpoint still takes `dict`); the overwrite hole is closed, the typing debt is recorded. — MIS-E2E-108
-- [ ] 11.10 Fix the `metadata.py` plain `alias`, give `DatasetMetadata` `extra="allow"`, and **rewrite the 13 assertions that pin the defect**. — MIS-E2E-107
-- [ ] 11.11 Frontend state: sign-before-zeroing in rebalance; exclude in-flight state from `persist`; generation tokens on the feature fetches and the cleanup abort. — MIS-E2E-121, -122, -123, -124
+- [x] 11.10 ✅ `validation_alias=AliasChoices("dataset_schema", "schema")` — input accepts both, output is the field name on **every** dump path (a plain alias made the key depend on whether the caller passed `by_alias`). `extra="allow"` so `task_id` / `task_type` / `lock_key` survive validation; they were being **silently dropped**, so a dataset that round-tripped through this model lost the id of the very task someone was cancelling. Round-trip stability verified against pydantic 2.12.5.
+  On the 13 assertions: they assert `dataset_schema` **in storage**, which is correct and stays — existing rows carry it. What was wrong was the *comments* attributing it to the alias; corrected, since there is no longer one. — MIS-E2E-107
+- [x] 11.11 ✅ All four.
+  - **-122** `SelectedFeature.sign` persists the direction, because the over-budget branch zeroes the magnitude and direction cannot be recovered from a zero. A drag past the budget and back used to flip a suppressing feature to amplifying, at a strength the budget model chose, silently.
+  - **-121** `releaseIfCurrent()` only clears the shared refs if it still owns them. A late handler used to null a newer request's controller, after which nothing could be cancelled and the 5s timeout never fired again — permanent, from two rapid feature switches.
+  - **-123** `isGenerating` / `batchState` out of `partialize`, plus a rehydrate reset for payloads already stored. `taskId` stays persisted deliberately — it is the durable handle recovery actually uses.
+  - **-124** `generateCombined` gains the double-submit guard `generateComparison` already had. — MIS-E2E-121, -122, -123, -124
 
 ## Task 12 — Infrastructure (P1)
 
@@ -383,6 +388,11 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/services/labeling_prompt_template_service.py` | MIS-E2E-108: import cannot overwrite — or grant — `is_system` |
 | `backend/tests/unit/test_batch_extraction_chain.py` | Fake query taught `order_by`, so it can express the real query |
 | `backend/tests/unit/test_task11_batch_and_scope.py` | **New.** 11 tests across all six findings |
+| `backend/src/schemas/metadata.py` | MIS-E2E-107: `validation_alias` (never a plain one) + `extra="allow"` so worker-written keys survive |
+| `backend/tests/unit/test_metadata_alias_stability.py` | **New.** 9 tests: no field carries a plain alias, every dump path agrees, `task_id` survives |
+| `frontend/src/types/steering.ts` · `stores/steeringStore.ts` | MIS-E2E-122: `sign` persists direction across zeroing. -123: in-flight state out of `persist` + rehydrate reset. -124: the missing double-submit guard |
+| `frontend/src/stores/featuresStore.ts` | MIS-E2E-121: `releaseIfCurrent()` — only clear the refs you still own |
+| `frontend/src/stores/task11FrontendState.test.ts` | **New.** 7 tests, incl. a behavioural one for the ref clobber (types cannot catch it) |
 
 ## Negative controls run
 
@@ -505,6 +515,10 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC111 | Advance demands `position + 1` again | ✅ 1 failure |
 | NC112 | NLP ids branch loses its scope (MIS-E2E-109) | ⚠️ **SURVIVED TWICE** — first the test matched the identifier in a log message, then `ast.walk` on the `If` found the *else* branch's filter. Fixed both; **re-run ✅ 2 failures** |
 | NC113 | Import overwrites a system template (MIS-E2E-108) | ✅ 1 failure |
+| NC114 | `directionOf` ignores the persisted sign (MIS-E2E-122) | ✅ 1 failure |
+| NC115 | In-flight state back in `partialize` (MIS-E2E-123) | ✅ 1 failure |
+| NC116 | Remove the combined double-submit guard (MIS-E2E-124) | ✅ 1 failure |
+| NC117 | Restore the unconditional ref clobber (MIS-E2E-121) | ✅ 1 failure — `tsc` stays clean, so only a behavioural test can catch it |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

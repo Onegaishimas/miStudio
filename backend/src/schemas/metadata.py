@@ -6,7 +6,7 @@ including schema information and tokenization statistics.
 """
 
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 
 class SchemaMetadata(BaseModel):
@@ -232,10 +232,25 @@ class DatasetMetadata(BaseModel):
     tokenization statistics, and download metadata.
     """
 
+    #: VALIDATION alias, never a plain one (MIS-E2E-107).
+    #:
+    #: A plain `alias` renames the field on SERIALISATION as well as input —
+    #: the exact construct `schemas/jspace_contracts.py` and
+    #: `schemas/cluster_profile.py` both warn about in writing, having once
+    #: republished a schema without its wire field and invalidated every
+    #: exported document. The lesson was written down and never applied outside
+    #: those two modules, and the guard enforcing it iterates only
+    #: `JSPACE_KINDS`.
+    #:
+    #: Reproduced on pydantic 2.12.5: input `{"schema": …}` dumps as
+    #: `{"dataset_schema": …}`, so a metadata round-trip renamed the key.
+    #:
+    #: `AliasChoices` accepts BOTH spellings on input while the field name is
+    #: the only thing ever written — input is tolerant, output is stable.
     dataset_schema: Optional[SchemaMetadata] = Field(
         None,
         description="Dataset schema information",
-        alias="schema"  # Accept "schema" in input, but use "dataset_schema" internally
+        validation_alias=AliasChoices("dataset_schema", "schema"),
     )
     tokenization: Optional[TokenizationMetadata] = Field(
         None,
@@ -275,6 +290,15 @@ class DatasetMetadata(BaseModel):
 
     model_config = {
         "populate_by_name": True,  # Allow using both 'dataset_schema' and 'schema'
+        # EXTRA KEYS SURVIVE THE ROUND TRIP (MIS-E2E-107).
+        #
+        # pydantic's default is "ignore", so validating stored metadata DROPPED
+        # every key this model does not declare — including `task_id`,
+        # `task_type` and `lock_key`, which the download and tokenize endpoints
+        # write into `extra_metadata` and the cancel path reads back. A dataset
+        # whose metadata passed through this model lost the id of the very task
+        # someone was trying to cancel.
+        "extra": "allow",
         "json_schema_extra": {
             "examples": [
                 {

@@ -149,7 +149,12 @@ async def test_metadata_merge_preserves_existing(async_session: AsyncSession):
     retrieved = await DatasetService.get_dataset(async_session, dataset_id)
 
     assert "download" in retrieved.extra_metadata, "Download metadata was lost during merge"
-    # Note: Pydantic validation transforms "schema" to "dataset_schema" due to alias
+    # The stored key is `dataset_schema`, and that is now the FIELD NAME rather
+    # than an alias artifact (MIS-E2E-107). It used to be produced by a plain
+    # `alias="schema"`, which renames on SERIALISATION as well as input — so the
+    # key you got out depended on which dump path ran. Existing rows carry
+    # `dataset_schema`, so that stays the stored spelling; what changed is that
+    # it is stable, and both spellings are accepted on input.
     assert "dataset_schema" in retrieved.extra_metadata, "Schema metadata was not added"
 
     # Verify download metadata is intact (note: may be None after validation)
@@ -482,7 +487,7 @@ async def test_metadata_persistence_across_status_changes(async_session: AsyncSe
     processing = await DatasetService.get_dataset(async_session, dataset_id)
     assert processing.status == DatasetStatus.PROCESSING
     assert "download" in processing.extra_metadata
-    # With complete schema metadata, Pydantic validates and transforms "schema" -> "dataset_schema"
+    # `dataset_schema` is the field name and the stored key (see MIS-E2E-107).
     assert "dataset_schema" in processing.extra_metadata
 
     # Transition to ready, add tokenization metadata

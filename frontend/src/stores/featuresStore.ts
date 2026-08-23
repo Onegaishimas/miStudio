@@ -629,25 +629,44 @@ export const useFeaturesStore = create<FeaturesStoreState>((set, get) => ({
     const controller = new AbortController();
     _cleanupAbortController = controller;
 
+    // ONLY CLEAR THE REFS IF WE STILL OWN THEM (MIS-E2E-121).
+    //
+    // These handlers used to null the shared refs unconditionally. An OLDER
+    // request completing after a NEWER one started therefore cleared the
+    // newer one's controller and timeout — so from then on the controller was
+    // `null` for the rest of the session, no request could be cancelled, and
+    // the 5-second hard timeout never fired again.
+    //
+    // Two rapid feature switches are enough, and clicking through features
+    // quickly is the primary interaction of the Feature Browser. Permanent,
+    // silent, and caused by ordinary use.
+    const releaseIfCurrent = () => {
+      if (_cleanupAbortController === controller) {
+        _cleanupAbortController = null;
+      }
+      if (_cleanupTimeoutId === timeoutId) {
+        clearTimeout(timeoutId);
+        _cleanupTimeoutId = null;
+      }
+    };
+
     // Hard 5-second timeout — abort if the backend takes too long.
-    _cleanupTimeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       controller.abort();
-      _cleanupAbortController = null;
-      _cleanupTimeoutId = null;
+      releaseIfCurrent();
     }, 5000);
+    _cleanupTimeoutId = timeoutId;
 
     // Fire-and-forget — result doesn't block the UI.
     axios.post('/api/v1/analysis/cleanup', undefined, { signal: controller.signal })
       .then((response) => {
-        _cleanupAbortController = null;
-        if (_cleanupTimeoutId !== null) { clearTimeout(_cleanupTimeoutId); _cleanupTimeoutId = null; }
+        releaseIfCurrent();
         if (response.data.vram_freed_gb > 0) {
           console.log(`[Analysis Cleanup] Freed ${response.data.vram_freed_gb} GB VRAM`);
         }
       })
       .catch((error: any) => {
-        _cleanupAbortController = null;
-        _cleanupTimeoutId = null;
+        releaseIfCurrent();
         // AbortError / CanceledError means a newer clearSelectedFeature() call
         // superseded this one — not a real failure, no need to log.
         if (
