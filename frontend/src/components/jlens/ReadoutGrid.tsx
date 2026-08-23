@@ -162,14 +162,14 @@ export function ReadoutGrid({
             <span className="flex items-center gap-1">
               <span
                 className="inline-block h-2 w-2 rounded-sm"
-                style={{ background: diffColor(0, topN) }}
+                style={{ background: diffColor(1, topN) }}
               />
               same top token
             </span>
             <span className="flex items-center gap-1">
               <span
                 className="inline-block h-2 w-2 rounded-sm"
-                style={{ background: diffColor(Math.max(topN - 1, 1), topN) }}
+                style={{ background: diffColor(topN, topN) }}
               />
               ranked lower by the logit lens
             </span>
@@ -303,9 +303,11 @@ export function ReadoutGrid({
                           ? ' · J = I at this layer — the two lenses are the same lens here, so agreement is not a finding'
                           : r === null
                             ? ` · Jacobian: ${mine} — outside the logit lens's top ${topN}`
-                            : r === 0
+                            : r === 1
                               ? ` · both lenses lead with ${mine}`
-                              : ` · Jacobian: ${mine} — logit ranks it #${r + 1}`;
+                              // `rankOf` is 1-based, so `#${r}` IS the rank.
+                              // `#${r + 1}` reported every rank one too high.
+                              : ` · Jacobian: ${mine} — logit ranks it #${r}`;
                       }
                     } else {
                       // BANDS NO LONGER TINT THE CELL. Band shading and the pin

@@ -100,11 +100,29 @@ export const PIN_COLORS = [
  * logit lens cannot, which is the entire reason the substrate exists.
  */
 export function diffColor(rank: number | null, topN: number): string {
-  if (rank === 0) return 'rgba(100,116,139,.16)';
-  if (rank === null) return 'rgba(244,63,94,.34)';
-  // Ramp amber -> red across the visible depth. Guard topN <= 1 so a top-1
-  // readout does not divide by zero and paint every cell the same.
+  // ONE-BASED, matching `rankOf` (MIS-E2E-129).
+  //
+  // This was written for a 0-based rank while `rankOf` returns `i + 1` and
+  // therefore NEVER returns 0. Three consequences, all visible:
+  //
+  //   * rank 1 — the two lenses agreeing on the top token, the thing the Diff
+  //     view exists to locate — fell through to the amber ramp and was shaded
+  //     as DISAGREEMENT;
+  //   * the "same top token" branch below was unreachable, so the legend
+  //     advertised a swatch no cell could ever receive (the cheap tell that an
+  //     index base is wrong);
+  //   * the shading contradicted the `first diverge at L…` badge beside it,
+  //     which `firstDisagreement` computes correctly.
+  //
+  // `rankColor` cannot move to 0-based — it takes `Math.log(rank)`, so rank 0
+  // would be -Infinity — and "rank 1 = best" is what the word means. So the
+  // base is 1 everywhere and this function moved, not `rankOf`.
+  if (rank === 1) return 'rgba(100,116,139,.16)';   // both lenses lead with it
+  if (rank === null) return 'rgba(244,63,94,.34)';  // outside the top N entirely
+  // Ramp amber -> red across the visible depth, starting at rank 2. Guard
+  // topN <= 1 so a top-1 readout does not divide by zero and paint every cell
+  // the same.
   const span = Math.max(topN - 1, 1);
-  const t = Math.min(rank / span, 1);
+  const t = Math.min((rank - 1) / span, 1);
   return `rgba(245,158,11,${(0.18 + 0.16 * t).toFixed(3)})`;
 }
