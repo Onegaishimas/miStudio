@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 119
-**Last id issued:** MIS-E2E-119
+**Count:** 127
+**Last id issued:** MIS-E2E-127
 
 ---
 
@@ -233,10 +233,11 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Location:** `frontend/src/api/websocket.ts` (173 lines) vs `frontend/src/contexts/WebSocketContext.tsx` (247 lines)
 - **Claim:** Two independent Socket.IO layers exist. The context is the live one — single connection, `transports: ['polling','websocket']`, re-subscribes all channels on reconnect, queues calls made before the socket is ready. `api/websocket.ts` is a separate `WebSocketClient` singleton with its own `io()` call, `transports: ['websocket']` only, and hand-rolled `subscribeToDatasetProgress` / `TrainingProgress` / `TrainingCheckpoints` / `LabelingResults`. It has no test file.
 - **Failure scenario:** If anything imports it, the app opens a second connection with different transport settings and a different subscription registry — so a channel subscribed through one layer receives nothing emitted to the other, and the reconnect re-subscription logic that only the context has does not apply. Silent divergence, not a crash.
-- **Evidence:** plausible (read-only; import graph not yet traced — P09 R1 must establish whether it is genuinely dead)
+- **Evidence:** **verified-by-live-repro — RESOLVED at P07 R1.** Grepped the whole of `frontend/src` for `websocketClient` and for any import of `api/websocket`: **no importers**. The module is entirely dead code. Two latent defects inside it were noted and not filed separately, since nothing calls them: `connect()` would spawn a second Manager if called on a disconnected socket, and its `reconnect*` listeners are Manager events that never fire on a Socket.
+- **Severity revised:** **P2 → P3.** The risk was "if anything imports it, a second connection opens with different transports and a separate subscription registry". Nothing does. What remains is a 173-line untested duplicate of the live transport sitting next to it, which is a deletion task, not a defect.
 - **Doc reference:** PADR IDL-1, IDL-12
-- **Verification (R3):** pending
-- **Proposed remediation:** If dead, delete it. If live, fold its four helpers into the context.
+- **Verification (R3):** **CONFIRMED dead at P07 R1**
+- **Proposed remediation:** Delete it.
 - **Effort:** S
 
 ---
@@ -2093,3 +2094,159 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Verification (R3):** CONFIRMED at R2
 - **Proposed remediation:** Make the gap visible rather than filling all 100 by hand: parametrize over the **registry**, assert every tool issues at least one call with a path starting `/`, and treat absence from `EXPECTED_CALLS` as an explicit `xfail`-style opt-out that has to be written down. That turns "nobody added a row" from silence into a listed exemption — the same discipline `test_causal_language_audit.py` already uses, where exemptions are `SKIPPED` with a reason so they stay visible in the output.
 - **Effort:** M
+
+---
+
+## P07 — Frontend state layer
+
+---
+
+### MIS-E2E-120 — Every WebSocket event fires N+1 times after N reconnects
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `frontend/src/contexts/WebSocketContext.tsx:61-68`
+- **Claim:** The `connect` handler re-attaches every handler already in `eventHandlersRef.current`:
+  ```js
+  // IMPORTANT: Re-attach existing handlers FIRST (for reconnections)
+  // This must happen before processing pending handlers to avoid double-registration
+  const existingHandlers = new Map(eventHandlersRef.current);
+  existingHandlers.forEach((handlers, event) => {
+    handlers.forEach(handler => { socket.on(event, handler); });
+  });
+  ```
+  socket.io-client **does not detach handlers on disconnect** — verified against 4.8.1, whose `onclose` clears only acks. So the handlers are still registered and `socket.on` adds a *second* registration. After N reconnects every event fires N+1 times. The comment reasons explicitly about double-registration and has the direction backwards: it protects the *pending* handlers from being registered twice while double-registering the *existing* ones.
+- **Failure scenario:** `reconnectionAttempts: Infinity` makes reconnects routine, not exceptional. The clearest visible consequence is duplicate checkpoints — `addCheckpoint` appends with no dedupe, so a training that reconnects three times shows each subsequent checkpoint four times. Every progress handler, store patch and counter behind this transport is multiplied the same way. **No test file exists for this context** (MIS-E2E-016), and it is the single connection every realtime feature depends on.
+- **Evidence:** **verified-by-live-repro** — the re-attach block read at source; the reviewer verified socket.io-client 4.8.1's `onclose` behaviour
+- **Doc reference:** PADR IDL-1, IDL-12
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** Drop the re-attach entirely — the handlers survive. If a defensive re-attach is wanted, `socket.off(event, handler)` first.
+- **Effort:** S
+
+---
+
+### MIS-E2E-121 — A stale request permanently disables cancellation and the request timeout
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `frontend/src/stores/featuresStore.ts:661` (the `.catch` path), `:655` (the same clobber on success)
+- **Claim:** An older cleanup request's completion handler nulls the **newer** request's abort controller and timeout handle — it clears the shared refs without checking that it still owns them.
+- **Failure scenario:** Two rapid feature switches are enough. After that, the abort controller is `null` for the rest of the session, so no subsequent request can be cancelled and the 5-second hard timeout never fires again. The failure is permanent, silent, and triggered by ordinary UI use — clicking through features quickly is the primary interaction of the Feature Browser.
+- **Evidence:** plausible (read-only) — both clobber sites read
+- **Doc reference:** none
+- **Verification (R3):** pending
+- **Proposed remediation:** Capture the controller in a local, and null the ref only if it is still the one this request installed — the standard generation-token pattern. Related: MIS-E2E-124 is the same missing pattern one level up.
+- **Effort:** S
+
+---
+
+### MIS-E2E-122 — Rebalance flips a suppressing feature to amplifying
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `frontend/src/stores/steeringStore.ts:827`, and the same defect at `:878`
+- **Claim:** The budget rebalance derives a member's **sign** from a strength value that the over-budget branch has already zeroed. A negative (suppressing) feature therefore comes back positive.
+- **Failure scenario:** Reachable in a single slider drag past the budget and back. Negative strength is not an edge case in this product — the cluster-definition contract carries `sign ∈ {1,-1}` and the canonical rule is that **a member's negative strength *is* its direction**. So the interaction silently inverts what a feature does: a cluster tuned to suppress a behaviour now amplifies it, at a strength the budget model chose, with no error and no visual cue.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-29 (cluster strength budget model); memory `cluster-member-meta-contract-rev` — "CANONICAL SIGN RULE: negative strength is already directional"
+- **Verification (R3):** pending
+- **Proposed remediation:** Capture the sign before the zeroing branch.
+- **Effort:** S
+
+---
+
+### MIS-E2E-123 — A mid-batch refresh locks the Generate button permanently
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `frontend/src/stores/steeringStore.ts:2538`
+- **Claim:** `isGenerating` and `batchState` are written into the **persisted** slice of the store, and nothing clears them on rehydration. After a refresh mid-batch, `selectCanGenerateBatch` returns false forever, and `abortBatch` cannot fix it because it drives the in-memory loop that no longer exists.
+- **Failure scenario:** Refresh the page during a batch — or close the tab and come back — and the Steering panel's primary action is disabled with no way to re-enable it from the UI. Recovery requires clearing `localStorage`. Transient UI state persisted alongside genuine preferences.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-27
+- **Verification (R3):** pending — reproducible in the browser; belongs to P08's live pass
+- **Proposed remediation:** Exclude in-flight state from the `persist` partializer, or clear it in `onRehydrateStorage`.
+- **Effort:** S
+
+---
+
+### MIS-E2E-124 — Three concurrency defects in the steering and feature stores
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `frontend/src/stores/steeringStore.ts:2100`, `:2415`; `frontend/src/stores/featuresStore.ts:395`
+- **Claim:**
+  1. **`generateCombined` lacks the double-submit guard `generateComparison` has** (`:2100`). A double-click shows a *"Superseded…"* error banner to the user while an orphaned GPU task runs to completion — so the UI reports a failure and the GPU is occupied by work nobody will read.
+  2. **A recovery guard is dead** (`:2415`): it compares `comparison_id` — format `cmp_<12 hex>`, generated client-side and independently — against an 8-character Celery task-id prefix. The two can never match by construction, so recovery is always skipped; and a coincidental match would silently skip it for the wrong reason.
+  3. **No request sequencing on feature detail/examples/token-analysis** (`:395`). A slow response for feature A renders under feature B, with no error — the classic stale-render race, and the same missing pattern as MIS-E2E-121 one level up.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-27; `.claude/context/agents/qa_engineer.md` records the sibling `pendingBatchResolver` leak
+- **Verification (R3):** pending
+- **Proposed remediation:** Give `generateCombined` the guard its sibling has; delete or repair the dead comparison; add a generation token to the three feature fetches.
+- **Effort:** M
+
+---
+
+### MIS-E2E-125 — Polling stops on one transient error and can render stale state after it stops
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `frontend/src/utils/polling.ts:186`, `:203`
+- **Claim:** Two defects in the shared polling helper:
+  1. **A single transient fetch error terminates polling permanently** (`:186`), and the only caller **discards the returned handle**, so there is no way to restart it.
+  2. **No in-flight guard on the interval** (`:203`): a slow earlier response can call `onUpdate` with stale non-terminal state *after* polling has already stopped.
+- **Failure scenario:** A 10-minute model download stops updating after one 502 and never resumes — the download itself completes, but the UI shows it in progress indefinitely. Or, via (2), a finished model is stranded displaying "downloading" because a late response overwrote the terminal state. Both leave the UI permanently wrong about a job that actually succeeded, which is the failure mode this repo has recorded before under "the frontend fallback keys on connection, not data freshness".
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-1
+- **Verification (R3):** pending
+- **Proposed remediation:** Tolerate N consecutive errors before giving up; guard the interval on an in-flight flag and discard responses that arrive after stop.
+- **Effort:** S
+
+---
+
+### MIS-E2E-126 — Two smaller state defects: an abandoned channel resubscribes forever, and a duplicate drops its SAE
+- **Phase / Round:** P07 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `frontend/src/contexts/WebSocketContext.tsx:165` (`unsubscribe`); `frontend/src/stores/steeringStore.ts:1244` (`duplicateFeature`)
+- **Claim:**
+  1. `unsubscribe` does not clear `pendingSubscriptionsRef`, so a channel the user abandoned is subscribed on the next connect and **re-subscribed on every reconnect thereafter**. Compounds with MIS-E2E-120.
+  2. `duplicateFeature` omits `sae_id`, so duplicating a member of a multi-layer circuit falls back to the request-level SAE — the wrong layer. That is the exact 422 the circuit loader documents guarding against, and the same wrong-basis class as MIS-E2E-064 reached from the UI instead of the API.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-31
+- **Verification (R3):** pending
+- **Proposed remediation:** Clear the pending entry on unsubscribe; carry `sae_id` through the duplicate.
+- **Effort:** S
+
+---
+
+## P07 — R2 (mutation controls)
+
+---
+
+### MIS-E2E-127 — The auto-baseline formula's own test file samples only where the slope cannot matter
+- **Phase / Round:** P07 / R2
+- **Source:** mutation control M22
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `frontend/src/utils/steeringStrength.test.ts:25-36`; the constant at `frontend/src/utils/steeringStrength.ts:25`
+- **Claim:** Changing `BASELINE_SLOPE` from **2.6 to 2.4** — the coefficient of the IDL-27 frequency auto-baseline, `S = clamp(2.9 − 2.6·freq, 1, 3)` — left **75 tests green** across the formula's dedicated test file and the steering store's.
+- **Failure scenario:** The test file samples the function at exactly three kinds of point, and the slope is invisible at all three: at **freq 0** the slope term is multiplied by zero; at **freq 0.9 and 1.0** the result clamps to the floor; and the remaining assertions are inequalities against `BASELINE_MAX`/`BASELINE_MIN`, which almost any slope satisfies. Computed, the two coefficients agree at every point the tests examine and differ only in the mid-range:
+  ```
+  slope 2.6 | f=0 -> 2.9 | f=0.5 -> 1.60 | f=0.9 -> 1 | f=1 -> 1
+  slope 2.4 | f=0 -> 2.9 | f=0.5 -> 1.70 | f=0.9 -> 1 | f=1 -> 1
+  ```
+  The arithmetic that *would* distinguish them is written in a **comment** — `2.9 - 2.6*1 = 0.3 → clamp` — where nothing executes it. The formula sets the default steering strength for every feature the user has not tuned, so a silent change to it changes what the product does by default across the whole Steering panel.
+- **Evidence:** **verified-by-mutation** — M22 landed (confirmed), 75 tests green, restore verified clean; the divergence computed independently
+- **Doc reference:** PADR IDL-27; memory `steering-011-baseline-and-color-literal`
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** Assert an exact mid-range value — `computeBaselineStrength(0.5).value` — where the slope is the only thing determining the answer. One line. When writing a test for a formula, first ask which input makes the candidate behaviours **differ**; every sample here was chosen from the boundaries, where they cannot.
+- **Effort:** S
+- **Note:** this is the J-Lens arc's recorded trap in the frontend — there, a fixture whose `W_U` was `torch.eye(...)` made a unit-norm fix deletable with 63 tests green, because the fixture was already unit-norm. Same shape: the sample points make both behaviours identical.
