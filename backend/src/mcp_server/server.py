@@ -99,10 +99,33 @@ class AuditToolLogger:
 
 def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, MiStudioClient]:
     """Create the FastMCP server with only the enabled tool categories registered."""
-    if not settings.auth_token and not (settings.allow_anonymous or stdio):
+    # `MCP_ALLOW_ANONYMOUS` IS STDIO-ONLY, AS EVERYTHING ALREADY CLAIMED
+    # (MIS-E2E-150).
+    #
+    # This read `not (settings.allow_anonymous or stdio)`, so the flag ALONE
+    # satisfied the guard on the HTTP transport. `__main__.py` then adds
+    # `BearerAuthMiddleware` only when a token is set — otherwise it logs a
+    # warning and serves on `settings.host`, default 0.0.0.0.
+    #
+    # So an operator hitting this very error, following the remedy this very
+    # message gives, got a LAN-reachable UNAUTHENTICATED MCP server exposing
+    # `delete_circuit`, GPU steering and label write-back. The manual says a
+    # bearer token is "always required" and the message says "for local stdio
+    # development only": three statements of a rule nothing enforced.
+    #
+    # `and stdio` is the enforcement.
+    if not settings.auth_token and not (settings.allow_anonymous and stdio) and not stdio:
         raise SystemExit(
             "MCP_AUTH_TOKEN is required — the MCP port is LAN-reachable by default. "
             "Set a token, or set MCP_ALLOW_ANONYMOUS=true for local stdio development only."
+        )
+
+    if settings.allow_anonymous and not stdio:
+        raise SystemExit(
+            "MCP_ALLOW_ANONYMOUS is only honoured on the stdio transport. Over "
+            "HTTP the port is LAN-reachable and exposes destructive tools "
+            "(delete_circuit, GPU steering, label write-back), so anonymous "
+            "access is refused. Set MCP_AUTH_TOKEN instead."
         )
 
     categories = settings.enabled_categories()

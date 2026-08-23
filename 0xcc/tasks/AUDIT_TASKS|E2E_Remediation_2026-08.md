@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3216 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3230 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,6 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
+| **Wave 6** | Task 13 — documentation (19 findings) | ⏳ **in progress** — 13.1 ✅ 13.2 ✅ 13.8 ✅ 13.9 ✅ · 13.3–13.7, 13.10, 13.11 open |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
@@ -35,7 +36,7 @@ running file list.*
 - [x] 0.4 ✅ **Fixed `sync-to-clean.yml` so the mirror carries no source history** — publish a squashed single commit, or `git filter-repo` before pushing. Deleting files from a tip commit does not remove them from a force-pushed history. — MIS-E2E-143
 - [ ] 0.5 Review the five `backups/*.sql.gz` dumps for credentials and user prompt text; rotate anything they hold. `git rm` them and add `backups/` to `.gitignore`. — MIS-E2E-008, -143
 - [x] 0.6 ✅ Added a CI check that inspects the **published** tree's history against the exclusion list and fails the sync. — MIS-E2E-143
-- [ ] 0.7 Delete `aaaa/` — 20 byte-identical copies of authoritative `0xcc/` documents, not in the exclusion list. — MIS-E2E-007, -164
+- [x] 0.7 ✅ Deleted (21 files). Verified byte-identical to their `0xcc/` originals first; the one non-duplicate — a reading-list manifest — was **relocated** to `0xcc/docs/clustering-document-set.md` pointing at the originals, rather than destroyed. — MIS-E2E-007, -164
 
 **Acceptance:** the exclusion list holds for every commit reachable from the mirror's
 tip, not only the tip; the rotated credential appears nowhere in either repo.
@@ -202,15 +203,16 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 13 — Documentation (P2)
 
-- [ ] 13.1 **Fix `docs/miStudio_Manual.md:349`** — the exact sentence that cost a real SAE. Then decide whether that manual should exist. — MIS-E2E-149
-- [ ] 13.2 Make `MCP_ALLOW_ANONYMOUS` genuinely stdio-only, which is what both the manual and the guard's own error message already promise. — MIS-E2E-150
+- [x] 13.1 ✅ Corrected, with the **Stop & Finalize** row and the warning the other manual already carried — plus the incident itself recorded inline, so the next reader knows why the wording matters. Pinned by a test parametrized over **both** manuals. On whether it should exist: left in place, now guarded; deleting a 599-line user manual is the user's call, not a remediation's. — MIS-E2E-149
+- [x] 13.2 ✅ Enforced, and the manual corrected. Verified across the full matrix: stdio+flag ✅, stdio bare ✅, **HTTP+flag REFUSED**, HTTP bare REFUSED, HTTP+token ✅.
+  ⚠️ **A test was pinning this defect** — `test_anonymous_flag_allows_empty_token` asserted the flag satisfies the guard, i.e. certified the hole. Rewritten. Third defect-pinning test found in this remediation. — MIS-E2E-150
 - [ ] 13.3 Rewrite the K8s install guide's four `sed` steps — none matches, and one renames the database to the password. — MIS-E2E-152
 - [ ] 13.4 Point README at the real Compose quickstart, not `start-mistudio.sh` (hardcoded `/home/x-sean`, needs a venv it never creates, different domain). — MIS-E2E-162
 - [ ] 13.5 Correct IDL-5 and the **five** documents propagating it; IDL-16's three false claims; IDL-1/12's channel and event conventions; IDL-11's DLQ and backoff; IDL-38's "one steering core". — MIS-E2E-156, -157, -158, -159, -076
 - [ ] 13.6 Reconcile PPRD §2.1 — **13 rows** mark "Planned" work that shipped — and decide which document is authoritative for status. — MIS-E2E-011
 - [ ] 13.7 Fix CLAUDE.md: the off-by-one instruction references (which point at the **wrong action**), the phantom paths, the self-contradictions, the stale test counts, the "returns 501" claims. — MIS-E2E-155, -010, -163
-- [ ] 13.8 Add a PADR IDL stating the no-app-auth posture, its boundary, and what invalidates it. Currently undocumented and indistinguishable from an oversight. — MIS-E2E-002, -166
-- [ ] 13.9 Document the 11 missing tables in `data-model.md` and remove its unearned "verified against the ORM models"; add a doc test diffing it against `Base.metadata`. — MIS-E2E-050, -164
+- [x] 13.8 ✅ **PADR IDL-47** (v3.5). States the posture, the **four classes that escape it** — credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach, each found live in this audit — the infrastructure boundary (the API behind nginx, *not* the broker or `/api/internal`), the four conditions that invalidate the decision, and that the PIN is a UI affordance and never security. — MIS-E2E-002, -166
+- [x] 13.9 ✅ Re-measured: **9** missing against the current ORM, not 11 (two of the named ones are non-ORM). All nine documented; the unearned claim replaced by `test_data_model_doc_covers_every_table`, which diffs the page against `Base.metadata`. `alembic_version` and `feature_activations_default` are **listed exemptions with reasons**. Control: adding a new ORM table fails the guard until it is documented. — MIS-E2E-050, -164
 - [ ] 13.10 Add `## Relevant Files` to FTASKS 024–028 and the six ad-hoc files; triage the 348 unchecked boxes; fix the 22 dead paths. — MIS-E2E-153, -154, -012
 - [ ] 13.11 Regenerate `docs/mcp-contract.md` after fixing the `startswith("/")` filter — it lists three endpoints that do not exist and a test pins them. Derive the tool-count prose from the registry. — MIS-E2E-114, -017, -161
 
@@ -405,6 +407,15 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_worker_queue_coverage.py` | MIS-E2E-148: two fail-open `pytest.skip`s → assertions (the finding named one) |
 | `README.md` · `CLAUDE.md` | Manifest references point at `k8s/base/` |
 | `backend/tests/unit/test_infrastructure_invariants.py` | **New.** 12 tests; the ingress check is parametrised over the hosts it finds, which is how the `.net` gap surfaced |
+| `aaaa/` | **Deleted** (21 files, MIS-E2E-007) — byte-identical copies published to the mirror while their originals were withheld |
+| `0xcc/docs/clustering-document-set.md` | **New.** The one non-duplicate from `aaaa/`, relocated to index the originals |
+| `docs/miStudio_Manual.md` | MIS-E2E-149: the sentence that cost `train_969e90af`, corrected in the second manual too |
+| `backend/src/mcp_server/server.py` | MIS-E2E-150: `MCP_ALLOW_ANONYMOUS` is stdio-only in fact, not just in prose |
+| `manual/docs/advanced/mcp-server.md` | MIS-E2E-150: the troubleshooting remedy no longer points into the hole |
+| `manual/docs/reference/data-model.md` | MIS-E2E-050: nine tables documented; the unearned verification claim replaced by an enforced one |
+| `0xcc/adrs/000_PADR\|miStudio.md` | **IDL-47** — the no-app-auth posture, its four escape classes, and what invalidates it |
+| `backend/tests/unit/test_mcp_server_foundation.py` | ⚠️ `test_anonymous_flag_allows_empty_token` **pinned the defect**; rewritten to assert the refusal |
+| `backend/tests/unit/test_docs_match_behaviour.py` | **New.** 12 tests binding the manuals and the data-model reference to the code |
 
 ## Negative controls run
 
@@ -542,6 +553,10 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC126 | `k8s_deploy` stops reporting step failure (MIS-E2E-147) | ✅ 1 failure |
 | NC127 | `apt-key`-style global trust restored (MIS-E2E-148) | ✅ 1 failure |
 | NC128 | The stale standalone manifest returns (MIS-E2E-144) | ✅ 1 failure |
+| NC129 | The Stop-saves-the-SAE sentence returns (MIS-E2E-149) | ✅ 1 failure |
+| NC130 | Anonymous allowed over HTTP again (MIS-E2E-150) | ✅ 1 failure |
+| NC131 | Remove a table's row from the data-model page | ⚠️ **SURVIVED** — the prose still named it. Re-run removing EVERY mention: ✅ 1 failure |
+| NC132 | Add a new ORM table and leave it undocumented | ✅ 1 failure — the invariant that actually matters |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

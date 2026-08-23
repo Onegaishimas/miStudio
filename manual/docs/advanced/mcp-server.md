@@ -34,7 +34,11 @@ Point a client machine at the ingress with a hosts-file entry, e.g. `192.168.244
 **Verify:** `curl http://<host>:8765/health` returns the enabled tool categories.
 
 :::warning Network exposure
-The server binds `0.0.0.0:8765` so agents on other LAN machines can connect (bearer token always required). If your agents run on the same host only, firewall port 8765.
+The server binds `0.0.0.0:8765` so agents on other LAN machines can connect. A bearer token is **always** required on this transport — and that is now enforced, not just stated: `MCP_ALLOW_ANONYMOUS` is honoured on **stdio only**, and the server refuses to start if it is set over HTTP.
+
+Until this was fixed, the flag alone satisfied the startup guard on HTTP, so following the troubleshooting remedy below produced a LAN-reachable **unauthenticated** server — on the page that told you a token was always required.
+
+If your agents run on the same host only, firewall port 8765.
 :::
 
 ## Connecting a Client
@@ -137,7 +141,7 @@ A Claude Code session pointed at the server, instructed with natural language on
 
 | Symptom | Fix |
 |---------|-----|
-| Server exits at startup: "MCP_AUTH_TOKEN is required" | Set the token in `.env` (or `MCP_ALLOW_ANONYMOUS=true` for stdio dev only) |
+| Server exits at startup: "MCP_AUTH_TOKEN is required" | Set `MCP_AUTH_TOKEN` in `.env`. **`MCP_ALLOW_ANONYMOUS` will not help here** — it is honoured on the **stdio** transport only, and the server refuses to start over HTTP with it set. That is deliberate: the HTTP port is LAN-reachable and exposes `delete_circuit`, GPU steering and label write-back. |
 | 401 from every call | Client isn't sending `Authorization: Bearer <token>`, or tokens don't match |
 | Tools error "backend unreachable" | The `mcp-server` container can't reach `backend:8000` — check both are on the same network and the backend is healthy |
 | `steer_*` returns a guardrail message | Concurrency cap hit — poll or cancel existing tasks, or raise `MCP_STEERING_MAX_CONCURRENT` |

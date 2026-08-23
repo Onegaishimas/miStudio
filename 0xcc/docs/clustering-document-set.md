@@ -1,7 +1,18 @@
-# Clustering document set
+# Clustering document set — reading list
 
-Every 0xcc document that carries a clustering requirement, copied 2026-08-19.
-Copies, not moves — the originals are unchanged and remain authoritative.
+> **Relocated from `aaaa/00_MANIFEST.md` (MIS-E2E-007).** That directory held 20
+> **byte-identical copies** of authoritative `0xcc/` documents. It was not in
+> `sync-to-clean.yml`'s exclusion list, so those copies were published to the
+> public mirror while their originals were correctly withheld — and a reader who
+> found a copy had no way to know an authoritative version existed elsewhere, or
+> that edits to one would not reach the other.
+>
+> The copies are deleted. This index survives because the grouping it describes
+> is genuinely useful; every path below now points at the ORIGINAL under
+> `0xcc/`, which is the only version.
+
+Every 0xcc document that carries a clustering requirement. Originally compiled
+2026-08-19 as copies; now an index into the originals.
 
 ## The CLUSTERS chain — cluster discovery, authoring, strength
 BRD-MIS-CLUSTERS-001.md ................. the increment BRD (114 "cluster", 0 "causal")

@@ -346,8 +346,22 @@ While training, miStudio streams these metrics in real-time via WebSocket:
 
 Active training jobs support:
 - **Pause/Resume:** Suspend training to free GPU for other work, then continue
-- **Stop:** Gracefully end training (saves final checkpoint)
+- **Stop:** End the run. Its checkpoints remain on disk, but **no importable SAE is produced**.
+- **Stop & Finalize:** End the run *and* build the SAE from the newest checkpoint, so it stays importable.
 - **Checkpoints:** Saved every N steps (configurable). Each records loss, L0, and model weights. The "best checkpoint" (lowest loss) is tracked automatically.
+
+> **⚠ Stop does not save an importable SAE.**
+>
+> Stopping a run leaves its checkpoints in place but does **not** write the
+> Community Standard export that every downstream feature reads — so the model
+> will not appear under **Import to SAEs**. Use **Stop & Finalize**, or click
+> **Finalize** on the stopped run afterwards.
+>
+> This sentence previously read *"Gracefully end training (saves final
+> checkpoint)"*, and that wording cost a real run: `train_969e90af`
+> (granite-4.1-8b, FVU 0.065, zero dead neurons) was stopped at step 10,300 and
+> its SAE was forfeited. The same line was corrected in
+> `manual/docs/core-workflow/sae-training.md` and missed here.
 
 #### Training Templates
 
