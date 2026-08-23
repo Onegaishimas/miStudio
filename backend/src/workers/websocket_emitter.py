@@ -859,7 +859,13 @@ def emit_system_metrics(
         True
     """
     channel = f"system/{metrics_type}"
-    return emit_progress(channel, "metrics", metrics)
+    # `system:metrics`, matching every sibling emitter and the frontend's
+    # listener (MIS-E2E-141). This emitted the bare name `"metrics"`, which
+    # nothing listens for — so it delivered to nobody AND returned True, the
+    # combination that makes a broken emit invisible. It has no callers today,
+    # so the bug was latent rather than live; the next caller would have
+    # inherited it silently.
+    return emit_progress(channel, "system:metrics", metrics)
 
 
 # ============================================================================

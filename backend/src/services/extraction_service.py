@@ -1839,14 +1839,20 @@ class ExtractionService:
                 statistics=statistics
             )
 
+            # STATUS MUST MATCH THE EVENT (MIS-E2E-067). This sent
+            # `status: "extracting"` on the COMPLETED event, and the store
+            # spread-merges the payload — so a finished job was written back as
+            # still running, and the completion counts were blanked with it.
             emit_progress(
                 channel=f"extraction/{extraction_job.id}",
                 event="extraction:completed",
                 data={
                     "extraction_id": extraction_job.id,
-                                    "status": ExtractionStatus.EXTRACTING.value,
+                    "status": ExtractionStatus.COMPLETED.value,
                     "sae_id": sae_id,
-                    "statistics": statistics
+                    "progress": 1.0,
+                    "features_extracted": features_processed,
+                    "statistics": statistics,
                 }
             )
 
@@ -1889,14 +1895,25 @@ class ExtractionService:
                 error_message=error_str
             )
 
+            # `error_message`, NOT `error` (MIS-E2E-067).
+            #
+            # Every other emitter in this product, and every frontend consumer,
+            # uses `error_message`. The store spread-merges the payload, so
+            # `error_message: undefined` overwrote the real message that the
+            # database already had — and nothing triggered a refetch. The user
+            # saw a failed extraction with NO REASON, including on the OOM path
+            # whose entire value is its diagnostics.
+            #
+            # The information existed server-side and was destroyed in transit
+            # by a key name.
             emit_progress(
                 channel=f"extraction/{extraction_job.id}",
                 event="extraction:failed",
                 data={
                     "extraction_id": extraction_job.id,
-                                    "status": ExtractionStatus.EXTRACTING.value,
+                    "status": ExtractionStatus.FAILED.value,
                     "sae_id": sae_id,
-                    "error": error_str
+                    "error_message": error_str,
                 }
             )
 
