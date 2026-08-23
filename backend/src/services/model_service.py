@@ -203,8 +203,26 @@ class ModelService:
         if not db_model:
             return None
 
-        # Update fields
+        # Update fields — explicit allow-list, never a blind loop
+        # (MIS-E2E-106; the same sink as MIS-E2E-071).
+        # A narrow request schema at the route closes today's hole; this closes
+        # the NEXT one, when someone adds a field to the internal schema or
+        # wires a new caller. `cluster_profile_service` and `circuit_service`
+        # are the in-repo references for this shape.
+        _WRITABLE = {
+            "name", "status", "progress", "error_message", "file_path",
+            "quantized_path", "architecture", "params_count",
+            "architecture_config", "memory_required_bytes", "disk_size_bytes",
+            "num_layers", "hidden_dim", "num_heads", "metadata",
+        }
+
         update_data = updates.model_dump(exclude_unset=True)
+        rejected = set(update_data) - _WRITABLE
+        if rejected:
+            raise ValueError(
+                f"ModelService.update_model refused unknown fields: "
+                f"{sorted(rejected)}"
+            )
 
         for field, value in update_data.items():
             setattr(db_model, field, value)

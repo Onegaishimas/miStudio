@@ -27,6 +27,20 @@ class ModelCreate(ModelBase):
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
 
 
+class ModelPatchRequest(BaseModel):
+    """The user-editable subset of a model — the PATCH body.
+
+    Everything else on `ModelUpdate` is written by the download and quantization
+    workers: `status` (which defeats the in-flight guards at `models.py:140` and
+    `:388`), `progress`, `error_message`, the discovered architecture fields, and
+    `file_path` / `quantized_path`, which fed `rmtree` (MIS-E2E-071).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
 class ModelUpdate(BaseModel):
     """Schema for updating an existing model."""
 

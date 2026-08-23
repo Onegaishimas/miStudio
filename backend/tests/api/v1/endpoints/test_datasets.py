@@ -234,20 +234,48 @@ class TestUpdateDataset:
         await async_session.commit()
         await async_session.refresh(dataset)
 
-        update_payload = {
-            "status": "ready",
-            "progress": 100.0
-        }
-
         response = await client.patch(
             f"/api/v1/datasets/{dataset.id}",
-            json=update_payload
+            json={"name": "Renamed"}
         )
 
         assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ready"
-        assert data["progress"] == 100.0
+        assert response.json()["name"] == "Renamed"
+
+    async def test_update_dataset_cannot_set_status_or_progress(
+        self, client: AsyncClient, async_session: AsyncSession
+    ):
+        """MIS-E2E-106 — this test PINNED the vulnerability.
+
+        It used to PATCH `{"status": "ready", "progress": 100.0}` and assert
+        **200**, certifying that a request body could drive the lifecycle and
+        falsify the record. That is what the finding is about, and the suite was
+        green over it because the test asserted the defect was present.
+
+        `status` is now rejected at the schema, so the same request is a 422.
+        """
+        dataset = Dataset(
+            name="Original Name",
+            source="HuggingFace",
+            status=DatasetStatus.DOWNLOADING,
+            progress=50.0
+        )
+        async_session.add(dataset)
+        await async_session.commit()
+        await async_session.refresh(dataset)
+
+        response = await client.patch(
+            f"/api/v1/datasets/{dataset.id}",
+            json={"status": "ready", "progress": 100.0}
+        )
+
+        assert response.status_code == 422, (
+            "a request body must not be able to set lifecycle status"
+        )
+
+        await async_session.refresh(dataset)
+        assert dataset.status == DatasetStatus.DOWNLOADING
+        assert dataset.progress == 50.0
 
     async def test_update_dataset_partial(self, client: AsyncClient, async_session: AsyncSession):
         """Test partial dataset update."""

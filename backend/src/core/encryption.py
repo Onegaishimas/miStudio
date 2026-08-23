@@ -15,11 +15,31 @@ import base64
 import os
 import logging
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 
 logger = logging.getLogger(__name__)
+
+
+class DecryptionError(Exception):
+    """A stored value is a well-formed AES-GCM envelope that failed to authenticate.
+
+    Distinct from "this row was never encrypted", which is legacy data and is
+    returned as-is. This one means the ciphertext cannot be trusted.
+    """
+
+
+# Legacy plaintext rows observed this process. Counted rather than merely logged
+# so the exposure is measurable — MIS-E2E-041 persisted because the path was
+# silent and nothing could report on it.
+_LEGACY_PLAINTEXT_READS: list[str] = []
+
+
+def legacy_plaintext_reads() -> list[str]:
+    """Setting keys read as plaintext since process start. Empty is the goal."""
+    return list(_LEGACY_PLAINTEXT_READS)
 
 # Module-level derived key (initialized on first use)
 _derived_key: bytes | None = None
@@ -64,11 +84,27 @@ def decrypt_value(encrypted: str, *, setting_key: str | None = None) -> str:
 
     Expects the format produced by encrypt_value(): base64(nonce + ciphertext + tag).
 
-    Forgiving for legacy/corrupted rows: if the value isn't a valid AES-GCM
-    envelope (bad base64 padding, too short, or auth tag mismatch), logs a
-    warning describing exactly why and returns the value as-is. This handles
-    rows that were saved plaintext under an earlier code path despite being
-    flagged is_sensitive.
+    TWO FAILURE MODES, DELIBERATELY TREATED DIFFERENTLY (MIS-E2E-004/041/056).
+
+    * **Not an envelope** — bad base64, or too short to hold nonce+tag. That is a
+      legacy row written as plaintext before service-layer encryption existed.
+      Returned as-is, because it IS the value, and counted so the exposure is
+      measurable instead of invisible.
+
+    * **InvalidTag** — the bytes decode as an envelope and fail authentication.
+      That is tampering, or a key that has changed. **Raises.**
+
+    This used to swallow both. The consequence was not abstract: after a key
+    change, `decrypt_value` handed back raw base64 ciphertext, which
+    `OpenAILabelingService` then sent to api.openai.com in an
+    `Authorization: Bearer` header. Encrypted credential material left the
+    network boundary because a decryption failure was designed to be silent.
+    Swallowing an authentication failure also discards the integrity half of
+    AES-GCM, which is the reason the mode was chosen.
+
+    Raises:
+        DecryptionError: the value is a well-formed envelope that failed
+            authentication. Do not treat the return value as a credential.
 
     Args:
         encrypted: The stored value (expected to be base64 ciphertext).
@@ -88,28 +124,49 @@ def decrypt_value(encrypted: str, *, setting_key: str | None = None) -> str:
         aesgcm = AESGCM(key)
         plaintext = aesgcm.decrypt(nonce, ciphertext, None)
         return plaintext.decode("utf-8")
+    except InvalidTag as exc:
+        # AUTHENTICATED ENCRYPTION FAILED. The bytes are a well-formed envelope
+        # and the tag does not match: the row was tampered with, or the key
+        # changed. Returning the ciphertext here is what sent credential
+        # material to a third party (MIS-E2E-056), so refuse.
+        which = f"setting {setting_key!r}" if setting_key else "an app_setting row"
+        logger.error(
+            "decrypt_value: AUTHENTICATION FAILED for %s. The stored value is a "
+            "well-formed AES-GCM envelope whose tag does not verify — most often "
+            "SETTINGS_ENCRYPTION_KEY (or the fallback SECRET_KEY) changed since "
+            "the row was written, otherwise the row was modified. Refusing to "
+            "return the ciphertext: re-enter the value via Settings → API Keys.",
+            which,
+        )
+        raise DecryptionError(
+            f"could not authenticate {which} — the encryption key has changed "
+            f"or the stored value was modified"
+        ) from exc
+
     except Exception as exc:
-        # Diagnose the most common failure modes for the operator log
+        # NOT AN ENVELOPE. A legacy row written as plaintext before the
+        # service-layer encryption existed. That is the case this fallback was
+        # built for, and it is the only one it still covers.
         if isinstance(exc, base64.binascii.Error):
-            cause = "value is not valid base64 — was likely stored as plaintext"
+            cause = "value is not valid base64 — was stored as plaintext"
         elif isinstance(exc, ValueError) and "too short" in str(exc):
             cause = str(exc) + " — likely plaintext or truncated"
-        elif "InvalidTag" in type(exc).__name__:
-            cause = (
-                "AES-GCM authentication tag mismatch — most often caused by "
-                "SETTINGS_ENCRYPTION_KEY (or fallback SECRET_KEY) changing "
-                "since the row was written"
-            )
         else:
             cause = f"{type(exc).__name__}: {exc}"
 
         which = f"setting {setting_key!r}" if setting_key else "an app_setting row"
+        # COUNTED, not just logged. MIS-E2E-041: legacy plaintext credentials can
+        # persist indefinitely precisely because this path is silent — nothing
+        # could ever notice them, so no backfill was ever prompted.
+        _LEGACY_PLAINTEXT_READS.append(setting_key or "<unknown>")
         logger.warning(
-            "decrypt_value: returning %s as-is — %s. "
-            "If the value is valid (e.g. an API key) this is harmless, but to "
-            "encrypt it at rest re-enter and save it via Settings → API Keys.",
+            "decrypt_value: %s is stored as PLAINTEXT (%s). Returning as-is for "
+            "backward compatibility. This value is NOT encrypted at rest — "
+            "re-enter and save it via Settings → API Keys. "
+            "(legacy plaintext reads this process: %d)",
             which,
             cause,
+            len(_LEGACY_PLAINTEXT_READS),
         )
         return encrypted
 
@@ -119,11 +176,23 @@ def mask_value(plaintext: str, visible_prefix: int = 3, visible_suffix: int = 4)
 
     Examples:
         "sk-proj-abc123xyz789" -> "sk-...789"
-        "hf_abcdefghijk" -> "hf_...hijk"
-        "short" -> "sho...ort"
+        "hf_abcdefghijk"       -> "hf_...hijk"
+        "abcd"                 -> "***"       (too short to mask meaningfully)
+
+    MIS-E2E-061: the old branch returned
+    `plaintext[:3] + "..." + plaintext[-4:]` for any value longer than 3
+    characters, so a 4-to-7-character secret was emitted IN FULL —
+    `"abcd"` masked to `"abc...abcd"`, and the docstring's own
+    `"short" -> "sho...ort"` example showed every character of the input.
+
+    A value too short to leave a hidden middle is fully masked instead. This is
+    the function the UI trusts not to show a credential, so the safe direction
+    on an edge case is to reveal nothing.
     """
+    # Need at least one hidden character between the two visible windows,
+    # otherwise the "mask" is the value.
     if len(plaintext) <= visible_prefix + visible_suffix:
-        return plaintext[:visible_prefix] + "..." + plaintext[-visible_suffix:] if len(plaintext) > 3 else "***"
+        return "***"
     return plaintext[:visible_prefix] + "..." + plaintext[-visible_suffix:]
 
 

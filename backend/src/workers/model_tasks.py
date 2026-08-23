@@ -564,8 +564,24 @@ def delete_model_files(model_id: str, file_path: Optional[str] = None, quantized
 
     try:
         # Resolve Docker-style /data/ paths for native mode compatibility
-        resolved_file_path = str(settings.resolve_data_path(file_path)) if file_path else None
-        resolved_quantized_path = str(settings.resolve_data_path(quantized_path)) if quantized_path else None
+        # MIS-E2E-071 — file_path/quantized_path are API-writable via
+        # ModelUpdate and land straight in rmtree.
+        resolved_file_path = None
+        if file_path:
+            try:
+                resolved_file_path = str(settings.resolve_deletable_path(file_path))
+            except ValueError as e:
+                errors.append(f"Refusing to delete file_path {file_path!r}: {e}")
+                logger.error(errors[-1])
+        resolved_quantized_path = None
+        if quantized_path:
+            try:
+                resolved_quantized_path = str(
+                    settings.resolve_deletable_path(quantized_path)
+                )
+            except ValueError as e:
+                errors.append(f"Refusing to delete quantized_path {quantized_path!r}: {e}")
+                logger.error(errors[-1])
 
         # Delete raw model files
         if resolved_file_path and os.path.exists(resolved_file_path):

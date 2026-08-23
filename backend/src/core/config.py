@@ -464,6 +464,108 @@ class Settings(BaseSettings):
             f"Path {user_path!r} resolves outside the trusted data roots"
         )
 
+    def resolve_deletable_path(self, path: str | Path, *, min_depth: int = 2) -> Path:
+        """Resolve a path that is about to be handed to ``rmtree``.
+
+        MIS-E2E-071. ``resolve_data_path`` is documented for "paths read from
+        the database or constructed by the system itself" — but the database is
+        NOT a trust boundary here: ``raw_path``, ``file_path``,
+        ``quantized_path`` and ``tokenized_path`` are all writable through
+        unauthenticated create/update endpoints that blind-``setattr`` onto the
+        ORM row. So a value reaches this sink having been *stored*, not having
+        been *validated*, and ``resolve_data_path`` returns an existing absolute
+        path verbatim. ``POST {"raw_path": "/"}`` then ``DELETE`` was two
+        ordinary-looking requests.
+
+        Containment alone is not sufficient for a DELETE. ``resolve_user_path``
+        maps ``""`` to ``data_dir`` itself and ``"datasets"`` to the directory
+        holding every dataset — both pass a containment check and both are
+        catastrophic to ``rmtree``. ``min_depth`` is what makes this a deletion
+        guard rather than a containment check: the target must be at least that
+        many segments BELOW its trusted root, so the roots and their top-level
+        category directories cannot be named at all.
+
+        The realpath re-check closes the symlink gap that the deliberately
+        string-only ``resolve_user_path`` leaves open: it never touches the
+        filesystem, which is correct before containment succeeds, but ``rmtree``
+        does traverse intermediate symlinked components.
+
+        Raises:
+            ValueError: if the path is empty, escapes the trusted roots, or is
+                        too shallow to be a legitimate deletion target.
+        """
+        if path is None or str(path).strip() in ("", "/", "."):
+            raise ValueError(f"Refusing to delete {path!r}: empty or root path")
+
+        trusted_roots = [
+            os.path.realpath(str(self.data_dir)),
+            os.path.realpath(str(self.run_dir)),
+            os.path.realpath(str(self.hf_cache_dir)),
+        ]
+
+        # An ALREADY-CONTAINED absolute path is taken as-is.
+        #
+        # `resolve_user_path` strips the leading slash and re-joins under
+        # data_dir, which is right for the untrusted input it was written for
+        # but wrong here: the workers store genuinely absolute paths, so
+        # `/…/backend/data/models/foo` would become
+        # `data_dir/…/backend/data/models/foo` — a path that does not exist, so
+        # every real deletion would silently no-op while reporting success.
+        # Caught by the cleanup integration tests, which is exactly what they
+        # are for.
+        raw = os.path.normpath(str(path))
+        candidate = None
+        if os.path.isabs(raw):
+            for root in trusted_roots:
+                try:
+                    if os.path.commonpath([raw, root]) == root:
+                        candidate = Path(raw)
+                        break
+                except ValueError:
+                    continue
+
+        if candidate is None:
+            # Relative, or absolute-but-outside (including docker-style
+            # "/data/…", which is absolute in a container and not a real root
+            # here). Fall through to the untrusted-input semantics, which
+            # relativize and then enforce containment.
+            candidate = self.resolve_user_path(path)
+
+        # Depth, measured under whichever root contains it.
+        for root in trusted_roots:
+            try:
+                if os.path.commonpath([str(candidate), root]) != root:
+                    continue
+            except ValueError:
+                continue
+            rel = os.path.relpath(str(candidate), root)
+            depth = len([seg for seg in rel.split(os.sep) if seg not in ("", ".")])
+            if depth < min_depth:
+                raise ValueError(
+                    f"Refusing to delete {path!r}: resolves to {candidate}, only "
+                    f"{depth} level(s) below {root} (minimum {min_depth}). A "
+                    f"trusted root or a top-level category directory is never a "
+                    f"legitimate deletion target."
+                )
+            break
+
+        # Symlink re-check: only meaningful once the path exists, and only
+        # matters for a sink that traverses. A missing path is fine — the caller
+        # checks existence — but a path that EXISTS and resolves outside is not.
+        if os.path.exists(str(candidate)):
+            real = os.path.realpath(str(candidate))
+            if not any(
+                os.path.commonpath([real, r]) == r
+                for r in trusted_roots
+                if os.path.exists(r)
+            ):
+                raise ValueError(
+                    f"Refusing to delete {path!r}: {candidate} is a symlink to "
+                    f"{real}, outside the trusted data roots"
+                )
+
+        return candidate
+
 
 # Global settings instance
 settings = Settings()

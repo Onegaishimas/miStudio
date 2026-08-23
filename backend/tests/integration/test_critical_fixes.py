@@ -16,6 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 from unittest.mock import patch, MagicMock
 
+from tests.integration._data_root_tmp import data_root_tmpdir
 from src.core.database import AsyncSessionLocal, get_sync_db
 from src.models.dataset import Dataset, DatasetStatus
 from src.models.model import Model, ModelStatus, QuantizationFormat
@@ -231,7 +232,7 @@ class TestModelFileCleanupIntegration:
         model_id = f"m_{uuid4().hex[:8]}"
         test_name = f"test_cleanup_{uuid4().hex[:8]}"
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("models") as tmpdir:
             file_path = Path(tmpdir) / "raw_model"
             quantized_path = Path(tmpdir) / "quantized_model"
 

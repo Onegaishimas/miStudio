@@ -272,8 +272,25 @@ class TrainingService:
         if not db_training:
             return None
 
-        # Update fields
+        # Update fields — explicit allow-list, never a blind loop
+        # (MIS-E2E-106; the same sink as MIS-E2E-071).
+        # A narrow request schema at the route closes today's hole; this closes
+        # the NEXT one, when someone adds a field to the internal schema or
+        # wires a new caller. `cluster_profile_service` and `circuit_service`
+        # are the in-repo references for this shape.
+        _WRITABLE = {
+            "status", "progress", "current_step", "current_loss",
+            "current_l0_sparsity", "current_dead_neurons",
+            "current_learning_rate", "error_message", "error_traceback",
+        }
+
         update_data = training_update.model_dump(exclude_unset=True)
+        rejected = set(update_data) - _WRITABLE
+        if rejected:
+            raise ValueError(
+                f"TrainingService.update_training refused unknown fields: "
+                f"{sorted(rejected)}"
+            )
         for field, value in update_data.items():
             if field == 'status' and value:
                 setattr(db_training, field, value.value)

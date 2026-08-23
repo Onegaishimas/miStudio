@@ -17,7 +17,7 @@ from fastapi import FastAPI, Header, HTTPException
 from .api.v1.router import api_router
 from .core.config import settings
 from .core.database import get_db
-from .core.websocket import socket_app, sio, WebSocketManager
+from .core.websocket import socket_app, sio, ws_manager
 from .db.schema_validator import validate_schema_on_startup
 from .ml.transformers_compat import patch_transformers_compatibility
 from .services.background_monitor import get_background_monitor
@@ -77,7 +77,10 @@ app = FastAPI(
 )
 
 # Initialize WebSocket manager
-ws_manager = WebSocketManager()
+# MIS-E2E-138: use the SINGLETON from core.websocket, not a second instance.
+# This module used to construct its own `WebSocketManager()`, so the
+# `__all__`-exported one that other modules import was permanently empty —
+# including the direct-emit path.
 
 # Mount Socket.IO app
 app.mount("/ws", socket_app)
@@ -89,33 +92,12 @@ app.mount("/ws", socket_app)
 app.include_router(api_router, prefix="/api")
 
 
-# Socket.IO event handlers
-@sio.event
-async def connect(sid, environ):
-    """Handle client connection."""
-    await ws_manager.connect(sid, environ)
-
-
-@sio.event
-async def disconnect(sid):
-    """Handle client disconnection."""
-    await ws_manager.disconnect(sid)
-
-
-@sio.event
-async def subscribe(sid, data):
-    """Handle channel subscription."""
-    channel = data.get("channel")
-    if channel:
-        await ws_manager.subscribe(sid, channel)
-
-
-@sio.event
-async def unsubscribe(sid, data):
-    """Handle channel unsubscription."""
-    channel = data.get("channel")
-    if channel:
-        await ws_manager.unsubscribe(sid, channel)
+# Socket.IO event handlers live in `core/websocket.py` and are registered by
+# importing `sio` above. They used to be duplicated here — python-socketio
+# silently overwrites a re-registered event, so THESE won and the hardened ones
+# never ran: no `subscribed`/`unsubscribed` acks, no channel validation, and a
+# second manager instance that left the exported singleton empty (MIS-E2E-138).
+# Do not re-add them; `tests/unit/test_websocket_boundary.py` fails if you do.
 
 
 @app.get("/api/health")

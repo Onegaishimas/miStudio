@@ -35,6 +35,37 @@ class DatasetCreate(DatasetBase):
     tokenization_junk_ratio_threshold: float = Field(0.7, ge=0.0, le=1.0, description="Junk ratio threshold (0.0-1.0)")
 
 
+class DatasetPatchRequest(BaseModel):
+    """The user-editable subset of a dataset — the PATCH body.
+
+    See the MIS-E2E-106 note below. `DatasetUpdate` is the INTERNAL shape and
+    keeps `status`, `progress`, `raw_path`, `num_samples`, `size_bytes` and
+    `metadata`, because the download and tokenization paths legitimately write
+    them through it. None of those belongs in a request body:
+
+      * `status` defeats the in-flight guards and the lifecycle,
+      * `progress` / `num_samples` / `size_bytes` falsify the record,
+      * `raw_path` was an arbitrary-deletion primitive (MIS-E2E-071),
+      * `metadata` carries `task_id`, so overwriting it orphans the running job.
+
+    `extra="forbid"` so a caller learns their field was rejected instead of
+    having it silently dropped.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    tokenization_filter_enabled: Optional[bool] = Field(
+        None, description="Enable sample filtering during tokenization"
+    )
+    tokenization_filter_mode: Optional[
+        Literal["minimal", "conservative", "standard", "aggressive", "strict"]
+    ] = Field(None, description="Filter mode")
+    tokenization_junk_ratio_threshold: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Junk ratio threshold (0.0-1.0)"
+    )
+
+
 class DatasetUpdate(BaseModel):
     """Schema for updating an existing dataset."""
 
