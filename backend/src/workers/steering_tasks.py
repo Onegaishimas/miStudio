@@ -131,6 +131,9 @@ def steering_compare_task(
     sae_d_model: Optional[int] = None,
     sae_n_features: Optional[int] = None,
     sae_architecture: Optional[str] = None,
+    # MIS-E2E-064: every referenced SAE, so a cross-layer feature is decoded in
+    # its own basis instead of the request-level one.
+    sae_meta_map: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Execute steering comparison in isolated worker process.
@@ -240,6 +243,7 @@ def steering_compare_task(
             sae_d_model=sae_d_model,
             sae_n_features=sae_n_features,
             sae_architecture=sae_architecture,
+            sae_meta_map=sae_meta_map,
             progress_callback=progress_callback,
         )
 
@@ -364,6 +368,12 @@ def steering_sweep_task(
     sae_d_model: Optional[int] = None,
     sae_n_features: Optional[int] = None,
     sae_architecture: Optional[str] = None,
+    # MIS-E2E-064: accepted for symmetry with compare and combined. Sweep is
+    # single-feature — `feature_idx`/`layer` sit on the request itself — so
+    # there is no per-feature routing to do; the map's value here is that the
+    # endpoint's shared resolver validated `request.layer == sae.layer` before
+    # dispatch, which sweep never checked at all.
+    sae_meta_map: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Execute strength sweep in isolated worker process.

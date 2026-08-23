@@ -54,6 +54,9 @@ jobs:
       DATA_DIR: /tmp/mistudio-ci
       HF_HOME: /tmp/mistudio-ci/huggingface_cache
       HF_CACHE_DIR: /tmp/mistudio-ci/huggingface_cache
+      # Read by tests/unit/test_orm_matches_migrated_schema.py — a migrated
+      # database that conftest's drop_all never touches.
+      SCHEMA_CHECK_DATABASE_URL: postgresql://mistudio:testpassword@localhost:5432/mistudio_schema_check
 
     steps:
       - uses: actions/checkout@v4
@@ -90,11 +93,23 @@ jobs:
       # it on a missing table would be worse than the failure — it is the only
       # place this check runs automatically, and it would fail OPEN in exactly
       # the environment that is supposed to enforce it.
-      - name: Apply migrations
+      # A SEPARATE database, because `conftest.async_engine` is function-scoped
+      # and runs `Base.metadata.drop_all` on teardown. Migrating the database
+      # the unit fixtures manage does not survive the first test — which is
+      # exactly what happened on the first attempt at this fix: alembic ran,
+      # the log shows every revision applied, and the guard still failed with
+      # NoSuchTableError because the tables had since been dropped.
+      - name: Create and migrate the schema-check database
         working-directory: backend
+        env:
+          PGPASSWORD: testpassword
         run: |
-          alembic upgrade head
-          echo "Migrated to: $(alembic current)"
+          psql -h localhost -U mistudio -d mistudio_test \
+            -c "CREATE DATABASE mistudio_schema_check;"
+          DATABASE_URL=postgresql+asyncpg://mistudio:testpassword@localhost:5432/mistudio_schema_check \
+          DATABASE_URL_SYNC=postgresql+psycopg2://mistudio:testpassword@localhost:5432/mistudio_schema_check \
+            alembic upgrade head
+          echo "Schema-check database migrated."
 
       - name: Run tests
         working-directory: backend

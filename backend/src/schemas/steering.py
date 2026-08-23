@@ -184,8 +184,16 @@ class GenerationMetrics(BaseModel):
     """Schema for generation quality metrics."""
 
     perplexity: Optional[float] = Field(None, description="Perplexity score (lower = more coherent)")
-    coherence: Optional[float] = Field(None, description="Coherence score (0-1)")
-    behavioral_score: Optional[float] = Field(None, description="Behavioral score (0-1)")
+    # MIS-E2E-063: `None` means NOT MEASURED, and is the correct value when the
+    # embedding model is unavailable. It must never be substituted with a
+    # placeholder — every coherence score this product displayed for its whole
+    # life was the constant 0.5, read by users as a measurement.
+    coherence: Optional[float] = Field(
+        None, description="Coherence score (0-1); null = not measured"
+    )
+    behavioral_score: Optional[float] = Field(
+        None, description="Behavioral score (0-1); null = not measured"
+    )
     token_count: int = Field(..., description="Number of tokens generated")
     generation_time_ms: int = Field(..., description="Generation time in milliseconds")
 

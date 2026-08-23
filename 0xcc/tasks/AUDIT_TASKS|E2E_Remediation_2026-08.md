@@ -5,14 +5,14 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3026 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
+**Suites:** backend **3038 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
 
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
-| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ⏳ **next** |
+| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ⏳ **in progress** — 6.1 ✅ · 6.6 ✅ · 6.8 ✅ · 6.2–6.5, 6.7, 6.9 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -99,14 +99,14 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 The class this product can least afford. Each item is a number a user reads as a measurement.
 
-- [ ] 6.1 Add `sentence-transformers`, or return `None` and render "not measured". Every coherence/behavioral score ever shown is the constant `0.5`. Broaden the `except` either way. — MIS-E2E-063
+- [x] 6.1 ✅ Both metrics return `None` when unmeasurable — the schema (`Optional[float]`) and the frontend type (`number | null`) already carried it, and the UI already renders `—`. The dependency was **not** added: it downloads its model on first use and this deployment is offline, so it would have swapped a constant for an abort. `except Exception`, not `except ImportError` — the offline download failure was never an ImportError and propagated out of the whole steering request. — MIS-E2E-063
 - [ ] 6.2 Measure J-lens convergence against **held-out** prompts or split-half agreement. The current criterion is the shrinkage of a running mean — it stops at `n ≈ σ/δ`, proportional to variance. Until then, do not call it convergence in the artifact or the docs. — MIS-E2E-080
 - [ ] 6.3 Rename `linearisation_residual_*` in the published artifact to what it measures, or compute the residual. It travels to HuggingFace. — MIS-E2E-081
 - [ ] 6.4 Rank-check before QR in the band metrics and refuse or report a degenerate basis (FVE overstated 4.5×); wire the random-direction controls or stop documenting `control_seed`; implement the "sustained rise" the docstring describes. — MIS-E2E-088
 - [ ] 6.5 Make `rankOf` and `diffColor` agree on one index base, and assert the "same top token" legend swatch is reachable. — MIS-E2E-129
-- [ ] 6.6 Route each steered feature through its **own** `sae_id` in compare and sweep, and validate `layer == sae.layer`. — MIS-E2E-064
+- [x] 6.6 ✅ **One shared resolver, `resolve_referenced_saes()`, used by all three endpoints** — extracted from the combined endpoint rather than copied, because this finding *is* an instance of "fixed one representative, never generalized" and a copy is the version that drifts back apart. Compare now carries each feature's own `sae_id` into its hook config and hands the SAE **map** to `_register_steering_hooks`, which already grouped by `(sae_id, layer)` for combined. Sweep is single-feature so has no routing to do — but it had **no feature validation whatsoever**, and now gets the layer check it never had. Both worker tasks accept `sae_meta_map`. — MIS-E2E-064
 - [ ] 6.7 Carry `normalize_activations` on the SAE record so capture and attribution stop running the SAE off-distribution. — MIS-E2E-083
-- [ ] 6.8 Gate the steering core on `dial != 0` — a negative dial currently returns the baseline labelled as steered, and negative strength is canonical. — MIS-E2E-065
+- [x] 6.8 ✅ `if dial != 0`. Zero is the baseline by definition; every other value is a real intervention. — MIS-E2E-065
 - [ ] 6.9 Either implement `anthropic_rescale` per its paper or collapse it — it is arithmetically identical to `constant_norm_rescale` (2.4e-7). — MIS-E2E-085
 
 ## Task 7 — The test schema is not the production schema (P1)
@@ -298,7 +298,15 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/ml/jlens_fitter.py` | MIS-E2E-079: dead `MAX_AFFINE_RESIDUAL` removed; `frozen_attention_and_norms` refuses a freeze that applied to nothing, unwinding the lock first |
 | `backend/tests/unit/test_steering_resilience_wired.py` | **New.** 10 tests; the dispatch scan asserts it found exactly 3 endpoints so it cannot pass vacuously |
 | `backend/tests/unit/test_jlens_freeze_gate.py` | **New.** 9 tests + an autouse fixture converting a leaked `_FREEZE_LOCK` from a hang into a failure |
-| `.github/workflows/backend-tests.yml` | **CI never ran migrations**, so the Wave 1 ORM-vs-migrated-schema guard failed with `NoSuchTableError` on its first push. `alembic upgrade head` added; reproduced against a fresh DB (6 failures) and verified fixed before pushing |
+| `.github/workflows/backend-tests.yml` | **CI never ran migrations**, so the Wave 1 ORM-vs-migrated-schema guard failed with `NoSuchTableError`. Fixed in two rounds: `alembic upgrade head`, then a **separate** `mistudio_schema_check` database — migrating the one the unit fixtures manage does not survive the first `drop_all` |
+| `backend/tests/unit/test_orm_matches_migrated_schema.py` | Reads `SCHEMA_CHECK_DATABASE_URL`; new `test_reflects_a_database_conftest_does_not_manage` makes the collision a loud failure instead of an order-dependent one |
+| `backend/src/services/steering_service.py` | MIS-E2E-063: coherence/behavioral return `None`, `except Exception`. MIS-E2E-064: compare resolves the SAE map and routes each feature through its own dictionary |
+| `backend/src/services/steering_core.py` | MIS-E2E-065: `dial != 0` — a negative dial registered no hooks and returned the baseline labelled as steered |
+| `backend/src/schemas/steering.py` | MIS-E2E-063: `null` documented as "not measured", never a placeholder |
+| `backend/src/api/v1/endpoints/steering.py` | MIS-E2E-064: `resolve_referenced_saes()` + `_routed_features()` extracted and used by compare, sweep and combined |
+| `backend/src/workers/steering_tasks.py` | MIS-E2E-064: compare and sweep accept and forward `sae_meta_map` |
+| `frontend/src/components/steering/ComparisonResults.tsx` | MIS-E2E-063: `!= null` so a genuinely-absent metric cannot reach `.toFixed` |
+| `backend/tests/unit/test_steering_wrong_results.py` | **New.** 12 tests over all three findings; the resolver test asserts **exactly 3** endpoints share it |
 
 ## Negative controls run
 
@@ -353,6 +361,15 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC44 | Remove the `freeze_qk` application check | ⚠️ **SURVIVED** — no test could reach the branch. Pinned by simulating the only real displacement window; **re-run ✅ 1 failure** |
 | NC45 | Make the freeze refusal skip its unwind loop | ⚠️ **HUNG the suite** rather than failing — a leaked `threading.Lock` blocks the next test forever. Autouse fixture added; **re-run ✅ 1 failure** |
 | NC46 | Restore the dead `MAX_AFFINE_RESIDUAL` threshold | ✅ 1 failure |
+| NC47 | Coherence returns the 0.5 constant again (MIS-E2E-063) | ✅ 2 failures |
+| NC48 | Behavioral score returns 0.5 again | ✅ 2 failures |
+| NC49 | Narrow the handler back to `except ImportError` | ✅ 1 failure |
+| NC50 | Dial gate back to `> 0` (MIS-E2E-065) | ✅ 1 failure |
+| NC51 | Sweep stops using the shared resolver (MIS-E2E-064) | ✅ 1 failure |
+| NC52 | Compare drops the per-feature `sae_id` again | ✅ 1 failure |
+| NC53 | Compare hooks a single SAE instead of the map | ✅ 1 failure |
+| NC54 | Sweep task stops accepting `sae_meta_map` | ✅ 1 failure |
+| CI | Point the schema guard at the conftest-managed database | ✅ 7 failures, the new guard naming the cause |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),

@@ -51,9 +51,52 @@ AUDITED_TABLES = ("features", "extraction_jobs", "feature_analysis_cache")
 
 
 def _sync_url() -> str:
+    """The MIGRATED database to reflect.
+
+    `SCHEMA_CHECK_DATABASE_URL` takes precedence so CI can point this at a
+    database that `conftest.async_engine` does not manage. That fixture is
+    FUNCTION-scoped and runs `Base.metadata.drop_all` on teardown, so any
+    database it touches has no tables by the time this module reflects it.
+
+    Locally the two are already distinct — `DATABASE_URL` is `.../mistudio`, so
+    conftest appends `_test` and works on `mistudio_test` while this reads
+    `mistudio`. In CI both pointed at `mistudio_test`, conftest dropped the
+    migrated schema out from under this module, and the guard failed with
+    NoSuchTableError while passing locally. `test_reflects_a_database_conftest_
+    does_not_manage` below makes that collision a loud failure rather than a
+    confusing one.
+    """
     return os.environ.get(
-        "DATABASE_URL_SYNC",
-        "postgresql://postgres:devpassword@localhost:5432/mistudio",
+        "SCHEMA_CHECK_DATABASE_URL",
+        os.environ.get(
+            "DATABASE_URL_SYNC",
+            "postgresql://postgres:devpassword@localhost:5432/mistudio",
+        ),
+    )
+
+
+def _conftest_managed_db() -> str:
+    """The database name `conftest.async_engine` drops and recreates."""
+    url = os.environ.get("DATABASE_URL", "postgresql://localhost/mistudio")
+    name = url.rsplit("/", 1)[-1].split("?")[0]
+    return name if "test" in name else "mistudio_test"
+
+
+def test_reflects_a_database_conftest_does_not_manage():
+    """This module must not read the database the unit fixtures wipe.
+
+    Not a skip — a FAILURE. If the two collide, every assertion in this file
+    becomes order-dependent: it passes when it happens to run before the first
+    fixture teardown and errors afterwards. A guard whose result depends on
+    test ordering is worse than no guard, because the green runs look like
+    evidence.
+    """
+    reflected = _sync_url().rsplit("/", 1)[-1].split("?")[0]
+    managed = _conftest_managed_db()
+    assert reflected != managed, (
+        f"this module reflects {reflected!r}, which conftest.async_engine "
+        f"drops after every test. Point SCHEMA_CHECK_DATABASE_URL at a "
+        f"separate migrated database."
     )
 
 
