@@ -9,7 +9,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
-| **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ⏳ 7.1–7.5 ✅ · **7.6 open** |
+| **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
 | Waves 2–9 | P0s, then correctness, then docs | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -101,7 +101,7 @@ The root enabler behind the production 500 the user hit. **Two of the constraint
 - [x] 7.3 ✅ Tests for delete cascades against a **migrated** database. Flipping all three CASCADEs on `features` currently leaves 211 tests green. — MIS-E2E-053
 - [x] 7.4 ✅ Round-trip test: build a maximal `CircuitDefinitionV1`, import, export, assert **document equality**. Field-by-field assertions only cover the fields someone remembered. — MIS-E2E-052, -037
 - [x] 7.5 ✅ Derived `REQUIRED_TABLES` from `Base.metadata`; decide deliberately whether a missing table blocks startup; test it. — MIS-E2E-032, -051, -157
-- [ ] 7.6 Narrow `check_migrations.py`'s claim to what it checks, or extend it to constraints; wire it into CI. Delete `find_column_gaps.py`. — MIS-E2E-048, -049, -022
+- [x] 7.6 ✅ Narrowed `check_migrations.py`'s claim to what it checks, or extend it to constraints; wire it into CI. Delete `find_column_gaps.py`. — MIS-E2E-048, -049, -022
 
 ## Task 8 — Unpinned load-bearing behaviour (P1)
 
@@ -235,6 +235,8 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_delete_cascades.py` | **New.** Six tests over CASCADE and SET NULL. Nothing exercised a delete rule, which is why M5 survived |
 | `backend/tests/unit/test_circuit_definition_roundtrip.py` | **New.** Document-equality round-trip + a fail-closed check that the endpoint passes every contract block |
 | `backend/src/api/v1/endpoints/circuits.py` | MIS-E2E-037: `calibration` was absent from the import dict, so an imported circuit lost its whole calibrated band |
+| `backend/check_migrations.py` | Claim narrowed to what it checks — it compares column names only and said "All models match the database schema" |
+| `backend/find_column_gaps.py` | **Deleted** (MIS-E2E-049) — its `create_table` regex truncated at the first `)`, so every report was a false positive |
 | `backend/tests/unit/test_analysis_cache_upsert.py` | **New** (out-of-band). Pins the cache upsert that fixed the production 500 |
 | `backend/src/services/analysis_service.py` | Cache upsert; ablation's dead precondition removed; correlations scoped to the SAE |
 | `backend/src/models/{feature,feature_analysis_cache}.py` | Declare the unique constraints that existed only in migrations |
