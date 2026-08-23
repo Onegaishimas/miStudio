@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3141 passed / 0 failed** (baseline 2883) · frontend **1232 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3153 passed / 0 failed** (baseline 2883) · frontend **1232 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9: 9.1 ✅ 9.3 ✅ 9.4 ✅ 9.5 ✅ 9.6 ✅** (9.2 needs a design call) · 12.7–12.10 ✅ · Tasks 10, 11, 12.1–12.6 open |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** (bar 9.2, a design call) · **Task 10 ✅** · 12.7–12.10 ✅ · Task 11 and 12.1–12.6 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -160,9 +160,9 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 10 — Provenance: `Feature.training_id` is NULL by design (P1)
 
-- [ ] 10.1 One resolver — "the training/model behind this feature" — that walks the `ExternalSAE` row. `Feature.source_id` already exists and nothing uses it. — MIS-E2E-135
-- [ ] 10.2 Fix `browse_sae_features` so external-SAE features keep labels, stats and `activation_frequency` — the third consumer with this assumption, and the one still open. — MIS-E2E-100
-- [ ] 10.3 Sweep every direct `Feature.training_id` read. — MIS-E2E-135
+- [x] 10.1 ✅ `services/feature_provenance.py` — `resolve_training_id` (async + sync) and `feature_scope_clause`. `source_id` answers "which dictionary"; these answer "which training", which is what the consumers actually wanted. — MIS-E2E-135
+- [x] 10.2 ✅ Scoped by `Feature.external_sae_id == sae.id` **`or_`** the training link, so features predating the registry still match. The `activation_frequency` was the sharp end: without it the frequency auto-baseline had nothing to compute from and every feature of a community SAE silently took the default strength of 10. — MIS-E2E-100
+- [x] 10.3 ✅ Swept. **Only two sites were broken** — `analysis_service`'s logit-lens branch and `browse_sae_features`. The other four (`logit_lens_service`, `neuronpedia_local_service`, `histogram_service` ×2) already `or_` over both links and were left alone, then **pinned** so a later cleanup cannot narrow them. Checked rather than assumed; the finding implied more. Correlations was fixed earlier in this session. — MIS-E2E-135
 
 ## Task 11 — Correctness bugs (P1)
 
@@ -365,6 +365,10 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/services/extraction_service.py` | MIS-E2E-067: `error_message` not `error`; terminal emits carry their own status |
 | `backend/src/workers/websocket_emitter.py` | MIS-E2E-141: `system:metrics`, the name every sibling and the frontend use |
 | `backend/tests/unit/test_realtime_contracts.py` | **New.** 8 tests over the emit payloads, monitor lifecycle and event naming |
+| `backend/src/services/feature_provenance.py` | **New.** MIS-E2E-135: the one resolver — `resolve_training_id` + `feature_scope_clause` |
+| `backend/src/api/v1/endpoints/saes.py` | MIS-E2E-100: `browse_sae_features` scoped by the SAE `or_` its training |
+| `backend/src/services/analysis_service.py` | MIS-E2E-135: the logit-lens branch resolves instead of reading the column |
+| `backend/tests/unit/test_feature_provenance.py` | **New.** 11 tests, incl. one proving `col == None` really does compile to `IS NULL` — the claim the whole finding rests on |
 
 ## Negative controls run
 
@@ -471,6 +475,10 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC95 | Reset removed from the start handler | ⚠️ **SURVIVED** — redundant once `_running` moved after the try. Re-pinned on the ORDER; **re-run ✅ 1 failure** |
 | NC96 | Drop the dead-loop handler in `stop()` | ⚠️ **SURVIVED** — the test matched the `aclose()` handler instead. Rewritten to run a dead task; **re-run ✅ 1 failure** |
 | NC97 | Metrics event name back to `"metrics"` (MIS-E2E-141) | ✅ 1 failure |
+| NC98 | Scope falls back to `IS NULL` again (MIS-E2E-135) | ✅ 1 failure |
+| NC99 | Resolver stops following the SAE hop | ✅ 1 failure |
+| NC100 | `analysis_service` reads the column directly | ✅ 1 failure |
+| NC101 | `browse_sae_features` drops the SAE link (MIS-E2E-100) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

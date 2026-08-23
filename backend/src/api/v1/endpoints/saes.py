@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from ....core.config import settings
 from ....core.database import get_db
@@ -413,13 +413,38 @@ async def browse_sae_features(
 
     n_features = sae.n_features or 8192
     layer = sae.layer if sae.layer is not None else 0
+    # SCOPE BY THE SAE ITSELF, NOT BY ITS TRAINING (MIS-E2E-100).
+    #
+    # This resolved features only through `sae.training_id`. A downloaded or
+    # externally imported SAE has `external_sae_id` set and `training_id` NULL,
+    # so no feature ever matched and the handler fell through to a placeholder
+    # branch: every feature rendered with no label, no statistics, and no
+    # `activation_frequency`.
+    #
+    # That last one is the sharp end. The frequency-derived auto-baseline
+    # (`S = clamp(2.9 − 2.6·freq, 1, 3)`, IDL-27) has nothing to compute from
+    # without it, so every feature of a community SAE silently took the default
+    # strength of 10 instead of its measured one — and downloading a community
+    # SAE from HuggingFace is a first-class documented workflow.
+    #
+    # Features carry `external_sae_id` pointing at this registry row, which is
+    # the direct link the training hop was standing in for.
     training_id = sae.training_id
 
-    # If SAE has a linked training, try to fetch real feature data
     features_from_db = {}
+    scopes = [Feature.external_sae_id == sae.id]
     if training_id:
+        # EITHER link, not just the new one. A feature extracted before the
+        # registry existed carries only `training_id`; narrowing to
+        # `external_sae_id` alone would have traded one silent empty result for
+        # another. `or_` covers both without needing to know which era a row
+        # came from.
+        scopes.append(Feature.training_id == training_id)
+    feature_scope = or_(*scopes) if len(scopes) > 1 else scopes[0]
+
+    if feature_scope is not None:
         # Build query for features
-        query = select(Feature).where(Feature.training_id == training_id)
+        query = select(Feature).where(feature_scope)
 
         # Apply search filter
         if search:

@@ -24,6 +24,10 @@ from scipy.stats import pearsonr
 import random
 
 from src.core.config import settings
+from src.services.feature_provenance import (
+    feature_scope_clause,
+    resolve_training_id,
+)
 from src.models.feature import Feature
 from src.models.feature_activation import FeatureActivation
 from src.models.feature_analysis_cache import FeatureAnalysisCache, AnalysisType
@@ -191,11 +195,19 @@ class AnalysisService:
             model_record = None
             decoder_weight = None
 
-            if feature.training_id:
+            # RESOLVE THE TRAINING, DON'T READ THE COLUMN (MIS-E2E-135).
+            #
+            # `feature.training_id` is NULL for essentially every feature here:
+            # features are extracted against an entry in the SAE registry, so
+            # the provenance lives one hop away on `ExternalSAE.training_id`.
+            # Reading the column meant this branch never ran for a real feature.
+            resolved_training_id = await resolve_training_id(self.db, feature)
+
+            if resolved_training_id:
                 # Path 1: Load from training checkpoint
-                training = await self._get_training(feature.training_id)
+                training = await self._get_training(resolved_training_id)
                 if not training:
-                    logger.warning(f"Training {feature.training_id} not found")
+                    logger.warning(f"Training {resolved_training_id} not found")
                     return None
 
                 # Load latest checkpoint
@@ -564,10 +576,10 @@ class AnalysisService:
             #
             # `source_id` is the Feature model's own answer to "which
             # dictionary is this from": `external_sae_id or training_id`.
-            if feature.external_sae_id:
-                scope = Feature.external_sae_id == feature.external_sae_id
-            elif feature.training_id:
-                scope = Feature.training_id == feature.training_id
+            # Same rule, one implementation (`feature_scope_clause`), so the
+            # two consumers cannot drift apart.
+            if feature.external_sae_id or feature.training_id:
+                scope = feature_scope_clause(feature)
             else:
                 # Neither set: the feature has no dictionary to compare within.
                 # Say so rather than silently comparing against the whole table.
