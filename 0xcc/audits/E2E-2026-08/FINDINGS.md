@@ -6,7 +6,7 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 148
+**Count:** 164
 
 > ### ⚠ ACT NOW — MIS-E2E-143
 > An SSH password for the GPU node, five database dumps, and this audit's own
@@ -15,7 +15,7 @@ Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 > full unfiltered history, so all of it is readable one commit back. Verified
 > against the live public repo. Rotate the credential and make the mirror
 > private before anything else in this register.
-**Last id issued:** MIS-E2E-148
+**Last id issued:** MIS-E2E-164
 
 ---
 
@@ -2662,4 +2662,237 @@ audit's strict record-only rule, made deliberately and noted in the round record
   3. `backend/Dockerfile:24` uses `apt-key adv`, putting the deadsnakes key in the **global** trusted keyring — trusted for all repositories. `signed-by=` scopes it.
 - **Evidence:** verified-by-live-repro
 - **Verification (R3):** pending
+- **Effort:** S
+
+---
+
+## P11 — Documentation chain conformance
+
+---
+
+### MIS-E2E-149 — The sentence that cost a real SAE is still live in the second manual
+- **Phase / Round:** P11 / R1
+- **Severity:** **P1** *(safety — this exact wording has already destroyed a training run)*
+- **Type:** doc-drift
+- **Location:** `docs/miStudio_Manual.md:349`
+- **Claim:** `- **Stop:** Gracefully end training (saves final checkpoint)`
+- **Reality:** `trainings.py:247-251` — `action == "stop"` calls `stop_training` and `revoke_task(terminate=True)` and nothing else. Only `stop_and_finalize` (`:252-274`) dispatches `finalize_training_from_checkpoint_task`, which writes `community_format/` — the only artifact downstream reads.
+- **Why it matters:** this is not *comparable* to the recorded incident, it is **the identical sentence**. `CLAUDE.md` records that this line in `manual/docs/core-workflow/sae-training.md` *"was factually wrong and is what cost a real run"* — `train_969e90af`, granite-4.1-8b, FVU 0.065, zero dead neurons, stopped at step 10,300, SAE forfeited. That page **was** fixed: `:183` now carries `:::warning Stop does not save an importable SAE`. `docs/miStudio_Manual.md` was not. It is a 599-line standalone "Complete User Manual", last substantively edited 2026-04-08, and it is indexed in `.understand-anything/knowledge-graph.json`, so an agent querying the repo's own knowledge graph can be served the uncorrected text.
+- **Evidence:** **verified-by-live-repro** — both manuals and the endpoint read; the corrected warning and the uncorrected sentence quoted above
+- **Verification (R3):** **CONFIRMED**
+- **Proposed remediation:** Fix the line. Then decide whether `docs/miStudio_Manual.md` should exist at all — it predates MCP, clusters, circuits and J-Lens (zero hits for any of them). A second, stale manual is a second place for every future correction to miss.
+- **Effort:** S
+
+---
+
+### MIS-E2E-150 — The manual's fix for a startup refusal removes authentication from a LAN-bound server
+- **Phase / Round:** P11 / R1
+- **Severity:** **P1**
+- **Type:** security
+- **Location:** `manual/docs/advanced/mcp-server.md:37`, `:64`, `:140`; `backend/src/mcp_server/server.py:102`
+- **Claim:** The page states the server binds `0.0.0.0:8765` with a **"bearer token always required"**, and `MCP_AUTH_TOKEN` is *(required)* — startup refused if empty. Its troubleshooting remedy at `:140` is: *"Set the token in `.env` (or `MCP_ALLOW_ANONYMOUS=true` for stdio dev only)"*.
+- **Reality:** `MCP_ALLOW_ANONYMOUS` is **not** stdio-restricted. `server.py:102` reads `if not settings.auth_token and not (settings.allow_anonymous or stdio)` — the flag **alone** satisfies the guard on the HTTP transport. `__main__.py:36-40` then adds `BearerAuthMiddleware` only when a token is set, otherwise logs a warning and serves on `settings.host`, default `0.0.0.0`.
+- **Why it matters:** an operator hitting the startup error follows the documented remedy and gets a LAN-reachable **unauthenticated** MCP server exposing `delete_circuit`, GPU steering and label write-back — on the same page that told them a bearer token is always required. **And the guard's own error message repeats the false claim**: *"Set a token, or set MCP_ALLOW_ANONYMOUS=true for local stdio development only."* The code says "stdio only" in prose and does not enforce it.
+- **Evidence:** **verified-by-live-repro** — the guard, the middleware branch, and both strings read directly
+- **Verification (R3):** **CONFIRMED**
+- **Proposed remediation:** Make the flag actually stdio-only (`allow_anonymous and stdio`), which is what both the manual and the error message already promise.
+- **Effort:** S
+
+---
+
+### MIS-E2E-151 — Dataset cancel is documented as conservative and deletes unrelated tokenizations
+- **Phase / Round:** P11 / R1
+- **Severity:** **P1** *(data loss)*
+- **Type:** bug
+- **Location:** `manual/docs/core-workflow/dataset-management.md:21`, `:37`; `backend/src/workers/dataset_tasks.py:1357-1367`; `backend/src/api/v1/endpoints/datasets.py:710-712`
+- **Claim:** The manual says cancelling during post-download processing *"keeps the raw files so you can retry without re-downloading"*, and that each tokenization *"can be cancelled or deleted **independently**"*.
+- **Reality:** the cancel worker iterates **all** `dataset.tokenizations` and `shutil.rmtree`s every `tokenized_path`, ungated by status and ungated by which job is being cancelled — while the raw-file cleanup immediately above it (`:1348`) *is* status-gated. DB rows survive, so previously-COMPLETED tokenizations still render in the UI pointing at deleted directories. Separately `datasets.py:710-712` carries `# Note: We don't have task_id stored, so we can't revoke the specific task` and calls `cancel_task` with no `task_id`, so the revoke branch is dead and the worker keeps running.
+- **Why it matters:** the same shape as the SAE-forfeit incident — an operation the manual describes as conservative destroys an unrelated artifact. The per-tokenization cancel path *is* correctly scoped, which is exactly what makes the "independently" claim misleading.
+- **Evidence:** verified-by-live-repro (all three sites read)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-152 — The K8s install guide's `sed` steps match nothing, and one renames the database
+- **Phase / Round:** P11 / R1
+- **Severity:** P1
+- **Type:** doc-drift
+- **Location:** `manual/docs/getting-started/install-guide-k8s.md:234-257`; same prose at `installation.md:147-175`
+- **Claim:** Four `sed -i` substitutions set the GPU node, node IP, `SECRET_KEY` and Postgres password in `k8s/mistudio-deployment.yaml`.
+- **Reality:** **none of the four target strings occur in the shipped manifest.** It was refactored to `secretKeyRef` against a `mistudio-secrets` Secret; `nodeSelector` is commented out. Worse, `sed -i "s/value: mistudio$/value: $POSTGRES_PASSWORD/g"` matches only `POSTGRES_DB: mistudio` and `POSTGRES_USER: mistudio` — it **renames the database and the user to the password string** and never sets a password. Neither install page mentions `k8s/mistudio-secrets.yaml.example` or the `kubectl create secret` step.
+- **Why it matters:** `sed` exits 0 on zero matches, so every step "succeeds". The user believes they set a strong `SECRET_KEY` — the key protecting stored API keys — and a DB password. They set neither, and may have renamed the database.
+- **Evidence:** verified-by-live-repro (grep count 0 for each target string)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-153 — Five shipped features have no doc→code traceability at all
+- **Phase / Round:** P11 / R1
+- **Severity:** P1
+- **Type:** debt
+- **Location:** `0xcc/tasks/024_`–`028_FTASKS`; PPRD §2.1 rows 25–29; `CLAUDE.md` Document Inventory
+- **Claim:** PPRD marks rows 25–29 "Planned"; the CLAUDE.md Document Inventory has **no entry at all** for files `024_`–`028_`; and those five FTASKS are exactly the ones missing `## Relevant Files`.
+- **Reality:** substantial implementation exists for all five — `jlens_annotation.py`, `jlens_watchlist.py` (024); `jlens_intervention.py` + its worker (025); `jspace_claims.py` + `frontend/src/config/jspaceClaims.ts` (026); 20 MCP tools (028). Their FTASKS run 68–100% checked.
+- **Why it matters:** the most recent tranche of work is invisible to **every** documented navigation path at once. There is no way to answer "what code implements feature 26?" from the doc chain.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-154 — 22 `Relevant Files` entries point at files that were never written
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** worst: `003_FTASKS|SAE_Training` (3), `004_FTASKS|Feature_Discovery` (3), `008_FTASKS|System_Monitoring` (3)
+- **Claim:** 273 paths extracted from the 23 FTASKS that have the section; **50 do not resolve**. Of those, 21 are relative-path style (cosmetic) and 7 are explicitly labelled "To Create". **22 are genuinely dead.**
+- **The important part:** `git log --all --diff-filter=A` on 15 of the 22 shows **15 of 15 have zero add-commits in the entire repository history**. They are not renames or deletions — they never existed. E.g. `003_FTASKS:248-256` has four `[x]` boxes for a `TrainingForm.tsx` that has never existed. The capability exists (inline SVG charts in `TrainingCard.tsx:989-1059`), so this is a documentation defect — **except** Task 7.7's `- [x] Zoom and pan`, which has no implementation anywhere.
+- **Why it matters:** for features 001–008 the sections appear to have been authored **from the design documents, not from the implementation**. The framework's documented join key is least reliable exactly where the docs claim 100% completion. Where the practice *is* followed it works: 013, 020 and 023 have zero dead paths and were verified against their commit windows.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-155 — CLAUDE.md's own framework references are off by one, and point the reader at the wrong action
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `CLAUDE.md:336-343`, `:727`, `:1031`, `:17`, `:378`
+- **Claim:** The "Instruction Documents Reference" lists `001_create-project-prd.md` … `008_housekeeping.md`.
+- **Reality:** the directory holds `001_generate-brd.md`, `002_create-project-prd.md`, … `008_process-task-list.md`. **Every listed filename except `000_README.md` does not exist**, and `008_housekeeping.md` exists nowhere.
+- **Why it matters:** worse than dead links, because the *numbers* still resolve to real but **wrong** documents. `CLAUDE.md:17` and `:378` both record the standing next action as *"execute … via `007_process-task-list.md`"* — but `007_` is now `generate-tasks.md`. Following CLAUDE.md's own instruction **re-generates the backlog instead of working it**.
+- **Evidence:** verified-by-live-repro (`test -e` on each; both files' opening lines read to confirm semantics)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-156 — IDL-5's architecture is inverted, and the error is propagated across five documents
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2532-2536`; propagated to `README.md:54,82`, `CLAUDE.md:642,654,828,838,849`, `008_FTASKS:94,206`, `008_FTDD:181-193`, `PPRD:396`
+- **Claim:** IDL-5 — *"Use Celery Beat scheduled task for system monitoring · Task: `collect_system_metrics` · Interval: Every 2 seconds"*.
+- **Reality:** no task named `collect_system_metrics` exists. `beat_schedule` contains only janitors, the pruner, the GPU watchdog and the steering reconciler. Collection is an **asyncio loop inside the FastAPI process** (`background_monitor.py:31,72-90`, started at `main.py:57`). The code says so explicitly at `celery_app.py:341-343`: *"System metrics monitoring runs as an asyncio background task … (not Celery)"*. Only the 2 s interval survives.
+- **Why it matters:** an operator debugging a dead dashboard inspects Celery Beat, which has nothing to do with it. And because collection lives in the API process, metrics stop on backend restart and duplicate across replicas — neither of which "Celery Beat" implies. **The correction reached exactly one document**: the 2026-07-10 review deleted `workers/system_monitor_tasks.py` and fixed `008_FPRD`, leaving five others asserting the deleted architecture.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-157 — IDL-16's schema guard cannot do what the PADR says and cannot block startup
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2767-2769`; `backend/src/db/schema_validator.py`
+- **Claim:** *"Startup validator compares live DB schema against SQLAlchemy model metadata · detects missing columns, type mismatches, missing indexes · optionally blocks startup on critical mismatches."*
+- **Reality:** it uses **no SQLAlchemy metadata**. `REQUIRED_TABLES` is a hand-maintained literal of 17 tables against 36 declared — `circuits`, `validation_manifests`, `agent_approval_requests`, `cluster_profiles`, `app_settings` and `steering_record_runs` are never checked, so the anti-drift tool drifts. It selects `column_name` only and diffs sets of names: no type check, no index check. Startup **cannot** be blocked — `validate_schema_on_startup` hardcodes `raise_on_error=False` and `main.py:52-55` continues anyway.
+- **Why it matters:** the mechanism the PADR names as the defence against schema drift is a name-only spot check over less than half the schema that can never fail the boot. Three claims, none true.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Related:** MIS-E2E-032, MIS-E2E-048, MIS-E2E-051
+- **Effort:** M
+
+---
+
+### MIS-E2E-158 — IDL-1 and IDL-12 document channel and event conventions the code does not use
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2443`, `:2451-2455`, `:2691`, `:2694`; restated in CLAUDE.md's "Real-time Updates Architecture"
+- **Claim:** channel pattern `{entity_type}/{entity_id}` with a table listing `training/{id}`, `extraction/{id}`, `model/{id}`, `dataset/{id}`; events *"lowercase with underscores (e.g. `download_progress`, `labeling_results`)"*; and *"standardize all WebSocket emissions through `websocket_emitter.py`"*.
+- **Reality:** channels are **pluralised with a sub-path** — `trainings/{id}/progress`, `models/{id}/progress`, `datasets/{id}/tokenization/{tid}`. Subscribing per the PADR table yields silence. Events are colon-delimited `namespace:event` (`training:progress`, `system:metrics`); **neither cited example event exists**. And the highest-frequency emitter bypasses the standard emitter entirely — `background_monitor.py:174-197` builds its own httpx client and POSTs directly.
+- **Evidence:** verified-by-live-repro; the frontend matches the code, not the PADR
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-159 — IDL-11's resilience decisions are unimplemented, and the exemplar task inverts one
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `PADR:2663`, `:2666`, `:2670-2679`
+- **Claim:** retry with exponential backoff (`max_retries=3`, `countdown=60s`), a **dead-letter queue**, and a `training_task` code block showing `soft_time_limit=3600` and `raise self.retry(countdown=60 * (2 ** retries))`.
+- **Reality:** no dead-letter queue exists anywhere. No exponential backoff — the only `countdown` in `backend/src` is in a docstring, and both real `self.retry()` sites pass none. The exemplar contradicts the snippet: `training_tasks.py:193-199` sets no `max_retries`, no `soft_time_limit`, and `acks_late=False` — a per-task **override** of the global `task_acks_late=True`.
+- **Why it matters:** `README.md:52` leans on this — *"The queue is durable: restarting the application does not lose queued or in-progress tasks."* The global settings support that; the flagship task opts out of it.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-160 — The manual describes a Settings PIN that gates one tab of five, and not the destructive one
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `manual/docs/advanced/settings-reference.md:56-58`, `:67`; `frontend/src/components/panels/SettingsPanel.tsx:67-71`
+- **Claim:** *"the **panel** can be locked behind a PIN … from then on, opening Settings prompts for it once per session."*
+- **Reality:** only the `api_keys` tab is wrapped in `<PinGate>`. The panel and tab bar render unconditionally. The **un-gated Storage tab** is the control that arms irreversible checkpoint deletion — `checkpoint_prune_dry_run`, where `false` means files are deleted.
+- **Why it matters:** compounds with MIS-E2E-055 (the PIN is readable, rewritable and deletable through `/settings`) and MIS-E2E-002. `installation.md:74` recommends Kubernetes for *"shared lab environments and multi-user research clusters"*, and `reference/api/overview.md` never states the API is unauthenticated — so the PIN is the manual's **only** mention of access control, and it reads as a security model that does not exist.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-161 — MCP docs omit a default-enabled category holding a GPU intervention tool
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `manual/docs/advanced/mcp-server.md:65`, `:87`, `:96`; `PADR:2968`
+- **Claim:** the default `MCP_TOOL_CATEGORIES` is documented as `read,groups,steering,labeling,experiments,profiles,jobs,circuits`; the catalog is headed "13 categories"; and *"add `admin` to enable destructive deletes"*, with `admin` marked off by default.
+- **Reality:** `config.py:15` includes **`jlens`** in the defaults — 20 tools including `run_jlens_intervention`, a real GPU intervention — and the category is **absent from the catalog entirely**. An operator copying the documented default into `.env` silently disables it. And `delete_circuit` is registered in the default-on `circuits` category, not `admin`, so leaving `admin` off per the manual still hands an agent a destructive delete. IDL-26 enumerates 7 categories where the code defines 14.
+- **Evidence:** verified-by-live-repro; distinct from MIS-E2E-017 (the 92-vs-116 count)
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-162 — README's startup path cannot work for a fresh clone
+- **Phase / Round:** P11 / R1
+- **Severity:** P2
+- **Type:** doc-drift
+- **Location:** `README.md:98`; `CLAUDE.md:57-79`; `start-mistudio.sh`
+- **Claim:** *"A single `./start-mistudio.sh` command starts all six services… The NVIDIA Container Toolkit is the only prerequisite."* CLAUDE.md: *"ONE COMMAND to start everything"*, access at `http://mistudio.hitsai.local`.
+- **Reality:** the script hardcodes `PROJECT_ROOT="/home/x-sean/app/miStudio"` and runs `set -e`, so `cd "$PROJECT_ROOT/backend"` aborts on any other clone. It starts only five containers from `docker-compose.dev.yml` and runs backend, Celery and frontend **on the host** — requiring a pre-existing `backend/venv/` it never creates, plus Node, `lsof` and `fuser`. Its domain is `dev-mistudio.hitsai.local`, not the documented one, so the `/etc/hosts` instruction produces an unreachable URL. `docker-compose.yml` declares 10 services, not six. The four other repo shell scripts hardcode the same home directory.
+- **Why it matters:** it is the first thing a new user runs. Note the **real** Compose quickstart (`docker compose up -d`, per `install-guide-compose.md`) was verified to work — the defect is README pointing at the wrong script.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** S
+
+---
+
+### MIS-E2E-163 — CLAUDE.md contradicts itself on status, counts and paths
+- **Phase / Round:** P11 / R1
+- **Severity:** P3
+- **Type:** doc-drift
+- **Location:** `CLAUDE.md:5`, `:43`, `:47`, `:375`, `:436`, `:441`
+- **Claim / reality:**
+  - `:43` *"995 passed, 4 skipped"* vs `:5` *"backend 2461, frontend 1149"* vs measured **2,883 collected / 1,211**. Stale by ~2.9×.
+  - `:47` names a manifest at `/home/sean/app/…` — a user that does not exist (`x-sean`) — while `:153` gives the correct in-repo path.
+  - `:375` *"Feature 020 … impl PLANNED"* vs `:19` *"✅ FEATURE 20 … CLOSED"*.
+  - `:441` *"Feature 022 … ⏳ In progress"* vs `:5` *"Shipped: … `021_*`"*.
+  - `:436`/`:470` say `/jlens/readout` **returns 501**. Grep for `501` across `api/v1/endpoints/` returns **zero hits**; `jlens.py` implements readout, probe, fit, band-report, gate and annotate, and 29 files exist under `frontend/src/components/jlens/`. Understated status invites re-implementing shipped work.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
+- **Effort:** M
+
+---
+
+### MIS-E2E-164 — Four smaller doc defects
+- **Phase / Round:** P11 / R1
+- **Severity:** P3
+- **Type:** doc-drift
+- **Location / claim:**
+  1. `README.md:50` enumerates *"Every panel"* and omits **Clusters, Circuits and J-Lens** — the registry declares 13. README mentions the MCP server, circuits, clusters and J-Lens **nowhere**; it is roughly PPRD rows 11–29 out of date while presenting itself as exhaustive.
+  2. `manual/docs/reference/data-model.md:9` states the page is *"verified against the ORM models"* — it asserts a verification it does not have (see MIS-E2E-050, 11 tables missing).
+  3. `install-guide-compose.md:341` documents `NGINX_HTTP_PORT`, which appears nowhere in the repo; the port is hardcoded at `docker-compose.yml:281`.
+  4. `PADR:2718` (IDL-13) claims `model_loader.py` uses `discover_transformer_structure` — it never imports it, carrying only a pointer comment. The substantive claim (no architecture whitelist) **holds**: `SUPPORTED_ARCHITECTURES` exists nowhere.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** **CONFIRMED**
 - **Effort:** S

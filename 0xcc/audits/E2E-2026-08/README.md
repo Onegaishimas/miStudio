@@ -1,6 +1,6 @@
 # miStudio End-to-End Assessment — E2E-2026-08
 
-**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ · P10 ✅ closed · P11 next
+**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ · P10 ✅ · P11 ✅ closed · P12 next
 
 > **⚠ MIS-E2E-143 — ACT NOW.** An SSH password, five database dumps and this
 > register itself are published in a **public** GitHub repository. See FINDINGS.md.
@@ -63,14 +63,14 @@ Legend: `·` not started · `~` in progress · `✅` closed
 | — | *Out-of-band: user-reported modal defects (**fixed**)* | ✅ | — | ✅ | 4 |
 | P09 | Realtime (WebSocket) | ✅ | ✅ | ✅ | 7 |
 | P10 | Infra & supply chain | ✅ | ✅ | ✅ | 6 |
-| P11 | Documentation chain | · | · | · | 0 |
+| P11 | Documentation chain | ✅ | ✅ | ✅ | 16 |
 | P12 | Cross-cutting & live journeys | · | · | · | 0 |
 
 ## Findings by severity
 
 | P0 | P1 | P2 | P3 | Total |
 |---:|---:|---:|---:|---:|
-| **12** | 57 | 58 | 21 | **148** |
+| **12** | 62 | 67 | 23 | **164** |
 
 Verdicts so far: **15 CONFIRMED**, 39 pending (most pending belong to phases that
 have not run yet). Severities are provisional until each finding's R3 verification.
