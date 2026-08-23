@@ -86,7 +86,49 @@ def emit_progress(
         ... )
         True
     """
+    import asyncio
     import time
+
+    # IN-PROCESS WHEN WE ARE THE API (MIS-E2E-136).
+    #
+    # This POSTs to `/api/internal/ws/emit` — the backend's OWN endpoint. Called
+    # from inside an `async def` handler, the sync HTTP call blocks the single
+    # event loop while waiting for a response only that same loop can produce.
+    # Self-deadlock: reproduced as a `ReadTimeout` after 5.01s with the whole API
+    # frozen for the duration and the event dropped anyway. `datasets.py` calls
+    # it twice in sequence, so ~10s.
+    #
+    # `training_service.py` wrapped ONE call in `asyncio.to_thread` under a
+    # comment naming the hazard. The other 13 sync calls in async handlers were
+    # left, so the fix existed and covered 1 of 14.
+    #
+    # The guard belongs HERE rather than at each call site, which is what let it
+    # cover one. A running loop means we are in the API process, so the manager
+    # is right there and the HTTP hop is pure overhead plus a deadlock. No loop
+    # means a Celery worker, where the loopback is the correct and only path.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        from ..core.websocket import ws_manager
+
+        def _report(task: "asyncio.Task") -> None:
+            exc = task.exception() if not task.cancelled() else None
+            if exc is not None:
+                logger.warning(
+                    "In-process WebSocket emit failed: %s to %s — %s",
+                    event, channel, exc,
+                )
+
+        task = loop.create_task(ws_manager.emit_event(channel, event, data))
+        task.add_done_callback(_report)
+        # Fire-and-forget, like the HTTP path: the caller is a progress
+        # notification, not a transaction. Reporting True here matches the
+        # existing contract — and the HTTP path already returned before the
+        # frontend had the event.
+        return True
 
     # Use configured WebSocket emit URL (supports both local and Docker deployments)
     api_url = settings.websocket_emit_url

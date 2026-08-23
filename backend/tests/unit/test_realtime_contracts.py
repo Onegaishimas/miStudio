@@ -253,3 +253,71 @@ def test_every_system_metrics_emit_uses_the_same_event_name():
         f"system metrics are emitted under {sorted(names)}; the frontend "
         f"listens for 'system:metrics' only"
     )
+
+
+# ── MIS-E2E-136 · a sync emit must not POST to its own event loop ──────────
+
+def test_emit_takes_the_in_process_path_when_a_loop_is_running(monkeypatch):
+    """The self-deadlock, closed at the emitter rather than the call site.
+
+    Called from an `async def` handler, the sync HTTP POST to
+    `/api/internal/ws/emit` blocks the single event loop waiting for a response
+    only that loop can produce: ReadTimeout after 5.01s, whole API frozen, event
+    dropped anyway. `datasets.py` calls it twice in sequence.
+
+    `training_service.py` wrapped ONE call in `asyncio.to_thread`; 13 others
+    were left. So the guard goes in the emitter, where it covers all of them and
+    every future one.
+    """
+    from src.core import websocket as ws_mod
+    from src.workers import websocket_emitter as we
+
+    emitted: list[tuple] = []
+
+    async def _fake_emit(channel, event, data, namespace="/"):
+        emitted.append((channel, event, data))
+
+    monkeypatch.setattr(ws_mod.ws_manager, "emit_event", _fake_emit)
+
+    def _no_http(*a, **k):
+        raise AssertionError(
+            "the emitter POSTed to the API's own endpoint from inside the loop "
+            "— this is the deadlock"
+        )
+
+    monkeypatch.setattr(we, "_get_http_client", _no_http)
+
+    async def scenario():
+        assert we.emit_progress("trainings/t1/progress", "training:progress", {"p": 1}) is True
+        # Fire-and-forget: let the scheduled task run.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+    assert emitted == [("trainings/t1/progress", "training:progress", {"p": 1})]
+
+
+def test_emit_still_uses_http_when_there_is_no_loop(monkeypatch):
+    """Negative control for the direction.
+
+    A Celery worker has no running loop and no in-process manager to reach, so
+    the loopback is the correct path there. A fix that always emitted
+    in-process would silently drop every worker event.
+    """
+    from src.workers import websocket_emitter as we
+
+    posted = {"n": 0}
+
+    class _Resp:
+        status_code = 200
+
+    class _Client:
+        def post(self, *a, **k):
+            posted["n"] += 1
+            return _Resp()
+
+    monkeypatch.setattr(we, "_get_http_client", lambda: _Client())
+
+    assert we.emit_progress("trainings/t1/progress", "training:progress", {}) is True
+    assert posted["n"] == 1

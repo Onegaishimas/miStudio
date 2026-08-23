@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3235 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3247 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -55,8 +55,8 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 - [x] 2.1 ✅ Stored the PIN outside the generic settings table, **or** deny `settings_pin_hash` in `PUT`, `PUT /bulk`, `DELETE` and both `GET`s. Marking it `is_sensitive=True` fixes only the read. — MIS-E2E-055, -165
 - [x] 2.2 ✅ *(reframed)* — the PIN is now unreachable via the generic CRUD, which was the actual bypass; server-side enforcement on the settings routes themselves remains open under Task 13.8's PADR work on the settings routes (short-lived token from `/pin/verify`), or amend IDL-25 to state it is a UI affordance. — MIS-E2E-005
-- [ ] 2.3 Gate the **Storage** tab, which arms irreversible checkpoint deletion, not only `api_keys`; correct `settings-reference.md:56`. — MIS-E2E-160
-- [ ] 2.4 Verify `MISTUDIO_BYPASS_PIN` is false in every shipped manifest. — MIS-E2E-005
+- [x] 2.3 ✅ `<PinGate>` on the Storage tab — it arms step-granular checkpoint retention (`dry_run: false` deletes files) and was the one destructive surface in Settings left ungated. `settings-reference.md` corrected: it said *"the panel can be locked"* when two tabs of five are gated, and now states plainly that the PIN is a **UI affordance, not authentication**, and does not gate the API at all (→ IDL-47). — MIS-E2E-160
+- [x] 2.4 ✅ Verified: the setting defaults to `False` and no shipped artifact enables it. Pinned across `k8s/base/*.yaml`, both compose files and `.env.example` — by **parsing** the manifests, because a k8s env entry puts the name and value on separate lines and a line scan can never see both (control C139 proved that by surviving). — MIS-E2E-005
 
 **Acceptance:** `GET /api/v1/settings` on the live deployment returns no PIN material — the check that failed in P12.
 
@@ -153,8 +153,8 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 ## Task 9 — Realtime (P1)
 
 - [x] 9.1 ✅ Removed. socket.io keeps listeners across the whole reconnect cycle, so the "re-attach for reconnections" loop added a second registration each time. **`WebSocketContext` had no test file at all** — now 5, including one that asserts a handler runs **once per server message** after three reconnects, not just that the listener count is 1. — MIS-E2E-120
-- [ ] 9.2 Call `ws_manager.emit_event()` directly from async contexts instead of the HTTP loopback; `asyncio.to_thread` is the stopgap the one fixed site uses. Requires 4.4 first. — MIS-E2E-136, -138
-- [ ] 9.3 Retry on `httpx.TransportError`, not `TimeoutException`. — MIS-E2E-137
+- [x] 9.2 ✅ `emit_progress` detects a running loop and emits **in-process** via `ws_manager.emit_event`; no loop means a Celery worker, where the loopback is correct. The guard is in the **emitter**, not at the 13 call sites — putting it at a call site is what produced a fix covering 1 of 14. Both directions pinned, including a control that a worker still uses HTTP. — MIS-E2E-136, -138
+- [x] 9.3 ✅ Done in Wave 4 alongside MIS-E2E-142 — `TransportError` covers `ConnectError` and `RemoteProtocolError` while excluding `HTTPStatusError`, where the server answered. Pinned in both directions (NC76). — MIS-E2E-137
 - [x] 9.4 ✅ `_running` is now assigned **after** the setup succeeds (the ordering is the fix; the reset in the handler is defence in depth — control C95 proved that by surviving until the test pinned the *order*). `stop()` catches a dead loop so shutdown still closes the HTTP client. — MIS-E2E-139
 - [x] 9.5 ✅ `error_message`, and **both** terminal emits now carry a status matching their event — they were sending `status: "extracting"` on *completed* and *failed*, and the store spread-merges, so a finished job was written back as running. Asserted by parsing the emit payloads, with a control that the in-progress event still says `extracting`. Directly relevant to the OOM the user hit: that path's whole value is its diagnostics, and the key name was destroying them in transit. — MIS-E2E-067
 - [x] 9.6 ✅ Both. An abandoned channel was subscribed on the next connect and every reconnect after (compounding 9.1); `emit_system_metrics` emitted a name nothing listens for **and returned True**. — MIS-E2E-126, -141
@@ -424,6 +424,12 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `manual/docs/getting-started/install-guide-k8s.md` · `installation.md` | MIS-E2E-152: the four no-op `sed` steps replaced by the Secret the deployment actually reads |
 | `README.md` · `CLAUDE.md` | MIS-E2E-162: `docker compose up -d`, not a script hardcoded to one home directory. MIS-E2E-155: every `0xcc/instruct/` reference renumbered |
 | `0xcc/prds/000_PPRD\|miStudio.md` | MIS-E2E-011: rows 16–24 reconciled from **code evidence**; the inventory declared authoritative for status |
+| `0xcc/adrs/000_PADR\|miStudio.md` | MIS-E2E-156/-157/-158/-159: IDL-5, IDL-16, IDL-1/12 and IDL-11 corrected against the code |
+| `README.md` · `CLAUDE.md` · `0xcc/prds/…` · `0xcc/tdds/008_*` · `0xcc/tasks/008_*` | The five documents that propagated IDL-5's deleted architecture |
+| `frontend/src/components/panels/SettingsPanel.tsx` | MIS-E2E-160: the Storage tab is PIN-gated |
+| `manual/docs/advanced/settings-reference.md` | MIS-E2E-160: the PIN described as the UI affordance it is |
+| `backend/src/workers/websocket_emitter.py` | MIS-E2E-136: in-process emit when a loop is running; HTTP only from a worker |
+| `frontend/src/components/layout/Sidebar.tsx` · `config/brand.ts` | Tagline: "Edge AI Feature Discovery" → "AI Feature Discovery" (user request) |
 
 ## Negative controls run
 
@@ -568,6 +574,11 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC133 | Scraper drops the leading-`/` filter (MIS-E2E-114) | ⚠️ survived against the committed file alone; **✅ 1 failure** once the regeneration test is in scope — which is the guard that matters |
 | NC134 | Instruction counts hardcoded again (MIS-E2E-161) | ✅ 1 failure |
 | NC135 | A CLAUDE.md instruct reference goes stale again (MIS-E2E-155) | ✅ 1 failure |
+| NC136 | Re-attribute metrics to Celery Beat in the README | ⚠️ **SURVIVED** — a negative check over prose cannot separate the claim from the correction beside it. Rewritten as a POSITIVE assertion (every doc must name `background_monitor`), which immediately found the PPRD saying what it is not without saying what it is; **re-run ✅ 1 failure** |
+| NC137 | Move the monitor off asyncio | ✅ 1 failure |
+| NC138 | Storage tab ungated again (MIS-E2E-160) | ✅ 1 failure |
+| NC139 | A manifest enables `MISTUDIO_BYPASS_PIN` | ⚠️ **SURVIVED** — k8s puts an env name and value on separate lines, so a line scan never saw both. Parsed the YAML; **re-run ✅ 1 failure** |
+| NC140 | Emit POSTs to its own loop again (MIS-E2E-136) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),
