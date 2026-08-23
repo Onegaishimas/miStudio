@@ -7,7 +7,7 @@ This module defines the SQLAlchemy model for discovered SAE features.
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, String, Float, Integer, DateTime, Text, Boolean, ForeignKey, Enum as SQLAlchemyEnum
+from sqlalchemy import Column, String, Float, Integer, DateTime, Text, Boolean, ForeignKey, Enum as SQLAlchemyEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, ENUM as PGEnum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -35,6 +35,16 @@ class Feature(Base):
     """
 
     __tablename__ = "features"
+
+    # Mirrors migration 126732716f92. See the note on FeatureAnalysisCache:
+    # constraints declared only in migrations are missing from the schema the
+    # unit suite builds, so the tests run against a different database.
+    __table_args__ = (
+        UniqueConstraint(
+            "training_id", "extraction_job_id", "neuron_index",
+            name="uq_features_extraction_neuron",
+        ),
+    )
 
     # Primary identifiers
     id = Column(String(255), primary_key=True)  # Format: feat_{training_id}_{neuron_index} or feat_sae_{sae_id}_{neuron_index}

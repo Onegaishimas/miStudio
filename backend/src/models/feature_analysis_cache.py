@@ -7,7 +7,7 @@ This module defines the SQLAlchemy model for caching expensive analysis results.
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Enum as SQLAEnum
+from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, UniqueConstraint, Enum as SQLAEnum
 from sqlalchemy.dialects.postgresql import JSONB, ENUM as PostgreSQLEnum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -40,6 +40,17 @@ class FeatureAnalysisCache(Base):
     """
 
     __tablename__ = "feature_analysis_cache"
+
+    # Declared here, not only in the migration. `Base.metadata.create_all()`
+    # builds the unit-test schema from THIS class, so a constraint that exists
+    # only in a migration is absent wherever the tests run — which is how the
+    # blind INSERT below went unnoticed until it 500'd in production.
+    __table_args__ = (
+        UniqueConstraint(
+            "feature_id", "analysis_type",
+            name="uq_feature_analysis_cache_feature_type",
+        ),
+    )
 
     # Primary identifiers
     id = Column(BigInteger, primary_key=True, autoincrement=True)
