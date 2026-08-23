@@ -223,8 +223,26 @@ class DatasetService:
         if not db_dataset:
             return None
 
-        # Apply updates
+        # Apply updates — explicit allow-list, never a blind loop
+        # (MIS-E2E-106; the same sink as MIS-E2E-071).
+        # A narrow request schema at the route closes today's hole; this closes
+        # the NEXT one, when someone adds a field to the internal schema or
+        # wires a new caller. `cluster_profile_service` and `circuit_service`
+        # are the in-repo references for this shape.
+        _WRITABLE = {
+            "name", "status", "progress", "error_message", "raw_path",
+            "num_samples", "size_bytes", "metadata",
+            "tokenization_filter_enabled", "tokenization_filter_mode",
+            "tokenization_junk_ratio_threshold",
+        }
+
         update_data = updates.model_dump(exclude_unset=True)
+        rejected = set(update_data) - _WRITABLE
+        if rejected:
+            raise ValueError(
+                f"DatasetService.update_dataset refused unknown fields: "
+                f"{sorted(rejected)}"
+            )
 
         for field, value in update_data.items():
             if field == "status" and isinstance(value, str):

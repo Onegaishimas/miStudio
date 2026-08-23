@@ -20,6 +20,7 @@ from ....core.config import settings
 from ....models.dataset import DatasetStatus
 from ....models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from ....schemas.dataset import (
+    DatasetPatchRequest,
     DatasetCreate,
     DatasetUpdate,
     DatasetResponse,
@@ -279,7 +280,10 @@ async def get_dataset_task_status(
 @router.patch("/{dataset_id}", response_model=DatasetResponse)
 async def update_dataset(
     dataset_id: UUID,
-    updates: DatasetUpdate,
+    # MIS-E2E-106: binds the NARROW request model, not the internal one. The
+    # internal `DatasetUpdate` still carries status/progress/raw_path/metadata
+    # because the workers write them; a request body may not.
+    patch: DatasetPatchRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -296,6 +300,7 @@ async def update_dataset(
     Raises:
         HTTPException: If dataset not found
     """
+    updates = DatasetUpdate(**patch.model_dump(exclude_unset=True))
     dataset = await DatasetService.update_dataset(db, dataset_id, updates)
 
     if not dataset:

@@ -16,6 +16,7 @@ from ....core.deps import get_db
 from ....models.model import ModelStatus, QuantizationFormat
 from ....models.activation_extraction import ActivationExtraction, ExtractionStatus
 from ....schemas.model import (
+    ModelPatchRequest,
     ModelUpdate,
     ModelResponse,
     ModelListResponse,
@@ -405,7 +406,10 @@ async def get_model_architecture(
 @router.patch("/{model_id}", response_model=ModelResponse)
 async def update_model(
     model_id: str,
-    updates: ModelUpdate,
+    # MIS-E2E-106: the narrow request model. `ModelUpdate` keeps status,
+    # progress, the discovered architecture fields and the two path columns
+    # because the download and quantization workers write them.
+    patch: ModelPatchRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -413,7 +417,7 @@ async def update_model(
 
     Args:
         model_id: Model ID (string format: m_{uuid})
-        updates: Update data
+        patch: The user-editable fields
         db: Database session
 
     Returns:
@@ -422,6 +426,7 @@ async def update_model(
     Raises:
         HTTPException: If model not found
     """
+    updates = ModelUpdate(**patch.model_dump(exclude_unset=True))
     model = await ModelService.update_model(db, model_id, updates)
 
     if not model:

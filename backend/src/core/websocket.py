@@ -5,18 +5,32 @@ This module provides a WebSocket manager for broadcasting progress updates,
 training metrics, and other real-time events to connected clients.
 """
 
+import re
 from typing import Any, Dict, Optional, Set
 
 import socketio
 
 from .config import settings
 
-# Create Socket.IO server with async support
-# NOTE: CORS is handled by FastAPI's CORSMiddleware in main.py
-# Setting cors_allowed_origins="*" here prevents duplicate CORS headers
+# ORIGIN ENFORCEMENT IS THIS SERVER'S JOB AND NOTHING ELSE'S (MIS-E2E-105).
+#
+# The removed comment said "CORS is handled by FastAPI's CORSMiddleware in
+# main.py". `main.py` says the opposite — it deliberately installs no
+# `CORSMiddleware` — and nginx's `/ws/` block only `add_header`s, which sets a
+# response header and blocks nothing. So the wildcard was the ONLY policy in
+# force, and engineio short-circuits the check entirely on "*"
+# (`base_server.py`: `elif self.cors_allowed_origins == '*': allowed_origins =
+# None`), with its own comment noting this matters MORE for WebSocket, because
+# browsers do not apply CORS controls to it.
+#
+# That escaped the accepted no-app-auth posture. "Anyone who can reach the host
+# can read the API" is conceded; "any website an operator visits can reach the
+# host" is not. A page in the operator's browser could open a socket and
+# `subscribe` to `labeling/{job_id}/results`, which carries verbatim corpus
+# text, or `steering/{task_id}`, which carries generated model output.
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins="*",  # Let FastAPI handle CORS validation
+    cors_allowed_origins=settings.allowed_origins,
     logger=settings.is_development,
     engineio_logger=settings.is_development,
     ping_interval=settings.websocket_ping_interval,
@@ -33,6 +47,66 @@ socket_app = socketio.ASGIApp(
     sio,
     socketio_path="",
 )
+
+
+# The channel vocabulary, declared in ONE place.
+#
+# MIS-E2E-140: `subscribe` took the client's string unchecked — a list raised
+# `TypeError: unhashable type`, a non-dict payload raised `AttributeError`, and
+# a reviewer created 50,000 channels from an unauthenticated client.
+#
+# A first-segment allow-list rather than a full pattern per channel: it is the
+# part that decides WHAT KIND of data the subscriber receives, so it is the part
+# worth constraining, and it does not have to be re-edited every time an id
+# format changes. `tests/unit/test_websocket_boundary.py` asserts that every
+# channel the emitters actually publish is accepted here — so this list cannot
+# drift narrower than production without a red test.
+_CHANNEL_TOPICS: frozenset[str] = frozenset({
+    "datasets",
+    "trainings",
+    "extraction",
+    "extractions",
+    "models",
+    "sae",
+    "labeling",
+    "enhanced_labeling",
+    "nlp_analysis",
+    "neuronpedia",
+    "steering",
+    "system",
+    "mcp",
+})
+
+# Segments are conservative on purpose: no "..", no "*", no whitespace, no
+# empty segment. Ids in this product are slugs, uuids and step numbers.
+_CHANNEL_RE = re.compile(r"^[a-z][a-z0-9_]*(?:/[A-Za-z0-9_.:-]+)*$")
+
+MAX_CHANNEL_LENGTH = 200
+MAX_SUBSCRIPTIONS_PER_CLIENT = 100
+
+
+class InvalidChannel(ValueError):
+    """A subscribe request named something that is not a channel."""
+
+
+def validate_channel(channel: Any) -> str:
+    """Return `channel` if it is a well-formed, known-topic channel name.
+
+    Raises `InvalidChannel` otherwise. Type-checking is part of the job: the
+    handler used to hand whatever arrived straight to a `set.add`.
+    """
+    if not isinstance(channel, str):
+        raise InvalidChannel(f"channel must be a string, got {type(channel).__name__}")
+    if not channel or len(channel) > MAX_CHANNEL_LENGTH:
+        raise InvalidChannel("channel is empty or too long")
+    if ".." in channel:
+        raise InvalidChannel("channel may not contain '..'")
+    if not _CHANNEL_RE.match(channel):
+        raise InvalidChannel(f"channel {channel!r} is not a well-formed channel name")
+    topic = channel.split("/", 1)[0]
+    if topic not in _CHANNEL_TOPICS:
+        raise InvalidChannel(f"unknown channel topic {topic!r}")
+    return channel
 
 
 class WebSocketManager:
@@ -103,6 +177,21 @@ class WebSocketManager:
         Notes:
             Clients automatically join Socket.IO room for the channel
         """
+        # Validated here, in the manager, not only in the event handler —
+        # `emit_event` and any future caller reach this method too, and a guard
+        # that only sits on one entry point is this audit's most repeated
+        # finding. `validate_channel` is idempotent, so double-checking costs
+        # nothing.
+        channel = validate_channel(channel)
+
+        # Cap per client (MIS-E2E-140). Without it one unauthenticated
+        # connection grew the registry to 50,000 channels.
+        held = sum(1 for subs in self.subscriptions.values() if sid in subs)
+        if channel not in self.subscriptions.get(channel, set()) and held >= MAX_SUBSCRIPTIONS_PER_CLIENT:
+            raise InvalidChannel(
+                f"subscription limit reached ({MAX_SUBSCRIPTIONS_PER_CLIENT})"
+            )
+
         # Create channel if doesn't exist
         if channel not in self.subscriptions:
             self.subscriptions[channel] = set()
@@ -299,11 +388,33 @@ async def subscribe(sid: str, data: dict):
         {
             "channel": "datasets/ds_123/progress"
         }
+
+    THIS IS THE ONLY REGISTRATION OF THIS EVENT (MIS-E2E-138). `main.py` used to
+    register its own `subscribe`/`unsubscribe`/`connect`/`disconnect` against
+    the same `sio`, and python-socketio silently overwrites on re-registration —
+    so `main.py` won, these never ran, the `subscribed`/`unsubscribed`
+    acknowledgements the frontend waits for never fired, and the `__all__`-
+    exported `ws_manager` singleton was never populated. Do not re-register
+    these anywhere else; `tests/unit/test_websocket_boundary.py` fails if you do.
     """
-    channel = data.get("channel")
-    if channel:
+    if not isinstance(data, dict):
+        await sio.emit(
+            "subscribe_error", {"error": "payload must be an object"}, room=sid
+        )
+        return
+    try:
+        channel = validate_channel(data.get("channel"))
+    except InvalidChannel as exc:
+        # Tell the client, and do not disconnect: a malformed payload used to
+        # raise out of the handler.
+        await sio.emit("subscribe_error", {"error": str(exc)}, room=sid)
+        return
+    try:
         await ws_manager.subscribe(sid, channel)
-        await sio.emit("subscribed", {"channel": channel}, room=sid)
+    except InvalidChannel as exc:
+        await sio.emit("subscribe_error", {"error": str(exc)}, room=sid)
+        return
+    await sio.emit("subscribed", {"channel": channel}, room=sid)
 
 
 @sio.event
@@ -316,10 +427,22 @@ async def unsubscribe(sid: str, data: dict):
             "channel": "datasets/ds_123/progress"
         }
     """
+    if not isinstance(data, dict):
+        await sio.emit(
+            "unsubscribe_error", {"error": "payload must be an object"}, room=sid
+        )
+        return
     channel = data.get("channel")
-    if channel:
-        await ws_manager.unsubscribe(sid, channel)
-        await sio.emit("unsubscribed", {"channel": channel}, room=sid)
+    # Unsubscribe is not a privilege escalation — leaving a room you are not in
+    # is a no-op — but it must not crash on a malformed payload either.
+    if not isinstance(channel, str) or not channel:
+        await sio.emit(
+            "unsubscribe_error", {"error": "channel must be a non-empty string"},
+            room=sid,
+        )
+        return
+    await ws_manager.unsubscribe(sid, channel)
+    await sio.emit("unsubscribed", {"channel": channel}, room=sid)
 
 
 @sio.event

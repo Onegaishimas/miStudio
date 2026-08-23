@@ -5,13 +5,13 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **2944 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
+**Suites:** backend **3007 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
 
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
-| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Tasks 1 ✅ · 2 ✅ · 3 ✅ CLOSED** · Tasks 4–5 open |
+| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Tasks 1 ✅ · 2 ✅ · 3 ✅ · 4 ✅ CLOSED** · Task 5 open |
 | Waves 3–9 | Correctness, mutations, realtime, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -71,11 +71,12 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 ## Task 4 — Mass assignment and the WebSocket boundary (P0)
 
-- [ ] 4.1 Remove `status` and the derived progress/metric fields from `TrainingUpdate`, `ModelUpdate`, `DatasetUpdate`; replace the blind `setattr` loops with explicit allow-lists (`cluster_profile_service.py:272` is the reference). — MIS-E2E-106
-- [ ] 4.2 Set Socket.IO `cors_allowed_origins` to `settings.allowed_origins` and delete the false comment. — MIS-E2E-105, -018
-- [ ] 4.3 Validate `subscribe` against a channel-pattern allow-list; cap subscriptions per connection; type-check the payload. — MIS-E2E-105, -140
-- [ ] 4.4 Register the Socket.IO handlers **once** — the duplicates silently overwrite, so the acks never fire and `ws_manager` is always empty. — MIS-E2E-138
-- [ ] 4.5 Regression test: a handshake from a foreign `Origin` is refused. Negative control: flip the setting back and require a red. — MIS-E2E-105
+- [x] 4.1 ✅ **Split the request shape from the internal one.** The fields could not simply be deleted — internal callers write them through these very schemas (`datasets.py` sets `status=PROCESSING` when queuing tokenization), the same trap as 3.2. So: new `DatasetPatchRequest` / `ModelPatchRequest` (`extra="forbid"`, user-editable fields only) bound by the PATCH routes, while `*Update` stays intact for the workers. **`PATCH /api/trainings/{id}` is deleted** — `TrainingUpdate` is *entirely* lifecycle and worker-owned metrics and `trainings` has no user-editable column, so removing the unsafe fields left nothing; it had no caller (no frontend PATCH, no MCP tool, no test). All three sinks additionally enforce an explicit `_WRITABLE` allow-list, because a narrow route with an open sink is one new caller away from the bug. — MIS-E2E-106
+  - ⚠️ **A test was pinning this defect.** `test_update_dataset_success` PATCHed `{"status": "ready", "progress": 100.0}` and asserted **200** — the suite was green *because* it certified the vulnerability. Replaced with a test asserting 422 and that the row is unchanged.
+- [x] 4.2 ✅ `cors_allowed_origins=settings.allowed_origins`; the false comment replaced with the reason it mattered (engineio *short-circuits* the check on `"*"`, so the wildcard was not a permissive policy — it was no policy). — MIS-E2E-105, -018
+- [x] 4.3 ✅ `validate_channel()` — type check, length bound, `..` refusal, a segment pattern, and a first-segment topic allow-list; `MAX_SUBSCRIPTIONS_PER_CLIENT = 100`. Enforced **in `WebSocketManager.subscribe`**, not only in the event handler. The topic list is held honest by a test that derives every channel the emitters publish **from the emitter source** and asserts each is accepted — with a minimum-count assertion so the scrape cannot fail open. — MIS-E2E-105, -140
+- [x] 4.4 ✅ `main.py`'s four duplicate `@sio.event` handlers and its second `WebSocketManager()` removed; it imports the singleton. Guarded by an **AST** test over `main.py`, because the overwrite leaves no trace in the live handler table — whichever module imported last simply wins, and the table looks normal either way. — MIS-E2E-138
+- [x] 4.5 ✅ `tests/unit/test_websocket_boundary.py` — 30 tests across origins, channel validation both directions, the cap, manager-level enforcement, and single registration. 11 negative controls, all red. — MIS-E2E-105
 
 ## Task 5 — Capabilities that do not exist (P0)
 
@@ -274,6 +275,15 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_dataset_cancel_scope.py` | **New.** 6 tests: cleanup scoped to in-flight work (pinning the SET, not just that a filter exists) and the revoke path reachable at both ends |
 | `frontend/src/components/panels/SettingsPanel.tsx` | MIS-E2E-128: the prune confirmation re-fetches the live policy and fails **closed**; `CheckpointPrunePreviewPanel` exported for its test |
 | `frontend/src/components/panels/SettingsPanel.prune.test.tsx` | **New.** 5 tests over the exact reported sequence: preview dry-run → change the setting → the dialog must say PERMANENTLY DELETE |
+| `backend/src/core/websocket.py` | MIS-E2E-105/-140/-018: origins from `settings.allowed_origins`; `validate_channel()` + a per-client cap, enforced in the manager; the false CORS comment replaced |
+| `backend/src/main.py` | MIS-E2E-138: four duplicate `@sio.event` handlers and a second `WebSocketManager()` removed; imports the singleton |
+| `backend/src/schemas/{dataset,model}.py` | MIS-E2E-106: `DatasetPatchRequest` / `ModelPatchRequest` — the user-editable subset, `extra="forbid"` |
+| `backend/src/schemas/training.py` | MIS-E2E-106: records why there is no `TrainingPatchRequest` — the whole schema was worker-owned |
+| `backend/src/api/v1/endpoints/trainings.py` | MIS-E2E-106: `PATCH /{training_id}` **deleted** — no user-editable field, no caller, and it unlocked partial-checkpoint SAE import |
+| `backend/src/services/{training,model,dataset}_service.py` | MIS-E2E-106: explicit `_WRITABLE` allow-lists replace the blind `setattr` loops |
+| `backend/tests/unit/test_websocket_boundary.py` | **New.** 30 tests; the topic allow-list is checked against channels derived from the emitter, not a second hand-list |
+| `backend/tests/unit/test_patch_is_not_mass_assignment.py` | **New.** Narrow schemas, route binding, route deletion, and each sink's allow-list exercised against a stub session that fails loudly if the guard is skipped |
+| `backend/tests/api/v1/endpoints/test_datasets.py` | ⚠️ `test_update_dataset_success` **pinned the defect** (PATCH status → assert 200); replaced with a 422 + row-unchanged assertion |
 
 ## Negative controls run
 
@@ -309,6 +319,17 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC25 | Confirm the prune against the stale snapshot (MIS-E2E-128) | ✅ 1 failure |
 | NC26 | Remove the prune policy re-fetch | ✅ 4 failures |
 | NC27 | Let a failed policy refresh proceed anyway | ✅ 1 failure — must fail closed |
+| NC28 | `cors_allowed_origins` back to `"*"` (MIS-E2E-105) | ✅ 2 failures |
+| NC29 | Remove the channel topic allow-list | ✅ 1 failure |
+| NC30 | Remove the channel-name pattern | ✅ 1 failure |
+| NC31 | Remove the payload type check (MIS-E2E-140) | ✅ 4 failures |
+| NC32 | Remove the per-client subscription cap | ✅ 1 failure |
+| NC33 | Remove validation from the MANAGER, leaving only the handler | ✅ 1 failure |
+| NC34 | Re-register a duplicate `subscribe` in `main.py` (MIS-E2E-138) | ✅ 1 failure |
+| NC35 | Construct a second `WebSocketManager()` in `main.py` | ✅ 1 failure |
+| NC36 | Rebind the dataset PATCH route to the internal `DatasetUpdate` | ✅ 1 failure |
+| NC37 | Disable the dataset sink's allow-list | ✅ 1 failure |
+| NC38 | Restore `PATCH /api/trainings/{id}` | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),
