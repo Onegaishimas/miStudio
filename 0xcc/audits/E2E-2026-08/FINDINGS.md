@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 54
-**Last id issued:** MIS-E2E-054
+**Count:** 61
+**Last id issued:** MIS-E2E-061
 
 ---
 
@@ -938,3 +938,127 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Verification (R3):** CONFIRMED at R2
 - **Proposed remediation:** One helper (`utc_naive()`), applied at all 37 sites, so the correct form is written once. Do not do this as a find-and-replace to `datetime.now(UTC)`.
 - **Effort:** M
+
+---
+
+## P02 — Backend services
+
+---
+
+### MIS-E2E-055 — The Settings PIN can be read, rewritten and deleted through the settings routes it guards
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/api/v1/endpoints/settings.py:100` (`is_sensitive=False`), `:138` (`PUT /settings`, no key guard), `:195` (`DELETE /settings/{key}`), `:36` (`_PIN_HASH_KEY = "settings_pin_hash"`)
+- **Claim:** The PIN is stored as an ordinary settings row under a known key, and the generic settings routes have no allowlist. Three independent bypasses of the same gate:
+  1. **Read it.** `_hash_pin` output is written with `is_sensitive=False`. Masking in `list_settings`/`get_setting` is conditional on `is_sensitive`, so `GET /settings/settings_pin_hash` — or just `GET /settings?category=system` — returns the **PBKDF2 salt and hash in the clear**. The PIN space is four digits: 10,000 candidates, offline, instant.
+  2. **Rewrite it.** `PUT /settings` validates only that `data.key in _URL_VALIDATED_KEYS` (two URL keys) and otherwise upserts anything. `PUT {"key":"settings_pin_hash","value":"<hash of a PIN I choose>"}` replaces the PIN, bypassing the `current_pin` check that `/pin/set` performs at `:91-93`.
+  3. **Delete it.** `DELETE /settings/settings_pin_hash` removes the row; `/pin/set` then reads `existing = None` at `:88` and its `if existing and not settings.bypass_settings_pin` guard is skipped, so a new PIN can be set with no current PIN at all.
+- **Failure scenario:** This is **not** covered by the accepted no-app-auth posture (MIS-E2E-002). The PIN's entire threat model is to gate the Settings panel — where the OpenAI and HuggingFace credentials live — from someone who *already has network access*. That is precisely the population the nginx/LAN boundary admits. The gate is defeated by three of the routes sitting beside it, and route (1) needs no write at all.
+- **Evidence:** **verified-by-live-repro at source** — all four line ranges read and quoted; the masking condition, the absent allowlist and the `existing is None` path each confirmed
+- **Doc reference:** PADR IDL-25 (Settings Panel PIN Protection), IDL-20
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Store the PIN outside the generic settings table, or deny `settings_pin_hash` (and any future gate key) in `PUT`, `PUT /bulk`, `DELETE` and the two `GET`s. Marking it `is_sensitive=True` fixes only bypass (1). The general lesson: a gate must not be stored in the thing it gates.
+- **Effort:** M
+- **Supersedes in part:** MIS-E2E-005 — that finding said the PIN protects nothing it appears to protect; this is the mechanism, and it is worse than "not enforced".
+
+---
+
+### MIS-E2E-056 — After a key change, ciphertext is sent to OpenAI as a bearer token
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/core/encryption.py:97` (the fail-open return); consumer `OpenAILabelingService`
+- **Claim:** `decrypt_value` swallows `InvalidTag` and returns the stored value unchanged (MIS-E2E-004). This finding is the **consequence**, which MIS-E2E-004 did not trace: if `SETTINGS_ENCRYPTION_KEY` or `secret_key` changes — a rotation, a redeploy with a regenerated secret, a different environment — every stored API key fails authentication and is returned as **raw base64 ciphertext**, which is then handed to `OpenAILabelingService` and transmitted to `api.openai.com` in an `Authorization: Bearer` header.
+- **Failure scenario:** Encrypted credential material leaves the network boundary and reaches a third party in a request header, because the decryption failure was designed to be invisible. The user sees an authentication error from OpenAI and reasonably concludes the key is wrong — the actual event is that their ciphertext was just transmitted. No log line distinguishes this from a genuinely bad key.
+- **Evidence:** plausible (read-only) — the fail-open path is verified; the transmission is traced through the consumer, not executed
+- **Doc reference:** PADR IDL-20, IDL-19 (OpenAI SDK as standard client)
+- **Verification (R3):** pending — trace the exact header construction
+- **Proposed remediation:** Raise on `InvalidTag`. This is the third finding rooting in the same swallow (MIS-E2E-004 integrity, MIS-E2E-041 permanent plaintext, this) — fix once.
+- **Effort:** S
+- **Related:** MIS-E2E-004, MIS-E2E-041
+
+---
+
+### MIS-E2E-057 — Cancelling a labeling job can never be observed
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/services/labeling_service.py:610` (`_raise_if_cancelled`)
+- **Claim:** `_raise_if_cancelled` re-queries `LabelingJob` on a session configured `expire_on_commit=False`. SQLAlchemy returns the **identity-mapped object already in the session**, not fresh database state, so a status written by another connection is never seen. The reviewer verified this empirically on SQLAlchemy 2.0.45.
+- **Failure scenario:** The user presses Cancel; the API writes `CANCELLED`; the running job never observes it, labels every remaining feature, and on completion writes `COMPLETED` **over** the cancel. That is the exact production symptom the cancel feature was built to fix. **Why no test catches it:** the existing test's fake `_Session` returns a fresh row on every call — it has no identity map, so the fixture cannot exhibit the behaviour under test. Fixtures agreeing by construction, again.
+- **Evidence:** verified-by-live-repro (reviewer executed against SQLAlchemy 2.0.45)
+- **Doc reference:** none
+- **Verification (R3):** pending
+- **Proposed remediation:** `await db.refresh(job)` or `session.expire(job)` before the read, or query with `populate_existing()`. The test needs a real session, not a fake without an identity map.
+- **Effort:** S
+
+---
+
+### MIS-E2E-058 — A cancelled labeling job is reported as failed
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/services/labeling_service.py:1483`; `backend/src/workers/labeling_tasks.py:92`
+- **Claim:** `_LabelingCancelled` is caught by the outer `except Exception`, which sets `status=FAILED` and emits `labeling:failed` before re-raising. `labeling_tasks.py:92` carries a comment asserting *"the job row is already CANCELLED"* — it is not; it was just overwritten to FAILED.
+- **Failure scenario:** A deliberate user cancellation surfaces in the UI as a failure, and the comment documenting the opposite means the next reader will not look. (Only reachable once MIS-E2E-057 is fixed — today the cancellation is never raised at all.)
+- **Evidence:** plausible (read-only)
+- **Doc reference:** none
+- **Verification (R3):** pending
+- **Proposed remediation:** Catch `_LabelingCancelled` before the generic handler.
+- **Effort:** S
+
+---
+
+### MIS-E2E-059 — The documented no-template fallback path raises `UnboundLocalError`
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/services/labeling_service.py:906`, `:1056`, `:1255`; binding site inside `if template:`
+- **Claim:** `job_batch_size` is assigned only inside the `if template:` branch and read unconditionally at three later points. The "no template found" path is explicitly supported, and it dies with `UnboundLocalError`.
+- **Failure scenario:** A labeling run started against a deleted or missing template crashes with a Python error rather than falling back, at three separate sites. The crash surfaces as a generic 500 / FAILED job.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** none
+- **Verification (R3):** pending
+- **Proposed remediation:** Bind the default before the branch.
+- **Effort:** S
+
+---
+
+### MIS-E2E-060 — Per-job `max_tokens` is silently overwritten by the template's
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/services/labeling_service.py:1046`
+- **Claim:** `max_tokens` is exposed on the API and in the UI as a per-job setting, and is then unconditionally replaced by `template.max_tokens` (default **50**). The sibling `max_examples` gets the precedence right; `max_tokens` does not.
+- **Failure scenario:** A user raises `max_tokens` to get longer feature descriptions, the value is accepted, and every description is still truncated at the template default. The control appears to work and does nothing — and this is the same class as the J-Lens arc's "a remedy string naming a control that does not do what it says".
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-18 (enhanced labeling)
+- **Verification (R3):** pending
+- **Proposed remediation:** Mirror the `max_examples` precedence: job value wins, template is the default.
+- **Effort:** S
+
+---
+
+### MIS-E2E-061 — Three smaller defects in the labeling and encryption paths
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** bug
+- **Location:** `labeling_service.py:1202` and `:1407`; `labeling_service.py:720`; `core/encryption.py:126`
+- **Claim:** Three independent minor defects, grouped because each is a one-line fix:
+  1. **`finally` masks the real error.** Both `finally` blocks dereference `labeling_service`, which is unbound if the `OpenAILabelingService` constructor raises — so a construction failure surfaces as `UnboundLocalError` and the actual cause is lost.
+  2. **Explicit null batch size crashes.** `"batch_size": null` in a request survives `.get(key, default)` as `None` (the default only applies to a *missing* key) and reaches `range(0, n, None)` → `TypeError`.
+  3. **`mask_value` reveals short secrets.** For a 4–7 character value it emits every character — `"abcd"` masks to `"abc...abcd"`. The docstring's own example is also wrong.
+- **Failure scenario:** (3) is the one with security relevance, though bounded: any secret short enough to be fully revealed by the mask is short enough to be low-value. Recorded because `mask_value` is the function the UI trusts to not show a credential.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** none
+- **Verification (R3):** pending
+- **Proposed remediation:** Bind before `try`; treat `None` as absent; make `mask_value` reveal a fixed suffix only above a minimum length, and fix the docstring.
+- **Effort:** S
