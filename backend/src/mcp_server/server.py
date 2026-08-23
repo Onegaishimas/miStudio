@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 SERVER_INSTRUCTIONS = """\
 miStudio MCP server — SAE feature analysis, circuit discovery, and steering.
 
-**CALL `mistudio_howto` FIRST** for circuit or steering work. 92 tools across
-13 categories is more than a description can carry; that tool holds the
+**CALL `mistudio_howto` FIRST** for circuit or steering work. Up to {tool_count} tools
+across {category_count} categories is more than a description can carry; that tool holds the
 workflows, the document shapes that cross between miStudio and miLLM, and the
 failure modes that look like something else.
 
@@ -97,6 +97,56 @@ class AuditToolLogger:
         )
 
 
+def _server_instructions() -> str:
+    """`SERVER_INSTRUCTIONS` with the tool and category counts filled in.
+
+    MIS-E2E-161. The counts were hand-written and had drifted three ways at
+    once: this string said 92 tools / 13 categories, `manual/docs/advanced/
+    mcp-server.md` said 97 / 13, and the generated contract said 116 / 14. The
+    contract's is right because it is DERIVED; the other two were maintained by
+    memory.
+
+    An agent reading these instructions is told how big the surface is in order
+    to decide whether to call `mistudio_howto`. A number 24 tools short
+    understates exactly the thing it exists to warn about.
+    """
+    # COUNTED BY AST, because the obvious sources both fail here:
+    #   * summing `CATEGORY_MODULES` counts MODULES (16), not tools;
+    #   * `_all_tools()` BUILDS A SERVER, and build_server calls this — infinite
+    #     recursion, which is how I found out.
+    # So walk the same `@mcp.tool()` decorators `contract.py` walks. No imports
+    # beyond the tool modules, which are being imported anyway.
+    import ast as _ast
+    import inspect as _inspect
+
+    from .tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+
+    categories = {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}
+    tool_count = 0
+    for modules in categories.values():
+        for module in modules:
+            try:
+                tree = _ast.parse(_inspect.getsource(module))
+            except (OSError, TypeError, SyntaxError):
+                continue
+            for node in _ast.walk(tree):
+                if not isinstance(node, (_ast.AsyncFunctionDef, _ast.FunctionDef)):
+                    continue
+                for dec in node.decorator_list:
+                    target = dec.func if isinstance(dec, _ast.Call) else dec
+                    if isinstance(target, _ast.Attribute) and target.attr == "tool":
+                        tool_count += 1
+                        break
+    # Plain replacement, not `.format` — the instructions contain literal
+    # braces (a JSON example: `{"unavailable": "millm", …}`) that `.format`
+    # reads as fields and raises on.
+    return (
+        SERVER_INSTRUCTIONS
+        .replace("{tool_count}", str(tool_count or "many"))
+        .replace("{category_count}", str(len(categories)))
+    )
+
+
 def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, MiStudioClient]:
     """Create the FastMCP server with only the enabled tool categories registered."""
     # `MCP_ALLOW_ANONYMOUS` IS STDIO-ONLY, AS EVERYTHING ALREADY CLAIMED
@@ -131,7 +181,7 @@ def build_server(settings: MCPSettings, stdio: bool = False) -> tuple[FastMCP, M
     categories = settings.enabled_categories()
     mcp = FastMCP(
         "mistudio",
-        instructions=SERVER_INSTRUCTIONS,
+        instructions=_server_instructions(),
         host=settings.host,
         port=settings.port,
         stateless_http=True,

@@ -88,7 +88,16 @@ def _endpoints_for(func_node: ast.AST) -> list[str]:
                     else:
                         parts.append("{…}")
                 path = "".join(parts)
-        if path:
+        # AN HTTP PATH STARTS WITH "/" (MIS-E2E-114).
+        #
+        # `fn.attr in ("get", "post", ...)` also matches a plain
+        # `dict.get("kind")`, so the scraper recorded ordinary dictionary
+        # access as endpoints. The committed contract carried three:
+        # `GET kind`, `GET manifests`, `GET /validation-manifests` on
+        # `get_steering_samples` — and `test_mcp_contract_generated.py` pinned
+        # them as correct, so the contract defended whatever path was recorded
+        # rather than the real one.
+        if path and path.startswith("/"):
             found.append(f"{method} {path}")
     return sorted(set(found))
 

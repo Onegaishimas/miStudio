@@ -192,3 +192,102 @@ def test_the_page_no_longer_claims_verification_it_did_not_do():
         "the page asserts verification instead of being verified; the test "
         "above is what makes the claim true"
     )
+
+
+# ── MIS-E2E-114 / -161 · the MCP contract and its counts ───────────────────
+
+#: Tools registered CONDITIONALLY, so the AST ceiling exceeds what a default
+#: server serves. Named, so the difference is a decision rather than a drift.
+_CONDITIONALLY_REGISTERED = {
+    "get_approval_status": "only registered when `steering_approval` is on",
+}
+
+
+def test_the_contract_lists_no_endpoint_that_is_really_a_dict_lookup():
+    """MIS-E2E-114. The AST scraper matched `dict.get("kind")` as `GET kind`.
+
+    The committed contract carried three such rows, and
+    `test_mcp_contract_generated.py` pinned them as correct — so the contract
+    defended whatever path was recorded rather than the real one.
+    """
+    contract = (REPO / "docs" / "mcp-contract.md").read_text()
+    for bogus in ("GET kind", "GET manifests", "GET status"):
+        assert f"`{bogus}`" not in contract and f"{bogus}<" not in contract, (
+            f"the contract lists {bogus!r} as an endpoint; it is a dictionary "
+            f"lookup the AST scraper mistook for an HTTP call"
+        )
+
+
+def test_every_contract_endpoint_looks_like_a_path():
+    """The general rule behind the three specific rows."""
+    import re
+
+    contract = (REPO / "docs" / "mcp-contract.md").read_text()
+    endpoints = re.findall(r"`(GET|POST|PUT|DELETE|PATCH) ([^`]+)`", contract)
+    assert endpoints, "no endpoints found in the contract — the scan broke"
+    bad = [f"{m} {p}" for m, p in endpoints if not p.startswith("/")]
+    assert not bad, f"contract endpoints that are not paths: {bad}"
+
+
+def test_the_server_instruction_count_is_derived_not_written():
+    """MIS-E2E-161. Three places carried three different counts: the
+    instructions said 92/13, the manual 97/13, the generated contract 116/14.
+    Only the contract was derived."""
+    import inspect
+
+    from src.mcp_server import server
+
+    src = inspect.getsource(server._server_instructions)
+    assert "ast" in src.lower(), "the count is not derived from the registry"
+
+    # Strip the docstring: it cites the stale numbers (92, 97, 116) to explain
+    # the drift, and a bare substring check reads them as a regression.
+    # Seventh occurrence of this trap in this remediation.
+    doc = inspect.getdoc(server._server_instructions) or ""
+    code = src
+    for line in doc.splitlines():
+        code = code.replace(line, "")
+    assert "92" not in code and "97" not in code, "a hardcoded count is back"
+
+    # And the template itself must carry a placeholder, not a literal.
+    assert "{tool_count}" in server.SERVER_INSTRUCTIONS
+
+
+def test_the_instruction_ceiling_exceeds_the_contract_by_exactly_the_conditional_tools(
+    monkeypatch,
+):
+    """The two authorities must not drift.
+
+    The AST ceiling counts every `@mcp.tool()`; the contract counts what a
+    default server serves. The difference is exactly the conditionally-
+    registered set — if it grows, one of them has changed and this says so.
+    """
+    monkeypatch.setenv("MILLM_API_URL", "http://millm.test")
+
+    import ast
+    import inspect as _inspect
+
+    from src.mcp_server.contract import collect
+    from src.mcp_server.tools import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
+
+    ast_names = set()
+    for modules in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}.values():
+        for module in modules:
+            for node in ast.walk(ast.parse(_inspect.getsource(module))):
+                if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                    continue
+                for dec in node.decorator_list:
+                    target = dec.func if isinstance(dec, ast.Call) else dec
+                    if isinstance(target, ast.Attribute) and target.attr == "tool":
+                        ast_names.add(node.name)
+                        break
+
+    served = {row["name"] for rows in collect().values() for row in rows}
+    assert ast_names, "no tools found by AST — the scan broke"
+    assert served, "the contract collector returned nothing"
+
+    difference = ast_names - served
+    assert difference == set(_CONDITIONALLY_REGISTERED), (
+        f"the AST ceiling and the served set differ by {sorted(difference)}, "
+        f"expected exactly {sorted(_CONDITIONALLY_REGISTERED)}"
+    )

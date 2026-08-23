@@ -76,7 +76,7 @@ Disabled categories simply don't appear in the agent's tool list. Disabling the 
 
 The `circuits` category is **on by default** as of the circuits arc. The four `millm_*` categories are the **cross-product plane** — miStudio discovers and calibrates, miLLM serves — and are gated separately: they require `MILLM_API_URL` and are never enabled by default, even if you list them in `MCP_TOOL_CATEGORIES`.
 
-## Tool Catalog (97 tools, 13 categories)
+## Tool Catalog
 
 The authoritative inventory is [`docs/mcp-contract.md`](https://github.com/Onegaishimas/miStudio/blob/main/docs/mcp-contract.md) in the repo — an **auto-generated, diff-tested** file derived from the live tool registry. The table below mirrors it; the contract wins if they ever drift.
 
