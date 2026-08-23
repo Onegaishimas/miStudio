@@ -5,12 +5,13 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
+**Suites:** backend **2944 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
 
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
-| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Tasks 1 ✅ · 2 ✅ CLOSED** · Tasks 3–5 open |
+| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Tasks 1 ✅ · 2 ✅ · 3 ✅ CLOSED** · Tasks 4–5 open |
 | Waves 3–9 | Correctness, mutations, realtime, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -57,11 +58,16 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 ## Task 3 — Arbitrary deletion (P0)
 
-- [ ] 3.1 `activation_service.delete_extraction`: route the id through `resolve_user_path`, reject ids not matching `^[A-Za-z0-9_-]+$` at the schema, **and** move the filesystem delete inside the `if extraction:` guard. Three layers, because this one deletes. — MIS-E2E-070
-- [ ] 3.2 Remove `raw_path` / `file_path` / `quantized_path` from the create and update schemas — the workers write them. — MIS-E2E-071
-- [ ] 3.3 Make every deletion sink re-assert containment with `resolve_user_path` immediately before `rmtree`. **The database is not a trust boundary while any API can write to it.** — MIS-E2E-071
-- [ ] 3.4 Fix the dataset-cancel worker to delete only the tokenization being cancelled, and store the `task_id` so the revoke branch is not dead. — MIS-E2E-151
-- [ ] 3.5 Re-fetch the prune preview immediately before the confirmation dialog, or confirm against the policy the backend will apply. — MIS-E2E-128
+- [x] 3.1 ✅ `ActivationService._extraction_dir()` — one method, three layers (id shape, `resolve_user_path` on a **relative** path, root containment); the write, read and delete sites all route through it, and the filesystem delete moved inside the `if extraction:` ownership guard (a non-matching id now reports "not found for this model"). — MIS-E2E-070
+- [x] 3.2 ⚠️ **SUPERSEDED — removing the fields breaks the writers.** Attempted; **37 tests failed** because the download workers write these columns *through the very same* `DatasetUpdate` / `ModelUpdate` schemas, so the field cannot be removed without splitting internal and external schemas. The exposure is real but the sink is the right place to close it — see 3.3, which makes the stored value harmless regardless of who wrote it. Recorded rather than quietly dropped. — MIS-E2E-071
+- [x] 3.3 ✅ **`settings.resolve_deletable_path()`** — a single guard in `core/config.py`, and every stored-path deletion sink routed through it (11 sites across 8 modules). Three properties, each separately controlled:
+  - **containment** against the same allow-list `resolve_user_path` uses, so a new trusted root is honoured without a second edit;
+  - **`min_depth=2`** — containment ALONE is not a deletion guard: `resolve_user_path("")` returns `data_dir` and `"datasets"` returns the directory holding every dataset, and both pass a containment check;
+  - **a realpath re-check**, because `resolve_user_path` is deliberately string-only (correct, before containment succeeds) while `rmtree` traverses symlinked components.
+
+  Also fixed a defect **in the fix**: the first version sent already-absolute stored paths through `resolve_user_path`, which strips the leading slash and re-joins under `data_dir` — so every *real* deletion would have resolved to a nonexistent path and silently no-op'd while reporting success. Caught by the cleanup integration tests. — MIS-E2E-071
+- [x] 3.4 ✅ Cancel cleanup gated to `{QUEUED, PROCESSING}`, so completed tokenizations for other models survive — the raw-file cleanup directly above it was already status-gated and this sibling had been missed. The revoke branch is live: the removed comment claimed *"We don't have task_id stored"*, but **both** dispatch sites write `task.id` into `extra_metadata['task_id']` immediately after `.delay(...)`, so revoke had been dead for its whole life while cancel reported success. — MIS-E2E-151
+- [x] 3.5 ✅ The prune confirmation re-fetches the policy and confirms against **that**, never the snapshot; the toast follows the same value. Fails **closed** — if the refresh fails nothing is pruned and the user is told, because for `dry_run` the falsy value is the deleting one. — MIS-E2E-128
 
 ## Task 4 — Mass assignment and the WebSocket boundary (P0)
 
@@ -252,6 +258,22 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/services/app_setting_service.py` | `_PROTECTED_KEYS` + `ProtectedSettingError`: the PIN is invisible to generic reads and refused by generic writes/deletes; `_privileged` is the only way in |
 | `backend/src/api/v1/endpoints/settings.py` | PIN endpoints use `_privileged`; PIN encrypted at rest; 403 on protected keys; `HTTPException` re-raised before the generic handler (MIS-E2E-103 pattern) |
 | `backend/tests/api/v1/endpoints/test_pin_is_not_a_setting.py` | **New.** 9 tests over all three bypasses (read/write/delete) plus /bulk, and the PIN still working |
+| `backend/src/services/activation_service.py` | MIS-E2E-070: `_extraction_dir()` — one method, three layers; the write, read and delete sites all route through it |
+| `backend/src/api/v1/endpoints/models.py` | MIS-E2E-070: filesystem delete moved inside the `if extraction:` ownership guard. MIS-E2E-071: requantize's file wipe routed through the deletion guard |
+| `backend/src/core/config.py` | **MIS-E2E-071: `resolve_deletable_path()`** — containment + `min_depth=2` + a realpath re-check; accepts an already-contained absolute path as-is (the workers store absolute paths) |
+| `backend/src/workers/dataset_tasks.py` | MIS-E2E-071: raw and tokenized deletions guarded. MIS-E2E-151: cleanup gated to `{QUEUED, PROCESSING}` so completed tokenizations survive a cancel |
+| `backend/src/workers/model_tasks.py` | MIS-E2E-071: `file_path` / `quantized_path` deletions guarded; a refusal is recorded as an error, never swallowed |
+| `backend/src/workers/training_tasks.py` | MIS-E2E-071: `training_dir` deletion guarded |
+| `backend/src/services/dataset_service.py` | MIS-E2E-071: tokenized-file deletion guarded (sibling sweep) |
+| `backend/src/services/sae_manager_service.py` | MIS-E2E-071: SAE `local_path` deletion guarded (sibling sweep) |
+| `backend/src/api/v1/endpoints/datasets.py` | MIS-E2E-071: tokenized-file deletion guarded. MIS-E2E-151: forwards the stored `task_id`, reviving a revoke branch that had been dead since it was written |
+| `backend/src/api/v1/endpoints/neuronpedia.py` | MIS-E2E-071: export archive deletion guarded (sibling sweep) |
+| `backend/tests/unit/test_deletion_containment.py` | **New.** 29 tests: the guard both directions, plus an **AST** wiring check that no sink resolves a stored path with `resolve_data_path` and then deletes it |
+| `backend/tests/integration/_data_root_tmp.py` | **New.** Repoints `settings.data_dir` at a temp root so the cleanup tests exercise the real containment path instead of `/tmp`, which the guard correctly refuses |
+| `backend/tests/integration/test_{model_cleanup,dataset_cancellation,critical_fixes}.py` | Fixtures moved inside the trusted root — relaxing the guard to keep them green would have certified the vulnerable behaviour |
+| `backend/tests/unit/test_dataset_cancel_scope.py` | **New.** 6 tests: cleanup scoped to in-flight work (pinning the SET, not just that a filter exists) and the revoke path reachable at both ends |
+| `frontend/src/components/panels/SettingsPanel.tsx` | MIS-E2E-128: the prune confirmation re-fetches the live policy and fails **closed**; `CheckpointPrunePreviewPanel` exported for its test |
+| `frontend/src/components/panels/SettingsPanel.prune.test.tsx` | **New.** 5 tests over the exact reported sequence: preview dry-run → change the setting → the dialog must say PERMANENTLY DELETE |
 
 ## Negative controls run
 
@@ -273,6 +295,20 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC12 | Restore the real key in ONE Postman writer (MIS-E2E-072) | ✅ 2 failures |
 | NC13 | Remove `settings_pin_hash` from `_PROTECTED_KEYS` (MIS-E2E-055/-165) | ✅ 4 of 6 failures — the 2 listing tests still pass because the belt-and-braces `is_sensitive=True` masks the value independently |
 | NC4 | Revert `_cache_analysis` to the blind INSERT | ✅ 2 failures |
+| NC14 | Revert `models.py` requantize to `resolve_data_path` (MIS-E2E-071) | ✅ 1 failure |
+| NC15 | Revert `dataset_tasks` raw deletion to `resolve_data_path` | ✅ 1 failure |
+| NC16 | Disable the guard's `min_depth` check | ✅ 6 failures |
+| NC17 | Disable the guard's symlink re-check | ✅ 1 failure |
+| NC18 | Disable the empty/root refusal | ⚠️ **SURVIVED** — the depth check subsumes it. Pinned by a new test asserting the branch holds for a `min_depth=0` caller, which is the only contract it uniquely provides; **re-run ✅ 4 failures** |
+| NC19 | Neuter the AST scan itself (`return []`) | ✅ 1 failure — the scan does not fail open |
+| NC20 | Remove the already-contained-absolute branch | ✅ 6 failures — this one caught a defect **in the fix**: real deletions would have silently no-op'd |
+| NC21 | Remove the cancel status gate (MIS-E2E-151) | ✅ 1 failure |
+| NC22 | Add `READY` to the in-flight set — deletes completed work | ✅ 1 failure |
+| NC23 | Drop `task_id` from the cancel call again | ✅ 1 failure |
+| NC24 | Stop storing `task_id` at one dispatch site | ✅ 1 failure — the read cannot become a lookup of a key nothing writes |
+| NC25 | Confirm the prune against the stale snapshot (MIS-E2E-128) | ✅ 1 failure |
+| NC26 | Remove the prune policy re-fetch | ✅ 4 failures |
+| NC27 | Let a failed policy refresh proceed anyway | ✅ 1 failure — must fail closed |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),

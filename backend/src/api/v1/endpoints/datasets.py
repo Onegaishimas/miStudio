@@ -543,7 +543,16 @@ async def tokenize_dataset(
                 # Delete the tokenized files if they exist
                 if existing_tokenization.tokenized_path:
                     from pathlib import Path
-                    tokenized_path = settings.resolve_data_path(existing_tokenization.tokenized_path)
+                    try:
+                        tokenized_path = settings.resolve_deletable_path(
+                            existing_tokenization.tokenized_path
+                        )
+                    except ValueError as e:
+                        logger.error(f"Refusing to delete tokenized_path: {e}")
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Stored tokenized_path is not a valid deletion target",
+                        )
                     if tokenized_path.exists():
                         import shutil
                         if tokenized_path.is_dir():
@@ -706,10 +715,20 @@ async def cancel_dataset_download(
         )
 
     try:
-        # Call cancel_dataset_download task (runs synchronously for immediate response)
-        # Note: We don't have task_id stored, so we can't revoke the specific task
-        # Instead, the cancel task will clean up files and update database
-        result = cancel_task(dataset_id=str(dataset_id))
+        # MIS-E2E-151. The removed comment claimed "We don't have task_id
+        # stored, so we can't revoke the specific task" — but BOTH dispatch
+        # sites store it: `download_dataset_task` and `tokenize_dataset_task`
+        # each write `task.id` into `extra_metadata['task_id']` immediately
+        # after `.delay(...)`. The worker's revoke branch was therefore dead
+        # for its whole life, and "cancel" left the job running to completion
+        # while the UI reported it cancelled.
+        task_id = (dataset.extra_metadata or {}).get("task_id")
+        if not task_id:
+            logger.warning(
+                f"No task_id recorded for dataset {dataset_id}; cancelling "
+                f"without revoke — the worker may run to completion"
+            )
+        result = cancel_task(dataset_id=str(dataset_id), task_id=task_id)
 
         if "error" in result:
             raise HTTPException(

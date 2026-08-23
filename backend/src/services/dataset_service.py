@@ -356,8 +356,14 @@ class DatasetService:
             for tokenization in db_dataset.tokenizations:
                 # Delete tokenized files from disk if they exist
                 if tokenization.tokenized_path:
-                    tokenized_path = settings.resolve_data_path(tokenization.tokenized_path)
-                    if tokenized_path.exists():
+                    try:
+                        tokenized_path = settings.resolve_deletable_path(
+                            tokenization.tokenized_path
+                        )
+                    except ValueError as e:
+                        logger.error(f"Refusing to delete tokenized_path: {e}")
+                        tokenized_path = None
+                    if tokenized_path is not None and tokenized_path.exists():
                         try:
                             if tokenized_path.is_dir():
                                 shutil.rmtree(tokenized_path)

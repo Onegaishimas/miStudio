@@ -15,6 +15,7 @@ from pathlib import Path
 from uuid import uuid4
 from unittest.mock import patch, MagicMock
 
+from tests.integration._data_root_tmp import data_root_tmpdir
 from src.models.dataset import Dataset, DatasetStatus
 from src.services.dataset_service import DatasetService
 from src.workers.dataset_tasks import cancel_dataset_download
@@ -28,7 +29,7 @@ class TestDatasetCancellationTask:
         """Test cancelling dataset with raw path (tokenized paths are in DatasetTokenization)."""
         dataset_id = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("datasets") as tmpdir:
             raw_path = Path(tmpdir) / "raw_data"
 
             # Create directory with files
@@ -79,7 +80,7 @@ class TestDatasetCancellationTask:
         """Test cancelling dataset with only raw_path."""
         dataset_id = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("datasets") as tmpdir:
             raw_path = Path(tmpdir) / "raw_data"
             raw_path.mkdir()
             (raw_path / "data.arrow").write_text("fake raw data")
@@ -124,7 +125,7 @@ class TestDatasetCancellationTask:
         """
         dataset_id = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("datasets") as tmpdir:
             raw_path = Path(tmpdir) / "raw_data"
 
             raw_path.mkdir()
@@ -321,7 +322,7 @@ class TestDatasetCancellationAPI:
 
         dataset_id = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("datasets") as tmpdir:
             raw_path = Path(tmpdir) / "raw_data"
             raw_path.mkdir()
             (raw_path / "data.arrow").write_text("fake raw data")
@@ -429,7 +430,7 @@ class TestDatasetCancellationIntegration:
         """
         dataset_id = uuid4()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with data_root_tmpdir("datasets") as tmpdir:
             raw_path = Path(tmpdir) / "raw_data"
 
             # Create files

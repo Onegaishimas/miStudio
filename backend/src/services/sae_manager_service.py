@@ -705,8 +705,12 @@ class SAEManagerService:
 
         # Delete local files if requested
         if delete_files and sae.local_path:
-            local_path = settings.resolve_data_path(sae.local_path)
-            if local_path.exists():
+            try:
+                local_path = settings.resolve_deletable_path(sae.local_path)
+            except ValueError as e:
+                logger.error(f"Refusing to delete SAE local_path: {e}")
+                local_path = None
+            if local_path is not None and local_path.exists():
                 try:
                     if local_path.is_dir():
                         shutil.rmtree(local_path)
