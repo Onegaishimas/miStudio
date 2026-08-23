@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3079 passed / 0 failed** (baseline 2883) · frontend **1224 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean · **CI Backend Tests green**
+**Suites:** backend **3123 passed / 0 failed** (baseline 2883) · frontend **1227 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean · **CI green, mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -13,7 +13,8 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
-| **Wave 4** | Task 8 — pin the surviving audit mutations | ⏳ **next** |
+| **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **next** |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -133,15 +134,20 @@ The root enabler behind the production 500 the user hit. **Two of the constraint
 
 Each is a mutation that survived. Write the test, then re-run the mutation as a negative control.
 
-- [ ] 8.1 Assert the steering hook target **is** `structure.layers_module[L]` on **both** implementations. Failure mode: `steered == unsteered at every dial`; cost a hardware round to find. — MIS-E2E-078
-- [ ] 8.2 Parametrized test that every `_SENSITIVE_KEYS` member stores ciphertext even when the client sends `is_sensitive: false`. — MIS-E2E-077
-- [ ] 8.3 Assert `weights_only=True` at all three `torch.load` sites — the only guard against artifact RCE. — MIS-E2E-091
-- [ ] 8.4 Assert every **registered** task resolves to its intended queue, driven off the registry. Catches `train_sae` landing on `datasets`. — MIS-E2E-093, -097
-- [ ] 8.5 IDOR test on `DELETE /trainings/{tid}/checkpoints/{cid}`. — MIS-E2E-112
-- [ ] 8.6 Assert an exact **mid-range** value for the auto-baseline — the existing file samples only where the slope vanishes or clamps. — MIS-E2E-127
-- [ ] 8.7 Derive BR-002's band-constant scan from the jlens **package**, not a two-module list; extend it to the frontend. — MIS-E2E-090
-- [ ] 8.8 Parametrize the MCP payload assertion off the registry; make absence from `EXPECTED_CALLS` an explicit, listed exemption rather than silence. — MIS-E2E-119
-- [ ] 8.9 Two tests for emit retry: a `ReadTimeout` retries; a `RemoteProtocolError` retries. — MIS-E2E-142, -137
+- [x] 8.1 ✅ Both implementations, and a second test that no steering path calls `get_hookable_module(..., "residual", ...)` — asserted as a **parsed call**, since both modules mention "residual" in comments explaining why it was wrong. — MIS-E2E-078
+- [x] 8.2 ✅ Parametrized **off the registry**, so a new secret is covered the day it is added, plus a control that the registry is non-empty (an empty one makes the parametrize vacuous). — MIS-E2E-077
+- [x] 8.3 ✅ An AST walk over the **whole source tree**, not three named sites, so a fourth `torch.load` is covered on arrival. Fails closed if the scan finds none. — MIS-E2E-091
+- [x] 8.4 ✅ Driven off the live registry — and it **found nine tasks live on the default queue**:
+  - `train_sae`, `resume_training` — GPU training jobs, short-named so the module glob could not match;
+  - `steering.combined` (GPU) and `steering.cleanup` — routes existed for `compare` and `sweep` only, now a `steering.*` glob;
+  - all five `workers.model_tasks.*` — the route was written `src.workers.model_tasks.*` while the tasks register **without** the `src.` prefix, so the entry matched nothing. **The recorded lesson biting a second time.**
+  - two `dataset_tasks` with no entry at all.
+  The test asserts **routing coverage**, not name shape: a short name is fine if an explicit entry exists. — MIS-E2E-093, -097
+- [x] 8.5 ✅ The guard existed and nothing asserted it. Two tests: the cross-check is present, **and it precedes the delete** — noticing after the row is gone is not a guard. — MIS-E2E-112
+- [x] 8.6 ✅ ⚠️ **Re-ran M22 first: it is already killed** (2 tests fail today, where the audit recorded 75 green) — exact mid-range values had been added since. Verified empirically rather than trusting the finding. Those two catch it *incidentally*, so a block was added stating the invariant directly, pinning the constants, and documenting why the clamp endpoints cannot distinguish any slope. — MIS-E2E-127
+- [x] 8.7 ✅ Derived by walking `src.ml` and `src.services` for jlens modules, with a control asserting the walk finds ≥5. Docstring lines excluded, since they legitimately name the published figures in order to forbid them. **Audit mutation M13 — a band constant in a sibling service — is now killed.** — MIS-E2E-090
+- [x] 8.8 ✅ `TestCallerCoverageIsAccounted` over the **real built server with every category enabled**. Confirmed the finding's arithmetic exactly: **100 of 116** tools had no payload assertion. All 100 are now *listed* with a reason, so the gap is counted and cannot grow silently; guards reject a stale exemption, a tool in both lists, and a blank reason. A payload fixture per tool remains backlog — writing 100 fake ones would be worse than recording the debt. — MIS-E2E-119
+- [x] 8.9 ✅ Fixed **and** pinned. The handler caught only `httpx.TimeoutException`, so `ConnectError` / `RemoteProtocolError` were abandoned on the first attempt — on the *terminal* events, where a dropped emit leaves the UI showing a finished job as running forever. Widened to `TransportError`, which excludes `HTTPStatusError` (the server answered; retrying repeats a rejected request). Pinned in **both** directions. — MIS-E2E-142, -137
 
 ## Task 9 — Realtime (P1)
 
@@ -334,6 +340,14 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_jlens_convergence.py` | **New.** 7 tests; reproduces the reviewer's proportionality result and pins the calibration |
 | `backend/tests/unit/test_band_metrics_honesty.py` | **New.** 12 tests over FVE rank, the control being wired, and both boundaries |
 | `backend/tests/unit/test_jlens_fitter.py` | Renamed fields; **new guard** that the six hand-rolled `_Result` stubs carry every `FitResult` field — it immediately found two more missing |
+| `backend/src/ml/layer_discovery.py` | **Live bug:** `resolve_vocab_size()` — gemma-4 unified configs nest `vocab_size`; two real extraction jobs died on the direct read |
+| `backend/src/services/activation_service.py` | Uses the resolver; raises rather than range-checking token ids against a guess |
+| `backend/tests/unit/test_resolve_vocab_size.py` | **New.** 7 tests incl. the reported `Gemma4UnifiedConfig` shape and an embedding-table fallback |
+| `backend/src/core/celery_app.py` | MIS-E2E-093/-097: **nine tasks were on the default queue**, incl. `steering.combined` and every `workers.model_tasks.*` (wrong prefix) |
+| `backend/src/workers/websocket_emitter.py` | MIS-E2E-137/-142: retry widened `TimeoutException` → `TransportError`, excluding `HTTPStatusError` |
+| `backend/tests/unit/test_audit_mutation_pins.py` | **New.** Task 8's harness — hook target, sensitive keys, `weights_only`, queue routing, retry scope, BR-002 package-wide, IDOR |
+| `backend/tests/unit/test_reachability.py` | MIS-E2E-119: `TestCallerCoverageIsAccounted` over the real built server; **100 exemptions listed** with reasons |
+| `frontend/src/utils/steeringStrength.test.ts` | MIS-E2E-127: the slope invariant stated directly rather than caught incidentally |
 
 ## Negative controls run
 
@@ -418,9 +432,20 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC73 | Motor boundary back to a raw argmax | ✅ 1 failure |
 | NC74 | Unwire `excess_fve` | ✅ 1 failure |
 | NC75 | Rename the spread keys back (MIS-E2E-081) | ✅ 1 failure |
+| NC76 | Retry narrowed back to `TimeoutException` (MIS-E2E-137) | ✅ 2 failures |
+| NC77 | Remove the `steering.*` route | ✅ 1 failure |
+| NC78 | Remove the `train_sae` route | ✅ 1 failure |
+| NC79 | Restore the wrong `src.` prefix on a model-task route | ✅ 1 failure |
+| NC80 | Drop `weights_only=True` from an artifact load (MIS-E2E-091) | ✅ 1 failure |
+| NC81 | **Re-run of audit mutation M13** — band constant in a sibling jlens service | ✅ 1 failure *(survived during the audit)* |
+| NC82 | Vocab resolver stops walking sub-configs | ✅ 2 failures |
+| NC83 | Extraction reads `model.config.vocab_size` directly again | ✅ 1 failure |
+| NC84 | Remove the checkpoint IDOR guard (MIS-E2E-112) | ✅ 2 failures |
+| NC85 | Register a new MCP tool with neither assertion nor exemption | ✅ 2 failures |
+| NC86 | **Re-run of audit mutation M22** — `BASELINE_SLOPE` 2.6 → 2.4 | ✅ 3 failures *(survived during the audit; already killed before this work, verified)* |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
-**4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),
+**6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),
 M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 
 ## Provenance
