@@ -1,6 +1,6 @@
 # miStudio End-to-End Assessment — E2E-2026-08
 
-**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ · P10 ✅ · P11 ✅ closed · P12 next
+**Started:** 2026-08-23 · **Status:** ✅ COMPLETE — P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ · P10 ✅ · P11 ✅ · **P12 ✅ — ALL PHASES CLOSED**
 
 > **⚠ MIS-E2E-143 — ACT NOW.** An SSH password, five database dumps and this
 > register itself are published in a **public** GitHub repository. See FINDINGS.md.
@@ -64,13 +64,50 @@ Legend: `·` not started · `~` in progress · `✅` closed
 | P09 | Realtime (WebSocket) | ✅ | ✅ | ✅ | 7 |
 | P10 | Infra & supply chain | ✅ | ✅ | ✅ | 6 |
 | P11 | Documentation chain | ✅ | ✅ | ✅ | 16 |
-| P12 | Cross-cutting & live journeys | · | · | · | 0 |
+| P12 | Cross-cutting & live journeys | ✅ | ✅ | ✅ | 2 |
+
+## Synthesis
+
+**166 findings across twelve phases. 13 P0.** 29 mutations run, **14 survived**.
+78 CONFIRMED with reproductions; 1 REFUTED and kept in the register so it is not
+rediscovered.
+
+**The dominant pattern is not missing code — it is a guard that exists and is not on
+the path.** `validate_llm_endpoint_url` has two call sites and neither is the
+credential-bearing one. `resolve_user_path` is correctly built and has one production
+caller, which is not either `rmtree` site. The "never write the bearer token to disk"
+rule is implemented, commented, and applied to the cURL branch but not the Postman
+branch sixty lines below it in the same function. In each case the fix already exists
+in the codebase, ten to sixty lines from where it is missing.
+
+**Five instances of "fixed one representative, never generalized"** were found
+independently, in five different subsystems — the SAE-basis fix, the Postman/cURL
+split, `looks_abandoned` in one janitor of five, `asyncio.to_thread` on one emit call
+of fourteen, and the "Stop saves final checkpoint" correction applied to one manual of
+two.
+
+**Guards whose scope is narrower than their claim** are the third pattern: BR-002 says
+"anywhere" and scans two modules; the MCP harness proves registration for 116 tools
+and behaviour for 16; the queue test proves every queue has a consumer and never that
+a task reaches one.
+
+**What mutation testing bought.** Fifteen kills confirmed genuinely protected
+behaviour. Fourteen survivors were each a correct control with nothing holding it in
+place — including the steering hook target, whose regression means `steered ==
+unsteered at every dial` and which cost a hardware round to find the first time.
+Reading found the defects; only breaking things established that the suite could not
+see them.
+
+**One finding was predicted and then observed.** MIS-E2E-030 was recorded at P01 from
+source: *"once a cache row passes the 7-day expiry… logit lens / correlations /
+ablation 500 permanently for that feature."* The user hit exactly that in production
+mid-audit. It is now fixed and deployed.
 
 ## Findings by severity
 
 | P0 | P1 | P2 | P3 | Total |
 |---:|---:|---:|---:|---:|
-| **12** | 62 | 67 | 23 | **164** |
+| **13** | 62 | 68 | 23 | **166** |
 
 Verdicts so far: **15 CONFIRMED**, 39 pending (most pending belong to phases that
 have not run yet). Severities are provisional until each finding's R3 verification.

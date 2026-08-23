@@ -6,7 +6,7 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 164
+**Count:** 166
 
 > ### ⚠ ACT NOW — MIS-E2E-143
 > An SSH password for the GPU node, five database dumps, and this audit's own
@@ -15,7 +15,7 @@ Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 > full unfiltered history, so all of it is readable one commit back. Verified
 > against the live public repo. Rotate the credential and make the mirror
 > private before anything else in this register.
-**Last id issued:** MIS-E2E-164
+**Last id issued:** MIS-E2E-166
 
 ---
 
@@ -2896,3 +2896,45 @@ audit's strict record-only rule, made deliberately and noted in the round record
 - **Evidence:** verified-by-live-repro
 - **Verification (R3):** **CONFIRMED**
 - **Effort:** S
+
+---
+
+## P12 — Cross-cutting synthesis & live journeys
+
+---
+
+### MIS-E2E-165 — Live confirmation: the PIN hash is served unmasked by the production API
+- **Phase / Round:** P12 / live verification
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** live `GET /api/v1/settings` on `k8s-mistudio.hitsai.local`
+- **Claim:** MIS-E2E-055 predicted this from source. Confirmed against the running deployment:
+  ```
+  settings rows returned: 9
+  key=settings_pin_hash  is_sensitive=False  masked=False  value_len=150
+  >>> EXPOSED: returned in the clear, not masked
+  ```
+  A 150-character PBKDF2 salt+hash, unauthenticated, from a single GET. The PIN space is four digits — 10,000 offline candidates.
+- **Verification (R3):** **CONFIRMED LIVE.** This closes MIS-E2E-055's most severe branch: it is not a latent code defect, it is currently exposed on the deployment the team uses.
+- **Honest qualifier:** the same probe reported "sensitive rows correctly masked: 0" — that is because **no sensitive rows are currently populated** (no API keys stored right now), not because masking is broken. Masking of `is_sensitive` rows was verified correct at source in P02. The PIN's exposure is caused by it being written `is_sensitive=False`, not by a masking failure.
+- **Effort:** M (see MIS-E2E-055)
+
+---
+
+### MIS-E2E-166 — Live confirmation: no authorization layer exists on destructive routes
+- **Phase / Round:** P12 / live verification
+- **Severity:** P2 *(the posture is accepted; this records that it is real in production)*
+- **Type:** security
+- **Location:** live, `k8s-mistudio.hitsai.local`
+- **Claim:** Probed with **nonexistent ids**, so nothing was deleted. A 401/403 would prove an auth layer; a 404/422 proves the request reached the handler and failed only on the object:
+  ```
+  DELETE /api/v1/trainings/train_NOPE_audit    404
+  DELETE /api/v1/circuits/crc_NOPE_audit       404
+  DELETE /api/v1/settings/nonexistent_audit_key 404
+  DELETE /api/v1/datasets/ds_NOPE_audit        422
+  ```
+  No route returned 401 or 403. The handler is reached in every case.
+- **Why it is P2 and not P0:** MIS-E2E-002 records the no-app-auth posture as **accepted** — nginx plus network isolation is the intended control. This finding is not "there is no auth"; it is the live confirmation that the posture is real in production, which the accepted-posture decision was taken *about*. It is recorded so the remediation tasklist's PADR-IDL item (MIS-E2E-002) has evidence attached rather than an assumption.
+- **What it does NOT excuse:** MIS-E2E-055/165 (the PIN, whose entire threat model is the population the boundary admits), MIS-E2E-069 (credential exfiltration), MIS-E2E-070/071 (arbitrary `rmtree`), MIS-E2E-099 (restart loop), MIS-E2E-003 (`pkill`/`Popen`), and MIS-E2E-105 (any-origin WebSocket, which changes *who* can reach the host).
+- **Verification (R3):** **CONFIRMED LIVE**
+- **Effort:** — (covered by MIS-E2E-002)
