@@ -77,6 +77,25 @@ jobs:
           grep -vE "^(triton|bitsandbytes)==" backend/requirements.txt \
             | pip install -r /dev/stdin
 
+      # MIGRATE BEFORE TESTING (MIS-E2E-030 / -031 follow-on).
+      #
+      # `test_orm_matches_migrated_schema.py` reflects the MIGRATED database on
+      # purpose: the divergence it exists to catch is between the ORM (which is
+      # what `Base.metadata.create_all()` builds for the unit suite) and what
+      # the migrations actually produce. Reflecting a `create_all()` schema
+      # would compare the ORM against itself and pass forever.
+      #
+      # CI never ran `alembic upgrade head`, so those tables did not exist here
+      # and the guard failed with NoSuchTableError on its first push. Skipping
+      # it on a missing table would be worse than the failure — it is the only
+      # place this check runs automatically, and it would fail OPEN in exactly
+      # the environment that is supposed to enforce it.
+      - name: Apply migrations
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          echo "Migrated to: $(alembic current)"
+
       - name: Run tests
         working-directory: backend
         run: |

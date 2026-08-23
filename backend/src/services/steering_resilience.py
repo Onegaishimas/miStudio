@@ -1,13 +1,38 @@
 """
 Steering Resilience Infrastructure.
 
-Provides circuit breaker, concurrency control, and process isolation
-for the steering service to improve reliability and fault tolerance.
+Provides a circuit breaker for the steering service, so repeated failures stop
+new dispatches instead of piling up behind a wedged GPU.
 
-Components:
-1. CircuitBreaker - Prevents cascading failures after repeated errors
-2. ConcurrencyLimiter - Ensures only one steering request at a time
-3. SteeringWorkerPool - Process isolation for GPU operations
+MIS-E2E-062 — THIS LAYER WAS ENTIRELY UNREACHABLE.
+
+Not one state-mutating function had a caller. `_failure_count` starts at 0 and
+is incremented only in `record_failure`; `_state` starts CLOSED and leaves it
+only inside the same dead function. So `GET /steering/status`, which computes
+`"healthy" if circuit_breaker.state == "closed"`, could only ever return
+"healthy" — no matter how many steering tasks had failed — and `POST
+/steering/reset` reset state that was never non-default. The endpoint's own
+docstring says "use this to monitor steering health and diagnose issues": an
+operator diagnosing a steering outage was told, by construction, always, that
+the service was fine.
+
+Resolved by SPLITTING the module rather than wiring all of it:
+
+  * `CircuitBreaker` is now WIRED. `can_execute()` gates the three async
+    dispatch endpoints and `record_success` / `record_failure` are driven from
+    `GET /async/result/{task_id}`, which is where the API first learns a task's
+    outcome. Both live in the API process, so the state the endpoint reports is
+    the state that was actually recorded.
+
+  * `ConcurrencyLimiter` and `ProcessIsolationManager` are DELETED. They hold a
+    semaphore and run an operation in-process with a timeout, which cannot
+    apply to a fire-and-forget `apply_async`: there is no in-process operation
+    to bound, and GPU serialisation is already the Celery worker's concurrency
+    setting. Wiring them would have produced a second constant.
+
+The rule from CLAUDE.md — "a capability is not shipped until a test FAILS when
+its wiring is removed" — could not be applied to any of this before, because
+nothing was wired. `tests/unit/test_steering_resilience_wired.py` applies it now.
 """
 
 import asyncio
@@ -212,207 +237,12 @@ class CircuitBreaker:
 # CONCURRENCY LIMITER
 # =============================================================================
 
-@dataclass
-class ConcurrencyStats:
-    """Statistics for concurrency limiter."""
-    max_concurrent: int
-    current_active: int
-    waiting: int
-    total_rejected: int
-    total_processed: int
+# ConcurrencyLimiter, ConcurrencyStats and ProcessIsolationManager were DELETED
+# here (MIS-E2E-062). See the module docstring: a semaphore and an in-process
+# timeout cannot bound a fire-and-forget `apply_async`, and GPU serialisation is
+# already the Celery worker's concurrency setting. They had zero callers and zero
+# tests. Wiring them would have produced a second always-healthy constant.
 
-
-class ConcurrencyLimiter:
-    """
-    Limits concurrent steering requests to prevent GPU memory exhaustion.
-
-    Uses a semaphore to ensure only N requests run simultaneously.
-    Excess requests are rejected with a clear message (no queuing).
-
-    Design rationale: Rejection over queuing because:
-    - Steering is interactive, users expect immediate feedback
-    - Queuing could lead to memory growth and timeout issues
-    - Users can easily retry
-    """
-
-    def __init__(self, max_concurrent: int = 1):
-        """
-        Initialize concurrency limiter.
-
-        Args:
-            max_concurrent: Maximum simultaneous requests (default: 1 for GPU safety)
-        """
-        self.max_concurrent = max_concurrent
-        self._semaphore = asyncio.Semaphore(max_concurrent)
-        self._active_count = 0
-        self._waiting_count = 0
-        self._total_rejected = 0
-        self._total_processed = 0
-        self._lock = asyncio.Lock()
-
-        logger.info(f"[ConcurrencyLimiter] Initialized: max_concurrent={max_concurrent}")
-
-    async def try_acquire(self) -> Tuple[bool, Optional[str]]:
-        """
-        Try to acquire a slot for execution.
-
-        Returns:
-            Tuple of (acquired: bool, reason: Optional[str])
-        """
-        # Non-blocking check first
-        if self._semaphore.locked():
-            async with self._lock:
-                self._total_rejected += 1
-            return False, "Steering operation in progress. Please wait and try again."
-
-        # Try to acquire
-        try:
-            acquired = self._semaphore.locked() is False
-            if acquired:
-                await self._semaphore.acquire()
-                async with self._lock:
-                    self._active_count += 1
-                return True, None
-            else:
-                async with self._lock:
-                    self._total_rejected += 1
-                return False, "Steering operation in progress. Please wait and try again."
-        except Exception as e:
-            return False, f"Failed to acquire lock: {e}"
-
-    async def release(self) -> None:
-        """Release a slot after execution completes."""
-        self._semaphore.release()
-        async with self._lock:
-            self._active_count = max(0, self._active_count - 1)
-            self._total_processed += 1
-
-    async def get_stats(self) -> ConcurrencyStats:
-        """Get current concurrency statistics."""
-        async with self._lock:
-            return ConcurrencyStats(
-                max_concurrent=self.max_concurrent,
-                current_active=self._active_count,
-                waiting=self._waiting_count,
-                total_rejected=self._total_rejected,
-                total_processed=self._total_processed,
-            )
-
-    @property
-    def is_busy(self) -> bool:
-        """Check if at capacity."""
-        return self._semaphore.locked()
-
-
-# =============================================================================
-# PROCESS ISOLATION (Lightweight approach)
-# =============================================================================
-
-class ProcessIsolationManager:
-    """
-    Manages process isolation for GPU operations.
-
-    Instead of full ProcessPoolExecutor (which would require reloading models
-    for each request), this provides:
-
-    1. Watchdog timeout - kills stuck operations
-    2. Graceful cleanup - ensures GPU memory is released on failure
-    3. Error isolation - captures errors without crashing main process
-
-    For full process isolation with model persistence, consider using
-    a dedicated GPU worker service (separate process/container).
-    """
-
-    def __init__(self, default_timeout: float = 120.0):
-        """
-        Initialize process isolation manager.
-
-        Args:
-            default_timeout: Default timeout for operations in seconds
-        """
-        self.default_timeout = default_timeout
-        self._operation_count = 0
-        self._timeout_count = 0
-        self._error_count = 0
-        self._lock = asyncio.Lock()
-
-        logger.info(f"[ProcessIsolation] Initialized: default_timeout={default_timeout}s")
-
-    async def execute_with_isolation(
-        self,
-        operation: Callable,
-        *args,
-        timeout: Optional[float] = None,
-        cleanup_fn: Optional[Callable] = None,
-        **kwargs
-    ) -> Any:
-        """
-        Execute an operation with timeout and error isolation.
-
-        Args:
-            operation: Async callable to execute
-            timeout: Operation timeout (uses default if not specified)
-            cleanup_fn: Optional cleanup function to call on error
-            *args, **kwargs: Arguments for the operation
-
-        Returns:
-            Result of the operation
-
-        Raises:
-            asyncio.TimeoutError: If operation times out
-            Exception: If operation fails (after cleanup)
-        """
-        timeout = timeout or self.default_timeout
-
-        async with self._lock:
-            self._operation_count += 1
-
-        try:
-            result = await asyncio.wait_for(
-                operation(*args, **kwargs),
-                timeout=timeout
-            )
-            return result
-
-        except asyncio.TimeoutError:
-            async with self._lock:
-                self._timeout_count += 1
-
-            logger.error(f"[ProcessIsolation] Operation timed out after {timeout}s")
-
-            # Run cleanup if provided
-            if cleanup_fn:
-                try:
-                    cleanup_fn()
-                except Exception as cleanup_error:
-                    logger.warning(f"[ProcessIsolation] Cleanup error: {cleanup_error}")
-
-            raise
-
-        except Exception as e:
-            async with self._lock:
-                self._error_count += 1
-
-            logger.error(f"[ProcessIsolation] Operation failed: {e}")
-
-            # Run cleanup if provided
-            if cleanup_fn:
-                try:
-                    cleanup_fn()
-                except Exception as cleanup_error:
-                    logger.warning(f"[ProcessIsolation] Cleanup error: {cleanup_error}")
-
-            raise
-
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get isolation manager statistics."""
-        async with self._lock:
-            return {
-                "total_operations": self._operation_count,
-                "timeout_count": self._timeout_count,
-                "error_count": self._error_count,
-                "default_timeout_seconds": self.default_timeout,
-            }
 
 
 # =============================================================================
@@ -421,8 +251,6 @@ class ProcessIsolationManager:
 
 # Global instances - created lazily
 _circuit_breaker: Optional[CircuitBreaker] = None
-_concurrency_limiter: Optional[ConcurrencyLimiter] = None
-_process_isolation: Optional[ProcessIsolationManager] = None
 
 
 def get_circuit_breaker() -> CircuitBreaker:
@@ -437,23 +265,6 @@ def get_circuit_breaker() -> CircuitBreaker:
     return _circuit_breaker
 
 
-def get_concurrency_limiter() -> ConcurrencyLimiter:
-    """Get or create global concurrency limiter instance."""
-    global _concurrency_limiter
-    if _concurrency_limiter is None:
-        _concurrency_limiter = ConcurrencyLimiter(max_concurrent=1)
-    return _concurrency_limiter
-
-
-def get_process_isolation() -> ProcessIsolationManager:
-    """Get or create global process isolation manager instance."""
-    global _process_isolation
-    if _process_isolation is None:
-        from ..core.config import settings
-        _process_isolation = ProcessIsolationManager(
-            default_timeout=settings.steering_timeout_seconds
-        )
-    return _process_isolation
 
 
 async def get_resilience_status() -> Dict[str, Any]:
@@ -464,12 +275,7 @@ async def get_resilience_status() -> Dict[str, Any]:
         Dictionary with circuit breaker, concurrency, and isolation stats
     """
     cb = get_circuit_breaker()
-    cl = get_concurrency_limiter()
-    pi = get_process_isolation()
-
     cb_stats = await cb.get_stats()
-    cl_stats = await cl.get_stats()
-    pi_stats = await pi.get_stats()
 
     return {
         "circuit_breaker": {
@@ -477,17 +283,18 @@ async def get_resilience_status() -> Dict[str, Any]:
             "failure_count": cb_stats.failure_count,
             "success_count": cb_stats.success_count,
             "total_rejected": cb_stats.total_rejected,
-            "last_failure": cb_stats.last_failure_time.isoformat() if cb_stats.last_failure_time else None,
+            "last_failure": (
+                cb_stats.last_failure_time.isoformat()
+                if cb_stats.last_failure_time
+                else None
+            ),
             "time_until_retry": cb_stats.time_until_retry,
+            # Honest about the scope of the observation. The breaker is
+            # in-process: it sees the dispatches and outcomes THIS API process
+            # handled. That is coherent at the deployed shape (one replica, one
+            # uvicorn worker) and would need shared state behind `--workers`.
+            "scope": "api-process",
         },
-        "concurrency": {
-            "max_concurrent": cl_stats.max_concurrent,
-            "current_active": cl_stats.current_active,
-            "total_rejected": cl_stats.total_rejected,
-            "total_processed": cl_stats.total_processed,
-            "is_busy": cl.is_busy,
-        },
-        "process_isolation": pi_stats,
     }
 
 
@@ -501,8 +308,4 @@ async def reset_resilience() -> Dict[str, str]:
     cb = get_circuit_breaker()
     await cb.reset()
 
-    return {
-        "circuit_breaker": "Reset to CLOSED state",
-        "concurrency": "No reset needed (stateless)",
-        "process_isolation": "Counters preserved for monitoring",
-    }
+    return {"circuit_breaker": "Reset to CLOSED state"}

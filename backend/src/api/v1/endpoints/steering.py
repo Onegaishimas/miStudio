@@ -64,13 +64,64 @@ from ....services import steering_hazards
 from ....services.model_service import ModelService
 from ....services.steering_resilience import (
     get_circuit_breaker,
-    get_concurrency_limiter,
-    get_process_isolation,
     get_resilience_status,
     reset_resilience,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# MIS-E2E-062. The circuit breaker existed with no caller, so `/steering/status`
+# could only ever report "healthy" and `/steering/reset` was a no-op that
+# reported success. These two helpers are the wiring; removing either one turns
+# the endpoint back into a constant, and
+# `tests/unit/test_steering_resilience_wired.py` fails if you do.
+#
+# Both live in the API process, which is what makes the reported state the state
+# that was actually recorded: dispatch happens here, and `GET
+# /async/result/{task_id}` is where the API first learns a task's outcome.
+
+
+async def _guard_steering_dispatch() -> None:
+    """Refuse a new steering dispatch while the breaker is open.
+
+    Raises 503 rather than queueing work behind a GPU that has already failed
+    repeatedly — which is the situation the breaker exists to notice.
+    """
+    breaker = get_circuit_breaker()
+    allowed, reason = await breaker.can_execute()
+    if not allowed:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "STEERING_CIRCUIT_OPEN",
+                "message": reason or "Steering is temporarily unavailable",
+                "hint": "Check GET /api/v1/steering/status; POST /steering/reset "
+                        "once the underlying issue is fixed",
+            },
+        )
+
+
+# A terminal outcome must be recorded ONCE, however many times the client polls.
+# Without this the breaker counts a poll loop, not a failure.
+_recorded_task_outcomes: set[str] = set()
+_MAX_RECORDED_OUTCOMES = 10_000
+
+
+async def _record_steering_outcome(task_id: str, *, succeeded: bool, error: str | None = None) -> None:
+    """Feed a terminal task outcome to the breaker, exactly once per task."""
+    if task_id in _recorded_task_outcomes:
+        return
+    if len(_recorded_task_outcomes) >= _MAX_RECORDED_OUTCOMES:
+        # Bounded: this is a de-duplication aid, not a ledger.
+        _recorded_task_outcomes.clear()
+    _recorded_task_outcomes.add(task_id)
+
+    breaker = get_circuit_breaker()
+    if succeeded:
+        await breaker.record_success()
+    else:
+        await breaker.record_failure(Exception(error or "steering task failed"))
 
 # Steering configuration - now configurable via settings
 STEERING_TIMEOUT_SECONDS = settings.steering_timeout_seconds
@@ -762,6 +813,10 @@ async def submit_async_steering_comparison(
         model_id = model.repo_id or model.name
 
     # Submit task to Celery
+    # MIS-E2E-062: the breaker gates the dispatch. Nothing called this
+    # before, which is why /steering/status was a constant.
+    await _guard_steering_dispatch()
+
     task = steering_compare_task.apply_async(
         kwargs={
             "request_dict": request.model_dump(mode="json"),
@@ -854,6 +909,10 @@ async def submit_async_strength_sweep(
         model_id = model.repo_id or model.name
 
     # Submit task
+    # MIS-E2E-062: the breaker gates the dispatch. Nothing called this
+    # before, which is why /steering/status was a constant.
+    await _guard_steering_dispatch()
+
     task = steering_sweep_task.apply_async(
         kwargs={
             "request_dict": request.model_dump(mode="json"),
@@ -1037,6 +1096,10 @@ async def submit_async_combined_steering(
         model_id = model.repo_id or model.name
 
     # Submit task to Celery
+    # MIS-E2E-062: the breaker gates the dispatch. Nothing called this
+    # before, which is why /steering/status was a constant.
+    await _guard_steering_dispatch()
+
     task = steering_combined_task.apply_async(
         kwargs={
             "request_dict": request.model_dump(mode="json"),
@@ -1144,6 +1207,15 @@ async def get_steering_task_result(task_id: str):
         task_status.error = str(raw_result) if raw_result else "Unknown error"
         task_status.message = f"Failed: {task_status.error}"
         task_status.completed_at = datetime.utcnow()
+
+    # MIS-E2E-062: this is where the API first learns a task's outcome, so this
+    # is where the breaker learns it. Recorded once per task id, however many
+    # times the client polls — otherwise the breaker counts a poll loop rather
+    # than a failure, and three polls of one failed task would open it.
+    if succeeded or failed:
+        await _record_steering_outcome(
+            task_id, succeeded=succeeded, error=task_status.error
+        )
 
     return SteeringResultResponse(
         task_id=task_id,
