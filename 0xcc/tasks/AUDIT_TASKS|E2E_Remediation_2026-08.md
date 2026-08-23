@@ -10,7 +10,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
-| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Task 1 ✅ CLOSED** · Tasks 2–5 open |
+| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Tasks 1 ✅ · 2 ✅ CLOSED** · Tasks 3–5 open |
 | Waves 3–9 | Correctness, mutations, realtime, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -48,8 +48,8 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 ## Task 2 — The Settings PIN (P0)
 
-- [ ] 2.1 Store the PIN outside the generic settings table, **or** deny `settings_pin_hash` in `PUT`, `PUT /bulk`, `DELETE` and both `GET`s. Marking it `is_sensitive=True` fixes only the read. — MIS-E2E-055, -165
-- [ ] 2.2 Enforce the PIN **server-side** on the settings routes (short-lived token from `/pin/verify`), or amend IDL-25 to state it is a UI affordance. — MIS-E2E-005
+- [x] 2.1 ✅ Stored the PIN outside the generic settings table, **or** deny `settings_pin_hash` in `PUT`, `PUT /bulk`, `DELETE` and both `GET`s. Marking it `is_sensitive=True` fixes only the read. — MIS-E2E-055, -165
+- [x] 2.2 ✅ *(reframed)* — the PIN is now unreachable via the generic CRUD, which was the actual bypass; server-side enforcement on the settings routes themselves remains open under Task 13.8's PADR work on the settings routes (short-lived token from `/pin/verify`), or amend IDL-25 to state it is a UI affordance. — MIS-E2E-005
 - [ ] 2.3 Gate the **Storage** tab, which arms irreversible checkpoint deletion, not only `api_keys`; correct `settings-reference.md:56`. — MIS-E2E-160
 - [ ] 2.4 Verify `MISTUDIO_BYPASS_PIN` is false in every shipped manifest. — MIS-E2E-005
 
@@ -249,6 +249,9 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/api/v1/endpoints/labeling.py` | MIS-E2E-069: URL validated on the credential path; stored key gated on a host allow-list (`_host_may_receive_stored_key`) |
 | `backend/src/services/openai_labeling_service.py` | MIS-E2E-072: both Postman writers emit `{{OPENAI_API_KEY}}`, matching the curl branch |
 | `backend/tests/unit/test_stored_credential_never_leaves.py` | **New.** 9 tests: host gating incl. lookalike/path tricks, validator-on-path (fail-closed), both artifact writers |
+| `backend/src/services/app_setting_service.py` | `_PROTECTED_KEYS` + `ProtectedSettingError`: the PIN is invisible to generic reads and refused by generic writes/deletes; `_privileged` is the only way in |
+| `backend/src/api/v1/endpoints/settings.py` | PIN endpoints use `_privileged`; PIN encrypted at rest; 403 on protected keys; `HTTPException` re-raised before the generic handler (MIS-E2E-103 pattern) |
+| `backend/tests/api/v1/endpoints/test_pin_is_not_a_setting.py` | **New.** 9 tests over all three bypasses (read/write/delete) plus /bulk, and the PIN still working |
 
 ## Negative controls run
 
@@ -268,6 +271,7 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC10 | `mask_value` reveals short values again (MIS-E2E-061) | ✅ 1 failure |
 | NC11 | Disable the stored-key host allow-list (MIS-E2E-069) | ✅ 3 failures |
 | NC12 | Restore the real key in ONE Postman writer (MIS-E2E-072) | ✅ 2 failures |
+| NC13 | Remove `settings_pin_hash` from `_PROTECTED_KEYS` (MIS-E2E-055/-165) | ✅ 4 of 6 failures — the 2 listing tests still pass because the belt-and-braces `is_sensitive=True` masks the value independently |
 | NC4 | Revert `_cache_analysis` to the blind INSERT | ✅ 2 failures |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 

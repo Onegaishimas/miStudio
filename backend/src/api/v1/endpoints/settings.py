@@ -26,7 +26,10 @@ from ....schemas.app_setting import (
     PinVerifyResponse,
     PinSetRequest,
 )
-from ....services.app_setting_service import AppSettingService
+from ....services.app_setting_service import (
+    AppSettingService,
+    ProtectedSettingError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +63,7 @@ def _verify_pin(pin: str, stored: str) -> bool:
 @router.get("/pin/status", response_model=PinStatusResponse)
 async def get_pin_status(db: AsyncSession = Depends(get_db)):
     """Return whether a settings PIN is configured and whether the bypass flag is active."""
-    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY)
+    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, _privileged=True)
     return PinStatusResponse(
         configured=existing is not None,
         bypass_active=settings.bypass_settings_pin,
@@ -70,7 +73,7 @@ async def get_pin_status(db: AsyncSession = Depends(get_db)):
 @router.post("/pin/verify", response_model=PinVerifyResponse)
 async def verify_pin(body: PinVerifyRequest, db: AsyncSession = Depends(get_db)):
     """Verify the settings PIN. Returns {valid: true} on success."""
-    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, unmask=True)
+    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, unmask=True, _privileged=True)
     if not existing:
         # No PIN configured — trivially valid
         return PinVerifyResponse(valid=True)
@@ -84,7 +87,7 @@ async def set_pin(body: PinSetRequest, db: AsyncSession = Depends(get_db)):
     Requires the current PIN when one is already configured, unless
     MISTUDIO_BYPASS_PIN=true is active (the recovery path).
     """
-    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, unmask=True)
+    existing = await AppSettingService.get_by_key(db, _PIN_HASH_KEY, unmask=True, _privileged=True)
 
     if existing and not settings.bypass_settings_pin:
         if not body.current_pin:
@@ -94,10 +97,16 @@ async def set_pin(body: PinSetRequest, db: AsyncSession = Depends(get_db)):
 
     await AppSettingService.upsert(
         db,
-        AppSettingUpsert(
+        # The PIN endpoint OWNS this key — the only privileged write in the app.
+        _privileged=True,
+        data=AppSettingUpsert(
             key=_PIN_HASH_KEY,
             value=_hash_pin(body.pin),
-            is_sensitive=False,
+            # Encrypted at rest. Belt and braces: _PROTECTED_KEYS already hides
+            # this row from every generic read, but it was served in the clear
+            # BECAUSE it was written is_sensitive=False, so if that guard is
+            # ever removed the row should still not be readable.
+            is_sensitive=True,
             category="system",
         ),
     )
@@ -149,6 +158,9 @@ async def upsert_setting(
             raise HTTPException(status_code=400, detail=str(e))
     try:
         setting, is_new = await AppSettingService.upsert(db, data)
+    except ProtectedSettingError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    try:
         # Return masked response for sensitive values. CRITICAL: expunge the row from
         # the session before mutating its `value` field, otherwise SQLAlchemy will
         # autoflush/commit the masked string back over the encrypted ciphertext on
@@ -164,6 +176,8 @@ async def upsert_setting(
                 # raw ciphertext. decrypt_value now raises on InvalidTag.
                 setting.value = "***"
         return setting
+    except HTTPException:
+        raise  # see the note in bulk_upsert_settings
     except Exception as e:
         logger.exception(f"Failed to upsert setting '{data.key}'")
         raise HTTPException(status_code=500, detail="Failed to save setting")
@@ -180,7 +194,13 @@ async def bulk_upsert_settings(
     updated = 0
     try:
         for item in data.settings:
-            setting, is_new = await AppSettingService.upsert(db, item)
+            try:
+                setting, is_new = await AppSettingService.upsert(db, item)
+            except ProtectedSettingError as e:
+                # /bulk must not be the way around the guard on /settings —
+                # MIS-E2E-073 is the same shape (bulk skipped the URL validation
+                # the single-key route applied).
+                raise HTTPException(status_code=403, detail=str(e))
             if setting.is_sensitive:
                 from ....core.encryption import decrypt_value, mask_value
                 # Expunge before mutating — otherwise the masked string overwrites
@@ -199,6 +219,12 @@ async def bulk_upsert_settings(
             else:
                 updated += 1
         return AppSettingBulkResponse(data=results, created=created, updated=updated)
+    except HTTPException:
+        # Re-raise deliberate HTTP responses before the generic handler.
+        # Without this, the 403 raised for a protected key is caught below and
+        # re-raised as a 500 — the MIS-E2E-103 pattern, where a client mistake
+        # is reported as a server error and the real reason is lost.
+        raise
     except Exception as e:
         logger.exception("Failed to bulk upsert settings")
         raise HTTPException(status_code=500, detail="Failed to save settings")
@@ -210,6 +236,9 @@ async def delete_setting(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a setting by key."""
-    deleted = await AppSettingService.delete_by_key(db, key)
+    try:
+        deleted = await AppSettingService.delete_by_key(db, key)
+    except ProtectedSettingError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
