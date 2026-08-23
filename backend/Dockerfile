@@ -20,6 +20,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     gnupg \
+    ca-certificates \
+    curl \
     # SCOPED KEYRING, NOT THE GLOBAL ONE (MIS-E2E-148).
     #
     # `apt-key adv` puts the deadsnakes key in the global trusted keyring, where
@@ -27,9 +29,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # it to this source alone, so a compromise of the deadsnakes key cannot
     # authorise a package from anywhere else. (`apt-key` is also deprecated and
     # slated for removal.)
-    && gpg --no-default-keyring --keyring /usr/share/keyrings/deadsnakes.gpg \
-        --keyserver keyserver.ubuntu.com \
-        --recv-keys F23C5A6CF475977595C89F51BA6932366A755776 \
+    #
+    # FETCHED OVER HTTPS, NOT FROM A KEYSERVER. The first version of this used
+    # `gpg --keyserver … --recv-keys`, which broke the build: `--recv-keys`
+    # needs `dirmngr` (not installed) and a writable `/root/.gnupg` (absent in
+    # the buildkit sandbox) — "gpg: keyserver receive failed: No dirmngr".
+    # An HTTPS fetch piped through `--dearmor` needs neither, and does not
+    # depend on the keyserver's HKP port being reachable from the runner.
+    && curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776" \
+        | gpg --dearmor -o /usr/share/keyrings/deadsnakes.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main" \
         > /etc/apt/sources.list.d/deadsnakes.list \
     && apt-get update && apt-get install -y --no-install-recommends \
