@@ -156,7 +156,13 @@ async def upsert_setting(
         if setting.is_sensitive:
             from ....core.encryption import decrypt_value, mask_value
             db.expunge(setting)
-            setting.value = mask_value(decrypt_value(setting.value, setting_key=setting.key))
+            try:
+                setting.value = mask_value(
+                    decrypt_value(setting.value, setting_key=setting.key))
+            except Exception:
+                # A row we cannot authenticate is masked, never echoed back as
+                # raw ciphertext. decrypt_value now raises on InvalidTag.
+                setting.value = "***"
         return setting
     except Exception as e:
         logger.exception(f"Failed to upsert setting '{data.key}'")
@@ -180,7 +186,13 @@ async def bulk_upsert_settings(
                 # Expunge before mutating — otherwise the masked string overwrites
                 # the encrypted ciphertext on session commit (see upsert_setting).
                 db.expunge(setting)
-                setting.value = mask_value(decrypt_value(setting.value, setting_key=setting.key))
+                try:
+                    setting.value = mask_value(
+                        decrypt_value(setting.value, setting_key=setting.key))
+                except Exception:
+                    # A row we cannot authenticate is masked, never echoed back as
+                    # raw ciphertext. decrypt_value now raises on InvalidTag.
+                    setting.value = "***"
             results.append(setting)
             if is_new:
                 created += 1

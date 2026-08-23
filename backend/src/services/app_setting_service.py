@@ -75,10 +75,18 @@ class AppSettingService:
             # Expunge to prevent in-place mutation from dirtying the session
             db.expunge(setting)
             if unmask:
+                # Caller wants the real value — a DecryptionError must propagate.
+                # Returning unauthenticated ciphertext to a credential consumer
+                # is exactly MIS-E2E-056.
                 setting.value = decrypt_value(setting.value, setting_key=setting.key)
             else:
-                decrypted = decrypt_value(setting.value, setting_key=setting.key)
-                setting.value = mask_value(decrypted)
+                # Display path. A row we cannot authenticate is shown as masked,
+                # like the list paths already do — never as raw ciphertext.
+                try:
+                    decrypted = decrypt_value(setting.value, setting_key=setting.key)
+                    setting.value = mask_value(decrypted)
+                except Exception:
+                    setting.value = "***"
         return setting
 
     @staticmethod
