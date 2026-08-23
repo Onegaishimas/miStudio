@@ -16,7 +16,7 @@ classifier annotates types/rungs downstream.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from ..core.database import Base
@@ -48,8 +48,22 @@ class CircuitCaptureRun(Base):
     manifest = Column(JSONB, nullable=False, default=dict)
 
     store_path = Column(String(1000), nullable=True)
-    events_total = Column(Integer, nullable=True)
-    bytes_total = Column(Integer, nullable=True)
+    #: BIGINT, not INTEGER (MIS-E2E-029).
+    #:
+    #: `bytes_total` counts a capture store in BYTES, and a 32-bit column caps
+    #: at 2,147,483,647 — about 2 GiB. Per-token multi-layer SAE activations
+    #: over a real corpus reach that readily.
+    #:
+    #: The failure is worse than a rejected write. The capture COMPLETES, all
+    #: the work is done, and the final commit raises on numeric overflow. That
+    #: poisons the SQLAlchemy session, so the task's own error handler — which
+    #: needs the same session to mark the run failed — fails too. The row is
+    #: left at `running` forever with `store_path` never set, and because
+    #: nothing points at the directory, the multi-gigabyte store is leaked on
+    #: disk with no owner. `assert_no_active_gpu_run` then counts that row and
+    #: refuses every subsequent capture with a 409.
+    events_total = Column(BigInteger, nullable=True)
+    bytes_total = Column(BigInteger, nullable=True)
     stale = Column(Boolean, nullable=False, default=False)  # SAE changed since capture
     celery_task_id = Column(String(155), nullable=True)
 

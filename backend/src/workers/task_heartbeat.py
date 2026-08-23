@@ -141,3 +141,54 @@ def seconds_since_row_update(row: Any, now: Optional[float] = None) -> Optional[
         return max(0.0, (current - stamp).total_seconds())
     except Exception:  # noqa: BLE001 - an unreadable timestamp is not a verdict
         return None
+
+
+def task_looks_alive(celery_task_id: Optional[str], row: Any, *, started: bool) -> bool:
+    """Whether the Celery task behind `row` is plausibly still running.
+
+    MIS-E2E-092. Four janitors asked this question as
+    `state in ("PENDING", "STARTED", "RETRY")`, which can NEVER be false for a
+    row that has a `celery_task_id`: Celery reports PENDING for any task id it
+    holds no result for, and that covers both a queued task and one whose worker
+    died. `task_track_started` is unset and the long tasks never call
+    `update_state`, so a live task and a dead one are indistinguishable by state
+    alone.
+
+    The consequence per subsystem: a drained training is never reclaimed;
+    extractions reclaim only the no-task rows — the case the janitor was NOT
+    written for; a dead activation extraction never gets `error_type=TIMEOUT`
+    and never emits `extraction:failed`, so the UI spinner never resolves; and
+    enhanced labeling's own error text ("the worker was restarted or the task
+    was lost") names precisely the state Celery reports as PENDING and the
+    janitor read as healthy.
+
+    `cleanup_stuck_circuit_runs` was written for exactly this trap, solved it
+    with `looks_abandoned`, and documented the solution as general — then it was
+    applied to one of five. This is that fix, extracted so there is one
+    implementation rather than five copies.
+
+    Args:
+        celery_task_id: the row's task id, or None if none was ever recorded.
+        row: the ORM row, read for its `updated_at` clock.
+        started: True when the row's status means the task HAS run. Only then is
+            the row's own age admissible — a QUEUED row waiting behind a long
+            job on a single-GPU queue would otherwise be condemned for waiting.
+
+    Returns:
+        True when the task should be left alone.
+    """
+    from src.core.celery_app import celery_app
+
+    if not celery_task_id:
+        # No task was ever recorded. The caller has already applied its
+        # staleness filter, so nothing can be waiting on this row.
+        return False
+
+    try:
+        result = celery_app.AsyncResult(celery_task_id, app=celery_app)
+        state, info = result.state, result.info
+    except Exception:  # broker hiccup — treat as alive, never false-kill
+        return True
+
+    age = seconds_since_row_update(row) if started else None
+    return not looks_abandoned(state, info, age)

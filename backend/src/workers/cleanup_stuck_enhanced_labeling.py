@@ -45,13 +45,22 @@ def cleanup_stuck_enhanced_labeling_task(self):
             for job in stuck_jobs:
                 task_is_active = False
                 if job.celery_task_id:
-                    from src.core.celery_app import get_task_status
-                    state = get_task_status(job.celery_task_id).get("state", "UNKNOWN")
-                    if state in ("PENDING", "STARTED", "RETRY"):
-                        task_is_active = True
+                    # MIS-E2E-092. This janitor's own error text — "the worker
+                    # was restarted or the task was lost" — names precisely the
+                    # state Celery reports as PENDING and this check read as
+                    # healthy, so it could never fire for the case it describes.
+                    from src.workers.task_heartbeat import task_looks_alive
+
+                    task_is_active = task_looks_alive(
+                        job.celery_task_id,
+                        job,
+                        started=str(getattr(job, "status", "")).lower()
+                        in ("processing", "running", "in_progress"),
+                    )
+                    if task_is_active:
                         logger.info(
-                            "Enhanced labeling job %s has active Celery task %s (%s), skipping",
-                            job.id, job.celery_task_id, state,
+                            "Enhanced labeling job %s has an active Celery task %s, skipping",
+                            job.id, job.celery_task_id,
                         )
 
                 if not task_is_active:
