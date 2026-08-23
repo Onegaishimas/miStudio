@@ -126,6 +126,24 @@ jobs:
             echo "Tagged the orphan snapshot as ${TAG}"
           fi
 
+          # RETARGET STALE TAGS. Force-pushing main to the orphan orphans the old
+          # commits, but ANY OTHER REF still anchors them as reachable — a clone
+          # then fetches the whole history back.
+          #
+          # Caught by the Verify step on this fix's first run: main was the orphan
+          # with 0 parents, and the mirror still reported 826 commits, because
+          # refs/tags/v0.5.0 pointed at an old source commit. One leftover tag held
+          # the entire history alive.
+          #
+          # The mirror is a snapshot: it holds exactly one commit, so every tag in
+          # it refers to that snapshot by definition. Retarget them all.
+          for ref in $(git ls-remote --tags "$REMOTE" | awk '{print $2}' | grep -v '\^{}$'); do
+            T="${ref#refs/tags/}"
+            git tag -f "$T" HEAD
+            git push --force "$REMOTE" "refs/tags/${T}"
+            echo "Retargeted stale tag ${T} onto the snapshot"
+          done
+
       # ── The check whose absence let MIS-E2E-143 run for months ─────────────
       # The old workflow force-pushed and assumed. This clones the PUBLISHED
       # result and asserts the exclusion list holds across EVERY commit, not
@@ -142,10 +160,14 @@ jobs:
 
           FAILED=0
 
+          # --all covers branches AND tags, which is the point: a tag pointing at
+          # old history keeps it reachable even when main is a clean orphan.
           COMMITS="$(git rev-list --all --count)"
           echo "Published commits: ${COMMITS}"
           if [ "$COMMITS" -ne 1 ]; then
             echo "::error::mirror has ${COMMITS} commits; a snapshot must have exactly 1"
+            echo "::error::a ref other than main is probably anchoring old history:"
+            git show-ref | sed 's/^/    /'
             FAILED=1
           fi
 
