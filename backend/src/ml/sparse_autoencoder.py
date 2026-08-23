@@ -33,24 +33,48 @@ def normalize_activations(
     Shared activation normalization for all SAE architectures.
 
     Modes:
-      - 'constant_norm_rescale': scale so ‖x‖ = sqrt(dim)  (SAELens standard)
-      - 'anthropic_rescale':     scale so E[‖x‖²] = dim     (Templeton et al. 2024)
+      - 'constant_norm_rescale': scale each sample so ‖x‖ = sqrt(dim)
+                                 (SAELens standard)
+      - 'anthropic_rescale':     **an alias for the above** — see below
       - 'none':                  no-op (coeff = ones)
+
+    ── 'anthropic_rescale' IS NOT A SECOND METHOD (MIS-E2E-085) ──────────────
+
+    This docstring used to claim it scales so ``E[‖x‖²] = dim`` (Templeton et
+    al. 2024), and the two branches were written as if they differed. They do
+    not: ``sqrt(dim / ‖x‖²)`` and ``sqrt(dim) / ‖x‖`` are the same number.
+    Measured, not assumed — max |difference| **7.2e-7** on float32 inputs at
+    two shapes, i.e. epsilon.
+
+    The claimed property is a DATASET expectation; the code computes a
+    PER-SAMPLE rescale. Those are genuinely different things — a dataset-wide
+    scalar preserves the relative magnitude between tokens, a per-sample one
+    discards it — so the paper's method is not implemented here at all.
+
+    Collapsed to one code path rather than reimplemented, deliberately:
+
+      * implementing it properly needs a calibration pass over the corpus to
+        estimate E[‖x‖²], that scalar persisted in the checkpoint, and the
+        checkpoint format changed to carry it; and
+      * every SAE ever trained with ``normalize_activations='anthropic_rescale'``
+        was in fact trained with these semantics. Changing what the string means
+        would silently alter the meaning of existing artifacts rather than fix
+        them.
+
+    So the string keeps working and keeps its behaviour, and now says what it
+    does. TRACKED DEBT: the real Templeton normalisation, and PPRD §2.1's "six
+    paper-grounded frameworks" (it is five plus an alias).
 
     Uses ``x[..., :1]`` for the 'none' coefficient so it works for both
     [batch, dim] and [batch, seq, dim] inputs.
 
     Returns (x_normalized, norm_coeff) where norm_coeff feeds ``denormalize_activations``.
     """
-    if mode == 'constant_norm_rescale':
+    # One branch for both names — they computed the same thing, and two copies
+    # of the same arithmetic can only ever drift into being differently wrong.
+    if mode in ('constant_norm_rescale', 'anthropic_rescale'):
         x_norm = torch.clamp(x.norm(dim=-1, keepdim=True), min=1e-6)
         norm_coeff = math.sqrt(dim) / x_norm
-        return x * norm_coeff, norm_coeff
-    elif mode == 'anthropic_rescale':
-        x_sq_norm = torch.clamp((x ** 2).sum(dim=-1, keepdim=True), min=1e-6)
-        norm_coeff = torch.sqrt(
-            torch.tensor(dim, dtype=x.dtype, device=x.device) / x_sq_norm
-        )
         return x * norm_coeff, norm_coeff
     elif mode == 'none':
         return x, torch.ones_like(x[..., :1])

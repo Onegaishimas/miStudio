@@ -5,14 +5,14 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3038 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
+**Suites:** backend **3046 passed / 0 failed** (baseline 2883) · frontend **1224 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean · **CI Backend Tests green** (the schema-check database fix verified on the runner)
 
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
-| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ⏳ **in progress** — 6.1 ✅ · 6.6 ✅ · 6.8 ✅ · 6.2–6.5, 6.7, 6.9 open |
+| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ⏳ **in progress** — 6.1 ✅ · 6.5 ✅ · 6.6 ✅ · 6.8 ✅ · 6.9 ✅ · 6.2, 6.3, 6.4, 6.7 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -103,11 +103,11 @@ The class this product can least afford. Each item is a number a user reads as a
 - [ ] 6.2 Measure J-lens convergence against **held-out** prompts or split-half agreement. The current criterion is the shrinkage of a running mean — it stops at `n ≈ σ/δ`, proportional to variance. Until then, do not call it convergence in the artifact or the docs. — MIS-E2E-080
 - [ ] 6.3 Rename `linearisation_residual_*` in the published artifact to what it measures, or compute the residual. It travels to HuggingFace. — MIS-E2E-081
 - [ ] 6.4 Rank-check before QR in the band metrics and refuse or report a degenerate basis (FVE overstated 4.5×); wire the random-direction controls or stop documenting `control_seed`; implement the "sustained rise" the docstring describes. — MIS-E2E-088
-- [ ] 6.5 Make `rankOf` and `diffColor` agree on one index base, and assert the "same top token" legend swatch is reachable. — MIS-E2E-129
+- [x] 6.5 ✅ One base — **1-based**, everywhere. `rankColor` cannot move to 0-based (`Math.log(0)` → the alpha becomes `Infinity`, an invalid value the browser discards, silently unshading every top cell — checked, not assumed; my first test asserted `NaN` and was wrong), and "rank 1 = best" is what the word means. So `diffColor`, the tooltip and both legend swatches moved. The tooltip's `#${r + 1}` reported every rank one too high, and the ramp started at `2/span` instead of `1/span`, overstating every disagreement. — MIS-E2E-129
 - [x] 6.6 ✅ **One shared resolver, `resolve_referenced_saes()`, used by all three endpoints** — extracted from the combined endpoint rather than copied, because this finding *is* an instance of "fixed one representative, never generalized" and a copy is the version that drifts back apart. Compare now carries each feature's own `sae_id` into its hook config and hands the SAE **map** to `_register_steering_hooks`, which already grouped by `(sae_id, layer)` for combined. Sweep is single-feature so has no routing to do — but it had **no feature validation whatsoever**, and now gets the layer check it never had. Both worker tasks accept `sae_meta_map`. — MIS-E2E-064
 - [ ] 6.7 Carry `normalize_activations` on the SAE record so capture and attribution stop running the SAE off-distribution. — MIS-E2E-083
 - [x] 6.8 ✅ `if dial != 0`. Zero is the baseline by definition; every other value is a real intervention. — MIS-E2E-065
-- [ ] 6.9 Either implement `anthropic_rescale` per its paper or collapse it — it is arithmetically identical to `constant_norm_rescale` (2.4e-7). — MIS-E2E-085
+- [x] 6.9 ✅ **Collapsed to one branch, behaviour unchanged.** Re-measured: **7.2e-7** at two shapes, i.e. float32 epsilon. Not reimplemented, for two reasons both recorded in the docstring: the paper's method is a **dataset** expectation needing a corpus calibration pass, a persisted scalar and a checkpoint-format change; and every SAE ever trained under `anthropic_rescale` was trained with *these* semantics, so redefining the string would silently reinterpret existing artifacts rather than fix them. The docstring's claim of `E[‖x‖²] = dim` was the real damage — it described a second method convincingly enough that nobody checked it existed. **Tracked debt:** the real Templeton normalisation, and PPRD §2.1's "six frameworks" (five plus an alias) → Task 13. — MIS-E2E-085
 
 ## Task 7 — The test schema is not the production schema (P1)
 
@@ -307,6 +307,11 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/workers/steering_tasks.py` | MIS-E2E-064: compare and sweep accept and forward `sae_meta_map` |
 | `frontend/src/components/steering/ComparisonResults.tsx` | MIS-E2E-063: `!= null` so a genuinely-absent metric cannot reach `.toFixed` |
 | `backend/tests/unit/test_steering_wrong_results.py` | **New.** 12 tests over all three findings; the resolver test asserts **exactly 3** endpoints share it |
+| `frontend/src/components/jlens/utils.ts` | MIS-E2E-129: `diffColor` moved to the 1-based rank `rankOf` actually returns; the ramp starts at rank 2 |
+| `frontend/src/components/jlens/ReadoutGrid.tsx` | MIS-E2E-129: both legend swatches and the tooltip rank corrected |
+| `frontend/src/components/jlens/diffColor.test.ts` | **New.** 8 tests; includes why `rankOf` could NOT move instead (`Math.log(0)` → non-finite alpha) |
+| `backend/src/ml/sparse_autoencoder.py` | MIS-E2E-085: one rescale branch for both names, behaviour unchanged, docstring corrected |
+| `backend/tests/unit/test_normalize_modes_collapsed.py` | **New.** 8 tests pinning both bit-identity AND that the collapse did not change what existing checkpoints mean |
 
 ## Negative controls run
 
@@ -370,6 +375,11 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC53 | Compare hooks a single SAE instead of the map | ✅ 1 failure |
 | NC54 | Sweep task stops accepting `sae_meta_map` | ✅ 1 failure |
 | CI | Point the schema guard at the conftest-managed database | ✅ 7 failures, the new guard naming the cause |
+| NC55 | Re-split the rescale into two branches (MIS-E2E-085) | ✅ 4 failures |
+| NC56 | Change the alias's value silently | ✅ 1 failure — existing checkpoints stay protected |
+| NC57 | Make `none` stop being a no-op | ✅ 2 failures |
+| NC58 | `diffColor` back to a 0-based rank (MIS-E2E-129) | ✅ 2 failures |
+| NC59 | Ramp back to `rank / span` | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),
