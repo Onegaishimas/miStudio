@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 6** | Task 13 — documentation (19 findings) | ⏳ **in progress** — 13.1 ✅ 13.2 ✅ 13.8 ✅ 13.9 ✅ · 13.3–13.7, 13.10, 13.11 open |
+| **Wave 6** | Task 13 — documentation (19 findings) | ⏳ **in progress** — 13.1 ✅ 13.2 ✅ 13.8 ✅ 13.9 ✅ 13.11 ✅ · 13.3–13.7, 13.10 open |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
@@ -214,7 +214,8 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 13.8 ✅ **PADR IDL-47** (v3.5). States the posture, the **four classes that escape it** — credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach, each found live in this audit — the infrastructure boundary (the API behind nginx, *not* the broker or `/api/internal`), the four conditions that invalidate the decision, and that the PIN is a UI affordance and never security. — MIS-E2E-002, -166
 - [x] 13.9 ✅ Re-measured: **9** missing against the current ORM, not 11 (two of the named ones are non-ORM). All nine documented; the unearned claim replaced by `test_data_model_doc_covers_every_table`, which diffs the page against `Base.metadata`. `alembic_version` and `feature_activations_default` are **listed exemptions with reasons**. Control: adding a new ORM table fails the guard until it is documented. — MIS-E2E-050, -164
 - [ ] 13.10 Add `## Relevant Files` to FTASKS 024–028 and the six ad-hoc files; triage the 348 unchecked boxes; fix the 22 dead paths. — MIS-E2E-153, -154, -012
-- [ ] 13.11 Regenerate `docs/mcp-contract.md` after fixing the `startswith("/")` filter — it lists three endpoints that do not exist and a test pins them. Derive the tool-count prose from the registry. — MIS-E2E-114, -017, -161
+- [x] 13.11 ✅ Filter fixed (`fn.attr in ("get", …)` also matched `dict.get("kind")`), contract regenerated, the three phantom endpoints gone. Tool-count prose derived — it said **92/13** while the manual said **97/13** and the generated contract said **116/14**; only the contract was derived.
+  ⚠️ Two attempts at the derivation were wrong and the tests caught both: summing `CATEGORY_MODULES` counts **modules** (16), and `_all_tools()` **builds a server**, which calls this — infinite recursion. Now an AST count, worded **"up to"** because `get_approval_status` is registered only when `steering_approval` is on. A test pins the ceiling-vs-served difference to exactly that named set. — MIS-E2E-114, -017, -161
 
 ## Task 14 — Remaining P2/P3
 
@@ -415,7 +416,11 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `manual/docs/reference/data-model.md` | MIS-E2E-050: nine tables documented; the unearned verification claim replaced by an enforced one |
 | `0xcc/adrs/000_PADR\|miStudio.md` | **IDL-47** — the no-app-auth posture, its four escape classes, and what invalidates it |
 | `backend/tests/unit/test_mcp_server_foundation.py` | ⚠️ `test_anonymous_flag_allows_empty_token` **pinned the defect**; rewritten to assert the refusal |
-| `backend/tests/unit/test_docs_match_behaviour.py` | **New.** 12 tests binding the manuals and the data-model reference to the code |
+| `backend/tests/unit/test_docs_match_behaviour.py` | **New.** 18 tests binding the manuals, the data-model reference and the MCP contract to the code |
+| `backend/src/mcp_server/contract.py` | MIS-E2E-114: an endpoint must start with `/`, so `dict.get("kind")` is no longer scraped as `GET kind` |
+| `docs/mcp-contract.md` | Regenerated — three phantom endpoints removed |
+| `backend/src/mcp_server/server.py` | MIS-E2E-161: the tool count is derived by AST, not written |
+| `manual/docs/advanced/mcp-server.md` | Stale `(97 tools, 13 categories)` heading dropped rather than re-hardcoded |
 
 ## Negative controls run
 
@@ -557,6 +562,8 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC130 | Anonymous allowed over HTTP again (MIS-E2E-150) | ✅ 1 failure |
 | NC131 | Remove a table's row from the data-model page | ⚠️ **SURVIVED** — the prose still named it. Re-run removing EVERY mention: ✅ 1 failure |
 | NC132 | Add a new ORM table and leave it undocumented | ✅ 1 failure — the invariant that actually matters |
+| NC133 | Scraper drops the leading-`/` filter (MIS-E2E-114) | ⚠️ survived against the committed file alone; **✅ 1 failure** once the regeneration test is in scope — which is the guard that matters |
+| NC134 | Instruction counts hardcoded again (MIS-E2E-161) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),
