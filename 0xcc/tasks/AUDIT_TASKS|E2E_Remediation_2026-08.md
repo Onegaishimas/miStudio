@@ -5,14 +5,15 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3058 passed / 0 failed** (baseline 2883) · frontend **1224 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean · **CI Backend Tests green** (the schema-check database fix verified on the runner)
+**Suites:** backend **3079 passed / 0 failed** (baseline 2883) · frontend **1224 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean · **CI Backend Tests green**
 
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
-| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ⏳ **in progress** — 6.1 ✅ · 6.5 ✅ · 6.6 ✅ · 6.7 ✅ · 6.8 ✅ · 6.9 ✅ · **6.2, 6.3, 6.4 open** (all J-Lens) |
+| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
+| **Wave 4** | Task 8 — pin the surviving audit mutations | ⏳ **next** |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -100,9 +101,17 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 The class this product can least afford. Each item is a number a user reads as a measurement.
 
 - [x] 6.1 ✅ Both metrics return `None` when unmeasurable — the schema (`Optional[float]`) and the frontend type (`number | null`) already carried it, and the UI already renders `—`. The dependency was **not** added: it downloads its model on first use and this deployment is offline, so it would have swapped a constant for an abort. `except Exception`, not `except ImportError` — the offline download failure was never an ImportError and propagated out of the whole steering request. — MIS-E2E-063
-- [ ] 6.2 Measure J-lens convergence against **held-out** prompts or split-half agreement. The current criterion is the shrinkage of a running mean — it stops at `n ≈ σ/δ`, proportional to variance. Until then, do not call it convergence in the artifact or the docs. — MIS-E2E-080
-- [ ] 6.3 Rename `linearisation_residual_*` in the published artifact to what it measures, or compute the residual. It travels to HuggingFace. — MIS-E2E-081
-- [ ] 6.4 Rank-check before QR in the band metrics and refuse or report a degenerate basis (FVE overstated 4.5×); wire the random-direction controls or stop documenting `control_seed`; implement the "sustained rise" the docstring describes. — MIS-E2E-088
+- [x] 6.2 ✅ **Split-half agreement.** Two independent accumulators over **alternating** prompts (interleaved, not sequential — a topic-ordered corpus would otherwise guarantee disagreement), compared against each other. The published lens remains the whole corpus: the split is the instrument, not the estimate.
+  - Reproduced the reviewer's simulation first: **518 / 1040 / 1988** at noise 0.5/1.0/2.0 against their 518/1050/2030 — linear in σ, confirming the old criterion measured per-prompt spread.
+  - ⚠️ **The threshold does not transfer.** At `1e-3` split-half never converges (it shrinks as σ/√n, needing ~1e6 prompts). Calibrated by simulation, not reasoning — table recorded in the source. **`DEFAULT_CONVERGENCE_DELTA` 1e-3 → 0.1**, which lands in the 100–2000 range the real fits used.
+  - The artifact now stamps `convergence_criterion`. **Absent is meaningful** and must never be defaulted on read: a lens without it was fitted under the old test and claims a property it was never given. — MIS-E2E-080
+- [x] 6.3 ✅ Renamed to `source_position_spread_{mean,max}` — the value is `std across source positions / |J|.mean()`, a statement about positional stability, and `linearisation_residual()` measures something else and has no production caller. Renamed rather than dual-published: keeping the old key perpetuates exactly the mislabelling, and a missing key is a question a consumer can ask. No in-repo consumer read it. — MIS-E2E-081
+- [x] 6.4 ✅ All three, plus a fourth found while testing.
+  - **FVE:** SVD-based rank determination replaces `qr(...).Q`, which padded a rank-deficient basis with arbitrary directions. Four duplicates now report exactly what one direction reports.
+  - **The control now runs:** `excess_fve` wired into the profile builder. Both inputs (`stacked` residuals, `jacobians[layer]`) were **already being collected there** — the call was simply absent, so `control_seed` made reproducible a control that never executed. The raw FVE is deliberately still not published.
+  - **`occupancy` re-checked:** the finding listed it as dead, but its remaining references are docstrings. It needs a *sparsity budget* this pipeline does not have, so `None` is genuinely correct — documented as structurally absent rather than wired to nothing.
+  - **"Sustained" now means sustained** (≥2 consecutive layers above median), so one noisy layer cannot set `workspace_start` at layer 0 and empty the sensory band.
+  - ⚠️ **Fourth defect, same shape, other boundary:** `peak_index` was a raw `argmax` over *every* layer, so an isolated late spike could set `motor_start` exactly as an early one could set `workspace_start`. Found by writing the workspace fixture; the finding named only one of the two. — MIS-E2E-088
 - [x] 6.5 ✅ One base — **1-based**, everywhere. `rankColor` cannot move to 0-based (`Math.log(0)` → the alpha becomes `Infinity`, an invalid value the browser discards, silently unshading every top cell — checked, not assumed; my first test asserted `NaN` and was wrong), and "rank 1 = best" is what the word means. So `diffColor`, the tooltip and both legend swatches moved. The tooltip's `#${r + 1}` reported every rank one too high, and the ramp started at `2/span` instead of `1/span`, overstating every disagreement. — MIS-E2E-129
 - [x] 6.6 ✅ **One shared resolver, `resolve_referenced_saes()`, used by all three endpoints** — extracted from the combined endpoint rather than copied, because this finding *is* an instance of "fixed one representative, never generalized" and a copy is the version that drifts back apart. Compare now carries each feature's own `sae_id` into its hook config and hands the SAE **map** to `_register_steering_hooks`, which already grouped by `(sae_id, layer)` for combined. Sweep is single-feature so has no routing to do — but it had **no feature validation whatsoever**, and now gets the layer check it never had. Both worker tasks accept `sae_meta_map`. — MIS-E2E-064
 - [x] 6.7 ✅ **One helper, `encode_with_training_normalization()`, and every SAE consumer on it.** `encode()` does not normalize — `forward()` does — so a bare `encode` hands the dictionary raw activations it was never fitted on. The **sibling sweep found two more sites the finding did not name**: faithfulness and intervention. Also fixed the compounding half: `_load_sae_sync` loaded the community-format `config` (which carries `normalize_activations`) and **discarded** it, so every SAE it built took the constructor default and no consumer could have recovered the right convention. Extraction's inline copy — the one path that had it right, with a comment explaining why — now uses the shared helper too, so there is one place to forget instead of six. — MIS-E2E-083
@@ -318,6 +327,13 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/services/extraction_service.py` | MIS-E2E-083: its inline copy (the one correct path) replaced by the shared helper |
 | `backend/src/workers/training_tasks.py` | MIS-E2E-083: the dead-neuron fallback measured off-distribution |
 | `backend/tests/unit/test_sae_encode_normalization.py` | **New.** 10 tests; an AST scan per module with its own negative control, plus a fixture check that raw and normalized encodes actually differ |
+| `backend/src/ml/jlens_fitter.py` | MIS-E2E-080: split-half convergence, threshold recalibrated 1e-3→0.1 by simulation, `convergence_criterion` stamped. MIS-E2E-081: `position_spread_{mean,max}` |
+| `backend/src/workers/jlens_fit_tasks.py` | MIS-E2E-081: artifact keys renamed to `source_position_spread_*`. MIS-E2E-080: records the criterion and delta |
+| `backend/src/ml/jlens_metrics.py` | MIS-E2E-088: SVD rank replaces QR padding; "sustained" enforced on **both** boundaries; `occupancy` documented as structurally absent |
+| `backend/src/services/jlens_band_service.py` | MIS-E2E-088: `excess_fve` wired — the inputs were already collected, the call was absent |
+| `backend/tests/unit/test_jlens_convergence.py` | **New.** 7 tests; reproduces the reviewer's proportionality result and pins the calibration |
+| `backend/tests/unit/test_band_metrics_honesty.py` | **New.** 12 tests over FVE rank, the control being wired, and both boundaries |
+| `backend/tests/unit/test_jlens_fitter.py` | Renamed fields; **new guard** that the six hand-rolled `_Result` stubs carry every `FitResult` field — it immediately found two more missing |
 
 ## Negative controls run
 
@@ -392,6 +408,16 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC63 | Intervention encodes bare *(sibling sweep site)* | ✅ 1 failure |
 | NC64 | Loader discards `normalize_activations` again | ✅ 1 failure |
 | NC65 | The helper stops normalizing | ✅ 2 failures |
+| NC66 | Convergence back to the running-mean step (MIS-E2E-080) | ✅ 1 failure |
+| NC67 | Split the halves sequentially instead of alternating | ✅ 1 failure |
+| NC68 | Publish only one half as the lens | ✅ 1 failure |
+| NC69 | Threshold back to 1e-3 | ✅ 1 failure |
+| NC70 | Stop stamping `convergence_criterion` | ✅ 1 failure |
+| NC71 | FVE pads a rank-deficient basis again (MIS-E2E-088) | ✅ 2 failures |
+| NC72 | Boundaries back to first-crossing | ✅ 1 failure |
+| NC73 | Motor boundary back to a raw argmax | ✅ 1 failure |
+| NC74 | Unwire `excess_fve` | ✅ 1 failure |
+| NC75 | Rename the spread keys back (MIS-E2E-081) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),

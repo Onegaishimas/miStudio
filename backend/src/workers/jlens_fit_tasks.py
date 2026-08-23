@@ -330,6 +330,14 @@ def _fit_and_publish(
         "slug": ref.slug,
         "prompts_seen": result.prompts_seen,
         "converged": result.converged,
+        # WHICH TEST THAT FLAG REFERS TO (MIS-E2E-080). "Converged" used to mean
+        # "the running mean's own increment got small", which happens because n
+        # grows, not because the estimate stabilised. A reader of an existing
+        # artifact cannot tell the two apart unless the criterion is named, and
+        # the word is doing evidential work in the artifact, the docs and the
+        # gate decision.
+        "convergence_criterion": result.convergence_criterion,
+        "convergence_delta": result.convergence_delta,
         "layers": sorted(result.jacobians),
         "size_bytes": result.size_bytes(),
         "published": published,
@@ -558,18 +566,23 @@ def _config_yaml(
     for layer in sorted(result.scales):
         lines.append(f"  {layer}: {result.scales[layer]!r}")
 
-    # HOW LOCAL THE LENS IS, over the whole corpus. Both figures, because the
-    # mean says what is typical and the max says how bad it gets — and a lens
-    # is judged on the second. This used to be a single number taken from
-    # whichever prompt happened to be last.
-    if result.residual_mean:
-        lines.append("linearisation_residual_mean:")
-        for layer in sorted(result.residual_mean):
-            lines.append(f"  {layer}: {result.residual_mean[layer]:.6g}")
-    if result.residual_max:
-        lines.append("linearisation_residual_max:")
-        for layer in sorted(result.residual_max):
-            lines.append(f"  {layer}: {result.residual_max[layer]:.6g}")
+    # HOW POSITIONALLY STABLE the lens is, over the whole corpus. Both figures,
+    # because the mean says what is typical and the max says how bad it gets —
+    # and a lens is judged on the second. This used to be a single number taken
+    # from whichever prompt happened to be last, and it used to be published
+    # under a name belonging to a quantity nothing computes (MIS-E2E-081).
+    # MIS-E2E-081: named for what it measures. These keys used to be
+    # `linearisation_residual_{mean,max}`, which is a different quantity — one
+    # this fitter never computes in production. The value is the spread of the
+    # Jacobian's rows across SOURCE POSITIONS, normalised by |J|.mean().
+    if result.position_spread_mean:
+        lines.append("source_position_spread_mean:")
+        for layer in sorted(result.position_spread_mean):
+            lines.append(f"  {layer}: {result.position_spread_mean[layer]:.6g}")
+    if result.position_spread_max:
+        lines.append("source_position_spread_max:")
+        for layer in sorted(result.position_spread_max):
+            lines.append(f"  {layer}: {result.position_spread_max[layer]:.6g}")
 
     lines += [
         "per_layer_applicability:",

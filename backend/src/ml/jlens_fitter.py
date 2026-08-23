@@ -78,9 +78,35 @@ DEFAULT_CHUNK = 32
 #: unfittable for a reason the caller cannot act on.
 MAX_BACKWARD_BYTES = 2 * 1024 ** 3
 
-# Convergence: relative Frobenius change in the accumulated mean below this,
-# sustained for PATIENCE consecutive shards, stops the fit.
-DEFAULT_CONVERGENCE_DELTA = 1e-3
+# Convergence: relative Frobenius difference between two INDEPENDENT half-corpus
+# estimates below this, sustained for PATIENCE consecutive prompts, stops the
+# fit. See the split-half block in `fit()` for why it is not the running mean's
+# own increment (MIS-E2E-080).
+#
+# THE THRESHOLD IS NOT TRANSFERABLE FROM THE OLD CRITERION. 1e-3 was calibrated
+# against a quantity that shrinks as sigma/n; split-half agreement shrinks as
+# sigma/sqrt(n), so the same number would demand roughly 1e6 prompts and no fit
+# would ever converge. Verified by simulation, not reasoned about:
+#
+#   delta   noise 0.5   noise 1.0   noise 2.0
+#   0.20         28         109         436
+#   0.10        111         464        1933
+#   0.05        464        1937      (>6000)
+#   0.01     (>6000)     (>6000)     (>6000)
+#
+# 0.1 — "two independent halves of the corpus produce Jacobians agreeing to
+# within 10% relative Frobenius norm" — lands in the 100-2000 prompt range the
+# real fits already used (gemma 634, LFM2 1097). The residual dependence on
+# noise is CORRECT here in a way it was not before: a noisier model genuinely
+# needs more data to pin the same estimate to the same relative precision.
+DEFAULT_CONVERGENCE_DELTA = 0.1
+
+#: Stamped into the artifact so a reader can tell WHICH test a lens passed.
+#: Artifacts fitted before MIS-E2E-080 carry no criterion and their "converged"
+#: flag means the old running-mean-increment test — which measured per-prompt
+#: variance, not stabilisation. Absent is therefore meaningful, and must not be
+#: defaulted to this value on read.
+CONVERGENCE_CRITERION = "split_half_agreement"
 PATIENCE = 2
 
 #: Serialises the process-wide SDPA patch — see `frozen_attention_and_norms`.
@@ -198,12 +224,29 @@ class FitResult:
     prompts_seen: int
     converged: bool
     convergence_delta: float
+    #: Which convergence test the flag above refers to (MIS-E2E-080).
+    convergence_criterion: str = CONVERGENCE_CRITERION
     deltas: List[float] = field(default_factory=list)
     #: Per-layer mean and worst local-linearisation residual over the CORPUS.
     #: The mean says how local the lens usually is; the max says how bad it
     #: gets, and that is the number a reader should judge it on.
-    residual_mean: Dict[int, float] = field(default_factory=dict)
-    residual_max: Dict[int, float] = field(default_factory=dict)
+    #: MEAN and MAX of the per-layer SOURCE-POSITION SPREAD, over the corpus.
+    #:
+    #: MIS-E2E-081. These were published as `linearisation_residual_mean` and
+    #: `linearisation_residual_max`, and they are not that. The value is
+    #: `std across source positions / |J|.mean()` — how much the Jacobian's rows
+    #: vary with WHERE in the sequence they were taken, which is a statement
+    #: about positional stability. `linearisation_residual()` measures something
+    #: else entirely (how well J predicts the map in a neighbourhood) and has no
+    #: production caller.
+    #:
+    #: The artifact TRAVELS — to HuggingFace and into miLLM — so a consumer
+    #: reading a field named after the affine approximation was getting a number
+    #: about positional variation with no way to tell. Renamed rather than
+    #: dual-published: keeping the old key would perpetuate exactly the
+    #: mislabelling, and a missing key is a question a consumer can ask.
+    position_spread_mean: Dict[int, float] = field(default_factory=dict)
+    position_spread_max: Dict[int, float] = field(default_factory=dict)
     #: Mean prompt length the fit actually ran over.
     #:
     #: Meaningful again now that the whole sequence is used. Under the old
@@ -714,8 +757,35 @@ class JacobianFitter:
                 "a confident face. Fit up to the target, or set "
                 "target_layer='final'."
             )
+        # SPLIT-HALF AGREEMENT, NOT THE RUNNING MEAN'S OWN STEP SIZE.
+        #
+        # MIS-E2E-080. This measured `relative_change(previous, accumulated)` —
+        # the increment of a running mean, which is O(sigma/n). It shrinks
+        # because the DENOMINATOR GROWS, not because successive estimates of J
+        # agree. The stop point was therefore n ~ sigma/delta: directly
+        # proportional to per-prompt variance, and reachable by any process with
+        # bounded increments, converged or not.
+        #
+        # Simulated by the reviewer at noise 0.5 / 1.0 / 2.0 → stop points
+        # 518 / 1050 / 2030, exactly proportional — and BRACKETING the two real
+        # recorded fits (gemma 634, LFM2 1097) that the docs call "paper-aligned
+        # converged lenses". Those numbers are fully consistent with the
+        # criterion having measured nothing but each model's per-prompt spread.
+        #
+        # Two INDEPENDENT accumulators over alternating prompts, compared
+        # against each other, is a real stabilisation test: it asks "would a
+        # different half of this corpus have produced the same lens?", which is
+        # the question the word "converged" is doing evidential work for. A
+        # low-variance but biased estimate no longer earns the word, and a
+        # noisier model no longer merely has to run proportionally longer.
+        #
+        # Costs a second accumulator per layer — still O(1) in corpus size,
+        # which is the property the running mean was chosen for.
+        half_a: Dict[int, torch.Tensor] = {}
+        half_b: Dict[int, torch.Tensor] = {}
+        count_a = 0
+        count_b = 0
         accumulated: Dict[int, torch.Tensor] = {}
-        previous: Dict[int, torch.Tensor] = {}
         deltas: List[float] = []
         stable = 0
         seen = 0
@@ -726,25 +796,48 @@ class JacobianFitter:
             for prompt in prompts:
                 per_prompt = self._fit_one(prompt, selected)
                 seen += 1
-                for layer, mat in per_prompt.items():
-                    if layer in accumulated:
-                        # Running mean, so peak memory is one J per layer
-                        # regardless of corpus size.
-                        accumulated[layer] += (mat - accumulated[layer]) / seen
-                    else:
-                        accumulated[layer] = mat.clone()
 
-                if seen >= self.min_prompts:
-                    delta = relative_change(previous, accumulated)
+                # Alternate, so the halves are interleaved rather than
+                # sequential: a corpus ordered by topic would otherwise put all
+                # of one subject in half A and guarantee disagreement.
+                if seen % 2:
+                    count_a += 1
+                    target, n = half_a, count_a
+                else:
+                    count_b += 1
+                    target, n = half_b, count_b
+
+                for layer, mat in per_prompt.items():
+                    if layer in target:
+                        target[layer] += (mat - target[layer]) / n
+                    else:
+                        target[layer] = mat.clone()
+
+                if seen >= self.min_prompts and count_a and count_b:
+                    # The two halves must AGREE. Not "the last prompt moved the
+                    # mean by little" — that is guaranteed for large n.
+                    delta = relative_change(half_a, half_b)
                     deltas.append(delta)
                     stable = stable + 1 if delta < self.convergence_delta else 0
-                    previous = {k: v.clone() for k, v in accumulated.items()}
                     if on_progress:
                         on_progress(FitProgress(seen, delta, stable >= PATIENCE))
                     if stable >= PATIENCE:
                         break
                 elif on_progress:
                     on_progress(FitProgress(seen, None, False))
+
+        # The published lens is the WHOLE corpus, not either half — the split is
+        # the convergence instrument, not the estimate.
+        for layer in set(half_a) | set(half_b):
+            a = half_a.get(layer)
+            b = half_b.get(layer)
+            if a is None:
+                accumulated[layer] = b.clone()
+            elif b is None:
+                accumulated[layer] = a.clone()
+            else:
+                total = count_a + count_b
+                accumulated[layer] = (a * count_a + b * count_b) / total
 
         cast_and_scale = {
             k: _to_storage_dtype(v, k) for k, v in accumulated.items()
@@ -758,11 +851,11 @@ class JacobianFitter:
             converged=stable >= PATIENCE,
             convergence_delta=self.convergence_delta,
             deltas=deltas,
-            residual_mean={
+            position_spread_mean={
                 l: self._residual_sums[l] / max(self._residual_counts[l], 1)
                 for l in self._residual_sums
             },
-            residual_max=dict(self._residual_max),
+            position_spread_max=dict(self._residual_max),
             mean_seq_len=(
                 sum(self._seq_lens) / len(self._seq_lens) if self._seq_lens else 0.0
             ),

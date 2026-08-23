@@ -454,8 +454,8 @@ def test_position_spread_is_recorded_and_means_what_it_says():
     flat = JacobianFitter(stack, Tokenizer(), stack_structure := Structure(stack),
                           min_prompts=1, chunk=3)
     result = flat.fit(["abc"], layers=[0])
-    assert result.residual_mean, "no per-layer spread was recorded at all"
-    assert result.residual_mean[0] == pytest.approx(0.0, abs=1e-5), (
+    assert result.position_spread_mean, "no per-layer spread was recorded at all"
+    assert result.position_spread_mean[0] == pytest.approx(0.0, abs=1e-5), (
         "a position-independent stack must show ZERO spread; a non-zero value "
         "means the number is measuring something else"
     )
@@ -463,7 +463,7 @@ def test_position_spread_is_recorded_and_means_what_it_says():
     model, structure, tok = _mixing_model(3, 4, 6)
     mixed = JacobianFitter(model, tok, structure, min_prompts=1, chunk=2)
     mixed_result = mixed.fit(["x"], layers=[0])
-    assert mixed_result.residual_mean[0] > 1e-4, (
+    assert mixed_result.position_spread_mean[0] > 1e-4, (
         "a position-MIXING stack must show non-zero spread, or the measure is "
         "not sensitive to the thing it claims to measure"
     )
@@ -610,8 +610,8 @@ class _RecipeResult:
     prompts_seen = 120
     converged = True
     convergence_delta = 1e-3
-    residual_mean = {0: 0.011, 1: 0.022}
-    residual_max = {0: 0.031, 1: 0.044}
+    position_spread_mean = {0: 0.011, 1: 0.022}
+    position_spread_max = {0: 0.031, 1: 0.044}
     degenerate_layers = [1]
 
 
@@ -685,17 +685,19 @@ def test_the_freeze_is_recorded_per_layer_not_wholesale():
     )
 
 
-def test_the_linearisation_residual_describes_the_CORPUS():
+def test_the_position_spread_describes_the_CORPUS():
+    """MIS-E2E-081 renamed these keys: they hold source-position spread, not a
+    linearisation residual, and the artifact travels to HuggingFace."""
     """It used to be whichever prompt happened to be last."""
     text = _written_config()
-    assert "linearisation_residual_mean:" in text
-    assert "linearisation_residual_max:" in text
+    assert "source_position_spread_mean:" in text
+    assert "source_position_spread_max:" in text
     # Both figures, because the mean says what is typical and the max says how
     # bad it gets — a lens is judged on the second.
     assert "0.031" in text and "0.011" in text
 
 
-def test_the_fitter_accumulates_residuals_over_every_prompt():
+def test_the_fitter_accumulates_position_spread_over_every_prompt():
     """Not the last one. Exercised through a real fit."""
     stack, _, _ = make_stack(31)
     fitter = JacobianFitter(
@@ -703,11 +705,11 @@ def test_the_fitter_accumulates_residuals_over_every_prompt():
     )
     result = fitter.fit(["abc", "abcd", "abcde"])
 
-    assert result.residual_mean, "no corpus residual was recorded"
-    for layer, worst in result.residual_max.items():
-        assert worst >= result.residual_mean[layer] - 1e-9, (
+    assert result.position_spread_mean, "no corpus residual was recorded"
+    for layer, worst in result.position_spread_max.items():
+        assert worst >= result.position_spread_mean[layer] - 1e-9, (
             f"layer {layer}: max {worst} is below the mean "
-            f"{result.residual_mean[layer]} — the accumulation is wrong"
+            f"{result.position_spread_mean[layer]} — the accumulation is wrong"
         )
 
 
@@ -2155,9 +2157,14 @@ def test_a_fit_that_fails_validation_KEEPS_its_staged_artifact(tmp_path):
         last_delta = 1e-4
         mean_seq_len = 12.0
         degenerate_layers: list = []
-        residual_mean = 0.0
-        residual_max = 0.0
+        position_spread_mean = 0.0
+        position_spread_max = 0.0
         convergence_delta = 1e-3
+        convergence_criterion = "split_half_agreement"
+        # Kept faithful to `FitResult` — see
+        # test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads.
+        d_model = 8
+        n_layers = 2
 
         @staticmethod
         def size_bytes():
@@ -2254,9 +2261,14 @@ def test_the_recipe_records_the_target_layer_that_WAS_USED():
         converged = True
         mean_seq_len = 68.2
         degenerate_layers: list = []
-        residual_mean = 0.0
-        residual_max = 0.0
+        position_spread_mean = 0.0
+        position_spread_max = 0.0
         convergence_delta = 1e-3
+        convergence_criterion = "split_half_agreement"
+        # Kept faithful to `FitResult` — see
+        # test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads.
+        d_model = 8
+        n_layers = 2
         scales = {i: 1.0 for i in range(15)}
 
     for target in ("penultimate", "final"):
@@ -2340,9 +2352,14 @@ def _fit_task_harness(tmp_path, cuda: bool, blow_up: bool = False):
         converged = True
         mean_seq_len = 10.0
         degenerate_layers: list = []
-        residual_mean = 0.0
-        residual_max = 0.0
+        position_spread_mean = 0.0
+        position_spread_max = 0.0
         convergence_delta = 1e-3
+        convergence_criterion = "split_half_agreement"
+        # Kept faithful to `FitResult` — see
+        # test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads.
+        d_model = 8
+        n_layers = 2
 
         @staticmethod
         def size_bytes():
@@ -2474,9 +2491,14 @@ def test_the_task_has_DROPPED_the_model_by_the_time_it_releases(tmp_path):
         converged = True
         mean_seq_len = 10.0
         degenerate_layers: list = []
-        residual_mean = 0.0
-        residual_max = 0.0
+        position_spread_mean = 0.0
+        position_spread_max = 0.0
         convergence_delta = 1e-3
+        convergence_criterion = "split_half_agreement"
+        # Kept faithful to `FitResult` — see
+        # test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads.
+        d_model = 8
+        n_layers = 2
 
         @staticmethod
         def size_bytes():
@@ -2580,9 +2602,14 @@ def test_the_progress_meta_carries_the_DENOMINATOR_and_the_THRESHOLD(tmp_path):
         converged = True
         mean_seq_len = 10.0
         degenerate_layers: list = []
-        residual_mean = 0.0
-        residual_max = 0.0
+        position_spread_mean = 0.0
+        position_spread_max = 0.0
         convergence_delta = 1e-3
+        convergence_criterion = "split_half_agreement"
+        # Kept faithful to `FitResult` — see
+        # test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads.
+        d_model = 8
+        n_layers = 2
 
         @staticmethod
         def size_bytes():
@@ -2590,6 +2617,11 @@ def test_the_progress_meta_carries_the_DENOMINATOR_and_the_THRESHOLD(tmp_path):
 
     class _Fitter:
         convergence_delta = 1e-3
+        convergence_criterion = "split_half_agreement"
+        # Kept faithful to `FitResult` — see
+        # test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads.
+        d_model = 8
+        n_layers = 2
 
         def __init__(self, *_a, **_kw):
             pass
@@ -2645,3 +2677,45 @@ def test_the_progress_meta_carries_the_DENOMINATOR_and_the_THRESHOLD(tmp_path):
         f"the delta is reported with no threshold to judge it against: {meta}"
     )
     assert meta.get("prompts_seen") == 634
+
+
+def test_the_hand_rolled_result_stubs_carry_every_field_the_writer_reads():
+    """The stubs above duplicate `FitResult`'s shape by hand.
+
+    Adding `convergence_criterion` to the real dataclass broke five tests with
+    `AttributeError` at run time, because each stub is a separate hand-written
+    copy — exactly the "fixture agrees by construction until it doesn't" shape.
+    This makes the next field addition fail HERE, with a message naming the
+    missing attribute, instead of five tests away with an AttributeError.
+    """
+    import ast
+    import inspect as _inspect
+
+    from src.ml.jlens_fitter import FitResult
+
+    required = set(FitResult.__dataclass_fields__) - {"jacobians", "scales", "deltas"}
+
+    src = _inspect.getsource(__import__(__name__, fromlist=["x"]))
+    tree = ast.parse(src)
+    stubs = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.ClassDef) and n.name == "_Result"
+    ]
+    assert stubs, "the _Result stubs moved — this guard is now vacuous"
+
+    for stub in stubs:
+        present = {
+            t.id
+            for node in stub.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            if isinstance(t, ast.Name)
+        } | {
+            n.name for n in stub.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        missing = required - present
+        assert not missing, (
+            f"_Result stub at line {stub.lineno} is missing {sorted(missing)} — "
+            f"add them, or the tests using it will fail with AttributeError"
+        )
