@@ -3481,6 +3481,63 @@ whether it was fitted locally, acquired, or contributed.
 - Developer Guide: `0xcc/docs/Developer_Guide.md`
 - CLAUDE.md: `CLAUDE.md`
 
+### IDL-47: No application-level authentication — the posture, its boundary, and what invalidates it
+
+**Date:** 2026-08-23
+
+**Context:** The end-to-end audit (`0xcc/audits/E2E-2026-08/`) recorded that miStudio's REST API,
+WebSocket and MCP surfaces carry no per-user authentication, and that this is **deliberate** — a
+single-operator research instrument behind nginx on a lab network. That decision had never been
+written down anywhere. An undocumented deliberate choice is indistinguishable from an oversight:
+every review round re-derived it, and worse, it gave no way to tell which findings the posture
+covers and which escape it. Two P0s in that audit were mis-triaged on exactly that question before
+the boundary was made explicit (MIS-E2E-002, -166).
+
+**Decision:**
+
+1. **The posture, stated:** *anyone who can reach the host can read and write the API.* Access
+   control is the network boundary — nginx, the LAN, and the operator's own machine — not the
+   application.
+
+2. **What the posture DOES cover.** Ordinary reads and writes across datasets, models, trainings,
+   extractions, features, steering and circuits. A finding whose worst case is "an unauthenticated
+   caller on the LAN can do a thing the operator could do" is **accepted**, not a defect.
+
+3. **What it does NOT cover, and never did.** Four classes escape it, and each was found live:
+
+   | Class | Why the posture does not extend to it | Example |
+   |---|---|---|
+   | **Credential disclosure** | Reading a stored secret is not "using the product" | MIS-E2E-069, -165 |
+   | **Process kill / spawn** | A privilege operation on the HOST, not an API action | MIS-E2E-003, -099 |
+   | **Arbitrary filesystem deletion** | Reaches outside the product's own data | MIS-E2E-070, -071 |
+   | **Cross-origin reach** | Converts "who can reach the host" into "any site the operator visits" | MIS-E2E-105 |
+
+   The last is the sharpest: the posture concedes callers who can *reach* the host. A browser
+   loading a hostile page is not one of them until a wildcard CORS policy makes it one.
+
+4. **The infrastructure boundary is part of the posture.** It concedes the API *behind nginx*. It
+   does not concede the database or the Celery broker directly (MIS-E2E-146), nor `/api/internal/*`,
+   which both nginx configs deny and which verifies an HMAC token of its own.
+
+5. **What invalidates this decision** — any one of these, and per-user authentication becomes
+   required work rather than deferred work:
+   - the instance is reachable from outside the lab network, including via a tunnel;
+   - more than one person uses it, or work is attributed to a person;
+   - it holds data whose disclosure matters to someone who is not the operator;
+   - a destructive action needs to be attributable after the fact.
+
+6. **The PIN is a UI affordance, not authentication.** `settings_pin_hash` gates the Settings panel
+   in the frontend. It is not a session, it does not gate the API, and it must never be described as
+   security. It is now unreachable through the generic settings CRUD (MIS-E2E-055/-165) — but that
+   fixed a *disclosure*, not the absence of auth.
+
+**Consequences:** Reviews can now classify a finding against a written boundary instead of
+re-arguing the premise. The four escape classes are the standing test: a finding that falls in one
+is a defect regardless of the posture, and one that does not is accepted. This IDL is also the
+thing to revisit first if any invalidating condition above becomes true.
+
+---
+
 **Revision History:**
 | Version | Date | Changes |
 |---------|------|---------|
@@ -3495,6 +3552,7 @@ whether it was fitted locally, acquired, or contributed.
 | 2.7 | 2026-07-15 | IDL-27: Steering UX — frequency-based auto-baseline strength (unit-norm-decoder rationale), Blended vs Compare toggle, 20-feature limit + palette — Planned |
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
 | 3.4 | 2026-07-31 | **J-Space family (BRD-MIS-JSPACE-001 v0.3).** IDL-40 J-space as a second, training-free substrate additive to SAEs, logit-lens-first with single-call-site substitution. IDL-41 model-agnostic construction through `discover_transformer_structure` — no whitelist, capture at the decoder-layer output not a normalisation module, per-layer applicability for hybrid models, construction-first over acquisition. IDL-42 synthesise-on-demand storage with a model-derived CI envelope bound. IDL-43 paired-run-with-clamping and mandatory matched controls. IDL-44 J-space rungs extending the existing ladder. IDL-45 adopt Neuronpedia's lens wire format. IDL-46 artifact mount (not upload) as the Neuronpedia integration architecture. **Also corrects a stale Document Control header:** it read 3.2 while the revision history already carried 3.3 for IDL-39 (2026-07-26) — the history was correct, the header had not been bumped with it. |
+| 3.5 | 2026-08-23 | **IDL-47: the no-app-auth posture, written down.** The decision was real and deliberate and had never been recorded, so it was indistinguishable from an oversight and every review round re-derived it. States the posture, the four classes that ESCAPE it (credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach — each found live in the E2E audit), the infrastructure boundary, and the conditions that invalidate the decision. |
 | 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |
 | 3.3 | 2026-07-26 | IDL-39 (finalize-from-checkpoint; step-granular retention; unlink-before-commit; fail-closed completeness) — Implemented, observed behaviour |

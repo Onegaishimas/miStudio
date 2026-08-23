@@ -38,8 +38,29 @@ class TestStartupGuard:
         with pytest.raises(SystemExit, match="MCP_AUTH_TOKEN is required"):
             build_server(make_settings(auth_token=""))
 
-    def test_anonymous_flag_allows_empty_token(self):
-        mcp, client = build_server(make_settings(auth_token="", allow_anonymous=True))
+    def test_anonymous_flag_does_NOT_allow_an_empty_token_over_http(self):
+        """MIS-E2E-150. This test PINNED the defect.
+
+        It asserted that `MCP_ALLOW_ANONYMOUS` alone satisfies the startup guard
+        — which is exactly the hole. `__main__.py` then adds
+        `BearerAuthMiddleware` only when a token is set, otherwise it logs a
+        warning and serves on `settings.host`, default `0.0.0.0`. So an operator
+        following the manual's own troubleshooting remedy got a LAN-reachable
+        UNAUTHENTICATED MCP server exposing `delete_circuit`, GPU steering and
+        label write-back.
+
+        Both the manual ("bearer token always required") and the guard's own
+        error message ("for local stdio development only") stated the rule.
+        Nothing enforced it, and this test certified the unenforced version.
+        """
+        with pytest.raises(SystemExit, match="stdio"):
+            build_server(make_settings(auth_token="", allow_anonymous=True))
+
+    def test_anonymous_flag_allows_an_empty_token_over_stdio(self):
+        """The case the flag exists for, and the only one it now covers."""
+        mcp, _client = build_server(
+            make_settings(auth_token="", allow_anonymous=True), stdio=True
+        )
         assert mcp is not None
 
     def test_stdio_allows_empty_token(self):

@@ -6,7 +6,7 @@ description: "Core database tables and how they relate"
 
 # Data Model
 
-miStudio stores all metadata in PostgreSQL (heavy artifacts — weights, activations — live on the filesystem, referenced by path). This page maps the core tables and their relationships, verified against the ORM models.
+miStudio stores all metadata in PostgreSQL (heavy artifacts — weights, activations — live on the filesystem, referenced by path). This page maps the tables and their relationships. Every table in the ORM is listed here — enforced by `test_data_model_doc_covers_every_table`, which diffs this page against `Base.metadata` and fails when one is missing. (It previously claimed to be "verified against the ORM models" while omitting nine tables, including one its own ER diagram draws.)
 
 ```mermaid
 erDiagram
@@ -113,3 +113,30 @@ A finalized run has `status = 'completed'` so the SAE import path unlocks, but
 distinguishes a salvaged run from one that reached `total_steps`, and it drives
 the "Finalized early @ N" badge. See
 [Training Lifecycle & Checkpoints](/core-workflow/training-lifecycle).
+
+
+## Tables this page used to omit
+
+Nine tables were undocumented until MIS-E2E-050. Three of them mattered
+particularly: `checkpoints` is drawn in this page's own ER diagram above and had
+no entry; the four `feature_group*` / `feature_token_index` tables back three
+shipped features and the entire Feature Groups panel; and
+`agent_approval_requests` is the gate deciding whether an MCP agent's
+destructive action needs a human.
+
+| Table | Purpose |
+|---|---|
+| `checkpoints` | Per-step training checkpoints — loss, L0, weights path. One row per layer per step on a multi-layer run. Drawn in the ER diagram above; subject to step-granular retention (see [Training Lifecycle](/core-workflow/training-lifecycle)). |
+| `feature_groups` | A cluster of related features (PPRD rows 13–15) |
+| `feature_group_members` | Membership rows joining a feature to its group, with per-member strength and similarity |
+| `feature_grouping_runs` | One execution of the grouping algorithm, with its parameters |
+| `feature_token_index` | Token → feature index backing token search and the TF-IDF context subgrouping |
+| `feature_analysis_cache` | Cached per-feature analyses (logit lens, correlations, NLP) with a 7-day expiry. Unique on `(feature_id, analysis_type)` — a blind INSERT here caused a production 500 once the expiry made a row invisible to the read but still present in the table. |
+| `feature_dashboard_data` | Precomputed dashboard payloads (logit-lens and histogram blobs) |
+| `agent_approval_requests` | The MCP approval gate: an agent's destructive action parked for human approval |
+| `dismissed_operations` | Operations the user has dismissed from the Monitor page, so they stay dismissed |
+
+`alembic_version` (migration bookkeeping) and `feature_activations_default` (the
+default partition of `feature_activations`) are deliberately not described: one
+belongs to Alembic and the other is an implementation detail of a partitioned
+table already documented above.
