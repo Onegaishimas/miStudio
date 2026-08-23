@@ -28,6 +28,12 @@ The single remediation tasklist is generated at the end, outside this directory,
 
 1. **Strict record-only.** No code is changed during the assessment — not even a
    live security hole. Rounds 2 and 3 must review the same tree round 1 did.
+   **One deliberate exception, 2026-08-23:** the user found four defects in the
+   live Feature Detail modal and asked for them to be fixed. They were
+   (MIS-E2E-132…135, plus MIS-E2E-030/031 which they confirmed). Phases P09–P12
+   therefore review a tree P01–P08 did not; the changed files are
+   `models/{feature,feature_analysis_cache}.py`, `services/analysis_service.py`
+   and `components/features/FeatureTokenAnalysis.tsx`.
 2. **Mutations are always reverted**, and the revert is confirmed with `git diff`
    before moving on. A surviving mutation is a *test* finding, not a code finding.
 3. **Mutation work never runs concurrently with a reading agent.** A reviewer once
@@ -51,6 +57,7 @@ Legend: `·` not started · `~` in progress · `✅` closed
 | P06 | MCP server | ✅ | ✅ | ✅ | 7 |
 | P07 | Frontend state layer | ✅ | ✅ | ✅ | 8 |
 | P08 | Frontend UI | ✅ | ✅ | ✅ | 4 |
+| — | *Out-of-band: user-reported modal defects (**fixed**)* | ✅ | — | ✅ | 4 |
 | P09 | Realtime (WebSocket) | · | · | · | 0 |
 | P10 | Infra & supply chain | · | · | · | 0 |
 | P11 | Documentation chain | · | · | · | 0 |
@@ -60,7 +67,7 @@ Legend: `·` not started · `~` in progress · `✅` closed
 
 | P0 | P1 | P2 | P3 | Total |
 |---:|---:|---:|---:|---:|
-| **11** | 49 | 53 | 18 | **131** |
+| **11** | 52 | 53 | 19 | **135** |
 
 Verdicts so far: **15 CONFIRMED**, 39 pending (most pending belong to phases that
 have not run yet). Severities are provisional until each finding's R3 verification.

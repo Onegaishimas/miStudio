@@ -12,6 +12,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, Hash, Settings } from 'lucide-react';
 import { useFeaturesStore } from '../../stores/featuresStore';
 import { fireAndForget } from '../../utils/fireAndForget';
+import { cleanToken, WORD_START_MARKERS } from '../../utils/tokenUtils';
 
 interface FeatureTokenAnalysisProps {
   featureId: string;
@@ -239,8 +240,28 @@ export const FeatureTokenAnalysis: React.FC<FeatureTokenAnalysisProps> = ({ feat
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-mono text-sm text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-900/50 px-2 py-1 rounded">
-                        {tokenData.token}
+                      {/* Tokenizer surface forms carry a word-start marker —
+                          'Ġ' for GPT-2/Llama BPE, '▁' for SentencePiece — which
+                          means "preceded by a space", not a character in the
+                          text. Showing it raw rendered every common word as
+                          'Ġthe'. Strip it for display, but keep the
+                          word-initial/continuation distinction: it is real
+                          information about what the feature fires on ('Ġthe'
+                          is the word "the"; 'the' is the tail of "breathe").
+                          The raw form stays available in the tooltip. */}
+                      <span
+                        className="font-mono text-sm text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-900/50 px-2 py-1 rounded"
+                        title={`Raw token: ${tokenData.token}`}
+                      >
+                        {!WORD_START_MARKERS.some((m) => tokenData.token.startsWith(m)) && (
+                          <span
+                            className="text-slate-400 dark:text-slate-500 select-none"
+                            title="Continues the previous word (no word-start marker)"
+                          >
+                            ⋯
+                          </span>
+                        )}
+                        {cleanToken(tokenData.token) || tokenData.token}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">

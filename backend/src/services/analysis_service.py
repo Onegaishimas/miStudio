@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, func
@@ -551,18 +552,43 @@ class AnalysisService:
             # stable key so the same query always samples the same features;
             # `sampled` is disclosed in the response.
             sample_size = 2000
-            features_stmt = select(Feature).where(
-                and_(
-                    Feature.training_id == feature.training_id,
-                    Feature.id != feature_id
-                )
-            ).order_by(Feature.id).limit(sample_size)
 
-            if isinstance(self.db, AsyncSession):
-                result = await self.db.execute(features_stmt)
-                other_features = list(result.scalars().all())
+            # SCOPE THE PEERS TO THE SAME DICTIONARY.
+            #
+            # This used to be `Feature.training_id == feature.training_id`.
+            # Features are extracted against an SAE in the registry, so
+            # `training_id` is NULL for every feature in this product — and
+            # `col == None` compiles to `IS NULL`, which matches EVERY feature
+            # of EVERY SAE. "Correlated features" were being drawn from other
+            # models entirely, then frozen for 7 days by the cache.
+            #
+            # `source_id` is the Feature model's own answer to "which
+            # dictionary is this from": `external_sae_id or training_id`.
+            if feature.external_sae_id:
+                scope = Feature.external_sae_id == feature.external_sae_id
+            elif feature.training_id:
+                scope = Feature.training_id == feature.training_id
             else:
-                other_features = list(self.db.execute(features_stmt).scalars().all())
+                # Neither set: the feature has no dictionary to compare within.
+                # Say so rather than silently comparing against the whole table.
+                logger.warning(
+                    f"Feature {feature_id} has neither external_sae_id nor "
+                    "training_id; cannot scope correlations"
+                )
+                scope = None
+
+            if scope is None:
+                other_features = []
+            else:
+                features_stmt = select(Feature).where(
+                    and_(scope, Feature.id != feature_id)
+                ).order_by(Feature.id).limit(sample_size)
+
+                if isinstance(self.db, AsyncSession):
+                    result = await self.db.execute(features_stmt)
+                    other_features = list(result.scalars().all())
+                else:
+                    other_features = list(self.db.execute(features_stmt).scalars().all())
 
             logger.info(f"Comparing with {len(other_features)} other features")
 
@@ -715,11 +741,16 @@ class AnalysisService:
             logger.warning(f"Feature {feature_id} not found")
             return None
 
-        training = await self._get_training(feature.training_id)
-        if not training:
-            logger.warning(f"Training {feature.training_id} not found")
-            return None
-
+        # NO training lookup here, deliberately.
+        #
+        # This estimate is computed entirely from `FeatureActivation` rows and
+        # `feature.activation_frequency` — the training is never read. The
+        # lookup that used to sit here was a dead precondition, and it failed
+        # for every feature in this product: features are extracted against an
+        # SAE in the registry, so `Feature.training_id` is NULL and the
+        # provenance lives one hop away on `ExternalSAE.training_id`. The
+        # endpoint then rendered that `None` as "Feature <id> not found",
+        # blaming the feature it had just successfully loaded.
         try:
             logger.info(f"Calculating ablation impact for feature {feature_id}")
 
@@ -861,20 +892,44 @@ class AnalysisService:
         analysis_type: AnalysisType,
         results: Dict[str, Any]
     ) -> None:
-        """Cache analysis results."""
+        """Cache analysis results, replacing any existing row for this pair.
+
+        UPSERT, not INSERT. `(feature_id, analysis_type)` is UNIQUE, and
+        `_get_cached_analysis` filters on `computed_at >= expiry_threshold` —
+        so once a row passes CACHE_EXPIRY_DAYS the read stops seeing it while
+        the row is still there, and nothing prunes it. A plain INSERT then
+        raises a unique violation on every subsequent request, PERMANENTLY:
+        logit lens, correlations and ablation all 500 for that feature from
+        the expiry onward, and recomputing is exactly what triggers it.
+
+        Two concurrent first-requests for the same feature hit the same wall.
+
+        `ON CONFLICT ... DO UPDATE` also gives the refresh the semantics the
+        expiry was always meant to have: a stale entry is replaced by the
+        recomputed one.
+        """
         now = datetime.now(timezone.utc)
-        cache_entry = FeatureAnalysisCache(
-            feature_id=feature_id,
-            analysis_type=analysis_type,
-            result=results,  # Column is named 'result' not 'results'
-            computed_at=now,
-            expires_at=now + timedelta(days=self.CACHE_EXPIRY_DAYS)
+        values = {
+            "feature_id": feature_id,
+            "analysis_type": analysis_type,
+            "result": results,  # Column is named 'result' not 'results'
+            "computed_at": now,
+            "expires_at": now + timedelta(days=self.CACHE_EXPIRY_DAYS),
+        }
+        stmt = pg_insert(FeatureAnalysisCache).values(**values).on_conflict_do_update(
+            constraint="uq_feature_analysis_cache_feature_type",
+            set_={
+                "result": values["result"],
+                "computed_at": values["computed_at"],
+                "expires_at": values["expires_at"],
+            },
         )
 
-        self.db.add(cache_entry)
         if isinstance(self.db, AsyncSession):
+            await self.db.execute(stmt)
             await self.db.commit()
         else:
+            self.db.execute(stmt)
             self.db.commit()
 
     async def _get_feature(self, feature_id: str) -> Optional[Feature]:

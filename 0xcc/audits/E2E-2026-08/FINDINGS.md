@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 131
-**Last id issued:** MIS-E2E-131
+**Count:** 135
+**Last id issued:** MIS-E2E-135
 
 ---
 
@@ -505,7 +505,9 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Failure scenario:** Two paths reach it. (1) A cached analysis passes its 7-day expiry: the read treats it as stale and recomputes, the write hits the surviving row, and the insert raises. (2) Two concurrent requests for the same feature race and the second insert raises. Either way logit lens, correlations and ablation return 500 **permanently** for that feature — the failure is sticky, because the row that causes it is never removed. A feature that worked yesterday stops working with no state change from the user.
 - **Evidence:** plausible (read-only)
 - **Doc reference:** PADR IDL-9 (NLP analysis for feature discovery)
-- **Verification (R3):** pending — reproducible against the live app by requesting an expired analysis
+- **Verification (R3):** **CONFIRMED IN PRODUCTION and FIXED (2026-08-23).** The user hit it on the live deployment: the Feature Detail modal's **Logit Lens** and **Correlations** tabs both returned `HTTP error! status: 500` for `feat_sae_20260726_174056_d1a4_00000`, while Examples and Token Analysis — which do not touch this cache — worked. Isolated by probing a feature that had never been analysed (`feat_sae_20260223_190441_03261`): it returned **200** on both tabs, proving the 500 is the stale-cache path and not the computation.
+  Root cause exactly as predicted: `_get_cached_analysis` filters on `computed_at >= expiry_threshold`, so an expired row is invisible to the read and still present in the table; nothing prunes it; `_cache_analysis` then blind-INSERTs against `uq_feature_analysis_cache_feature_type`. Reproduced against a real Postgres schema — the second write raises `UniqueViolationError`.
+  **Fixed:** `_cache_analysis` is now `pg_insert(...).on_conflict_do_update(...)`, which also gives the expiry the semantics it always implied (a stale entry is *replaced* by the recompute). Regression test `backend/tests/unit/test_analysis_cache_upsert.py`; negative control M25 reverted the upsert to the blind INSERT and **2 tests failed**.
 - **Proposed remediation:** Postgres `ON CONFLICT (feature_id, analysis_type) DO UPDATE`. Add the missing prune for expired rows.
 - **Effort:** S
 
@@ -527,7 +529,8 @@ phase rediscovers them as new. Each carries the phase that owns its verification
   features:               unique=NONE      # DB has uq_features_extraction_neuron
   ```
   Both constraints exist in the live database (queried via `pg_constraint`) and neither is in the ORM, so the unit suite's schema provably lacks them.
-- **Proposed remediation:** Declare both constraints on the models (they belong there regardless), and add a guard test that diffs `Base.metadata` against the migrated schema so the next migration-only constraint cannot diverge silently.
+- **FIXED (2026-08-23):** both constraints are now declared in `__table_args__` on `FeatureAnalysisCache` and `Feature`, so `create_all()` builds the same schema production has. This was a prerequisite for fixing MIS-E2E-030 — `ON CONFLICT` needs the constraint to exist wherever the tests run. Full backend suite green afterwards (2,883 collected, 0 failures), so nothing depended on the missing constraints.
+- **Still outstanding:** the guard test that diffs `Base.metadata` against the migrated schema, so the next migration-only constraint cannot diverge silently. Two constraints are fixed; the *mechanism* that let them diverge is not.
 - **Effort:** M
 
 ---
@@ -2325,4 +2328,77 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Doc reference:** PADR IDL-32, IDL-33
 - **Verification (R3):** pending — all four are browser-observable
 - **Proposed remediation:** Set `mountedRef.current = true` on mount; clear `captureId` when its option disappears; validate `feature_idx`; append the anchor and revoke after the click.
+- **Effort:** M
+
+---
+
+## Out-of-band — Feature Detail modal (user-reported, 2026-08-23)
+
+Four defects the user found in the running product while the audit was between
+phases. Recorded here so the register stays the complete account. **These four
+were fixed immediately at the user's request** — the only departure from the
+audit's strict record-only rule, made deliberately and noted in the round records.
+
+---
+
+### MIS-E2E-132 — Ablation refuses every feature in the product, blaming the feature
+- **Phase / Round:** out-of-band / user-reported
+- **Source:** live product; confirmed at source
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/services/analysis_service.py` `calculate_ablation`; `backend/src/api/v1/endpoints/features.py:684`
+- **Claim:** `calculate_ablation` loaded the feature successfully, then did `training = await self._get_training(feature.training_id)` and returned `None` when that failed. **`training` was never used again** — the estimate is computed entirely from `FeatureActivation` rows and `feature.activation_frequency`. It was a dead precondition. The endpoint maps `None` to `404 "Feature {id} not found"`, so the message was wrong twice: the feature *was* found, and the actual failure was a training lookup.
+- **Failure scenario:** `Feature.training_id` is NULL for **every feature in this deployment** — all 20 extractions have it NULL. Features are extracted against an SAE in the registry, so the link is `Feature.external_sae_id → ExternalSAE.training_id`. The Ablation tab therefore 404'd for every feature, and the message sent the reader looking for a missing feature that was right there.
+- **Evidence:** **verified-by-live-repro** — `GET /features/feat_sae_20260726_174056_d1a4_00000/ablation` → 404 with that message, while `GET /features/{id}` → 200; reproduced on a second, never-analysed feature
+- **FIXED:** the dead lookup is removed, with a comment recording why it was wrong.
+- **Effort:** S
+
+---
+
+### MIS-E2E-133 — Correlations were computed against features from other models
+- **Phase / Round:** out-of-band / user-reported
+- **Source:** live product; found while diagnosing the 500
+- **Severity:** P1
+- **Type:** bug *(the "wrong results presented as correct" class)*
+- **Location:** `backend/src/services/analysis_service.py`, `calculate_correlations` peer query
+- **Claim:** Peers were selected with `Feature.training_id == feature.training_id`. Since `training_id` is NULL for every feature, SQLAlchemy compiles that to **`training_id IS NULL`**, which matches **every feature of every SAE in the deployment** — 32,766 in this one SAE alone, across 20 unrelated SAEs and models, capped only by the 2,000-row sample.
+- **Failure scenario:** Confirmed on the live app: correlations for a feature in `extr_20260223_190441` returned `feat_sae_20260223_131023_01636` — **a different extraction, a different SAE**. "Correlated features" were drawn from other dictionaries entirely and then frozen for seven days by the cache. Nothing indicated it; the numbers looked ordinary.
+- **Evidence:** **verified-by-live-repro** — the cross-SAE peer id in the live response
+- **FIXED:** peers are now scoped to the same dictionary (`external_sae_id`, falling back to `training_id`), and a feature with neither is logged and returns no peers rather than silently comparing against the whole table.
+- **Effort:** S
+- **Note:** this is the same root shape as MIS-E2E-100 and the recorded memory `cluster-profile-persisted-shape` — *derive it from the `ExternalSAE` row*. Third consumer found with the same assumption.
+
+---
+
+### MIS-E2E-134 — Token Analysis showed raw BPE markers
+- **Phase / Round:** out-of-band / user-reported
+- **Source:** live product
+- **Severity:** P3
+- **Type:** bug
+- **Location:** `frontend/src/components/features/FeatureTokenAnalysis.tsx:243`
+- **Claim:** The ranked-token table rendered `{tokenData.token}` raw, so every common word appeared as `Ġthe`, `Ġa`, `Ġand`. `Ġ` (U+0120) is the GPT-2/Llama byte-level BPE marker meaning *"preceded by a space"* — it is not a character in the text. `cleanToken` already existed in `utils/tokenUtils.ts` and was used elsewhere; this table used neither it nor the backend's `normalize_token`.
+- **Failure scenario:** Cosmetic but pervasive — the top of the token table is exactly where common words rank, so nearly every visible row was affected.
+- **FIXED:** the marker is stripped for display, the raw form is kept in a tooltip, and — because the distinction is real information about what the feature fires on (`Ġthe` is the word *"the"*; `the` is the tail of *"breathe"*) — continuation tokens now carry a `⋯` prefix rather than being silently conflated with word-initial ones.
+- **Effort:** S
+
+---
+
+### MIS-E2E-135 — `Feature.training_id` is NULL by design and three consumers assume it is not
+- **Phase / Round:** out-of-band / user-reported
+- **Source:** synthesis of 132, 133 and MIS-E2E-100
+- **Severity:** P1
+- **Type:** debt
+- **Location:** the `Feature → ExternalSAE → Training` chain, versus consumers reading `Feature.training_id` directly
+- **Claim:** `external_saes` is the **SAE registry**, not a table of foreign SAEs. A locally-trained SAE is exported to `community_format/`, imported into the registry (`source="trained"`, carrying `training_id` and `model_id`), and feature extraction runs against the **registry SAE**. So `Feature.training_id` is NULL and the provenance is one hop away. Verified on the live app:
+  ```
+  Feature.external_sae_id  = sae_d1a486a712b0
+      ExternalSAE.source      = "trained"
+      ExternalSAE.training_id = train_969e90af
+      ExternalSAE.model_id    = m_8a9fe2c7
+  ```
+  Nothing is lost — but three consumers read `Feature.training_id` directly and break: ablation (MIS-E2E-132), correlations (MIS-E2E-133) and the Steering feature browser (MIS-E2E-100).
+- **Failure scenario:** The three symptoms differ — a 404, silently wrong peers, missing labels and `activation_frequency` — which is why they were never connected. The `Feature` model already has the right abstraction: `source_id`, returning `external_sae_id or training_id`. It is used by none of them.
+- **Evidence:** **verified-by-live-repro** — the SAE row queried on the live app; all 20 extractions confirmed `training_id: None`
+- **Verification (R3):** CONFIRMED
+- **Proposed remediation:** A single resolver — "give me the training/model behind this feature" — that walks the SAE row, and a sweep of every direct `Feature.training_id` read. MIS-E2E-100 is still open and is the third instance.
 - **Effort:** M
