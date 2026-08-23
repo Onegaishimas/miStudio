@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3230 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3235 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 6** | Task 13 — documentation (19 findings) | ⏳ **in progress** — 13.1 ✅ 13.2 ✅ 13.8 ✅ 13.9 ✅ 13.11 ✅ · 13.3–13.7, 13.10 open |
+| **Wave 6** | Task 13 — documentation (19 findings) | ⏳ **in progress** — 13.1–13.4 ✅ 13.6 ✅ 13.7 partial 13.8 ✅ 13.9 ✅ 13.11 ✅ · 13.5, 13.10 open |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
@@ -206,11 +206,11 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 13.1 ✅ Corrected, with the **Stop & Finalize** row and the warning the other manual already carried — plus the incident itself recorded inline, so the next reader knows why the wording matters. Pinned by a test parametrized over **both** manuals. On whether it should exist: left in place, now guarded; deleting a 599-line user manual is the user's call, not a remediation's. — MIS-E2E-149
 - [x] 13.2 ✅ Enforced, and the manual corrected. Verified across the full matrix: stdio+flag ✅, stdio bare ✅, **HTTP+flag REFUSED**, HTTP bare REFUSED, HTTP+token ✅.
   ⚠️ **A test was pinning this defect** — `test_anonymous_flag_allows_empty_token` asserted the flag satisfies the guard, i.e. certified the hole. Rewritten. Third defect-pinning test found in this remediation. — MIS-E2E-150
-- [ ] 13.3 Rewrite the K8s install guide's four `sed` steps — none matches, and one renames the database to the password. — MIS-E2E-152
-- [ ] 13.4 Point README at the real Compose quickstart, not `start-mistudio.sh` (hardcoded `/home/x-sean`, needs a venv it never creates, different domain). — MIS-E2E-162
+- [x] 13.3 ✅ Both pages rewritten around the **Secret** the deployment actually reads (`secretKeyRef` → `mistudio-secrets`), with a verification step that reports failure — unlike `sed`, which exits 0 on zero matches, so all four steps "succeeded" while setting nothing. The danger callout records what the old steps did, including the one that **renamed the database and its user to the password string**. — MIS-E2E-152
+- [x] 13.4 ✅ README and CLAUDE.md both point at `docker compose up -d`. The script is described for what it is — a one-machine dev convenience — with the reasons it cannot work elsewhere. — MIS-E2E-162
 - [ ] 13.5 Correct IDL-5 and the **five** documents propagating it; IDL-16's three false claims; IDL-1/12's channel and event conventions; IDL-11's DLQ and backoff; IDL-38's "one steering core". — MIS-E2E-156, -157, -158, -159, -076
-- [ ] 13.6 Reconcile PPRD §2.1 — **13 rows** mark "Planned" work that shipped — and decide which document is authoritative for status. — MIS-E2E-011
-- [ ] 13.7 Fix CLAUDE.md: the off-by-one instruction references (which point at the **wrong action**), the phantom paths, the self-contradictions, the stale test counts, the "returns 501" claims. — MIS-E2E-155, -010, -163
+- [x] 13.6 ✅ Re-counted from evidence: **9** rows (16–24), not 13 — row 21 already read "Implemented". Status verified against the **code**, not another document: each row's primary module was checked to exist, and 25–29 stay Planned because theirs do not. The PPRD inventory is declared **authoritative for status**, with `CLAUDE.md` the narrative that yields to it. — MIS-E2E-011
+- [x] 13.7 ⏳ **Partial.** The off-by-one instruction references are fixed — `001_generate-brd.md` was added at the front and the list never renumbered, so every entry named a real file performing a **different action**, and `008_housekeeping.md` did not exist. Now pinned by `test_every_instruct_reference_names_a_file_that_exists`. The startup section is corrected too. **Remaining:** the phantom paths, the stale test counts and the "returns 501" claims in the status narrative. — MIS-E2E-155 ✅ · -010, -163 open
 - [x] 13.8 ✅ **PADR IDL-47** (v3.5). States the posture, the **four classes that escape it** — credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach, each found live in this audit — the infrastructure boundary (the API behind nginx, *not* the broker or `/api/internal`), the four conditions that invalidate the decision, and that the PIN is a UI affordance and never security. — MIS-E2E-002, -166
 - [x] 13.9 ✅ Re-measured: **9** missing against the current ORM, not 11 (two of the named ones are non-ORM). All nine documented; the unearned claim replaced by `test_data_model_doc_covers_every_table`, which diffs the page against `Base.metadata`. `alembic_version` and `feature_activations_default` are **listed exemptions with reasons**. Control: adding a new ORM table fails the guard until it is documented. — MIS-E2E-050, -164
 - [ ] 13.10 Add `## Relevant Files` to FTASKS 024–028 and the six ad-hoc files; triage the 348 unchecked boxes; fix the 22 dead paths. — MIS-E2E-153, -154, -012
@@ -421,6 +421,9 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `docs/mcp-contract.md` | Regenerated — three phantom endpoints removed |
 | `backend/src/mcp_server/server.py` | MIS-E2E-161: the tool count is derived by AST, not written |
 | `manual/docs/advanced/mcp-server.md` | Stale `(97 tools, 13 categories)` heading dropped rather than re-hardcoded |
+| `manual/docs/getting-started/install-guide-k8s.md` · `installation.md` | MIS-E2E-152: the four no-op `sed` steps replaced by the Secret the deployment actually reads |
+| `README.md` · `CLAUDE.md` | MIS-E2E-162: `docker compose up -d`, not a script hardcoded to one home directory. MIS-E2E-155: every `0xcc/instruct/` reference renumbered |
+| `0xcc/prds/000_PPRD\|miStudio.md` | MIS-E2E-011: rows 16–24 reconciled from **code evidence**; the inventory declared authoritative for status |
 
 ## Negative controls run
 
@@ -564,6 +567,7 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC132 | Add a new ORM table and leave it undocumented | ✅ 1 failure — the invariant that actually matters |
 | NC133 | Scraper drops the leading-`/` filter (MIS-E2E-114) | ⚠️ survived against the committed file alone; **✅ 1 failure** once the regeneration test is in scope — which is the guard that matters |
 | NC134 | Instruction counts hardcoded again (MIS-E2E-161) | ✅ 1 failure |
+| NC135 | A CLAUDE.md instruct reference goes stale again (MIS-E2E-155) | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),

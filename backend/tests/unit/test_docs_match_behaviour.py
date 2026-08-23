@@ -291,3 +291,30 @@ def test_the_instruction_ceiling_exceeds_the_contract_by_exactly_the_conditional
         f"the AST ceiling and the served set differ by {sorted(difference)}, "
         f"expected exactly {sorted(_CONDITIONALLY_REGISTERED)}"
     )
+
+
+# ── MIS-E2E-155 · CLAUDE.md's instruction references ───────────────────────
+
+def test_every_instruct_reference_names_a_file_that_exists():
+    """MIS-E2E-155. `001_generate-brd.md` was added at the front of the
+    sequence and the reference list was never renumbered — so every entry
+    named a real file performing a DIFFERENT action, and `008_housekeeping.md`
+    did not exist at all. Following any of them by number ran the wrong step.
+    """
+    import re
+
+    claude = (REPO / "CLAUDE.md").read_text()
+    instruct_dir = REPO / "0xcc" / "instruct"
+    assert instruct_dir.is_dir(), "0xcc/instruct moved — guard is vacuous"
+
+    on_disk = {p.name for p in instruct_dir.glob("*.md")}
+    assert on_disk, "no instruction files found"
+
+    referenced = set(re.findall(r"0xcc/instruct/([0-9]{3}_[a-z-]+\.md)", claude))
+    assert referenced, "no instruction references found in CLAUDE.md"
+
+    missing = referenced - on_disk
+    assert not missing, (
+        f"CLAUDE.md references instruction files that do not exist: "
+        f"{sorted(missing)}. On disk: {sorted(on_disk)}"
+    )
