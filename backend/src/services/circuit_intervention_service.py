@@ -382,7 +382,10 @@ class CircuitInterventionService:
         finally:
             h.remove()
         hidden = captured["h"].float()
-        z = sae_d.encode(hidden)
+        # MIS-E2E-083 sibling sweep.
+        from ..ml.sparse_autoencoder import encode_with_training_normalization
+
+        z = encode_with_training_normalization(sae_d, hidden)
         if isinstance(z, tuple):
             z = z[0]
         return z[..., feature_idx]
@@ -391,7 +394,9 @@ class CircuitInterventionService:
     def _encoder_for(sae, feature_idx):
         """encode_fn(hidden)->a_u for the suppression hook (same-pass encode)."""
         def enc(hidden):
-            z = sae.encode(hidden.float())
+            from ..ml.sparse_autoencoder import encode_with_training_normalization
+
+            z = encode_with_training_normalization(sae, hidden.float())
             if isinstance(z, tuple):
                 z = z[0]
             return z[..., feature_idx]

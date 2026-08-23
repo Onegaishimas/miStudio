@@ -464,7 +464,10 @@ class CircuitFaithfulnessService:
                 model(input_ids=input_ids, attention_mask=mask)
         finally:
             h.remove()
-        z = sae_d.encode(captured["h"].float())
+        # MIS-E2E-083 sibling sweep.
+        from ..ml.sparse_autoencoder import encode_with_training_normalization
+
+        z = encode_with_training_normalization(sae_d, captured["h"].float())
         if isinstance(z, tuple):
             z = z[0]
         idx = torch.as_tensor(list(feature_idxs), device=z.device, dtype=torch.long)
@@ -476,7 +479,9 @@ class CircuitFaithfulnessService:
         for the per-layer SUM suppression hook."""
         def enc(hidden):
             import torch
-            z = sae.encode(hidden.float())
+            from ..ml.sparse_autoencoder import encode_with_training_normalization
+
+            z = encode_with_training_normalization(sae, hidden.float())
             if isinstance(z, tuple):
                 z = z[0]
             return [z[..., int(fi)] for fi in feature_idxs]
