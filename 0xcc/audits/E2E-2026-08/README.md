@@ -1,6 +1,9 @@
 # miStudio End-to-End Assessment — E2E-2026-08
 
-**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ closed · P10 next
+**Started:** 2026-08-23 · **Status:** ⏳ P00 ✅ · P01 ✅ · P02 ✅ · P03 ✅ · P04 ✅ · P05 ✅ · P06 ✅ · P07 ✅ · P08 ✅ · P09 ✅ · P10 ✅ closed · P11 next
+
+> **⚠ MIS-E2E-143 — ACT NOW.** An SSH password, five database dumps and this
+> register itself are published in a **public** GitHub repository. See FINDINGS.md.
 
 An end-to-end assessment of the whole application — frontend, backend, MCP server,
 infrastructure, and the `0xcc` document chain — in **12 subsystem phases × 3 rounds
@@ -59,7 +62,7 @@ Legend: `·` not started · `~` in progress · `✅` closed
 | P08 | Frontend UI | ✅ | ✅ | ✅ | 4 |
 | — | *Out-of-band: user-reported modal defects (**fixed**)* | ✅ | — | ✅ | 4 |
 | P09 | Realtime (WebSocket) | ✅ | ✅ | ✅ | 7 |
-| P10 | Infra & supply chain | · | · | · | 0 |
+| P10 | Infra & supply chain | ✅ | ✅ | ✅ | 6 |
 | P11 | Documentation chain | · | · | · | 0 |
 | P12 | Cross-cutting & live journeys | · | · | · | 0 |
 
@@ -67,7 +70,7 @@ Legend: `·` not started · `~` in progress · `✅` closed
 
 | P0 | P1 | P2 | P3 | Total |
 |---:|---:|---:|---:|---:|
-| **11** | 54 | 57 | 20 | **142** |
+| **12** | 57 | 58 | 21 | **148** |
 
 Verdicts so far: **15 CONFIRMED**, 39 pending (most pending belong to phases that
 have not run yet). Severities are provisional until each finding's R3 verification.
@@ -85,6 +88,7 @@ have not run yet). Severities are provisional until each finding's R3 verificati
 | P07 | 1 | **1** | 0 |
 | P08 | 2 | 0 | 2 |
 | P09 | 2 | **1** | 1 |
+| P10 | 1 | 0 | 1 |
 
 A survival is a **test finding**, not a code finding. Every edit was confirmed to
 land before the suite ran, and `git diff` verified clean after every restore.

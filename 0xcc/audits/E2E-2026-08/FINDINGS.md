@@ -6,8 +6,16 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 142
-**Last id issued:** MIS-E2E-142
+**Count:** 148
+
+> ### ⚠ ACT NOW — MIS-E2E-143
+> An SSH password for the GPU node, five database dumps, and this audit's own
+> findings register are **published in a public GitHub repository**. The
+> `sync-to-clean` filter removes them from the tip commit and force-pushes the
+> full unfiltered history, so all of it is readable one commit back. Verified
+> against the live public repo. Rotate the credential and make the mirror
+> private before anything else in this register.
+**Last id issued:** MIS-E2E-148
 
 ---
 
@@ -2533,3 +2541,125 @@ audit's strict record-only rule, made deliberately and noted in the round record
 - **Proposed remediation:** Two tests: a `ReadTimeout` retries and eventually succeeds; a `RemoteProtocolError` does the same. Fix MIS-E2E-137 and use these as its negative control.
 - **Effort:** S
 - **Method note:** this mutation applied the *fix* rather than breaking the code. Where a finding claims behaviour is wrong, checking that the corrected behaviour is also unobserved tells you whether the fix will stay fixed.
+
+---
+
+## P10 — Infra & supply chain
+
+---
+
+### MIS-E2E-143 — The public mirror publishes everything the filter exists to withhold, including an SSH password
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high; confirmed against the live public repository
+- **Severity:** **P0 — ACT NOW**
+- **Type:** security
+- **Location:** `.github/workflows/sync-to-clean.yml:27-78`; `scripts/k8s-helpers.sh:7`
+- **Claim:** `sync-to-clean.yml` checks out with `fetch-depth: 0`, `rm -rf`s the excluded paths, commits **one filter commit**, and then `git push --force` to `hitsainet/miStudio`. That publishes the **entire unfiltered history** with a single cleanup commit on top. The filter therefore removes the files from the **tip** and from nowhere else — every excluded path is readable one commit back.
+- **Verified against the live public repository** (`hitsainet/miStudio`, `"visibility": "public"`, `"private": false`), comparing the tip against its parent `ef270db`:
+  ```
+  path                                      tip      history
+  scripts/k8s-helpers.sh                    404      PRESENT   ← contains K8S_PASS=
+  backups/mistudio_db_20251218_035811.sql.gz 404     PRESENT   ← database dump
+  CLAUDE.md                                 404      PRESENT
+  0xcc/audits/E2E-2026-08/FINDINGS.md       404      PRESENT   ← this audit
+  scripts/backup-db.sh                      404      PRESENT
+  ```
+- **Failure scenario — three distinct exposures, all live:**
+  1. **`scripts/k8s-helpers.sh:7` hardcodes `K8S_PASS` — the SSH password for the GPU node** (`192.168.244.61`, user `sean`), used with `StrictHostKeyChecking=no`. It is published and world-readable. **This credential must be treated as compromised and rotated.**
+  2. **Five database dumps** (`backups/*.sql.gz`) are published. This supersedes MIS-E2E-008, which recorded them as *"stripped from the public mirror, but in this repo's history"* — they are in the **public** repo's history. Their contents determine whether encrypted API-key envelopes and user prompt text are also exposed.
+  3. **This audit's own `FINDINGS.md` is published**, and it is a complete, indexed inventory of 142 unremediated defects including 11 P0 security holes with reproduction steps. It reached the public repo through the merge that deployed the Feature Detail fixes.
+- **Why the filter looked correct:** it does exactly what its comments say — the exclusion list is right, the intent is right, and `docs/schemas/` and `mcp-contract.md` are correctly preserved. Nothing about reading the workflow reveals the problem, because the defect is not in *what* it removes but in the fact that `--force`-pushing a full history makes removal-at-the-tip meaningless. `docker-images.yml` even documents the mechanism in passing — *"HEAD~1 is the unfiltered source tip"* — as a build-detection nuance, not as a disclosure.
+- **Evidence:** **verified-by-live-repro against the public GitHub API** — repository visibility, tip 404s, and parent-commit presence for five paths
+- **Doc reference:** `.github/workflows/sync-to-clean.yml`; supersedes MIS-E2E-007 and MIS-E2E-008 in severity and scope
+- **Verification (R3):** **CONFIRMED**
+- **Proposed remediation, in order:**
+  1. **Rotate the GPU node's SSH password now**, and move `k8s-helpers.sh` to key-based auth reading from the environment. Assume the current value is known.
+  2. **Make the mirror private** until the history is dealt with — one setting, immediate, reversible.
+  3. **Rewrite the mirror's history**: publish a squashed single commit, or filter with `git filter-repo` before pushing. A force-push of full history can never be filtered by deleting files at the tip.
+  4. Review the dumps for credential and prompt content; rotate anything they hold.
+  5. Add a CI check that greps the *published* tree's history for the exclusion list and fails the sync.
+- **Effort:** M (S for steps 1–2, which stop the bleeding)
+
+---
+
+### MIS-E2E-144 — `k8s_deploy` re-applies a stale manifest and reverts two shipped fixes
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `k8s/mistudio-deployment.yaml:220` versus `k8s/base/backend.yaml`; `scripts/k8s-helpers.sh:60`
+- **Claim:** ArgoCD deploys `k8s/base` (via kustomize). The root `k8s/mistudio-deployment.yaml` is a second, **stale** copy: it is missing `celery-worker-cpu`, `CELERY_QUEUES`, `CELERY_WORKER_NAME` and `ENVIRONMENT=production`. `k8s_deploy` — documented as break-glass — re-applies that file, which **reverts the queue-split fix and the SQL-echo incident fix** on a cluster that currently has them. The guard test reads only `k8s/base`, so it cannot see the divergence.
+- **Failure scenario:** The emergency procedure silently undoes two incident fixes, at the moment it is most likely to be used. Compounding: `k8s_deploy` never restarts `mistudio-mcp`, which runs the same backend image, so new MCP tools stay invisible after a break-glass deploy.
+- **Evidence:** verified-by-live-repro (both manifests diffed; the guard's path scope read)
+- **Doc reference:** `CLAUDE.md` K8s Helper Commands; memory `mistudio-gitops-cicd`
+- **Verification (R3):** pending
+- **Proposed remediation:** Delete the root manifest and have `k8s_deploy` apply `k8s/base` via kustomize, so there is one source of truth. Extend the guard to fail if a second manifest defines the same Deployments.
+- **Effort:** S
+
+---
+
+### MIS-E2E-145 — Postgres and Redis run as RollingUpdate Deployments over hostPath
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `k8s/base/postgres.yaml:10` (and the redis manifest)
+- **Claim:** Both are `Deployment`s with the default `RollingUpdate` strategy backed by `hostPath` volumes. A rollout therefore starts the new pod **before** terminating the old one, and both mount the same data directory. Postgres wedges on `postmaster.pid`; Redis clobbers `dump.rdb`. The backend Deployment already uses `Recreate` — the pattern is known and was applied to the stateless component, not the stateful ones.
+- **Failure scenario:** Any change to either manifest — an image bump, a resource tweak, a config change — risks corrupting the database on a shared data directory. It has not fired only because these manifests rarely change.
+- **Evidence:** plausible (read-only) — the strategy and volume type read from the manifests
+- **Doc reference:** PADR deployment standards
+- **Verification (R3):** pending
+- **Proposed remediation:** `strategy: Recreate` on both, or move to StatefulSets with real PVCs.
+- **Effort:** S
+
+---
+
+### MIS-E2E-146 — Compose publishes an unauthenticated Redis and a known-password Postgres on all interfaces
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** security
+- **Location:** `docker-compose.yml:25` (postgres `5432:5432`, `devpassword`), `:61` (redis `6379:6379`, no auth)
+- **Claim:** Both are published on `0.0.0.0`. The Redis instance is the **Celery broker**, so anyone on the LAN can enqueue tasks — which in this product means starting GPU jobs, and reaching the task payloads of jobs already queued.
+- **Failure scenario:** Broader than the accepted no-app-auth posture (MIS-E2E-002): that posture concedes the *API*, behind nginx. This is the broker and the database, direct, bypassing nginx entirely. A LAN attacker enqueues a Celery task or reads the database with a password committed to the repo.
+- **Evidence:** verified-by-live-repro (port bindings read; `mistudio-postgres` is currently listening on `0.0.0.0:5432` on this host)
+- **Doc reference:** MIS-E2E-002
+- **Verification (R3):** pending
+- **Proposed remediation:** Bind to `127.0.0.1:` in the published ports, and set a Redis password.
+- **Effort:** S
+
+---
+
+### MIS-E2E-147 — Five infra defects that make a deployment or a diagnosis wrong
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `docker-compose.yml:269`, `:188`; `nginx/nginx.docker.conf:32`; `scripts/k8s-helpers.sh:69`; `nginx/nginx.conf:46`
+- **Claim:**
+  1. **The compose frontend is unreachable.** Published `3000:80`, but commit `bca37c6` moved the image to nginx-unprivileged on **8080** and updated only k8s and `nginx.docker.conf`. `http://localhost:3000` is dead.
+  2. **`k8s_deploy` reports success on failure.** The whole `&&` chain ends in one `|| echo "Schema verification failed"`, so a failed pull, apply or rollout is misreported and the function returns 0.
+  3. **No `/ollama/` location in `nginx.docker.conf`.** The labeling default `/ollama/v1` hits the SPA catch-all and returns `index.html` with a **200** — surfacing as "no models found" rather than a routing error.
+  4. **The compose worker consumes every queue on one solo slot** — the exact head-of-line-blocking incident the k8s deployment fixed by adding a second worker.
+  5. **`nginx.conf:46` `server_name` typo** — `192.168.224.222` where the CORS map says `.244.`. Works only because it is the default server block.
+- **Failure scenario:** (2) is the sharpest: the break-glass deploy path reports success when it failed, and (1) means the documented dev URL has been broken since `bca37c6`.
+- **Evidence:** verified-by-live-repro (each read at source; the port change traced to its commit)
+- **Verification (R3):** pending
+- **Proposed remediation:** Individually small; (2) first.
+- **Effort:** M
+
+---
+
+### MIS-E2E-148 — Two guards that fail open, and a keyring that trusts too much
+- **Phase / Round:** P10 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** debt
+- **Location:** `backend/tests/unit/test_worker_queue_coverage.py:40`; `k8s/base/ingress.yaml:36`; `backend/Dockerfile:24`
+- **Claim:**
+  1. The manifest guard `pytest.skip`s if the manifest path moves — **fails open**, the fourth source-scrape guard in this audit to do so.
+  2. `ingress.yaml:36`'s `/api` prefix exposes `/api/internal/*`, which **both** nginx configs deny as security-critical. Mitigated by the HMAC check on those two endpoints (verified correct in P05), so the defence-in-depth layer is missing rather than the defence.
+  3. `backend/Dockerfile:24` uses `apt-key adv`, putting the deadsnakes key in the **global** trusted keyring — trusted for all repositories. `signed-by=` scopes it.
+- **Evidence:** verified-by-live-repro
+- **Verification (R3):** pending
+- **Effort:** S
