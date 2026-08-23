@@ -160,8 +160,15 @@ jobs:
             echo "tags=${{ steps.img.outputs.repo }}:latest,${{ steps.img.outputs.repo }}:${VERSION}" >> "$GITHUB_OUTPUT"
           else
             SHA="${GITHUB_SHA::8}"
+            VERSION="$(cat VERSION 2>/dev/null || echo 0.0.0)+${SHA}"
             echo "tags=${{ steps.img.outputs.repo }}:latest,${{ steps.img.outputs.repo }}:${SHA}" >> "$GITHUB_OUTPUT"
           fi
+          # MIS-E2E-028: the version the IMAGE reports, not just the tag it
+          # carries. Every deployed pod answered `GET /api/v1/version` with
+          # "unknown" because `VERSION` lives at the repo root and the backend
+          # build context is `backend/`, so the file never entered the image.
+          # A build arg reaches across that boundary where a COPY cannot.
+          echo "app_version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.name }} image
         id: build
@@ -171,6 +178,8 @@ jobs:
           file: ${{ steps.img.outputs.dockerfile }}
           push: true
           tags: ${{ steps.version.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.app_version }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           # mode=max attaches full build step provenance (not the default
