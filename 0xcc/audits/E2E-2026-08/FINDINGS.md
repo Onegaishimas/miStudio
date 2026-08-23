@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 97
-**Last id issued:** MIS-E2E-097
+**Count:** 112
+**Last id issued:** MIS-E2E-112
 
 ---
 
@@ -1703,4 +1703,270 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Doc reference:** PADR IDL-11; memory `celery-queue-split-and-name-routing`
 - **Verification (R3):** CONFIRMED at R2
 - **Proposed remediation:** Add one assertion driven off the registry: for every registered task, resolve its queue through `celery_app.amqp.router` and compare against an expected mapping. That single test catches MIS-E2E-093 and would have caught M17. It is the same derive-from-the-registry shape the MCP reachability harness already uses.
+- **Effort:** S
+
+---
+
+## P05 — REST API surface & schemas
+
+---
+
+### MIS-E2E-098 — Retry erases the failure evidence, then refuses, stranding the row forever
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/api/v1/endpoints/task_queue.py:852` (the `increment_retry_count` call), `:908-912` (the 400 fallthrough); `backend/src/services/task_queue_service.py:285-292`
+- **Claim:** `retry_task` calls `TaskQueueService.increment_retry_count` **before** the dispatch `if/elif` chain. That helper is not a counter increment — it sets `status="queued"`, `error_message=None`, `progress=0.0`, `completed_at=None`, `started_at=None` and then **`await db.commit()`**. If the task's `(task_type, entity_type)` pair matches no branch, execution reaches the `else` at `:908` and raises `HTTPException(400, "Unsupported task type…")`.
+- **Failure scenario:** The row is committed as `queued` with its error message destroyed, **no Celery task dispatched**, and the caller gets a 400. That row is now permanently stuck: it no longer appears under `/failed` because its status is not failed, nothing will ever process it because nothing was queued, and pressing Retry again repeats the sequence. The one artifact that said *why* the job failed is gone on the first click, irrecoverably — and the click that destroyed it also returned an error, so the user has no reason to think anything was written at all.
+- **Evidence:** **verified-by-live-repro at source** — the call ordering, the helper's field resets and its `db.commit()`, and the 400 fallthrough all read directly
+- **Doc reference:** PADR IDL-11; `.claude/context/agents/qa_engineer.md` records the sibling "task_queue retry ghosts" defect
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Resolve the dispatch branch **first**, then increment. Better: make `increment_retry_count` take the new `task_id` so the reset and the dispatch commit together, and neither can happen without the other.
+- **Effort:** S
+
+---
+
+### MIS-E2E-099 — `POST /system/restart` is an unauthenticated, idempotent restart loop
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** security
+- **Location:** `backend/src/api/v1/endpoints/system.py:56-70`
+- **Claim:** The handler takes no arguments, requires nothing, schedules `_delayed_exit` as a FastAPI background task and returns `200 {"status": "restarting"}`. Its docstring notes *"Docker will automatically restart the container due to the restart policy"* — so the restart policy is what makes it repeatable.
+- **Failure scenario:** Same privilege class as the steering `pkill`/`Popen` pair already recorded as MIS-E2E-003, and not covered by the accepted network-boundary posture for the same reason: terminating the API process is a privilege operation regardless of who can reach the port. Because it is unauthenticated, unrated and idempotent, a caller that repeats it keeps the backend permanently unavailable — the restart policy that makes the feature work is what makes the loop self-sustaining. It also kills any in-flight request, including a training dispatch mid-write.
+- **Evidence:** **verified-by-live-repro at source** — the whole handler read; no auth dependency, no confirmation token, no rate limit
+- **Doc reference:** none; MIS-E2E-002 records the posture, and this is one of the operations that escapes it
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Require the same `X-Internal-Token` HMAC the two `/api/internal/` routes use — that mechanism already exists in this codebase and is correctly built (`main.py:142`, `compare_digest`, always 403). Nginx already `deny all`s `/api/internal/`; this route deserves the same treatment.
+- **Effort:** S
+
+---
+
+### MIS-E2E-100 — Features from downloaded SAEs lose their labels in the Steering browser
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/api/v1/endpoints/saes.py:420` (`browse_sae_features`)
+- **Claim:** The handler resolves features only through `sae.training_id`. A **downloaded or externally imported** SAE has `external_sae_id` set and `training_id` NULL, so its features never match and the handler falls through to a placeholder branch.
+- **Failure scenario:** Every feature of an external SAE renders in the Steering browser with no label, no activation statistics, no `activation_frequency` and no `feature_id`. The missing `activation_frequency` is the sharper half: the frequency-derived auto-baseline (`S = clamp(2.9 − 2.6·freq, 1, 3)`, PADR IDL-27) has nothing to compute from, so every such feature silently falls back to the default strength of 10 — and downloading a community SAE from HuggingFace is a first-class, documented workflow.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-27; PPRD §3.5, §3.12; memory `steering-011-baseline-and-color-literal`
+- **Verification (R3):** pending — an external SAE exists in this deployment; a live `GET /saes/{id}/features` would settle it
+- **Proposed remediation:** Resolve on `external_sae_id` as well — the `Feature` model carries both columns and the extraction path already writes whichever applies.
+- **Effort:** S
+
+---
+
+### MIS-E2E-101 — A failed activation extraction disappears from the Monitor entirely
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/api/v1/endpoints/task_queue.py:495` (`/failed`) versus `:671` (`/active`)
+- **Claim:** `/active` federates over `activation_extractions`; `/failed` does not. And the activation worker writes no `task_queue` failure row — `task_queue` rows are created only in the failure handlers of three other task types.
+- **Failure scenario:** A failed "Extract Activations" job is visible in neither surface: not in `/active` (it is no longer active) and not in `/failed` (no federator, no row). It vanishes. The Monitor page is the product's single answer to "what went wrong", and this job type is absent from it — the same class the architect persona recorded as *"task_queue has no lifecycle owner"*, still open on this branch of it.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-11; `.claude/context/sessions/review_celery_monitor_operations_2026-07-10.md`
+- **Verification (R3):** pending
+- **Proposed remediation:** Add the federator to `/failed`, mirroring `/active`. The recorded architectural decision from that earlier review — *federate read-only over the real job tables rather than dual-writing `task_queue`* — already prescribes this; it was applied to `/active` only.
+- **Effort:** S
+
+---
+
+### MIS-E2E-102 — Blocking Redis reads inside the async Monitor handler
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** perf
+- **Location:** `backend/src/api/v1/endpoints/task_queue.py:701` (`_celery_view`)
+- **Claim:** `_celery_view` performs **synchronous** Redis result-backend reads — three per row — inside the `async def` `/active` handler. Synchronous I/O in a coroutine blocks the event loop for its duration.
+- **Failure scenario:** The Monitor page polls `/active` continuously. Every poll blocks the single event loop for three synchronous Redis round-trips per active task, stalling **every other request** the API is serving — including WebSocket emissions and training dispatch. The cost scales with the number of active tasks, so it is worst exactly when the Monitor is most needed.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-1 (WebSocket-first realtime)
+- **Verification (R3):** pending — measurable against the live app
+- **Proposed remediation:** `run_in_threadpool`, or an async Redis client. Per the standing rule, benchmark `/active` specifically — a fix measured against a different endpoint is not a verified fix.
+- **Effort:** S
+
+---
+
+### MIS-E2E-103 — Two error-path defects: an unreachable 409 and a 400 re-raised as a 500
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/api/v1/endpoints/features.py:134`; `backend/src/api/v1/endpoints/saes.py:218`
+- **Claim:**
+  1. **The documented 409 is unreachable on the large-delete path.** For an extraction with >5000 features, the handler queues the background task with **no existence or active-job check** and returns 202. The 409 the API documents for a conflicting delete can only fire on the small path. The worker's own guard then refuses the job silently, so the caller is told 202 and nothing happens.
+  2. **A deliberate 400 is swallowed into a 500.** `HTTPException(400, "SAE files not found…")` is raised **inside** a `try` whose bare `except Exception` catches it and re-raises as a 500, with the original status stringified into the detail. The client gets a server error for a client mistake, and the real message is buried in a nested string.
+- **Failure scenario:** (1) means the size of an extraction silently changes the API's contract; (2) is the stack-trace/status-leak class that PADR IDL-22 exists to prevent, reintroduced by an over-broad `except`.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-22; the project's `{data, meta}` / `{error}` API convention
+- **Verification (R3):** pending
+- **Proposed remediation:** Move the existence/active check above the size branch; re-raise `HTTPException` before the generic handler (`except HTTPException: raise`).
+- **Effort:** S
+
+---
+
+### MIS-E2E-104 — A training is dispatched before its Celery id is persisted
+- **Phase / Round:** P05 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/api/v1/endpoints/trainings.py:56`
+- **Claim:** `train_sae_task.delay()` fires **before** `celery_task_id` is written to the row. If the request fails in that window, the task is running with nothing recording its id.
+- **Failure scenario:** The run cannot be revoked — `POST /trainings/{id}/control`'s stop path resolves the Celery task through `celery_task_id`, which is NULL. A GPU training runs to completion with no way to stop it from the product, and the janitor cannot reclaim it either (MIS-E2E-092 makes that worse: with no task id the row is reclaimable, with one it is not, so this bug is the *lucky* case).
+- **Evidence:** plausible (read-only) — flagged as PLAUSIBLE by the reviewer and left there; the window is narrow
+- **Doc reference:** PADR IDL-11
+- **Verification (R3):** pending
+- **Proposed remediation:** Persist a row first, dispatch, then write the id — or use a pre-generated `task_id` passed to `apply_async` so the id exists before dispatch.
+- **Effort:** S
+
+---
+
+### MIS-E2E-105 — Socket.IO accepts any origin with no auth and joins any channel on request
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/core/websocket.py:19` (`cors_allowed_origins="*"`), `:88-113` (`subscribe`); `backend/src/main.py:94` (`connect`), `:104-109` (the `subscribe` event)
+- **Claim:** Three controls are absent at once, and the reason is a comment that is false:
+  ```python
+  # NOTE: CORS is handled by FastAPI's CORSMiddleware in main.py
+  # Setting cors_allowed_origins="*" here prevents duplicate CORS headers
+  sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*", ...)
+  ```
+  `main.py:85-86` says the **opposite** and installs no `CORSMiddleware` at all. Nginx's `/ws/` block only `add_header`s, which sets a response header and blocks nothing. Origin enforcement for a WebSocket upgrade is server-side and nothing else can do it — and engineio short-circuits the check entirely on `"*"` (`base_server.py:301`: `elif self.cors_allowed_origins == '*': allowed_origins = None`), with its own source comment noting this matters *more* for WebSocket because browsers do not apply CORS controls to it. Downstream, `connect` only logs, and `subscribe` joins the caller to **any string supplied**, with no ownership, existence or format check.
+- **Failure scenario:** **This escapes the accepted posture.** MIS-E2E-002 concedes "anyone who can reach the host can read the API." This converts it to "**any website an operator visits** can reach the host" — a boundary crossing the posture does not grant. A page in the operator's browser opens `io('http://mistudio.hitsai.local/ws', {path:'/ws/socket.io'})` and emits `subscribe` for any channel. `labeling/{job_id}/results` carries verbatim corpus text — `prefix_tokens`, `prime_token`, `suffix_tokens` per activation example (`websocket_emitter.py:888-937`); `steering/{task_id}` carries generated model output (`:1290-1340`); `system/*` channels need no id at all and can simply be guessed.
+- **Evidence:** **verified-by-live-repro at source** — the wildcard, the false comment, `main.py`'s contradicting statement, the unvalidated `subscribe`, and the engineio short-circuit all read directly
+- **Doc reference:** PADR IDL-1, IDL-12; **MIS-E2E-018** recorded this same false comment as a P3 doc-drift finding — this is its consequence, and it makes 018 load-bearing rather than cosmetic
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Set `cors_allowed_origins` to `settings.allowed_origins` (already defined at `config.py:63`), delete the false comment, and validate `subscribe` against a known channel-pattern allowlist. Add a test that connects with `Origin: https://evil.example` and asserts refusal, then flip the setting back as a negative control.
+- **Effort:** M
+- **Note:** this repo's history already includes a WebSocket broadcast leaking user prompt text, found by mutation after a round recorded "Privacy holds". The channels here carry the same class of content and the transport now has no origin control.
+
+---
+
+### MIS-E2E-106 — `PATCH` lets a caller set lifecycle status and falsify training metrics
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** **P0**
+- **Type:** security
+- **Location:** `backend/src/schemas/training.py:272-281` (`TrainingUpdate`), sink `backend/src/services/training_service.py:276-281`; same shape at `schemas/model.py:34` → `model_service.py:207-210` and `schemas/dataset.py:42` → `dataset_service.py:227-248`
+- **Claim:** Three `*Update` schemas expose the row's **lifecycle `status`** and are blind-`setattr`'d onto the ORM. `TrainingUpdate` additionally exposes `progress`, `current_step`, `current_loss`, `current_l0_sparsity`, `current_dead_neurons`, `current_learning_rate`, `error_message` and `error_traceback` — every field the worker owns. The sink is a bare loop over `model_dump(exclude_unset=True)` with a single special case to unwrap the enum.
+- **Failure scenario:** `PATCH /api/trainings/{id} {"status": "completed"}` against a running job does three things at once. (1) **Unlocks SAE import from a partial checkpoint** — `sae_manager_service.py:225` and `:457` gate solely on `status != COMPLETED`, so SAEs are built from whatever step the run reached and imported as finished artifacts, with **no `finalized_from_step` marker**, which is the one signal Feature 21 added to distinguish a salvaged run from a complete one. (2) **Makes the job uncancellable** — `training_service.py:558` returns `None` for any terminal status, so `cancel_training` silently no-ops while the worker keeps the GPU. (3) **Falsifies the record** — `progress: 100`, `current_loss: 0.01`, `current_dead_neurons: 0` are writable in the same request. The same shape on `PATCH /models/{id} {"status":"ready"}` defeats the in-flight guards at `models.py:140` and `:388`.
+- **Evidence:** **verified-by-live-repro at source** — the schema fields and the `setattr` loop read directly; the reviewer separately confirmed the SQLEnum bind processor persists a raw `"ready"` string, so there is no type error to stop it
+- **Doc reference:** PADR IDL-39 (finalize-from-checkpoint, honest `finalized_from_step`); PPRD row 21
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Remove `status` and the derived progress/metric fields from all three `*Update` schemas — they are worker-owned. Replace the blind loops with explicit allowlists; `cluster_profile_service.py:272-293` and `circuit_service.py:288-296` are the correct in-repo reference implementations.
+- **Effort:** M
+- **Related:** MIS-E2E-071 (the same blind-`setattr` sink, different fields)
+
+---
+
+### MIS-E2E-107 — A plain `alias` renames on output, corrupting dataset metadata and stranding task ids
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/schemas/metadata.py:238` (`alias="schema"`); `backend/src/schemas/dataset.py:56-95`; `backend/src/services/dataset_service.py:227`
+- **Claim:** `DatasetMetadata.dataset_schema` uses a **plain `alias`**, the exact construct that `schemas/jspace_contracts.py:11-14` and `schemas/cluster_profile.py:166-175` both warn about in writing — *"a plain `alias` also renames the field on SERIALISATION, which republished the schema with `sae_id` and NO `mistudio_sae_id`"*. The lesson was written down and never applied outside those two modules; the guard enforcing it (`test_jspace_contracts.py:97`) iterates only `JSPACE_KINDS`. Reproduced end to end against pydantic 2.12.5:
+  ```
+  input  : {schema, split, config, hf_access_token_used, task_id, task_type, lock_key}
+  persist: {schema, split, task_id(STALE), task_type(STALE), dataset_schema(DUPLICATE)}
+    config / hf_access_token_used / lock_key survived? False
+    duplicate 'dataset_schema' key added?           True
+  ```
+  Two defects compound: the rename on output adds a duplicate key, and `extra="ignore"` on a model declaring only three fields **destroys every other top-level key**.
+- **Failure scenario:** Worse internally than externally. `datasets.py:596-601` writes `task_id`, `task_type` and `lock_key` through `DatasetUpdate` — and once a dataset's metadata contains a `schema` block, all three writes are discarded. `GET /datasets/{id}/task-status` then reads the **stale** `task_id` and reports a previous task's state; `POST /datasets/{id}/cancel` **revokes the wrong Celery task**. Nothing raises.
+- **The test pins the defect.** `test_tokenization_metadata.py:152-153` reads `# Note: Pydantic validation transforms "schema" to "dataset_schema" due to alias` and asserts `"dataset_schema" in retrieved.extra_metadata`. Thirteen assertions encode the renamed key, so the suite is permanently green over it — a test written to describe the bug rather than prevent it.
+- **Evidence:** **verified-by-live-repro** (reviewer reproduced the round-trip against the real code)
+- **Doc reference:** memory `pydantic-alias-renames-on-serialisation`; PADR IDL-16
+- **Verification (R3):** CONFIRMED at R1
+- **Proposed remediation:** `validation_alias=AliasChoices("schema","dataset_schema")` + `serialization_alias="schema"`, as `cluster_profile.py:184` already does; give `DatasetMetadata` `extra="allow"` or merge rather than replace. Extend the no-plain-alias sweep to every schema reachable from a request body, and rewrite the pinning assertions — then re-run against current code as a negative control.
+- **Effort:** M
+
+---
+
+### MIS-E2E-108 — Template import overwrites protected system templates
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** P1
+- **Type:** security
+- **Location:** `backend/src/services/labeling_prompt_template_service.py:515-539` (import overwrite branch); guards present at `:207-209` (update) and `:261` (delete); endpoint `api/v1/endpoints/labeling_prompt_templates.py:402-410`
+- **Claim:** `update_template` and `delete_template` both refuse a system template (`if db_template.is_system: raise ValueError("Cannot modify system templates")`). The **import** path has neither guard: it matches on `name` alone and overwrites `system_message`, `user_prompt_template`, `description` and more unconditionally, and will promote the row to `is_default`. The endpoint takes `import_request: dict` with no Pydantic model at all. Note the create branch immediately below (`:545-558`) *is* careful, pinning `is_default=False, is_system=False` — the overwrite branch simply was not given the same treatment.
+- **Failure scenario:** An import naming a seeded system template (e.g. *"Context-Aware Labeling"*, seeded `is_system=True` at `scripts/seed_context_aware_template.py:103`) with `overwrite_duplicates: true` replaces its prompt body and makes it the default. Every subsequent bulk-labeling run — including runs billing the operator's OpenAI key against their corpus — executes the imported instructions. The UI still shows the template as protected and `PATCH`/`DELETE` still refuse it, so the tamper is invisible from the surface that is supposed to be authoritative.
+- **Evidence:** verified-by-live-repro (all three branches read; the seed scripts confirm `is_system=True`)
+- **Doc reference:** PADR IDL-21 (Context-Aware Labeling Template Strategy)
+- **Verification (R3):** pending
+- **Proposed remediation:** Guard the overwrite branch on `is_system`, refuse `is_default` promotion from imported data, and validate the body with a schema rather than `dict`. Related: MIS-E2E-045 records two *migrations* overwriting the same templates without an `is_system` guard — same rule missed in two places.
+- **Effort:** S
+
+---
+
+### MIS-E2E-109 — NLP analysis writes across extraction boundaries
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/api/v1/endpoints/features.py:805-810`; `backend/src/workers/nlp_analysis_tasks.py:102-109`, `:219-234`
+- **Claim:** `POST /extractions/{extraction_id}/analyze-nlp` validates the path extraction, then forwards the body's `feature_ids` untouched. The worker drops the extraction scope entirely when ids are supplied — `Feature.id.in_(feature_ids)` with **no `extraction_job_id` filter**, where the no-ids branch is correctly scoped. `request.feature_ids` is an unconstrained `Optional[List[str]]`.
+- **Failure scenario:** A caller posts to a small extraction and passes ids from a large one with `force_reprocess: true`. Every one of those features has its curated `nlp_analysis` overwritten and its `FeatureAnalysisCache` row deleted, while the progress counters are written onto the **path** extraction — so the extraction whose data was destroyed shows no activity, and the one showing activity holds none of the results. Silent in both directions. The sibling reset route at `features.py:956-958` scopes correctly, which makes this an oversight; of 11 two-path-parameter routes, all 11 bind child to parent, and this is the body-parameter case that was missed.
+- **Evidence:** verified-by-live-repro (both worker branches read and contrasted with the correct sibling)
+- **Doc reference:** PADR IDL-9
+- **Verification (R3):** pending
+- **Proposed remediation:** Filter on both columns; better, validate in the endpoint and 400 naming any id that does not belong.
+- **Effort:** S
+
+---
+
+### MIS-E2E-110 — IDL-22's error-message hardening never covered the modules written after it
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** P2
+- **Type:** security
+- **Location:** `backend/src/api/v1/endpoints/neuronpedia.py:587`; `saes.py` (13 `str(e)` sites, e.g. `:663`); `jlens.py` (11), `circuit_discovery.py` (10), `neuronpedia.py` (8); `models.py:1318-1323`
+- **Claim:** IDL-22's hardening (commit `b153781`) bounded itself to `status_code=500` responses across a fixed file list. Modules written afterwards were never swept. The sharpest instance: `GET /neuronpedia/local-status` deliberately withholds the DSN (`:571` returns `"db_url_set": bool(...)`) and then leaks its components through a bare `except Exception` around an asyncpg pool acquire — asyncpg messages carry the target and identity (`Connect call failed ('10.x.x.x', 5432)`, `password authentication failed for user "neuronpedia"`, `database "…" does not exist`). `saes.py` is the only module with bare `except Exception` → `HTTPException(500, f"...{str(e)}")` wrapping a pure DB read, so raw SQLAlchemy text reaches the client. `GET /models/tasks/{task_id}` returns `str(task_result.info)` plus the whole `info` object — unbounded worker-side exception text for any task id.
+- **Failure scenario:** Reconnaissance about an **adjacent** system. The accepted posture concedes miStudio's own data to anyone on the LAN; it does not concede the host, port, database and role of the Neuronpedia deployment beside it.
+- **Evidence:** verified-by-live-repro (the site read; the `str(e)` inventory counted per module; the reviewer confirmed the circuits/validation sites all catch **narrow custom** exception types and are genuinely fine)
+- **Doc reference:** PADR IDL-22 — regressed by scope, not by reversion
+- **Verification (R3):** pending
+- **Proposed remediation:** Classify at the site (`str(e)` only for `ValueError`/`ValidationError`, log the rest) — the correct pattern is already written at `cluster_profiles.py:230`. Extend the sweep to the four unswept modules and the task-status passthrough, then add a check that fails on `except Exception as e:` reaching a response body anywhere in `api/`.
+- **Effort:** M
+
+---
+
+### MIS-E2E-111 — An internal LLM endpoint URL is published in a response its sibling withholds
+- **Phase / Round:** P05 / R1
+- **Source:** /security-review
+- **Severity:** P3
+- **Type:** security
+- **Location:** `backend/src/schemas/enhanced_labeling.py:20` (`endpoint: str`, `celery_task_id`); contrast `backend/src/schemas/labeling.py:171-212`
+- **Claim:** `EnhancedLabelingJobResponse` is `from_attributes=True` over `EnhancedLabelingJob` and exposes `endpoint` — the configured LLM server URL. The sibling schema over the same subsystem, `LabelingStatusResponse`, reads from a table holding `openai_api_key`, `openai_compatible_endpoint` and `celery_task_id`, and **omits all three**. Two schemas over one domain, one treating the endpoint as secret and the other publishing it.
+- **Failure scenario:** `GET /features/{id}/label/enhanced/latest` returns e.g. `"endpoint": "http://ollama.hitsai.local:11434/v1"` — an internal hostname and port not otherwise advertised. Combined with MIS-E2E-105, a page in an operator's browser can read it, handing an external attacker a named internal service.
+- **Evidence:** verified-by-live-repro (both schemas read and contrasted)
+- **Doc reference:** PADR IDL-18, IDL-22
+- **Verification (R3):** pending
+- **Proposed remediation:** Drop `endpoint` and `celery_task_id`; return a stable `"local"`/`"openai"` label if the UI needs one. Because these schemas are `from_attributes=True` over tables holding secrets, add a test instantiating each response schema against its ORM model and asserting a denylist (`*_api_key`, `*endpoint*`, `*_token`, `*_path`, `*traceback*`) never appears in `model_fields`.
+- **Effort:** S
+
+---
+
+## P05 — R2 (mutation controls)
+
+---
+
+### MIS-E2E-112 — The API's only IDOR guard has no test
+- **Phase / Round:** P05 / R2
+- **Source:** mutation control M18
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `backend/src/api/v1/endpoints/trainings.py:534`
+- **Claim:** Neutralising the parent-ownership check on `DELETE /trainings/{training_id}/checkpoints/{checkpoint_id}` left **277 tests green**. Of the 11 routes with two or more path parameters, ten bind child to parent inside the query itself; this is the only one that fetches by child id and enforces ownership with a separate post-fetch comparison — and its own comment states the invariant: *"Never allow a checkpoint to be deleted via an unrelated training's URL."*
+- **Failure scenario:** The single line standing between a caller and deleting any checkpoint through any training's URL is unprotected by any test. Checkpoint deletion is irreversible and removes files from disk. A refactor that reorders the fetch, or an "optimisation" that folds the 404 branches together, silently removes the only cross-tenant boundary the API has — with a green suite.
+- **Evidence:** **verified-by-mutation** — M18 landed (confirmed by `git diff --stat`), 277 tests green, restore verified clean
+- **Doc reference:** none
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** One test: create two trainings, take a checkpoint of the second, `DELETE` it through the first's URL, assert 404 and that the row and its file survive. Then re-run M18 as a negative control.
 - **Effort:** S
