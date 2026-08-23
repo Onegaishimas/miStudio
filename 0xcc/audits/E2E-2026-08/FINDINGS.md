@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 127
-**Last id issued:** MIS-E2E-127
+**Count:** 131
+**Last id issued:** MIS-E2E-131
 
 ---
 
@@ -376,16 +376,17 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 ---
 
 ### MIS-E2E-023 — `ReadoutGrid` calls two hooks after an early return
-- **Phase / Round:** P00 / baseline
+- **Phase / Round:** P00 / baseline — **reachability corrected at P08 R1**
 - **Source:** eslint baseline (`react-hooks/rules-of-hooks`)
-- **Severity:** P1
+- **Severity:** P2 *(downgraded — see Verification)*
 - **Type:** bug
 - **Location:** `frontend/src/components/jlens/ReadoutGrid.tsx:87` (early return), `:111` and `:136` (the two `useMemo` calls after it)
 - **Claim:** `ReadoutGrid` returns early — `if (axis.length === 0 || tokens.length === 0) return <p>This readout carries no layers for the selected lens.</p>` — and then calls `useMemo` twice further down (`firstDisagreement`, `logitRowOf`). React requires the same hooks in the same order on every render.
 - **Failure scenario:** The component renders once with a non-empty axis, registering 2 hooks. The user then switches the lens type to one whose artifact covers no layers — the exact case the empty-state message and the surrounding comments ("a partial artifact reports only the layers it was fitted for", "the two axes are independent now") were written for. `axis` is derived at `JLensPanel.tsx:159` as `useMemo(() => axisFor(meta, readType), [meta, readType])`, so changing `readType` changes `axis` **without unmounting `ReadoutGrid`** — the component is rendered unconditionally at `JLensPanel.tsx:736`. On that render React sees 0 hooks where it saw 2 and throws *"Rendered fewer hooks than expected"*, crashing the J-Lens panel instead of showing the empty-state message it was supposed to show.
 - **Evidence:** plausible (read-only) — the rule violation is verified by eslint and by reading; the *crash* is reasoned from the mount path, not yet reproduced
 - **Doc reference:** 023_FPRD|JLens_Readout_Viewer; PADR IDL-40
-- **Verification (R3):** pending — reproduce in P08 R3 by loading a readout on the live app and switching lens type to one with no fitted layers
+- **Verification (R3):** **CORRECTED at P08 R1 — the defect is real, the crash is NOT currently reachable.** My reachability argument was wrong. I claimed switching `readType` to a lens with no fitted layers would re-render the grid with an empty axis. It cannot today: the lens-type selector is populated from `meta.types`, and the backend emits `types` and `layers_by_type` from **the same tuple, on adjacent lines** — `jlens_readout_service.py:550-551`, `types=[t.lens_type for t, _ in servable]` and `layers_by_type={t.lens_type: list(ls) for t, ls in servable}`. Every type offered therefore has a non-empty axis by construction, so `axis.length === 0` is unreachable while the grid is mounted.
+- **Severity revised:** **P1 → P2.** The Rules of Hooks violation is real and eslint reports it; the crash it would cause is held off by an invariant maintained in one backend expression. The moment a servable type can carry zero layers — a partial artifact, a per-layer applicability change, a refactor that splits those two lines — the intended empty-state message becomes a "rendered fewer hooks" crash of the whole panel. Recorded as a latent crash rather than a live one, because a register that overstates is as useless as one that misses.
 - **Proposed remediation:** Move the early return below both `useMemo` calls (they are cheap and both already guard their own inputs), or lift the empty check into `JLensPanel` so the grid is not mounted at all when there is nothing to draw.
 - **Effort:** S
 - **Note:** this file passed three review rounds and 15 mutation controls in the J-Lens enhancement arc (2026-08-10). `npm run lint` has been reporting it the whole time — nothing runs lint as a gate (see MIS-E2E-024).
@@ -2250,3 +2251,78 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Proposed remediation:** Assert an exact mid-range value — `computeBaselineStrength(0.5).value` — where the slope is the only thing determining the answer. One line. When writing a test for a formula, first ask which input makes the candidate behaviours **differ**; every sample here was chosen from the boundaries, where they cannot.
 - **Effort:** S
 - **Note:** this is the J-Lens arc's recorded trap in the frontend — there, a fixture whose `W_U` was `torch.eye(...)` made a unit-norm fix deletable with 63 tests green, because the fixture was already unit-norm. Same shape: the sample points make both behaviours identical.
+
+---
+
+## P08 — Frontend UI
+
+---
+
+### MIS-E2E-128 — The prune dialog says "report on" while the task permanently deletes
+- **Phase / Round:** P08 / R1
+- **Source:** /code-review high
+- **Severity:** **P0** *(data loss)*
+- **Type:** bug
+- **Location:** `frontend/src/components/panels/SettingsPanel.tsx:1306` (confirm text) and `:1318` (success toast); the task reads live settings at `backend/src/workers/prune_checkpoints.py:147` and `:237`
+- **Claim:** Both the confirmation dialog and the success toast read `preview.policy.dry_run` — a **snapshot** captured when the preview was fetched. The Celery task re-reads `checkpoint_prune_dry_run` from settings at execution time. The two can disagree, and nothing re-fetches the preview when the setting changes.
+- **Failure scenario:** Preview while dry-run is on → untick "dry run" and Save → click "Prune now". The confirmation says *"This will **report on** 12 checkpoint file(s) for train_xxx. Continue?"*, the toast says *"Dry-run prune queued"*, and the task **permanently deletes all twelve**. A destructive, irreversible action behind a dialog stating the opposite of what will happen — and the dialog is the product's only confirmation step. Note the code does have the `'PERMANENTLY DELETE'` branch; it simply consults stale state to choose it.
+- **Evidence:** **verified-by-live-repro at source** — the confirm/toast expressions read; the worker's live `policy.dry_run` reads confirmed at two sites
+- **Doc reference:** PADR IDL-39 (step-granular checkpoint retention, shipped *disabled + dry-run*); memory recorded for Feature 21 — *"a boolean setting must fail to its DEFAULT, not to False (for `dry_run`, False means delete)"*
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Re-fetch the preview immediately before showing the dialog, or have the backend return the policy it will actually apply and confirm against that. The general rule: a confirmation for a destructive action must be rendered from the state the action will use, never from a snapshot.
+- **Effort:** S
+
+---
+
+### MIS-E2E-129 — The Diff view shades agreement as disagreement and reports every rank off by one
+- **Phase / Round:** P08 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug *(the "wrong results presented as correct" class)*
+- **Location:** `frontend/src/components/jlens/ReadoutGrid.tsx:293` (`rankOf`), and the `diffColor` / tooltip consumers
+- **Claim:** `rankOf` returns a **1-based** rank; `diffColor` and the tooltip are written for **0-based**. Four consequences: cells where the two lenses **agree** receive the amber disagreement shading; every tooltip rank is off by one (showing `#2` for rank 1); the "same top token" legend swatch is **unreachable**; and the shading directly contradicts the `first diverge at L…` badge, which is computed correctly by `firstDisagreement`.
+- **Failure scenario:** The Diff view exists to show where the Jacobian lens starts seeing something the logit lens does not — that crossing is the quantity the mode was built for. It currently colours agreement as divergence, so the visual answer is wrong everywhere, while a correct badge sits beside it saying something different. A user reading the grid draws a conclusion about the model from an off-by-one.
+- **Evidence:** plausible (read-only) — the index-base mismatch read at source
+- **Doc reference:** 023_FPRD|JLens_Readout_Viewer; PADR IDL-40
+- **Verification (R3):** pending — visible in the browser against a live readout
+- **Proposed remediation:** Make `rankOf` and its consumers agree on one base, and assert the legend's "same top token" swatch is reachable — an unreachable legend entry is the cheap tell that the mapping is wrong.
+- **Effort:** S
+
+---
+
+### MIS-E2E-130 — Three Settings defects: a swept model name, an unawaited delete, and cross-card reversion
+- **Phase / Round:** P08 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `frontend/src/components/panels/SettingsPanel.tsx:362`, `:559`, `:862`
+- **Claim:**
+  1. **`getByCategory('endpoints')` sweeps in non-endpoints** — `openai_compatible_model` lands in the "Saved Endpoints" list beside the URLs. The model name renders as if it were a URL, and its trash icon **silently deletes the configured labeling model**.
+  2. **`remove('ollama_url')` is neither awaited nor caught** while the field is cleared optimistically, so a failed DELETE looks like success and the value reappears on reload. The same missing handling is in **all five** other mutation handlers in this file.
+  3. **The `[settings]` sync effect rewrites all five Labeling fields on every upsert**, so saving one card silently reverts unsaved edits in another.
+- **Failure scenario:** (1) is the sharpest — a delete control that appears to remove an endpoint and actually removes the labeling model, with no confirmation. (3) loses user input with no error. This panel holds the product's credentials and is untested (MIS-E2E-016 — `SettingsPanel.tsx` is 1,368 lines with no test file).
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-14, IDL-20
+- **Verification (R3):** pending
+- **Proposed remediation:** Filter the endpoints list by key rather than category; await and catch the mutations (the tested `utils/fireAndForget.ts` helper exists and is unused here — MIS-E2E-021); make the sync effect skip fields the user has touched.
+- **Effort:** M
+
+---
+
+### MIS-E2E-131 — Three Circuits panel defects: a dead poll, a hidden stale id, and a silent export
+- **Phase / Round:** P08 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `frontend/src/components/panels/CircuitsPanel.tsx:740`, `:1322`, `:1333`, `:568`
+- **Claim:**
+  1. **`mountedRef` is set `false` on cleanup and never back to `true`** (`:740`). With StrictMode on (`main.tsx:7`), the CaptureTab estimate poll is **dead on arrival in dev**, so the "Cost estimate" / "Run capture" card never appears — a developer-visible break of the panel's entry point.
+  2. **Un-ticking "Force" removes the stale capture from the options but leaves `captureId` set** (`:1322`). The select shows no selection while "Run discovery" submits the hidden stale id and is refused — the user sees a rejection for a choice the UI says they did not make.
+  3. **`parseSeedRefs` validates only `layer`** (`:1333`); a line like `6` yields `feature_idx: NaN`, serialised as `null` in the POST body.
+  4. **Slice export clicks a detached anchor and revokes the object URL on the next line** (`:568`) — a silent no-op in Firefox. The five other download sites in this repo all append to `document.body` first.
+- **Failure scenario:** (1) and (4) are silent no-ops — a feature that appears absent and a button that does nothing. (2) produces a refusal the user cannot explain from what is on screen.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-32, IDL-33
+- **Verification (R3):** pending — all four are browser-observable
+- **Proposed remediation:** Set `mountedRef.current = true` on mount; clear `captureId` when its option disappears; validate `feature_idx`; append the anchor and revoke after the click.
+- **Effort:** M
