@@ -4,7 +4,16 @@
 end-to-end assessment (2026-08-23). Every task cites its finding id; the register
 carries the evidence, the reproduction and the proposed remediation for each.
 
-**Status:** ❌ Not started · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
+**Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
+
+| Wave | Scope | State |
+|---|---|---|
+| **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
+| **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ⏳ 7.1 ✅ · 7.2 ✅ · 7.5 ✅ · 7.3, 7.4, 7.6 open |
+| Waves 2–9 | P0s, then correctness, then docs | ❌ not started |
+
+*This table is updated as work lands — see the Relevant Files section for the
+running file list.*
 
 > ## ⚠ TASK 0 IS NOT A DEVELOPMENT TASK
 > `MIS-E2E-143` — an SSH password, five database dumps and this audit's own findings
@@ -15,12 +24,12 @@ carries the evidence, the reproduction and the proposed remediation for each.
 
 ## Task 0 — Stop the disclosure  ⚠ IMMEDIATE
 
-- [ ] 0.1 **Rotate the GPU node's SSH password** (`192.168.244.61`, user `sean`). Treat the current value as known. — MIS-E2E-143
-- [ ] 0.2 **Make `hitsainet/miStudio` private** until 0.4 is done. One setting, immediate, reversible. — MIS-E2E-143
-- [ ] 0.3 Move `scripts/k8s-helpers.sh` to key-based auth reading from the environment; remove `StrictHostKeyChecking=no`. — MIS-E2E-143
-- [ ] 0.4 **Fix `sync-to-clean.yml` so the mirror carries no source history** — publish a squashed single commit, or `git filter-repo` before pushing. Deleting files from a tip commit does not remove them from a force-pushed history. — MIS-E2E-143
+- [ ] 0.1 ⚠ **USER ACTION — Rotate the GPU node's SSH password** (`192.168.244.61`, user `sean`). Treat the current value as known. — MIS-E2E-143
+- [x] 0.2 ~~Make the mirror private~~ — **superseded**: mirror stays public by decision; the orphan snapshot removes the need until 0.4 is done. One setting, immediate, reversible. — MIS-E2E-143
+- [x] 0.3 ✅ `scripts/k8s-helpers.sh` moved to key-based auth reading from the environment; remove `StrictHostKeyChecking=no`. — MIS-E2E-143
+- [x] 0.4 ✅ **Fixed `sync-to-clean.yml` so the mirror carries no source history** — publish a squashed single commit, or `git filter-repo` before pushing. Deleting files from a tip commit does not remove them from a force-pushed history. — MIS-E2E-143
 - [ ] 0.5 Review the five `backups/*.sql.gz` dumps for credentials and user prompt text; rotate anything they hold. `git rm` them and add `backups/` to `.gitignore`. — MIS-E2E-008, -143
-- [ ] 0.6 Add a CI check that inspects the **published** tree's history against the exclusion list and fails the sync. — MIS-E2E-143
+- [x] 0.6 ✅ Added a CI check that inspects the **published** tree's history against the exclusion list and fails the sync. — MIS-E2E-143
 - [ ] 0.7 Delete `aaaa/` — 20 byte-identical copies of authoritative `0xcc/` documents, not in the exclusion list. — MIS-E2E-007, -164
 
 **Acceptance:** the exclusion list holds for every commit reachable from the mirror's
@@ -87,11 +96,11 @@ The class this product can least afford. Each item is a number a user reads as a
 
 The root enabler behind the production 500 the user hit. **Two of the constraints are already fixed; the mechanism is not.**
 
-- [ ] 7.1 Add a guard test diffing `Base.metadata` against the migrated schema — constraints, foreign keys, indexes. This single test covers MIS-E2E-031, -033 and every future migration-only constraint. — MIS-E2E-031, -033, -048
-- [ ] 7.2 Re-create the three foreign keys the ORM declares and the database lacks, or drop them from the ORM — pick one. — MIS-E2E-033
+- [x] 7.1 ✅ Added a guard test diffing `Base.metadata` against the migrated schema — constraints, foreign keys, indexes. This single test covers MIS-E2E-031, -033 and every future migration-only constraint. — MIS-E2E-031, -033, -048
+- [x] 7.2 ✅ Re-created the three foreign keys the ORM declares and the database lacks, or drop them from the ORM — pick one. — MIS-E2E-033
 - [ ] 7.3 Integration tests for delete cascades against a **migrated** database. Flipping all three CASCADEs on `features` currently leaves 211 tests green. — MIS-E2E-053
 - [ ] 7.4 One round-trip test: build a maximal `CircuitDefinitionV1`, import, export, assert **document equality**. Field-by-field assertions only cover the fields someone remembered. — MIS-E2E-052, -037
-- [ ] 7.5 Derive `REQUIRED_TABLES` from `Base.metadata`; decide deliberately whether a missing table blocks startup; test it. — MIS-E2E-032, -051, -157
+- [x] 7.5 ✅ Derived `REQUIRED_TABLES` from `Base.metadata`; decide deliberately whether a missing table blocks startup; test it. — MIS-E2E-032, -051, -157
 - [ ] 7.6 Narrow `check_migrations.py`'s claim to what it checks, or extend it to constraints; wire it into CI. Delete `find_column_gaps.py`. — MIS-E2E-048, -049, -022
 
 ## Task 8 — Unpinned load-bearing behaviour (P1)
@@ -215,7 +224,34 @@ want of it. It is filled in as tasks are completed — one line per file touched
 
 | File | Purpose |
 |---|---|
-| *(none yet — remediation not started)* | |
+| `.github/workflows/sync-to-clean.yml` | Rewritten: orphan snapshot + stale-tag retarget + a Verify step that clones the published mirror and asserts no excluded path in any commit |
+| `scripts/k8s-helpers.sh` | Credential removed; key-based SSH, host/user from the environment, `StrictHostKeyChecking=no` dropped |
+| `backend/alembic/versions/d7f3a91c2e08_restore_declared_foreign_keys.py` | **New.** Restores the 3 FKs the ORM declared and the DB lacked; NULLs orphans first, idempotent, reversible |
+| `backend/tests/unit/test_orm_matches_migrated_schema.py` | **New.** Fails when ORM and migrated schema disagree, in either direction. Reflects the *migrated* DB, never `create_all()` |
+| `backend/src/db/schema_validator.py` | `REQUIRED_TABLES` derived from `Base.metadata` (17 → 35 tables), resolved lazily at validation time |
+| `backend/src/db/__init__.py` | Exports `_required_tables` instead of the removed eager constant |
+| `backend/scripts/verify_schema.py` | Imports the single source instead of carrying a copy-pasted duplicate dict |
+| `backend/tests/unit/test_schema_validator_coverage.py` | **New.** The validator had zero tests, which is why mutation M2 survived |
+| `backend/tests/unit/test_analysis_cache_upsert.py` | **New** (out-of-band). Pins the cache upsert that fixed the production 500 |
+| `backend/src/services/analysis_service.py` | Cache upsert; ablation's dead precondition removed; correlations scoped to the SAE |
+| `backend/src/models/{feature,feature_analysis_cache}.py` | Declare the unique constraints that existed only in migrations |
+| `frontend/src/components/features/FeatureTokenAnalysis.tsx` | BPE marker stripped for display; continuations marked |
+
+## Negative controls run
+
+Every fix is required to have a test that **fails when the fix is removed**. Recorded
+here as they are verified, because "a test exists" is not the same claim.
+
+| Control | Mutation | Result |
+|---|---|---|
+| NC1 | `features.training_id` ondelete CASCADE → SET NULL | ✅ 2 failures |
+| NC2 | Remove `FeatureAnalysisCache.__table_args__` (the MIS-E2E-031 shape) | ✅ 1 failure |
+| NC3 | **Re-run of audit mutation M2** — shrink the validator to a hand-list | ✅ 3 failures *(survived during the audit)* |
+| NC4 | Revert `_cache_analysis` to the blind INSERT | ✅ 2 failures |
+| Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
+
+**2 of the 14 surviving audit mutations are now killed** (M2 via NC3; the cache
+divergence via NC2/NC4). Task 16.2 requires all 14.
 
 ## Provenance
 
