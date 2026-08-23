@@ -65,3 +65,29 @@ Revisit when `image-size` publishes a patched release.
 `torch` 2.9.1 (two low alerts, fixes at 2.10.0 / 2.13.0). Deferred as before:
 torch is coupled to the CUDA and triton builds this deployment runs on, and a
 low-severity advisory does not justify moving that floor. Tracked, not ignored.
+
+## Alert state after this pass (2026-08-23)
+
+**miStudio: 0 open** — 166 fixed, 20 dismissed.
+**miLLM: 0 open** — 85 fixed, 2 dismissed.
+
+Dependabot auto-closed everything the version bumps resolved: miStudio went
+36 open → 4, miLLM 23 → 2. The remainder were dismissed as `tolerable_risk`,
+each with the revisit condition in the dismissal comment:
+
+* **`image-size`** (2 in each repo, high) — no patched version exists.
+  Revisit when `image-size` publishes above 2.0.2.
+* **`torch`** (2, low) — coupled to the CUDA/triton build this GPU deployment
+  runs on; moving that floor for a low-severity advisory risks the serving
+  path. Revisit when torch is next upgraded for other reasons.
+
+### The cost of dismissing, stated plainly
+
+A dismissed alert does not re-open when a fix becomes available. For `torch`
+that is fine — the revisit is tied to an upgrade we will do deliberately. For
+`image-size` it means **nobody will be told when upstream patches it**; the
+alert list is now clean at the price of that signal.
+
+If that matters, the replacement is a periodic check of whether
+`image-size > 2.0.2` has shipped, not a re-opened alert. Recorded here so the
+tradeoff was chosen rather than stumbled into.
