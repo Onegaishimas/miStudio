@@ -522,8 +522,22 @@ class ActivationService:
             # Register hooks
             hook_manager.register_hooks(layer_indices, hook_types, architecture)
 
-            # Get model's vocabulary size for validation
-            vocab_size = model.config.vocab_size
+            # Get model's vocabulary size for validation.
+            #
+            # NOT `model.config.vocab_size`: unified and multimodal configs keep
+            # the text fields on a sub-config, and this line killed two real
+            # extraction jobs on gemma-4-12B-it with
+            # "'Gemma4UnifiedConfig' object has no attribute 'vocab_size'".
+            from ..ml.layer_discovery import resolve_vocab_size
+
+            vocab_size = resolve_vocab_size(model)
+            if vocab_size is None:
+                # Fail loudly rather than validating token ids against a guess.
+                raise ValueError(
+                    "Could not determine this model's vocabulary size from its "
+                    "config or its embedding table, so token ids cannot be "
+                    "range-checked. Report the model architecture."
+                )
             logger.info(f"Model vocabulary size: {vocab_size}")
             logger.info(f"Processing {len(dataset)} samples with batch_size={batch_size}")
 

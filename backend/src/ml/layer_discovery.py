@@ -252,6 +252,78 @@ def _is_transformer_layer(module: nn.Module) -> Tuple[bool, Dict[str, Optional[s
     return is_transformer, detected
 
 
+def resolve_vocab_size(model: nn.Module) -> Optional[int]:
+    """This model's vocabulary size, wherever the config happens to keep it.
+
+    Reported live: two extraction jobs on `gemma-4-12B-it` died with
+
+        Extraction failed: 'Gemma4UnifiedConfig' object has no attribute
+        'vocab_size'
+
+    `model.config.vocab_size` is not universal. Unified and multimodal configs
+    keep the text-model fields on a SUB-CONFIG — `text_config`, `llm_config`,
+    `decoder`, depending on the family — and the top level carries only the
+    composition. Reading the attribute directly is the same class of assumption
+    this module exists to remove: it names one architecture's layout and fails
+    closed on every other.
+
+    Three sources, in order of how specific they are:
+
+      1. `config.vocab_size` — right for the usual decoder-only case.
+      2. Any sub-config that has one. Discovered by walking the config's own
+         attributes rather than naming `text_config`, so a family this shop has
+         not run yet is covered without an edit.
+      3. The INPUT EMBEDDING's row count, which is ground truth: a token id is
+         usable if and only if the embedding table has a row for it, whatever
+         the config says. This is the fallback that cannot be wrong, and it is
+         the bound the token-id validation actually needs.
+
+    Returns None only when the model has no embedding table to ask, in which
+    case the caller must decide — silently substituting a default would put a
+    made-up bound on a real validation check.
+    """
+    config = getattr(model, "config", None)
+
+    if config is not None:
+        direct = getattr(config, "vocab_size", None)
+        if isinstance(direct, int) and direct > 0:
+            return direct
+
+        # Sub-configs, discovered rather than named.
+        for attr in dir(config):
+            if attr.startswith("_"):
+                continue
+            try:
+                child = getattr(config, attr)
+            except Exception:
+                continue
+            if child is None or child is config or isinstance(child, (str, bytes)):
+                continue
+            nested = getattr(child, "vocab_size", None)
+            if isinstance(nested, int) and nested > 0:
+                logger.info(
+                    "vocab_size resolved from config.%s (%s has none at the top "
+                    "level)", attr, type(config).__name__,
+                )
+                return nested
+
+    # Ground truth.
+    try:
+        embeddings = model.get_input_embeddings()
+    except Exception:
+        embeddings = None
+    if embeddings is not None:
+        rows = getattr(embeddings, "num_embeddings", None)
+        if isinstance(rows, int) and rows > 0:
+            logger.info("vocab_size resolved from the input embedding table (%d)", rows)
+            return rows
+        weight = getattr(embeddings, "weight", None)
+        if weight is not None and getattr(weight, "ndim", 0) >= 1:
+            return int(weight.shape[0])
+
+    return None
+
+
 def discover_transformer_structure(
     model: nn.Module,
     architecture_hint: Optional[str] = None

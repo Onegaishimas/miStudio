@@ -125,7 +125,31 @@ def emit_progress(
                 # Don't retry on non-timeout failures
                 return False
 
-        except httpx.TimeoutException:
+        # WHICH FAILURES ARE RETRIED IS A DECISION, AND IT IS PINNED
+        # (MIS-E2E-137 / -142).
+        #
+        # This caught only `httpx.TimeoutException`. Against the installed httpx:
+        #
+        #     ConnectError         is TimeoutException?  False
+        #     RemoteProtocolError  is TimeoutException?  False
+        #     ReadTimeout          is TimeoutException?  True
+        #
+        # so a connection refused mid-restart, or a half-closed keep-alive
+        # connection, fell to `except Exception` and was abandoned on the first
+        # attempt. The events configured with retries are the TERMINAL ones —
+        # `steering:completed`, `neuronpedia:push_completed`,
+        # `enhanced_labeling:completed` — where a silent drop leaves the UI
+        # showing a finished job as still running, forever.
+        #
+        # `TransportError` is the right boundary: it covers timeouts, connection
+        # failures and protocol errors — everything where the request may simply
+        # not have arrived — and excludes `HTTPStatusError`, where the server
+        # answered and retrying would just repeat a rejected request.
+        #
+        # Nothing asserted this in either direction, which is why flipping the
+        # handler left the suite green (mutation M26). Now pinned both ways in
+        # `test_audit_mutation_pins.py`.
+        except httpx.TransportError:
             if attempt < max_attempts - 1:
                 # Exponential backoff: 0.5s, 1s, 2s...
                 backoff = 0.5 * (2 ** attempt)
