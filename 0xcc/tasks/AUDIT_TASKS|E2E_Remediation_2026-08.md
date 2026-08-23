@@ -5,14 +5,15 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3007 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
+**Suites:** backend **3026 passed / 0 failed** (baseline 2883) · frontend **1216 passed / 0 failed** (baseline 1211) · `tsc --noEmit` clean
 
 | Wave | Scope | State |
 |---|---|---|
 | **Part 1** | MIS-E2E-143 — the public-mirror disclosure | ✅ **CLOSED**, verified live |
 | **Wave 1** | Task 7 — test-schema divergence (the prerequisite) | ✅ **CLOSED** — 7.1–7.6 |
-| **Wave 2** | Tasks 1–5 — the 13 P0s | ⏳ **in progress** on `fix/audit-w2-p0-security` — **Tasks 1 ✅ · 2 ✅ · 3 ✅ · 4 ✅ CLOSED** · Task 5 open |
-| Waves 3–9 | Correctness, mutations, realtime, docs, P2/P3, hardware, acceptance | ❌ not started |
+| **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
+| **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ⏳ **next** |
+| Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
 running file list.*
@@ -80,9 +81,17 @@ tip, not only the tip; the rotated credential appears nowhere in either repo.
 
 ## Task 5 — Capabilities that do not exist (P0)
 
-- [ ] 5.1 **Wire or delete** `steering_resilience.py`. Five state-mutating functions have zero callers, so `/steering/status` can only ever return `"healthy"` and `/steering/reset` is a no-op that reports success. — MIS-E2E-062
-- [ ] 5.2 **Implement the `affine_residual` freeze-leak gate**, or correct `CLAUDE.md`. The threshold is stored and never read; per the project's own description this is the only point an incomplete freeze is detectable. — MIS-E2E-079
-- [ ] 5.3 For both: delete the wiring line and require a red. A grep for a caller is the weaker form and is not sufficient. — `CLAUDE.md` Reachability gate
+- [x] 5.1 ✅ **Split: wire the breaker, delete the rest.**
+  - **`CircuitBreaker` WIRED.** `_guard_steering_dispatch()` gates all three async dispatch endpoints (503 when open); `_record_steering_outcome()` feeds terminal outcomes from `GET /async/result/{task_id}`, which is where the API first learns them. Both in the API process, so the state `/status` reports is the state that was recorded. Outcomes are de-duplicated **per task id** — without that, three polls of one failed task open a threshold-of-three breaker on their own.
+  - **`ConcurrencyLimiter` + `ProcessIsolationManager` DELETED.** A semaphore and an in-process timeout cannot bound a fire-and-forget `apply_async`; GPU serialisation is already the Celery worker's concurrency. Zero callers, zero tests. Wiring them would have produced a *second* always-healthy constant.
+  - `/status` now discloses `scope: "api-process"` rather than implying it observes the whole system. — MIS-E2E-062
+- [x] 5.2 ✅ ⚠️ **The finding read the absence correctly and proposed the wrong remedy.** Implementing the affine gate would have been a *regression*: freezing does **not** make the map affine — the MLP activation stays non-linear — so a global-affine check reports a large departure for every real model and **would refuse every genuine fit**. That is precisely why it had been replaced by `linearisation_residual`, a recorded diagnostic. What was actually wrong: the dead `MAX_AFFINE_RESIDUAL` threshold, which reads like a guard and so stops anyone looking for the missing one.
+  - **Removed** the dead threshold and the constructor parameter.
+  - **Closed the real hazard soundly:** `frozen_attention_and_norms` now refuses a freeze that applied to *nothing* — `freeze_norms=True` on a model where `_norm_modules` matches no module (the documented substring-match failure) raises instead of recording `freeze_norms: true` for an unfrozen fit. Checking that the patch **landed** is direct and certain; inferring it from the resulting matrix is neither.
+  - `CLAUDE.md` correction is Task 13.7's, and now has something true to say. — MIS-E2E-079
+- [x] 5.3 ✅ 8 negative controls (C39–C46), each verified to land and then bite. **Two findings came out of the controls themselves:**
+  - **C44 SURVIVED** — the `freeze_qk` half of the gate had no test that could reach it. Pinned by simulating the only real displacement window (`_freeze_norm` stealing SDPA between the patch and the check).
+  - **C45 HUNG the suite instead of failing.** Deleting the refusal path's unwind loop leaks `_FREEZE_LOCK`, and the next test blocks on `acquire()` forever with no output. An autouse fixture now converts a leaked lock into a legible failure. A test that hangs is worse than one that fails. — `CLAUDE.md` Reachability gate
 
 ---
 
@@ -284,6 +293,12 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_websocket_boundary.py` | **New.** 30 tests; the topic allow-list is checked against channels derived from the emitter, not a second hand-list |
 | `backend/tests/unit/test_patch_is_not_mass_assignment.py` | **New.** Narrow schemas, route binding, route deletion, and each sink's allow-list exercised against a stub session that fails loudly if the guard is skipped |
 | `backend/tests/api/v1/endpoints/test_datasets.py` | ⚠️ `test_update_dataset_success` **pinned the defect** (PATCH status → assert 200); replaced with a 422 + row-unchanged assertion |
+| `backend/src/services/steering_resilience.py` | MIS-E2E-062: `CircuitBreaker` kept and wired; `ConcurrencyLimiter` / `ProcessIsolationManager` deleted as architecturally unfit; `/status` discloses its `api-process` scope |
+| `backend/src/api/v1/endpoints/steering.py` | MIS-E2E-062: `_guard_steering_dispatch()` on all three dispatch endpoints; `_record_steering_outcome()` (de-duplicated per task) on the result endpoint |
+| `backend/src/ml/jlens_fitter.py` | MIS-E2E-079: dead `MAX_AFFINE_RESIDUAL` removed; `frozen_attention_and_norms` refuses a freeze that applied to nothing, unwinding the lock first |
+| `backend/tests/unit/test_steering_resilience_wired.py` | **New.** 10 tests; the dispatch scan asserts it found exactly 3 endpoints so it cannot pass vacuously |
+| `backend/tests/unit/test_jlens_freeze_gate.py` | **New.** 9 tests + an autouse fixture converting a leaked `_FREEZE_LOCK` from a hang into a failure |
+| `.github/workflows/backend-tests.yml` | **CI never ran migrations**, so the Wave 1 ORM-vs-migrated-schema guard failed with `NoSuchTableError` on its first push. `alembic upgrade head` added; reproduced against a fresh DB (6 failures) and verified fixed before pushing |
 
 ## Negative controls run
 
@@ -330,6 +345,14 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC36 | Rebind the dataset PATCH route to the internal `DatasetUpdate` | ✅ 1 failure |
 | NC37 | Disable the dataset sink's allow-list | ✅ 1 failure |
 | NC38 | Restore `PATCH /api/trainings/{id}` | ✅ 1 failure |
+| NC39 | Ungate ONE of the three dispatch sites (MIS-E2E-062) | ✅ 1 failure |
+| NC40 | Stop recording task outcomes | ✅ 1 failure |
+| NC41 | Drop the per-task outcome de-duplication | ✅ 1 failure |
+| NC42 | Make the breaker's failure count never increment | ✅ 3 failures |
+| NC43 | Remove the `freeze_norms` application check (MIS-E2E-079) | ✅ 2 failures |
+| NC44 | Remove the `freeze_qk` application check | ⚠️ **SURVIVED** — no test could reach the branch. Pinned by simulating the only real displacement window; **re-run ✅ 1 failure** |
+| NC45 | Make the freeze refusal skip its unwind loop | ⚠️ **HUNG the suite** rather than failing — a leaked `threading.Lock` blocks the next test forever. Autouse fixture added; **re-run ✅ 1 failure** |
+| NC46 | Restore the dead `MAX_AFFINE_RESIDUAL` threshold | ✅ 1 failure |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **4 of the 14 surviving audit mutations are now killed** — M2 (NC3), M3 (NC7),

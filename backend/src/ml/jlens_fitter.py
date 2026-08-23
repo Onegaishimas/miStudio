@@ -90,7 +90,20 @@ _FREEZE_LOCK = threading.Lock()
 # the fit is refused. Non-zero only to absorb floating-point error: freezing is
 # meant to make the map exactly affine, so anything above this means a norm or
 # an attention pattern escaped the freeze and the extracted matrix is not a lens.
-MAX_AFFINE_RESIDUAL = 1e-3
+# MAX_AFFINE_RESIDUAL was REMOVED (MIS-E2E-079).
+#
+# `CLAUDE.md` claimed "`affine_residual` refuses a fit whose freeze leaked", and
+# an audit found the threshold stored and compared to nothing. Reinstating the
+# comparison is the WRONG fix: freezing does not make the map affine — the MLP
+# activation stays non-linear — so a global-affine gate reports a large
+# departure for every real model and would refuse every genuine fit. That is
+# why the check was replaced by `linearisation_residual`, a recorded diagnostic.
+#
+# A configured threshold that nothing reads is worse than no threshold: it
+# reads like a guard, so nobody looks for the missing one. Removed, and the
+# real gap — a freeze that silently applies to nothing — is closed by
+# `frozen_attention_and_norms` below, which is a direct check that the patch
+# landed rather than an inference from the resulting matrix.
 
 #: Relative Frobenius distance from the identity below which a fitted layer is
 #: DEGENERATE — the lens there is the logit lens, exactly.
@@ -297,6 +310,40 @@ def frozen_attention_and_norms(
         )
 
     handles = [_freeze_norm(m) for m in _norm_modules(model)] if freeze_norms else []
+
+    # THE FREEZE MUST HAVE ACTUALLY APPLIED (MIS-E2E-079).
+    #
+    # This is the gate `CLAUDE.md` promised under the name `affine_residual`,
+    # implemented soundly. The affine version could not work — freezing does not
+    # make the map affine, so it would refuse every genuine fit — but the hazard
+    # it was aimed at is real: an incomplete freeze yields a matrix of the right
+    # shape that passes STRUCTURAL, NAMING and ENVELOPE validation and reads out
+    # plausible nonsense, and the artifact then records `freeze_qk: true` as
+    # though it held.
+    #
+    # Checking that the patch LANDED is direct, cheap and certain, where
+    # inferring it from the matrix is neither. `_norm_modules` is the specific
+    # reason this matters: it once used a substring match, and a model whose
+    # norm modules do not match the predicate yields an EMPTY list here — a
+    # `freeze_norms=True` fit that froze nothing at all, silently.
+    if freeze_qk and torch.nn.functional.scaled_dot_product_attention is not frozen_sdpa:
+        for undo in reversed(patched):
+            undo()
+        raise RuntimeError(
+            "freeze_qk was requested but the SDPA patch is not in place — "
+            "something replaced torch.nn.functional.scaled_dot_product_attention "
+            "after it was patched. Refusing to fit: the lens would record "
+            "freeze_qk=true for a fit that was not frozen."
+        )
+    if freeze_norms and not handles:
+        for undo in reversed(patched):
+            undo()
+        raise RuntimeError(
+            "freeze_norms was requested but no norm module was found on this "
+            "model, so nothing was frozen. Refusing to fit rather than "
+            "recording freeze_norms=true for an unfrozen fit. Check that "
+            "_norm_modules' predicate matches this architecture's norm layers."
+        )
 
     try:
         yield
@@ -580,7 +627,6 @@ class JacobianFitter:
         convergence_delta: float = DEFAULT_CONVERGENCE_DELTA,
         min_prompts: int = MIN_PROMPTS,
         chunk: int = DEFAULT_CHUNK,
-        max_affine_residual: float = MAX_AFFINE_RESIDUAL,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -607,7 +653,6 @@ class JacobianFitter:
         self.convergence_delta = convergence_delta
         self.min_prompts = min_prompts
         self.chunk = chunk
-        self.max_affine_residual = max_affine_residual
         #: Per-layer local-linearisation residual, ACCUMULATED over the corpus.
         #:
         #: This used to hold the most recent prompt's value only — overwritten
