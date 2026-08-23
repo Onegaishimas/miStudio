@@ -6,8 +6,8 @@ Ids are never reused and never renumbered. A refuted finding is marked
 
 Schema, severity rubric and verification rules: see [PLAN.md](PLAN.md).
 
-**Count:** 78
-**Last id issued:** MIS-E2E-078
+**Count:** 91
+**Last id issued:** MIS-E2E-091
 
 ---
 
@@ -1371,3 +1371,223 @@ phase rediscovers them as new. Each carries the phase that owns its verification
 - **Proposed remediation:** A test asserting the module handed to `register_forward_hook` **is** `structure.layers_module[L]` and is not a norm submodule — cheap, needs no GPU, and would have failed before the hardware round. Add it to both implementations while both exist (MIS-E2E-076). Then re-run this mutation as a negative control to prove the new test bites.
 - **Effort:** S
 - **Note:** the standing rule — *mutate the previous round's fix; if it does not fail loudly, that round produced an unpinned fix* — is satisfied here in the negative, for a fix that cost a hardware round to find.
+
+---
+
+## P03 — ML / GPU
+
+---
+
+### MIS-E2E-079 — The documented freeze-leak gate does not exist
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** **P0** *(a capability the product claims to ship that is unreachable)*
+- **Type:** reachability
+- **Location:** `backend/src/ml/jlens_fitter.py:583` (constructor param), `:610` (`self.max_affine_residual = max_affine_residual`)
+- **Claim:** `CLAUDE.md` states, as a shipped property of the J-space fitter: *"**`affine_residual` refuses a fit whose freeze leaked.** An incomplete freeze yields a matrix of the right shape and size that passes STRUCTURAL/NAMING/ENVELOPE and reads out plausible nonsense; fit time is the only point where it is detectable."* No such gate exists. `max_affine_residual` is accepted as a constructor argument, assigned to an attribute, and **never read** — grepped across `backend/src` and `backend/tests`, two hits total, both writes. `affine_residual` itself appears only in **docstrings** at `:417` and `:440`; it is never computed.
+- **Failure scenario:** The threshold is configured and compared to nothing. Per the project's own description, an incomplete freeze produces a lens that passes every other validation class and reads out plausible nonsense, and **fit time is the only point where it is detectable** — so this is not one guard among several, it is the only one, and it is absent. A leaked-freeze lens is therefore fittable, validatable, publishable to HuggingFace, and mountable by miLLM, and nothing anywhere would say otherwise.
+- **Evidence:** **verified-by-live-repro** — grep over `src` and `tests` for both identifiers; the two hits are the parameter and the assignment
+- **Doc reference:** `CLAUDE.md` J-Space arc section; PADR IDL-41 (model-agnostic lens construction)
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Implement the comparison the stored threshold implies, and gate the fit on it. Then apply the repo's own reachability rule: delete the gate line and require a red. Until it exists, `CLAUDE.md`'s claim should be corrected — a documented guarantee that is absent is worse than no guarantee, because it stops anyone looking.
+- **Effort:** M
+
+---
+
+### MIS-E2E-080 — "Converged" measures sample count, not stabilisation
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug *(the "wrong results presented as correct" class)*
+- **Location:** `backend/src/ml/jlens_fitter.py:686-699`
+- **Claim:** The fit accumulates a running mean, `accumulated += (mat - accumulated) / seen`, and declares convergence when `relative_change(previous, accumulated) < convergence_delta` for `PATIENCE` consecutive steps. The step size of a running mean is `O(σ/n)` in the per-prompt spread σ — **it shrinks because the denominator grows, not because successive estimates of J agree.** So the stop point is `n ≈ σ/δ`: directly proportional to per-prompt variance, and reachable by any process whose increments are bounded, converged or not.
+- **Failure scenario:** The reviewer simulated it: stop points **518 / 1050 / 2030** for noise 0.5 / 1.0 / 2.0 — exactly proportional, and **bracketing the two real recorded fits** that `CLAUDE.md` reports as *"paper-aligned converged lenses (gemma 634 prompts, LFM2 1097)"*. Those two numbers are therefore consistent with the criterion measuring nothing but each model's per-prompt variance. A noisier model is required to run proportionally longer to earn the same word; a low-variance but *biased* estimate converges early. The word "converged" is doing evidential work in the artifact, the docs and the gate decision, and it is not supported by what is computed.
+- **Evidence:** **verified-by-live-repro** — the running-mean update and the delta computation read at source; the reviewer's simulation reproduces the proportionality
+- **Doc reference:** `CLAUDE.md` ("paper-aligned converged lenses"); PADR IDL-41; 021_FPRD
+- **Verification (R3):** **CONFIRMED at R1**
+- **Proposed remediation:** Measure stabilisation of J against a **held-out** set of prompts, or compare split-half estimates, rather than the shrinkage of a running mean's own increment. Until then, do not call it convergence in the artifact or the docs.
+- **Effort:** M
+
+---
+
+### MIS-E2E-081 — The published lens artifact labels a spread as a residual
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/ml/jlens_fitter.py:909`
+- **Claim:** The published artifact writes per-source-position **spread** under the keys `linearisation_residual_mean` and `linearisation_residual_max`. The real `linearisation_residual` function is never called outside tests.
+- **Failure scenario:** A field named after a quantity is populated by a different quantity, in a document that **travels** — to HuggingFace and into miLLM. A consumer reading `linearisation_residual_max` to judge how well the affine approximation holds gets a number about positional variation instead, with no way to tell. This is the class the J-Lens review lessons single out: *evidence that is wrong rather than merely missing*.
+- **Evidence:** verified-by-live-repro (the write site and the function's caller inventory)
+- **Doc reference:** PADR IDL-42, IDL-45 (Neuronpedia wire format)
+- **Verification (R3):** pending
+- **Proposed remediation:** Rename the keys to what they measure, or compute the residual. Note this was **already recorded as standing debt** by the architect persona (*"`linearisation_residual()` has zero callers while a field named after it is populated by something else"*) — it is in a published artifact, which is why it is filed at P1 rather than left as debt.
+- **Effort:** S
+
+---
+
+### MIS-E2E-082 — A raise during norm patching leaks a process-wide patch and the freeze lock
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/ml/jlens_fitter.py:299`
+- **Claim:** Norm patching runs **before** the `try:`, so an exception there leaks the process-wide SDPA patch and never releases `_FREEZE_LOCK`.
+- **Failure scenario:** Every subsequent forward pass in that worker process runs under a patched attention implementation, and every subsequent fit blocks forever on a lock nobody holds — a permanent, silent degradation of the process, recoverable only by restarting the worker. The comment immediately above the site was written to prevent exactly this.
+- **Evidence:** plausible (read-only) — the ordering is verified; the leak is reasoned
+- **Doc reference:** PADR IDL-41
+- **Verification (R3):** pending
+- **Proposed remediation:** Move the patch inside the `try:`, or acquire it with a context manager so the release is structural.
+- **Effort:** S
+
+---
+
+### MIS-E2E-083 — Circuit capture runs the SAE off-distribution
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/ml/sparse_autoencoder.py:173` (`encode` requires pre-normalized input); `_load_sae` never passes the trained `normalize_activations`
+- **Claim:** `encode()` expects input already normalized the way training normalized it. The extraction path does this; **circuit capture and attribution do not**, and `_load_sae` does not carry the trained `normalize_activations` setting through, so those paths feed raw activations to an SAE trained on normalized ones.
+- **Failure scenario:** Every circuit discovered from a capture is mined from activations the dictionary was not trained to decode. The features fire, the numbers are plausible, and the basis is wrong — the same silent-wrong-basis shape as MIS-E2E-064, in the discovery plane rather than the steering plane. Everything downstream (co-activation statistics, attribution, edge validation) inherits it.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-2, IDL-3; PPRD §3.17
+- **Verification (R3):** pending
+- **Proposed remediation:** Carry `normalize_activations` on the SAE record and apply it in `_load_sae`, so every consumer inherits the training-time convention instead of each remembering.
+- **Effort:** M
+
+---
+
+### MIS-E2E-084 — Three generic-caller contract breaks in the SAE classes, all reproduced
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/ml/sparse_autoencoder.py:345` (`SkipAutoencoder.decode`), `:653` (`TopKSAE.encode`/`decode`); `backend/src/ml/forward_hooks.py:279`
+- **Claim:** Three defects that only appear through a *generic* caller, all reproduced by execution:
+  1. **`SkipAutoencoder.decode(z, x_original)`** breaks the base-class signature. `circuit_capture_service.py:991` and `circuit_attribution_service.py:58` call `decode(z)` polymorphically → **TypeError**.
+  2. **`TopKSAE.encode`/`decode` omit `b_pre`** where every sibling applies it. A generic caller gets a reconstruction offset by the bias (max error **1.13** reproduced) *and* a different top-k selection — so the features chosen differ, not just their scale.
+  3. **`forward_hooks.py:279`** does `del activation_list[i]` while iterating a fixed `range(len(...))` → **IndexError** for any list with ≥2 entries (reproduced). Latent only because every current caller clears after a single forward.
+- **Failure scenario:** (1) and (2) mean circuit capture and attribution are broken or subtly wrong for two of the six SAE frameworks — and (2) is the dangerous one, because it does not raise. (3) is a live landmine behind an accidental invariant.
+- **Evidence:** **verified-by-live-repro** — all three reproduced by the reviewer against torch 2.9.1
+- **Doc reference:** PADR IDL-3 (multi-architecture SAE support)
+- **Verification (R3):** pending
+- **Proposed remediation:** Make the base-class contract explicit and conform all six implementations; iterate a copy or delete in reverse.
+- **Effort:** M
+
+---
+
+### MIS-E2E-085 — `anthropic_rescale` is arithmetically identical to `constant_norm_rescale`
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/ml/sparse_autoencoder.py:49`
+- **Claim:** The two normalization modes compute the same thing — verified numerically, max difference **2.4e-7**. So `standard_anthropic` is not a distinct framework from its sibling in any respect that affects the model.
+- **Failure scenario:** The PPRD advertises **six paper-grounded frameworks**, and two of them are the same arithmetic under different names. A user selecting `standard_anthropic` to reproduce a paper gets `constant_norm_rescale`, and any comparison between the two measures noise.
+- **Evidence:** **verified-by-live-repro** (numerical comparison executed)
+- **Doc reference:** PPRD §2.1, PADR IDL-3 ("6 paper-grounded frameworks")
+- **Verification (R3):** pending
+- **Proposed remediation:** Either implement the Anthropic rescale as specified in the source paper, or collapse the two and say so.
+- **Effort:** M
+
+---
+
+### MIS-E2E-086 — Two SAE training defects: raw-space MSE and a ghost-gradient on the wrong tensor
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/ml/sparse_autoencoder.py:243`, `:262`
+- **Claim:**
+  1. Reconstruction MSE is computed in **raw** space while sparsity is computed in **normalized** space, so each sample is effectively weighted by `‖x‖²/d`. High-norm tokens dominate the loss, and cross-layer hyperparameter transfer — the stated purpose of normalization — is defeated.
+  2. The ghost-gradient (dead-neuron resurrection) penalty encodes **raw `x`** instead of the normalized-and-centered tensor the encoder actually receives, so the resurrection signal is computed on a different input than the one being resurrected against.
+- **Failure scenario:** Both silently degrade training quality rather than failing. (1) undermines the reason normalization was introduced; (2) makes dead-neuron recovery less effective in a way no metric surfaces.
+- **Evidence:** plausible (read-only)
+- **Doc reference:** PADR IDL-3; `0xcc/docs/SAE-training-optimization-Feb2026.md`
+- **Verification (R3):** pending
+- **Proposed remediation:** Compute both terms in the same space; encode the same tensor the encoder receives.
+- **Effort:** M
+
+---
+
+### MIS-E2E-087 — Layer discovery returns the alphabetically-first norm, discarding the documented preference
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P2
+- **Type:** bug
+- **Location:** `backend/src/ml/layer_discovery.py:167` (`_find_matching_attr`)
+- **Claim:** `_find_matching_attr` iterates `dir()`, which is **alphabetical**, and so discards the ordering that `LAYER_NORM_PATTERNS` documents as a preference. Reproduced: it returns `input_layernorm` where `_is_transformer_layer` returns `post_attention_layernorm`. Reachable on hybrid models through `get_hookable_module`'s fallback.
+- **Failure scenario:** Two functions in the same module disagree about which norm a layer has, and the one that wins is decided by alphabetical order. On a hybrid architecture — the reference model for this product is hybrid — a hook lands on the pre-attention norm instead of the post-attention one. Same family as the hook-target class (MIS-E2E-078), and the same silence.
+- **Evidence:** **verified-by-live-repro** (reproduced by the reviewer)
+- **Doc reference:** PADR IDL-13 (dynamic layer discovery); memory `probe-the-layer-that-owns-the-thing`
+- **Verification (R3):** pending
+- **Proposed remediation:** Iterate `LAYER_NORM_PATTERNS` in its declared order and test each against the module, rather than iterating `dir()` and testing membership.
+- **Effort:** S
+
+---
+
+### MIS-E2E-088 — Band metrics: a rank-deficient basis inflates FVE, and two controls never run
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P1
+- **Type:** bug
+- **Location:** `backend/src/ml/jlens_metrics.py:133`, `:141`, `:240`
+- **Claim:** Three defects in the band-report metrics:
+  1. **QR of rank-deficient directions pads the basis with arbitrary directions.** Reproduced: four duplicate directions report **FVE 0.378 against a true 0.083** — a 4.5× overstatement of variance explained.
+  2. **`excess_fve`, `occupancy` and `next_token_agreement` have no production caller** — so the random-direction control that `control_seed` exists to make reproducible **never runs**.
+  3. **`derive_boundaries` claims "first/final *sustained* rise"** and implements first-over-median plus argmax. One noisy layer can set `workspace_start`, including at layer 0, which yields an empty sensory band.
+- **Failure scenario:** BR-002 is this product's load-bearing honesty rule — bands render **only** from a measured band report, never from a constant, precisely so no borrowed boundary is presented as measured. These three defects attack the measurement the rule defends: FVE can be overstated 4.5× on a degenerate basis, the control that would show the metric is meaningless is dead code, and the boundary derivation is one noisy layer away from an empty band. A band report can be honest about its provenance and wrong about its content.
+- **Evidence:** **verified-by-live-repro** for (1) (reproduced numerically) and (2) (caller inventory); plausible for (3)
+- **Doc reference:** BR-002; PADR IDL-40, IDL-44
+- **Verification (R3):** pending — the caller inventory for (2) should be re-checked against the band-report service
+- **Proposed remediation:** Rank-check before QR and refuse or report a degenerate basis; wire the controls or delete them and stop documenting `control_seed`; implement the sustained-rise criterion the docstring describes.
+- **Effort:** M
+
+---
+
+### MIS-E2E-089 — Two candidate findings discarded after verification
+- **Phase / Round:** P03 / R1
+- **Source:** /code-review high
+- **Severity:** P3
+- **Type:** debt
+- **Location:** `backend/src/ml/sparse_autoencoder.py` (`calibrate_thresholds`); `backend/src/ml/model_loader.py` (`torch_dtype=`)
+- **Claim:** **REFUTED, recorded so no later round re-raises them.** (1) `torch.quantile`'s historical 2^24-element limit no longer applies in torch 2.9, so `calibrate_thresholds` is fine at 134M elements. (2) `torch_dtype=` is still back-compatible in transformers 5.15.1 despite the deprecation in favour of `dtype=`. Both were checked by execution against the project venv rather than assumed.
+- **Verification (R3):** **REFUTED — no action**
+- **Effort:** —
+
+---
+
+## P03 — R2 (mutation controls)
+
+---
+
+### MIS-E2E-090 — BR-002's "anywhere" guard scans two hardcoded modules
+- **Phase / Round:** P03 / R2
+- **Source:** mutation controls M12 and M13
+- **Severity:** P2
+- **Type:** test-gap
+- **Location:** `backend/tests/unit/test_jlens_band_report.py:236` (`test_no_band_constant_exists_in_the_derivation_module`)
+- **Claim:** BR-002 is this product's load-bearing honesty rule, stated as *"no band constant **anywhere**, by construction"* — the published sensory/workspace/motor boundaries were measured on one specific model, so miStudio must draw no bands unless a band report exists for the model in front of you. The guard is an AST walk over `inspect.getsource` of a **hardcoded two-module tuple** (`jlens_metrics`, `jlens_band_report`) rejecting `ast.Constant` values in `(38, 40, 90, 92)`.
+- **Failure scenario:** Injecting the literal forbidden constants into `jlens_band_service.py` — a **sibling jlens service in the same package**, and a plausible place for someone to add a default — left the suite green (M13). The rule is package-wide; the check is two-module and maintained by hand. Separately (M12), the scan matches only bare numeric literals, so `4 * 10` evades it — unrealistic as an accident, recorded for completeness.
+- **Evidence:** **verified-by-mutation** — both M12 and M13 landed and both left the suite green; M11 (the literal in a scanned module) was killed, which is what makes the scope the variable
+- **Doc reference:** BR-002; PADR IDL-40
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** Derive the module list rather than hardcoding it — walk every module in the jlens package (and the frontend's band code, which the guard does not cover at all). The precedent already exists in this codebase: the MCP reachability harness is parametrized off the registry rather than a hand-written list, for exactly this reason.
+- **Effort:** S
+
+---
+
+### MIS-E2E-091 — The `weights_only` guard against artifact RCE has no test
+- **Phase / Round:** P03 / R2
+- **Source:** mutation control M14
+- **Severity:** P1
+- **Type:** test-gap
+- **Location:** `backend/src/services/jlens_artifact_service.py:396`; also `jlens_acquire_service.py:1086`, `workers/jlens_acquire_tasks.py:185`
+- **Claim:** Flipping `weights_only=True` to `False` left **58 jlens tests green**. That flag is the only thing preventing a downloaded J-lens artifact from executing arbitrary pickled code at load time, and the code knows it — `:382` carries the comment *"an artifact is an untrusted file"*.
+- **Failure scenario:** A J-lens artifact is acquired from HuggingFace — the product's documented *"acquisition"* path, where the whole point is adopting a lens someone else fitted. With the flag off, `torch.load` on that file executes whatever the publisher pickled, in the GPU worker, which holds `/data` write access and the broker and DB credentials. Nothing in the suite would notice the flag changing, in any of the three load sites.
+- **Evidence:** **verified-by-mutation** — M14 landed (confirmed), suite green, restore verified clean
+- **Doc reference:** PADR IDL-46 (artifact mount, not upload); BR-031
+- **Verification (R3):** CONFIRMED at R2
+- **Proposed remediation:** A test that asserts the `weights_only` kwarg passed to `torch.load` is `True` at each of the three sites — cheap, and it is the guard the acquisition feature's entire threat model rests on. Then re-run M14 as a negative control.
+- **Effort:** S
