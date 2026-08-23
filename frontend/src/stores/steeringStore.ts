@@ -535,6 +535,17 @@ interface SteeringState {
   setHasHydrated: (hydrated: boolean) => void;
 }
 
+/**
+ * A member's direction, preferring the persisted sign over its magnitude.
+ *
+ * MIS-E2E-122: reading `f.strength < 0` fails after the over-budget branch has
+ * zeroed it, which is reachable in a single drag past the budget and back.
+ */
+export function directionOf(f: { strength: number; sign?: 1 | -1 }): 1 | -1 {
+  if (f.sign === 1 || f.sign === -1) return f.sign;
+  return f.strength < 0 ? -1 : 1;
+}
+
 export const useSteeringStore = create<SteeringState>()(
   devtools(
     persist(
@@ -816,7 +827,13 @@ export const useSteeringStore = create<SteeringState>()(
         if (unpinned.length > 0) {
           if (remaining < 0) {
             // Over budget: unpinned drop to 0; pins are never rescaled.
-            for (const f of features) if (!f.pinned) f.strength = 0;
+            // RECORD THE DIRECTION FIRST — zeroing destroys it, and the next
+            // rebalance reads it back (MIS-E2E-122).
+            for (const f of features) {
+              if (f.pinned) continue;
+              f.sign = directionOf(f);
+              f.strength = 0;
+            }
           } else {
             const wsum = unpinned.reduce(
               (s, f) => s + (clusterBudget.weightsByInstance[f.instance_id] ?? 0), 0);
@@ -824,7 +841,7 @@ export const useSteeringStore = create<SteeringState>()(
               if (f.pinned) continue;
               const w = clusterBudget.weightsByInstance[f.instance_id] ?? 0;
               const share = wsum > 0 ? w / wsum : 1 / unpinned.length;
-              const sign = f.strength < 0 ? -1 : 1;
+              const sign = directionOf(f);
               f.strength = Math.round(sign * remaining * share * 10) / 10;
             }
           }
@@ -867,7 +884,11 @@ export const useSteeringStore = create<SteeringState>()(
         const unpinned = onLayer.filter((f) => !f.pinned);
         if (unpinned.length > 0) {
           if (remaining < 0) {
-            for (const f of features) if (f.layer === layer && !f.pinned) f.strength = 0;
+            for (const f of features) {
+              if (f.layer !== layer || f.pinned) continue;
+              f.sign = directionOf(f);   // MIS-E2E-122, same rule per layer
+              f.strength = 0;
+            }
           } else {
             const wsum = unpinned.reduce(
               (s, f) => s + (layerBudget.weightsByInstance[f.instance_id] ?? 0), 0);
@@ -875,7 +896,7 @@ export const useSteeringStore = create<SteeringState>()(
               if (f.layer !== layer || f.pinned) continue;
               const w = layerBudget.weightsByInstance[f.instance_id] ?? 0;
               const share = wsum > 0 ? w / wsum : 1 / unpinned.length;
-              const sign = f.strength < 0 ? -1 : 1;
+              const sign = directionOf(f);
               f.strength = Math.round(sign * remaining * share * 10) / 10;
             }
           }
@@ -2098,7 +2119,22 @@ export const useSteeringStore = create<SteeringState>()(
 
       // Generate with combined mode (all features applied together)
       generateCombined: async (includeBaseline = true, computeMetrics = true) => {
-        const { selectedSAE, selectedFeatures, prompts, generationParams, advancedParams } = get();
+        const {
+          selectedSAE, selectedFeatures, prompts, generationParams, advancedParams,
+          isCombinedGenerating,
+        } = get();
+
+        // THE SAME DOUBLE-SUBMIT GUARD `generateComparison` HAS (MIS-E2E-124).
+        //
+        // Without it a double-click started a second generation, the first was
+        // cancelled with "Superseded by a newer combined generation request" —
+        // shown to the user as an ERROR — and the orphaned GPU task ran to
+        // completion anyway. So the UI reported a failure while the GPU was
+        // occupied by work nobody would read.
+        if (isCombinedGenerating) {
+          console.log('[SteeringStore] Already generating (combined), ignoring duplicate call');
+          throw new Error('A combined generation is already running');
+        }
 
         if (!selectedSAE) {
           throw new Error('No SAE selected');
@@ -2533,10 +2569,19 @@ export const useSteeringStore = create<SteeringState>()(
         name: 'miStudio-steering',
         // Only persist essential state for recovery
         partialize: (state) => ({
-          // Active task state (for recovery after refresh)
+          // IN-FLIGHT STATE IS NOT PERSISTED (MIS-E2E-123).
+          //
+          // `isGenerating` and `batchState` used to be written here. Nothing
+          // cleared them on rehydration, so refreshing mid-batch left
+          // `selectCanGenerateBatch` false FOREVER — the Steering panel's
+          // primary action disabled with no way to re-enable it, because
+          // `abortBatch` drives an in-memory loop that no longer exists.
+          // Recovery required clearing localStorage.
+          //
+          // `taskId` DOES persist, deliberately: it is a durable handle the
+          // page can poll after a reload, which is the actual recovery
+          // mechanism. The booleans describing a loop in this tab are not.
           taskId: state.taskId,
-          isGenerating: state.isGenerating,
-          batchState: state.batchState,
           progress: state.progress,
           progressMessage: state.progressMessage,
           // Configuration state (so user doesn't lose their setup)
@@ -2557,6 +2602,13 @@ export const useSteeringStore = create<SteeringState>()(
           recentComparisons: state.recentComparisons,
         }),
         onRehydrateStorage: () => (state) => {
+          if (state) {
+            // Belt and braces for MIS-E2E-123: even if an older persisted
+            // payload carries these (they were stored until this fix), a
+            // rehydrated tab has no running loop, so they must start false.
+            state.isGenerating = false;
+            state.batchState = null;
+          }
           state?.setHasHydrated(true);
           console.log('[SteeringStore] State hydrated from localStorage');
         },

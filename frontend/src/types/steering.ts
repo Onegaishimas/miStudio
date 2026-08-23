@@ -231,6 +231,24 @@ export interface SelectedFeature {
   /** Feature 013: member context similarity (cluster hand-offs only). */
   similarity?: number | null;
   strengthSource?: StrengthSource; // 'auto' | 'default' | 'manual' | 'cluster'
+  /**
+   * The member's DIRECTION, independent of its current magnitude (MIS-E2E-122).
+   *
+   * The budget rebalance derives sign from `strength`, and its over-budget
+   * branch zeroes unpinned members first. So dragging a slider past the budget
+   * and back read the sign off a zero — `0 < 0` is false — and a suppressing
+   * feature came back AMPLIFYING, at a strength the budget model chose, with no
+   * error and no visual cue.
+   *
+   * Negative strength is not an edge case here: the cluster-definition contract
+   * carries `sign ∈ {1,-1}` and the canonical rule is that a member's negative
+   * strength IS its direction. Direction therefore has to survive an operation
+   * that discards magnitude, which means it cannot be recovered FROM magnitude.
+   *
+   * Optional for back-compatibility: absent means "derive from strength", which
+   * is correct for every feature that has never been zeroed.
+   */
+  sign?: 1 | -1;
   /** Feature 013: manually-edited member in cluster mode — excluded from rebalance. */
   pinned?: boolean;
   /** Author-provided display metadata (contract rev 2026-07-17) — carried
