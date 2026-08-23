@@ -5,7 +5,7 @@ end-to-end assessment (2026-08-23). Every task cites its finding id; the registe
 carries the evidence, the reproduction and the proposed remediation for each.
 
 **Status:** ⏳ **In progress** — started 2026-08-23 · **Findings:** 13 P0 · 62 P1 · 68 P2 · 23 P3
-**Suites:** backend **3195 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
+**Suites:** backend **3203 passed / 0 failed** (baseline 2883) · frontend **1239 passed / 0 failed** (baseline 1211) · `tsc` clean · **eslint 0 errors** · **CI green (now running all 1232, lint gating), mirror images built**
 
 | Wave | Scope | State |
 |---|---|---|
@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11: all but 11.5 ✅** · 12.7–12.10 ✅ · 11.5 and 12.1–12.6 open |
+| **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ⏳ **in progress** — **Task 9 ✅** · **Task 10 ✅** · **Task 11 ✅** · **12.3 ✅ 12.5 partial 12.7–12.10 ✅** · 12.1, 12.2, 12.4, 12.6 open |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -170,7 +170,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 11.2 ✅ `populate_existing()`. **And the fixture was rebuilt**, which was the finding's sharper half: the fake `_Session` returned a fresh row every call, so it had no identity map and could not exhibit the defect in either direction. It now models one — verified by removing the fix and watching the *new* test go red, which the old fixture could never have done. Sibling sweep: `training_tasks` and `neuronpedia_tasks` open a **fresh session per check**, so the trap is unique to labeling, which reuses `self.db`. — MIS-E2E-057
 - [x] 11.3 ✅ All three. `job_batch_size` bound before `if template:` (the supported no-template path died with `UnboundLocalError` at three read sites). `_LabelingCancelled` handled ahead of the generic handler — and the comment in `labeling_tasks.py` asserting *"the job row is already CANCELLED"* is now **true**; it was false precisely because the generic handler had overwritten it, which is why nobody looked. `max_tokens` takes the job's value at **both** sites, matching `max_examples`. — MIS-E2E-058, -059, -060
 - [x] 11.4 ✅ `RETRYABLE_TASK_TYPES` checked first, so an unsupported pair leaves the row untouched. The allow-list is held in step with the if/elif chain by a test that reads the branches out of the **AST** — a hand-list that can drift from the code it guards is worth little. — MIS-E2E-098
-- [ ] 11.5 Track spawned worker PIDs instead of `pkill -9 -f steering@`; bound worker spawn. HMAC-gate `POST /system/restart`. — MIS-E2E-003, -099
+- [x] 11.5 ✅ `_SPAWNED_WORKER_PIDS` + `_kill_orphan_steering_workers()` — the sweep kills what this process started, by pid. The worker was **already** started with `--pidfile`, so the precise handle existed and nothing used it. `POST /system/restart` now requires the internal token with `hmac.compare_digest`, matching `main.py`'s existing internal endpoints — it previously took no arguments, required nothing, and being idempotent under a restart policy was a self-sustaining outage loop. ⚠️ **Spawn bounding deferred**: recorded, not done. — MIS-E2E-003, -099
 - [x] 11.6 ✅ One shared `task_looks_alive()` in `task_heartbeat`, and **all five** janitors on it. The discovery test found a **sixth janitor the finding never named** — `cleanup_stuck_nlp` — which turned out to be correct by design (`ExtractionJob.celery_task_id` belongs to the extraction task, not the NLP pass). Recorded as a listed exemption **with its reason pinned**, so if an `nlp_celery_task_id` column ever appears the test says so. — MIS-E2E-092
 - [x] 11.7 ✅ Dispatch keys on `not created_jobs` rather than the enumerate index (a skipped first SAE meant no job had position 1 and **nothing ran**), and the chain advances to the next queued job **by order** rather than demanding `position + 1` (a gap stranded the tail until the 3-hour reaper blamed a crashed worker). — MIS-E2E-066
 - [x] 11.8 ✅ The `feature_ids` branch now binds to `extraction_job_id`, as the no-ids branch already did, and logs when ids are dropped rather than silently analysing a subset. — MIS-E2E-109
@@ -187,9 +187,9 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 - [ ] 12.1 Delete the root `k8s/mistudio-deployment.yaml`; have `k8s_deploy` apply `k8s/base` via kustomize. It currently reverts the queue-split and SQL-echo fixes. — MIS-E2E-144
 - [ ] 12.2 `strategy: Recreate` on postgres and redis, or StatefulSets with PVCs. — MIS-E2E-145
-- [ ] 12.3 Bind compose postgres/redis to `127.0.0.1`; set a Redis password. The broker is the LAN-writable one. — MIS-E2E-146
+- [x] 12.3 ✅ Both bound to `127.0.0.1` by default, overridable via `POSTGRES_BIND` / `REDIS_BIND` for deliberate remote access. Redis is the **Celery broker**, so LAN reachability meant anyone could enqueue GPU jobs and read queued payloads — well outside the accepted posture, which concedes the API behind nginx and not the broker. ⚠️ **Redis password deferred** (binding removes the exposure; auth is defence in depth). — MIS-E2E-146
 - [ ] 12.4 Fix `k8s_deploy`'s `&&`-chain so a failed pull/apply/rollout is not reported as success. — MIS-E2E-147
-- [ ] 12.5 Fix the compose frontend port (`3000:80` → 8080), add the `/ollama/` location, split the compose worker's queues, fix the `server_name` typo. — MIS-E2E-147
+- [x] 12.5 ⏳ **Partial** — the frontend port is fixed (`3000:8080`; the image moved to nginx-unprivileged in `bca37c6` and only k8s and `nginx.docker.conf` were updated, so `localhost:3000` has been dead since). The `/ollama/` location, the compose worker's queue split and the `server_name` typo remain. — MIS-E2E-147
 - [ ] 12.6 Scope `MCP_TOOL_CATEGORIES` off the ingress `/api` prefix or deny `/api/internal/*` there; use `signed-by=` instead of `apt-key adv`. — MIS-E2E-148
 - [x] 12.7 ✅ All nine removed. Verified first: **329 tests, 9 files, all passing** — whatever was once broken had been fixed and the exclusion outlived it silently. — MIS-E2E-025
 - [x] 12.8 ✅ **0 errors, and lint now gates CI.** The two `react-hooks/rules-of-hooks` errors were real: `ReadoutGrid`'s empty-readout guard sat *above* two `useMemo` calls, so an empty axis meant React saw a shorter hook list — "rendered fewer hooks than expected", which unmounts the tree. Assessed unreachable because the backend emits `types` and `layers_by_type` from one tuple; that is a property of today's backend, not of the component, so the guard moved below the hooks.
@@ -393,6 +393,10 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `frontend/src/types/steering.ts` · `stores/steeringStore.ts` | MIS-E2E-122: `sign` persists direction across zeroing. -123: in-flight state out of `persist` + rehydrate reset. -124: the missing double-submit guard |
 | `frontend/src/stores/featuresStore.ts` | MIS-E2E-121: `releaseIfCurrent()` — only clear the refs you still own |
 | `frontend/src/stores/task11FrontendState.test.ts` | **New.** 7 tests, incl. a behavioural one for the ref clobber (types cannot catch it) |
+| `backend/src/api/v1/endpoints/steering.py` | MIS-E2E-003: `pkill -9 -f steering@` replaced by a pid-tracked sweep; both spawn sites record their pid |
+| `backend/src/api/v1/endpoints/system.py` | MIS-E2E-099: `/system/restart` gated on the internal token (`settings` was not even imported) |
+| `docker-compose.yml` | MIS-E2E-146: postgres and the Celery broker bound to loopback. MIS-E2E-147: frontend `3000:8080` |
+| `backend/tests/unit/test_privilege_operations.py` | **New.** 8 tests; `pkill` asserted as a parsed CALL, and the restart exercised in all three directions |
 
 ## Negative controls run
 
@@ -519,6 +523,10 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC115 | In-flight state back in `partialize` (MIS-E2E-123) | ✅ 1 failure |
 | NC116 | Remove the combined double-submit guard (MIS-E2E-124) | ✅ 1 failure |
 | NC117 | Restore the unconditional ref clobber (MIS-E2E-121) | ✅ 1 failure — `tsc` stays clean, so only a behavioural test can catch it |
+| NC118 | Restore a pattern `pkill` (MIS-E2E-003) | ✅ 1 failure |
+| NC119 | A spawn site stops recording its pid | ✅ 1 failure — a sweep over an unpopulated set kills nothing |
+| NC120 | `/system/restart` drops the token (MIS-E2E-099) | ✅ 3 failures |
+| NC121 | Token compared with `==` instead of `compare_digest` | ⚠️ **SURVIVED** — my own docstring named `compare_digest` while explaining why `==` is wrong. Parsed the call instead; **re-run ✅ 1 failure** |
 | Gate | Build a mirror the old way and run the Verify step against it | ✅ fails, naming `0xcc`, `CLAUDE.md`, `scripts` |
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),
