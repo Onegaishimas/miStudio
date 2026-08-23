@@ -1,5 +1,24 @@
 # Technical Design Document: System Monitoring
 
+:::danger This design was SUPERSEDED on 2026-07-10 (MIS-E2E-156)
+The Celery Beat architecture below — `collect_system_metrics_task`,
+`src.workers.system_monitor_tasks`, the `beat_schedule` entry — **no longer
+exists**. `workers/system_monitor_tasks.py` was deleted and collection moved to
+an **asyncio task inside the FastAPI process**: `services/background_monitor.py`,
+started from `main.py`'s lifespan.
+
+Only the 2-second interval and the `system/*` channel shape survive. The
+correction reached `008_FPRD` and this document was left describing the deleted
+design — along with the PADR, README, CLAUDE.md and `008_FTASKS`, all now
+corrected.
+
+**Consequences of the real architecture** that Celery Beat does not imply:
+collection stops on backend restart, and duplicates across API replicas.
+
+Kept as history. Do not implement from it.
+:::
+
+
 **Document ID:** 008_FTDD|System_Monitoring
 **Version:** 1.1
 **Last Updated:** 2025-12-16

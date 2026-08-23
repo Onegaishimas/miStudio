@@ -399,7 +399,7 @@ The highest-quality labeling path. Two-pass strategy:
 | Network | Upload/download I/O rates (MB/s) |
 
 **Implementation:**
-- WebSocket streaming (2-second intervals via Celery Beat)
+- WebSocket streaming (2-second intervals from `services/background_monitor.py`, an asyncio task in the FastAPI process — **not** Celery Beat; MIS-E2E-156)
 - Fallback to HTTP polling on WebSocket disconnect
 - 1-hour rolling history with chart visualization
 - Combined GPU utilization + temperature chart
@@ -1062,7 +1062,7 @@ streaming are `BRD-MILLM-JSPACE-001`.
 | Kubernetes (primary) | Production orchestration (namespace: mistudio) |
 | Docker Compose v2 | Development + secondary deployment |
 | Nginx (unprivileged) | Reverse proxy — runs as uid 101, port 8080 |
-| Celery Beat | Scheduled tasks (monitoring, cleanup) |
+| Celery Beat | Scheduled tasks: stuck-job janitors, checkpoint pruning, the GPU watchdog, the steering reconciler. *(System monitoring is NOT one — see MIS-E2E-156.)* |
 | GitHub Actions | CI: backend tests, frontend CI, Docker image builds |
 | Docker Scout | Image vulnerability scanning (supply-chain policies) |
 | CodeQL | Static application security testing (via hitsainet default setup) |
@@ -1081,7 +1081,7 @@ All long-running operations emit progress via WebSocket for immediate UI feedbac
 Background processing for CPU/GPU-intensive operations:
 - Queues: `high_priority`, `datasets`, `processing`, `training`, `extraction`, `sae`, `low_priority`
 - Priority routing for training vs. extraction vs. labeling
-- Celery Beat for periodic system monitoring and cleanup tasks (stuck job detection)
+- Celery Beat for periodic cleanup (stuck-job detection, checkpoint pruning, GPU watchdog). System monitoring runs as an asyncio task inside the API process instead — `services/background_monitor.py` (MIS-E2E-156).
 
 ### 5.3 Architecture-Agnostic Model Support
 `discover_transformer_structure()` in `layer_discovery.py` dynamically inspects loaded models:

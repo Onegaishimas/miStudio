@@ -651,7 +651,7 @@ The application uses a consistent WebSocket-first approach for all real-time upd
    - `system/memory` - RAM and Swap usage
    - `system/disk` - Disk I/O rates
    - `system/network` - Network I/O rates
-   - Event type: `metrics` (emitted every 2 seconds via Celery Beat)
+   - Event type: `system:metrics` (emitted every 2 seconds by `services/background_monitor.py`, an asyncio task in the FastAPI process — **not** Celery Beat; MIS-E2E-156/-158)
 
 **WebSocket Fallback Pattern:**
 - Frontend hooks automatically detect WebSocket connection state
@@ -663,7 +663,7 @@ The application uses a consistent WebSocket-first approach for all real-time upd
 - All WebSocket emissions use `backend/src/workers/websocket_emitter.py`
 - Celery tasks emit updates via internal HTTP endpoint: `POST /api/internal/ws/emit`
 - Emission functions: `emit_training_progress()`, `emit_gpu_metrics()`, etc.
-- Celery Beat scheduler handles periodic emissions (system monitoring)
+- System-metric emission is an asyncio loop in the API process (`background_monitor.py`), started from the FastAPI lifespan. Celery Beat runs the janitors, the pruner, the GPU watchdog and the steering reconciler — not this.
 
 **Frontend Subscription Pattern:**
 - React hooks manage channel subscriptions: `useTrainingWebSocket()`, `useSystemMonitorWebSocket()`, etc.
@@ -837,7 +837,7 @@ The application uses a consistent WebSocket-first approach for all real-time upd
     - Generated prioritized task list (9 major tasks, 79 sub-tasks, 110-144 hours estimated)
   - **System Monitoring WebSocket Migration (HP-1):**
     - Added 6 new WebSocket emission functions to `websocket_emitter.py` for system metrics
-    - Created new Celery Beat task for periodic system metrics collection (every 2 seconds)
+    - Created periodic system metrics collection (every 2 seconds) — originally a Celery Beat task; **replaced by an asyncio task in the API process on 2026-07-10** and `workers/system_monitor_tasks.py` deleted
     - Defined WebSocket channel naming conventions for system monitoring:
       - `system/gpu/{gpu_id}` - Per-GPU metrics
       - `system/cpu` - CPU utilization
@@ -847,7 +847,7 @@ The application uses a consistent WebSocket-first approach for all real-time upd
     - Created `useSystemMonitorWebSocket.ts` React hook for channel subscriptions
     - Updated `systemMonitorStore.ts` with WebSocket integration and automatic polling fallback
     - Updated `SystemMonitor.tsx` component to use WebSocket-first with polling fallback
-    - Configured Celery Beat scheduler with system monitoring task
+    - Configured the scheduler (the system-monitoring entry has since been removed — see above)
     - Added `system_monitor_interval_seconds` configuration setting (default: 2s)
   - **Bug Fixes:**
     - Fixed console spam from 404 errors on extraction endpoint (now returns 200 with null data)
@@ -858,7 +858,7 @@ The application uses a consistent WebSocket-first approach for all real-time upd
 - **Files Created:**
   - `.claude/context/sessions/review_progress_monitoring_architecture_2025-10-22.md` - Architecture review document
   - `0xcc/tasks/SUPP_TASKS|Progress_Architecture_Improvements.md` - Implementation task list
-  - `backend/src/workers/system_monitor_tasks.py` - Celery Beat task for metrics collection
+  - ~~`backend/src/workers/system_monitor_tasks.py`~~ — **deleted 2026-07-10**; superseded by `services/background_monitor.py`
   - `frontend/src/hooks/useSystemMonitorWebSocket.ts` - WebSocket subscription hook
 - **Files Modified:**
   - `backend/src/workers/websocket_emitter.py` - Added system metrics emission functions

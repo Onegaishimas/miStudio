@@ -14,7 +14,7 @@
 |-------|-------|--------|
 | Phase 1: Metrics Collection | 4 tasks | ✅ Complete |
 | Phase 2: WebSocket Infrastructure | 4 tasks | ✅ Complete |
-| Phase 3: Celery Beat | 3 tasks | ✅ Complete |
+| Phase 3: Celery Beat | 3 tasks | ⚠️ **Superseded** — see Phase 3 |
 | Phase 4: API Endpoints | 2 tasks | ✅ Complete |
 | Phase 5: Frontend Store | 3 tasks | ✅ Complete |
 | Phase 6: UI Components | 5 tasks | ✅ Complete |
@@ -83,7 +83,13 @@
 
 ---
 
-## Phase 3: Celery Beat
+## Phase 3: Celery Beat — **SUPERSEDED 2026-07-10**
+
+> This phase shipped and was then **replaced**. `collect_system_metrics` and
+> `workers/system_monitor_tasks.py` no longer exist; collection is an asyncio
+> task inside the FastAPI process (`services/background_monitor.py`). Kept as
+> history rather than deleted, because the tasks below were genuinely done —
+> but nothing here describes the running system. (MIS-E2E-156)
 
 ### Task 3.1: Create Monitor Task
 - [x] Define collect_system_metrics task
@@ -203,7 +209,7 @@
 | File | Purpose |
 |------|---------|
 | `backend/src/services/system_monitor_service.py` | Metrics collection |
-| `backend/src/workers/system_monitor_tasks.py` | Celery Beat task |
+| ~~`backend/src/workers/system_monitor_tasks.py`~~ | **Deleted 2026-07-10** — superseded by `services/background_monitor.py` |
 | `backend/src/workers/websocket_emitter.py` | WebSocket emission |
 | `backend/src/core/celery_app.py` | Beat schedule |
 | `backend/src/api/v1/endpoints/system.py` | API routes |
