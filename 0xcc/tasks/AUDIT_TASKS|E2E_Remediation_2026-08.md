@@ -16,7 +16,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
 | **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
-| **Wave 7** | Task 14 — the P2/P3 tail | ⏳ **in progress** — 14.2 ✅ (dead code deleted, sourcemaps + console stripped and verified against the built bundle, all 37 `utcnow()` sites swept, schema `$id` made resolvable with miLLM's mirror synced, internal hostnames removed). 14.1 ⏳ — the body cap is now middleware covering every route. Controls C149–C157. |
+| **Wave 7** | Task 14 — the P2/P3 tail | ✅ **CLOSED** — 14.1–14.15. Every P2/P3 either fixed with a verified-red control, or recorded as accepted debt **with its reason** (coverage, process, one forward-only data loss). Controls C149–C219. Three findings were **wrong or incomplete as written** and are corrected in place. |
 | **Wave 8** | Task 15 — hardware acceptance | ⏳ **started** — cluster access restored (the Part 1 credential removal left no key installed, so `scripts/k8s-helpers.sh` was dead the first time it was needed). Live on k8s after the beat hotfix: backend **4/4 Running**, health 200 on both hostnames, `/api/v1/version` reports a real version, the new `GET /extractions/{id}` returns 404 not 405, a 2 MB import is refused **413**, and the frontend ships no sourcemaps and no `console.log`. 15.1–15.4 open. |
 | **Wave 9** | Task 16 — the acceptance gate | ❌ not started |
 
@@ -230,7 +230,49 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 14.7 ✅ **SSRF surface and a test touching real infrastructure.** **-075**: `CalibrationBody.judge_endpoint` is free-form per-request input handed to an `OpenAI` client constructed **inside the backend pod**, with no validation — not even a scheme check. Verified live: `file:///etc/passwd` was accepted. It now reuses `validate_llm_endpoint_url`, the same check the labeling path applies to the same kind of field, so the two cannot drift. **-027**: two dataset tests dispatched a REAL Celery task — failing with `ConnectionRefusedError` where Redis is absent, and enqueueing a genuine download where it is present. Now patched at the worker module (the endpoint imports the task inside the handler, so patching the endpoint module raises `AttributeError`), and **verified passing against an unreachable broker**. — MIS-E2E-075, -027
 - [x] 14.8 ✅ **The frontend trio — nine defects, most of them silent.** **-125**: the shared polling helper stopped permanently on ONE transient fetch error, and its only caller discards the stop handle, so a 10-minute download that hit a single 502 showed as in-progress forever; it also had no in-flight guard, so a slow response could report stale state after stopping. Now tolerates a run of 5, resets on success, and refuses to report once stopped. **-130**: `getByCategory('endpoints')` swept in `openai_compatible_model` — a model NAME rendered beside URLs with a **"Delete endpoint" button that removed the labeling model**; `remove('ollama_url')` was neither awaited nor caught; and the `[settings]` sync effect rewrote all five Labeling fields on every upsert, so saving one card silently reverted unsaved edits in another. **-131**: `mountedRef` was set false on cleanup and never true again, so under StrictMode the estimate poll was **dead on arrival in dev**; the slice export clicked a detached anchor (a no-op in Firefox) and revoked the URL on the next line; `parseSeedRefs` validated only `layer`, so `6` became `feature_idx: NaN` → `null` in the POST; and un-ticking Force left a stale hidden `captureId` submitting behind an empty select. — MIS-E2E-125, -130, -131
 - [x] 14.9 ✅ **A fabricated number, a leaked URL, a noisy shutdown.** **-068(1)**: `features_extracted: int(latent_dim * progress)` reported a count derived from the sampling bar, not from any row — **zero feature records exist until the commit phase that follows**, so the UI showed a rising count of features that did not exist. **-068(2)**: `max_length=2048 - max_new_tokens` ignored the model's real window; at the schema-allowed `max_new_tokens=2048` the budget was **zero or negative**, so the prompt was cut to nothing and the model generated from empty context. Now read from `max_position_embeddings` and an over-long prompt is **refused**, not quietly shortened. **-068(3)**: a `logger.info` inside the forward hook fired per pass, rebuilding two comprehensions to format a message usually discarded — now DEBUG behind `isEnabledFor`. **-111**: `EnhancedLabelingJobResponse` published the internal LLM server URL while its sibling withheld it; **two tests asserted the leak** and were replaced. **-118**: `lambda t: t.exception()` re-raises `CancelledError` on a cancelled task, so every graceful shutdown logged an ERROR traceback. — MIS-E2E-068, -111, -118
-- [x] 14.10 ✅ **Bounded `meta`, real quality gates, and doc reconciliation.** **-042**: `MemberMeta` keeps `extra="allow"` — that is a deliberate contract decision — but the extras were **unbounded** while every declared field is capped, and they are persisted AND re-exported into an artifact this product exists to exchange. Now 8 KB. **-021**: `tsconfig.test.json` was listed as a quality gate and could never have worked for **two independent reasons** — nothing referenced it, and it extends a base whose `exclude` names exactly the files it includes, so run by hand it reported *No inputs were found*; it also named `@types/node`, absent from this package, so the config failed to load. Fixed and wired, revealing **432 pre-existing type errors** the gate was hiding. Fixing those is its own work and forcing them into CI would break the build, so they are ratcheted down-only by `typeCheckRatchet.test.ts`; a `format:check` gate was added beside `format`, which rewrites and therefore gates nothing. **-157, -158, -159**: verified already corrected in the PADR during Wave 6 — citations were missing, not the fixes. **-163**: the last two status contradictions in CLAUDE.md reconciled. — MIS-E2E-042, -021, -157, -158, -159, -163
+- [x] 14.10 ✅ **Bounded `meta`, real quality gates, and doc reconciliation.** **-042**: `MemberMeta` keeps `extra="allow"` — that is a deliberate contract decision — but the extras were **unbounded** while every declared field is capped, and they are persisted AND re-exported into an artifact this product exists to exchange. Now 8 KB. **-021**: `frontend/tsconfig.test.json` was listed as a quality gate and could never have worked for **two independent reasons** — nothing referenced it, and it extends a base whose `exclude` names exactly the files it includes, so run by hand it reported *No inputs were found*; it also named `@types/node`, absent from this package, so the config failed to load. Fixed and wired, revealing **432 pre-existing type errors** the gate was hiding. Fixing those is its own work and forcing them into CI would break the build, so they are ratcheted down-only by `typeCheckRatchet.test.ts`; a `format:check` gate was added beside `format`, which rewrites and therefore gates nothing. **-157, -158, -159**: verified already corrected in the PADR during Wave 6 — citations were missing, not the fixes. **-163**: the last two status contradictions in CLAUDE.md reconciled. — MIS-E2E-042, -021, -157, -158, -159, -163
+- [x] 14.11 ✅ **-047 guarded, -076 corrected, and the rest recorded honestly.**
+  **-047**: the two seed migrations f-string a JSON file into an `UPDATE` behind a hand-rolled
+  `escape_sql` that only doubles quotes. They have already run everywhere, so editing them changes
+  nothing and risks the graph — grandfathered, with the rule enforced forward by
+  `test_migrations_do_not_fstring_sql.py`. Running the detector found **more than the audit had**:
+  a third `escape_sql` migration, and the finding's cited filename
+  (`9dc725cba2ad_update_gpt4_template_with_improved_`) does not exist. It also flagged two of my own
+  Wave 5 migrations, which interpolate **identifiers** from hardcoded lists — SQL cannot bind an
+  identifier, so the rule was narrowed to interpolation of *externally-read data*, which is the
+  actual hazard.
+  **-076**: `build_steer_generator` is one core for calibration and the recorder; the **user-facing**
+  `steering_service._create_steering_hook` path was never migrated. IDL-38's "one steering core"
+  claim is now scoped to what it actually covers. **Not fixed** — migrating the served path is a
+  GPU-behaviour change needing hardware verification against a known-good steer, not a static
+  refactor. — MIS-E2E-047 (guarded), -076 (corrected + tracked)
+
+### Recorded as accepted debt, with reasons
+
+These are real and are **not** being closed by this remediation. Each says why, so the next reader
+inherits a decision rather than a silence.
+
+- [x] 14.12 **-015 / -016 — test coverage.** ~19,000 backend service lines and most frontend stores,
+  panels and hooks have no test file named for them. This is a genuine gap and it is not closable in
+  a remediation pass: writing meaningful tests for `steering_service.py` (2,993 lines, GPU-bound)
+  is a project. What this pass DID add is ~300 targeted tests around every defect it touched, each
+  with a verified-red control. **Partial mitigation shipped:** the frontend test-file type-check now
+  runs at all (-021) and is ratcheted, so the untested surface cannot silently grow worse in that
+  dimension. — MIS-E2E-015, -016 · **open**
+- [x] 14.13 **-012 / -013 — process gaps.** 193 open task boxes in files without `## Relevant Files`
+  (the sections were added in Wave 6; triaging 193 boxes against current code is separate work), and
+  nine features with no review record. Recording a review that did not happen would be worse than
+  the gap. — MIS-E2E-012, -013 · **open**
+- [x] 14.14 **-040 — four data-bearing columns dropped with no copy.** `c8c7653233ee` adds
+  `memory_required_bytes` and `architecture_config`, then drops `memory_req_bytes`,
+  `extra_metadata`, `hidden_dim` and `num_heads` in the same migration with **no `UPDATE` copying
+  values across**. It has run on every deployment; the data is gone and forward-only is the only
+  option. Recorded so the loss is known rather than discovered later. The forward-looking half is
+  covered: `test_orm_matches_migrated_schema.py` (Wave 1) fails on ORM/migration divergence in
+  either direction. — MIS-E2E-040 · **accepted, forward-only**
+- [x] 14.15 **-006 — `resolve_user_path` has one production caller.** Superseded: Wave 2 added
+  `resolve_deletable_path` and routed **11 deletion sinks** through it, which is the containment the
+  finding was actually about. — MIS-E2E-006 · **superseded**
 
 ## Task 15 — Hardware acceptance
 
@@ -506,6 +548,9 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `frontend/package.json` | `type-check:test` and `format:check` added; `type-check` left as-is so CI stays green (-021) |
 | `frontend/src/test/typeCheckRatchet.test.ts` | **New.** Asserts the gate is wired, sees real files, and that the 432 hidden errors can only go down |
 | `CLAUDE.md` | Feature 020 and 022 status lines reconciled with Current Status (-163) |
+| `0xcc/adrs/000_PADR|miStudio.md` | IDL-38's "one steering core" scoped to the paths it actually covers; the served path is tracked debt (-076) |
+| `backend/tests/unit/test_migrations_do_not_fstring_sql.py` | **New.** New migrations may not interpolate externally-read data into SQL, nor define a hand-rolled escaper. Identifier interpolation stays legal — SQL cannot bind one (-047) |
+| `backend/tests/unit/test_generate_text_reaches_the_model.py` | **New.** Drives `_generate_text` against a stub model. Nothing in 3,438 tests called it, which is how a fix that broke every steering generation shipped green |
 
 ## Negative controls run
 
@@ -741,9 +786,15 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 | C213 | `endpoint` republished in the response | ✅ 1 failure |
 | C214 | The cancelled-task guard removed | ✅ 1 failure |
 
-| C215 | `tsconfig.test.json` excludes the test files again | ✅ RED |
+| C215 | `frontend/tsconfig.test.json` excludes the test files again | ✅ RED |
 | C216 | The `type-check:test` script removed | ✅ RED |
 | C217 | A new type error introduced into a test file | ✅ RED |
+
+| C218 | A new migration f-strings JSON content into an UPDATE | ✅ 1 failure |
+| C219 | A new hand-rolled `escape_sql` | ✅ 1 failure |
+
+| C220 | Restore `self._model` — the exact production failure | ✅ 5 failures |
+| C221 | Remove the prompt-too-long refusal | ✅ 1 failure |
 
 ## Provenance
 

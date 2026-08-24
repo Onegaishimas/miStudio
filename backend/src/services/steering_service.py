@@ -1427,11 +1427,18 @@ class SteeringService:
         # A prompt that genuinely does not fit is now REFUSED rather than
         # quietly shortened: a truncated prompt produces a confident answer to
         # a question the user did not ask.
-        context_window = getattr(self._model.config, "max_position_embeddings", None) \
+        # `model` is the function's own parameter. I first wrote `self._model`,
+        # which does not exist on this service — models live in the
+        # `_loaded_models` cache — so every generation raised
+        # `'SteeringService' object has no attribute '_model'` and steering
+        # failed outright. Caught in production, not by the suite.
+        context_window = getattr(getattr(model, "config", None),
+                                 "max_position_embeddings", None) \
             or getattr(tokenizer, "model_max_length", None) or 2048
         # Some tokenizers use a sentinel for "no limit".
         if context_window > 1_000_000:
-            context_window = getattr(self._model.config, "max_position_embeddings", 2048)
+            context_window = getattr(getattr(model, "config", None),
+                                     "max_position_embeddings", 2048)
 
         prompt_budget = context_window - params.max_new_tokens
         if prompt_budget <= 0:
