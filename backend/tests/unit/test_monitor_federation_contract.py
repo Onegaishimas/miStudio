@@ -152,3 +152,88 @@ class TestFailedOperationsCanBeCleared:
         assert has_guard, (
             "dismiss-all no longer skips can_retry rows"
         )
+
+
+class TestEverySourceThatCanBeActiveCanAlsoBeFailed:
+    """MIS-E2E-101: a failed activation extraction appeared nowhere at all.
+
+    `/active` federated six sources and `/failed` federated four. The two that
+    were missing were `_federated_tokenizations` — deliberately, its worker
+    writes a real `task_queue` row on failure — and
+    `_federated_activation_extractions`, which was simply forgotten. Its worker
+    (`extract_activations`) writes no row either, so a failure disappeared from
+    the operator's view entirely.
+
+    Derived from the source, not a hand-list: the point is that a *new*
+    federator added to `/active` and forgotten in `/failed` fails here, which
+    is exactly what happened.
+    """
+
+    @staticmethod
+    def _federators_called_by(func_name: str) -> set:
+        import inspect
+
+        from src.api.v1.endpoints import task_queue
+
+        source = inspect.getsource(getattr(task_queue, func_name))
+        tree = ast.parse(inspect.cleandoc(source))
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if name and name.startswith("_federated_"):
+                    called.add(name)
+        return called
+
+    #: The one source deliberately absent from /failed, with the reason. Any
+    #: other gap is a defect, not a decision.
+    DELIBERATELY_ACTIVE_ONLY = {
+        # its worker writes a real task_queue row on failure, so federating
+        # here too would double-count it
+        "_federated_tokenizations",
+    }
+
+    def test_the_scan_finds_federators_at_all(self):
+        """Guards the test: an empty set below passes every assertion."""
+        active = self._federators_called_by("list_active_tasks")
+        assert len(active) >= 5, f"only found {active} — did the scan break?"
+
+    def test_no_source_can_fail_invisibly(self):
+        active = self._federators_called_by("list_active_tasks")
+        failed = self._federators_called_by("list_failed_tasks")
+
+        missing = active - failed - self.DELIBERATELY_ACTIVE_ONLY
+        assert not missing, (
+            f"{sorted(missing)} federate into /active but not /failed, and are "
+            f"not recorded as deliberate. A job from those sources vanishes "
+            f"from the Monitor the moment it fails."
+        )
+
+    def test_activation_extractions_specifically_reach_the_failed_list(self):
+        failed = self._federators_called_by("list_failed_tasks")
+        assert "_federated_activation_extractions" in failed, (
+            "the exact defect: `extract_activations` writes no task_queue row, "
+            "so if it is not federated here a failed extraction is unreachable"
+        )
+
+    def test_the_exemption_list_names_only_real_federators(self):
+        """A stale exemption silently re-opens the hole it was written for."""
+        from src.api.v1.endpoints import task_queue
+
+        for name in self.DELIBERATELY_ACTIVE_ONLY:
+            assert hasattr(task_queue, name), (
+                f"{name} is exempted from /failed but no longer exists"
+            )
+
+    def test_the_failed_call_asks_for_a_failure_status(self):
+        """Federating with the wrong status is the same bug with more code."""
+        import inspect
+
+        from src.api.v1.endpoints import task_queue
+
+        source = inspect.getsource(task_queue.list_failed_tasks)
+        assert '_federated_activation_extractions(db, ("FAILED",))' in source, (
+            "this table's status is the `extractionstatus` enum whose labels "
+            "are the UPPERCASE Python names; a lowercase 'failed' matches "
+            "nothing and the row stays invisible"
+        )

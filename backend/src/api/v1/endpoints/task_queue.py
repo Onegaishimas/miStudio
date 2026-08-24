@@ -511,6 +511,19 @@ async def list_failed_tasks(db: AsyncSession = Depends(get_db)):
     enriched_tasks.extend(await _federated_extractions(db, ("failed",)))
     enriched_tasks.extend(await _federated_labeling(db, ("failed",)))
     enriched_tasks.extend(await _federated_pushes(db, ("failed",)))
+    # MIS-E2E-101: a failed model activation extraction appeared NOWHERE in the
+    # Monitor. It was federated into /active but not here, and unlike the
+    # tokenization path — whose exemption above is genuine, its worker really
+    # does write a task_queue row on failure — `extract_activations` writes no
+    # row at all. (The TaskQueue writes in `model_tasks.py` belong to
+    # `download_and_load_model`, a different task in the same module.) So the
+    # job vanished from the operator's view the moment it failed.
+    #
+    # Uppercase for the same reason as the /active call: this table's status is
+    # the `extractionstatus` enum, whose labels are the Python enum NAMES.
+    enriched_tasks.extend(
+        await _federated_activation_extractions(db, ("FAILED",))
+    )
 
     # Hide anything the operator has cleared. Filtered here rather than in each
     # federated query so a source added later is covered without being
