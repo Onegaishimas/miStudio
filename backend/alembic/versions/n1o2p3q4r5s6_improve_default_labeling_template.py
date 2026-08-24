@@ -90,9 +90,13 @@ Return ONLY this exact JSON object:
 def upgrade() -> None:
     op.execute(
         sa.text(
+            # MIS-E2E-045: `is_system` guard. Matching on name alone
+            # overwrites a USER template that happens to share the name,
+            # and `downgrade()` is a no-op, so those edits are gone for
+            # good. Only the shipped system template is re-seeded.
             "UPDATE labeling_prompt_templates "
             "SET system_message = :sys, user_prompt_template = :usr "
-            "WHERE name = 'miStudio Internal - Full Context'"
+            "WHERE name = 'miStudio Internal - Full Context' AND is_system = true"
         ).bindparams(sys=NEW_SYSTEM_MESSAGE, usr=NEW_USER_PROMPT)
     )
 

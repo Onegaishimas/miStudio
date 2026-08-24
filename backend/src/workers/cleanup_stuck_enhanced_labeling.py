@@ -72,10 +72,16 @@ def cleanup_stuck_enhanced_labeling_task(self):
                         "(status: %s, stuck for %d min, task_id: %s)",
                         job.id, job.status, stuck_minutes, job.celery_task_id or "None",
                     )
+                    # MIS-E2E-096: capture BEFORE mutating. The message below
+                    # interpolates the status, and assigning FAILED first made
+                    # every one of them read "Job stuck in FAILED", discarding
+                    # the only field that says what it was actually stuck in —
+                    # which is the whole diagnostic value of the message.
+                    stuck_in = job.status
                     job.status = EnhancedLabelingStatus.FAILED.value
                     job.phase = None
                     job.error_message = (
-                        f"Job stuck in {job.status} for {stuck_minutes} minutes with no progress. "
+                        f"Job stuck in {stuck_in} for {stuck_minutes} minutes with no progress. "
                         "This may indicate the Celery worker was restarted or the task was lost. "
                         "Please try again."
                     )

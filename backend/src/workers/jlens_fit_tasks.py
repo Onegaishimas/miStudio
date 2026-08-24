@@ -177,7 +177,12 @@ def _fit_and_publish(
         ),
     )
 
-    self.update_state(state="PROGRESS", meta={"stage": "fitting", "prompts_seen": 0})
+    # MIS-E2E-096: through `beat()`. A bare meta dict REPLACES the previous
+    # meta, so a plain `update_state` here erases the liveness timestamp the
+    # stuck-task janitor reads — the task then looks like it has not
+    # reported since whenever `beat()` last ran, and a long fit gets
+    # reaped mid-flight.
+    self.update_state(state="PROGRESS", meta=beat({"stage": "fitting", "prompts_seen": 0}))
 
     total_prompts = max(len(prompts), 1)
 
@@ -226,7 +231,7 @@ def _fit_and_publish(
         repo_id, result.jacobians, config_yaml, n_prompts=result.prompts_seen
     )
 
-    self.update_state(state="PROGRESS", meta={"stage": "validating"})
+    self.update_state(state="PROGRESS", meta=beat({"stage": "validating"}))
     # SEMANTIC runs HERE or nowhere. The check needs a loaded model, and this
     # task is the one place in the system that has one alongside a freshly
     # written artifact — so leaving it NOT_RUN made `serviceable` false on every
