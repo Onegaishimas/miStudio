@@ -30,7 +30,48 @@ TASKS = REPO / "0xcc" / "tasks"
 #: deleting keeps the record of what was claimed.
 NEVER_WRITTEN = "never written"
 
+#: How a row records a path that DID exist and was deliberately removed. This
+#: is a different claim from "never written" and must stay distinguishable: one
+#: says the plan was never carried out, the other says the code shipped and was
+#: later deleted on purpose. Collapsing them would rewrite history — the first
+#: version of this guard had only NEVER_WRITTEN, and Wave 7's deletion of
+#: `frontend/src/api/websocket.ts` would have been mislabelled as never built.
+DELETED = "**Deleted**"
+
 _SOURCE_EXT = (".py", ".tsx", ".ts", ".md", ".yaml", ".yml", ".json", ".sh", ".sql", ".css")
+
+
+def _unannotated_dead_paths(text: str, exists=None) -> list[str]:
+    """Paths a `## Relevant Files` section names that neither resolve nor say so.
+
+    Extracted so the detection itself can be tested. Control C163 made the
+    annotation match every table row, which silently accepted every dead path,
+    and every existing test stayed green — a guard whose acceptance rule can be
+    widened to "anything" without a failure is not a guard.
+    """
+    if "## Relevant Files" not in text:
+        return []
+    if exists is None:
+        def exists(candidate):
+            return (REPO / candidate).exists()
+
+    section = text.split("## Relevant Files", 1)[1]
+    offenders = []
+    for line in section.splitlines():
+        if not line.startswith("|"):
+            continue
+        match = re.search(r"`([A-Za-z0-9_./\-]+)`", line)
+        if not match:
+            continue
+        candidate = match.group(1)
+        if not candidate.endswith(_SOURCE_EXT):
+            continue                      # an API route or a directory, not a file
+        if exists(candidate):
+            continue
+        if NEVER_WRITTEN in line or DELETED in line:
+            continue                      # recorded honestly, either way
+        offenders.append(candidate)
+    return offenders
 
 
 def _task_files():
@@ -59,27 +100,14 @@ def test_every_listed_path_resolves_or_is_marked_as_never_written(path):
     if "## Relevant Files" not in text:
         pytest.skip("covered by the section test above")
 
-    section = text.split("## Relevant Files", 1)[1]
-    offenders = []
-    for line in section.splitlines():
-        if not line.startswith("|"):
-            continue
-        match = re.search(r"`([A-Za-z0-9_./\-]+)`", line)
-        if not match:
-            continue
-        candidate = match.group(1)
-        if not candidate.endswith(_SOURCE_EXT):
-            continue                      # an API route or a directory, not a file
-        if (REPO / candidate).exists():
-            continue
-        if NEVER_WRITTEN in line:
-            continue                      # recorded honestly
-        offenders.append(candidate)
+    offenders = _unannotated_dead_paths(text)
 
     assert not offenders, (
         f"{path.name} lists paths that do not resolve and are not marked: "
-        f"{offenders}. Either fix the path, or annotate it "
-        f"'⚠️ **never written**' with what actually ships the capability."
+        f"{offenders}. Either fix the path, or annotate it: "
+        f"'⚠️ **never written**' if it was planned and never built (say what "
+        f"ships the capability instead), or '**Deleted**' if it shipped and was "
+        f"removed on purpose (say why). Those are different claims."
     )
 
 
@@ -116,3 +144,44 @@ def test_no_task_file_claims_a_capability_with_no_implementation():
     assert "- [x] Zoom and pan" not in training.read_text(), (
         "the zoom-and-pan box is checked again; nothing implements it"
     )
+
+
+class TestTheGuardItselfStillRejects:
+    """C163: widening the annotation to match every row accepted every dead
+    path, and the whole suite stayed green. These exercise the detector
+    directly, against text rather than the repository."""
+
+    SECTION = """## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `backend/src/real_module.py` | exists |
+| `backend/src/gone.py` | no annotation at all |
+| `backend/src/planned.py` | ⚠️ **never written** — no add-commit anywhere |
+| `backend/src/removed.py` | **Deleted** — superseded by the middleware |
+"""
+
+    def _exists(self, candidate):
+        return candidate == "backend/src/real_module.py"
+
+    def test_an_unannotated_dead_path_is_caught(self):
+        found = _unannotated_dead_paths(self.SECTION, exists=self._exists)
+        assert found == ["backend/src/gone.py"], found
+
+    def test_never_written_is_accepted(self):
+        assert "backend/src/planned.py" not in _unannotated_dead_paths(
+            self.SECTION, exists=self._exists)
+
+    def test_deleted_is_accepted(self):
+        assert "backend/src/removed.py" not in _unannotated_dead_paths(
+            self.SECTION, exists=self._exists)
+
+    def test_the_annotations_are_not_interchangeable_with_any_text(self):
+        """The two markers must be specific strings, not something every row has."""
+        for marker in (NEVER_WRITTEN, DELETED):
+            assert marker.strip() not in ("", "|", "-"), (
+                f"{marker!r} would match every table row, accepting every dead path"
+            )
+            assert len(marker) >= 8, (
+                f"{marker!r} is short enough to appear incidentally"
+            )

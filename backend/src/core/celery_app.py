@@ -395,6 +395,11 @@ celery_app.conf.update(
     # NOTE: System metrics monitoring runs as an asyncio background task in
     # src/services/background_monitor.py (not Celery) so it can't be blocked
     # by long-running Celery tasks.
+    # MIS-E2E-095: every entry carries `expires`. Without one, a tick that
+    # queues behind a long GPU task is still delivered when the queue drains —
+    # so an hour of blocked ticks all fire at once, against state that has
+    # moved on. Each expires at 90% of its own period: past that a fresh tick
+    # is already due, and the stale one has nothing to add.
     beat_schedule={
         # Cleanup stuck NLP analysis passes - runs every 10 minutes.
         #
@@ -409,6 +414,7 @@ celery_app.conf.update(
         "cleanup-stuck-nlp": {
             "task": "cleanup_stuck_nlp",
             "schedule": 600.0,
+            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
             },
@@ -416,7 +422,8 @@ celery_app.conf.update(
         # Cleanup stuck extraction jobs - runs every 10 minutes
         "cleanup-stuck-extractions": {
             "task": "cleanup_stuck_extractions",
-            "schedule": 600.0,  # Run every 10 minutes (600 seconds)
+            "schedule": 600.0,
+            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 10 minutes (600 seconds)
             "options": {
                 "queue": "low_priority",
             },
@@ -427,6 +434,7 @@ celery_app.conf.update(
         "cleanup-stuck-circuit-runs": {
             "task": "cleanup_stuck_circuit_runs",
             "schedule": 600.0,
+            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
             },
@@ -434,7 +442,8 @@ celery_app.conf.update(
         # Cleanup stuck training jobs - runs every 10 minutes
         "cleanup-stuck-trainings": {
             "task": "cleanup_stuck_trainings",
-            "schedule": 600.0,  # Run every 10 minutes (600 seconds)
+            "schedule": 600.0,
+            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 10 minutes (600 seconds)
             "options": {
                 "queue": "low_priority",
             },
@@ -442,7 +451,8 @@ celery_app.conf.update(
         # Cleanup stuck activation extraction jobs - runs every 10 minutes
         "cleanup-stuck-activations": {
             "task": "cleanup_stuck_activations",
-            "schedule": 600.0,  # Run every 10 minutes (600 seconds)
+            "schedule": 600.0,
+            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 10 minutes (600 seconds)
             "options": {
                 "queue": "low_priority",
             },
@@ -451,7 +461,8 @@ celery_app.conf.update(
         # Short threshold because enhanced labeling jobs are short-lived (seconds to minutes)
         "cleanup-stuck-enhanced-labeling": {
             "task": "cleanup_stuck_enhanced_labeling",
-            "schedule": 300.0,  # Run every 5 minutes
+            "schedule": 300.0,
+            "expires": 270.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 5 minutes
             "options": {
                 "queue": "low_priority",
             },
@@ -460,7 +471,8 @@ celery_app.conf.update(
         # Deletes completed entries >7 days old and stale queued/running ghosts
         "cleanup-task-queue": {
             "task": "cleanup_task_queue",
-            "schedule": 3600.0,  # Run every hour
+            "schedule": 3600.0,
+            "expires": 3240.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every hour
             "options": {
                 "queue": "low_priority",
             },
@@ -479,6 +491,7 @@ celery_app.conf.update(
         "cleanup-orphaned-tasks": {
             "task": "cleanup_orphaned_tasks",
             "schedule": 300.0,
+            "expires": 270.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
             },
@@ -488,7 +501,8 @@ celery_app.conf.update(
         # deleting while checkpoint_prune_dry_run=true (both defaults).
         "prune-checkpoints": {
             "task": "src.workers.prune_checkpoints.prune_checkpoints",
-            "schedule": 86400.0,  # Run daily
+            "schedule": 86400.0,
+            "expires": 77760.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run daily
             "options": {
                 "queue": "low_priority",
             },
@@ -497,7 +511,8 @@ celery_app.conf.update(
         # This is critical for preventing zombie processes from holding GPU memory
         "gpu-memory-watchdog": {
             "task": "gpu_watchdog",
-            "schedule": 60.0,  # Run every 60 seconds (1 minute)
+            "schedule": 60.0,
+            "expires": 54.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 60 seconds (1 minute)
             "options": {
                 "queue": "low_priority",
             },
@@ -507,6 +522,7 @@ celery_app.conf.update(
         "steering-worker-reconcile": {
             "task": "steering_worker_reconcile",
             "schedule": 30.0,
+            "expires": 27.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
             },
@@ -521,10 +537,25 @@ celery_app.conf.update(
     # CUDA maintains state in the parent process that cannot be forked safely.
     # Error without solo: "Cannot re-initialize CUDA in forked subprocess"
     #
-    # max_tasks_per_child: Restart worker after N tasks to prevent memory leaks.
-    # With --pool=solo, this triggers a full worker restart (cleans GPU memory).
+    # max_tasks_per_child does NOTHING under --pool=solo. MIS-E2E-094.
     #
-    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks (memory cleanup)
+    # This setting recycles a prefork *child* process after N tasks. The solo
+    # pool has no child — it runs each task in the worker's own process — so
+    # Celery discards the value. The comment that used to sit here said this
+    # setting recycled the solo worker and reclaimed its GPU memory; that
+    # reclaim has never happened. `docker-entrypoint.sh` also passes
+    # `--max-tasks-per-child`, equally inertly.
+    #
+    # VRAM is actually reclaimed by explicit `torch.cuda.empty_cache()` calls
+    # in the GPU paths (55 sites across activation, steering, training, jlens
+    # and the extraction services) and, for a process that dies holding memory,
+    # by `workers/gpu_watchdog_task.py`. Those are the mechanisms to change if
+    # reclaim is wrong — not this line.
+    #
+    # It is kept, at its original value, because a deployment that switches to
+    # --pool=prefork for the CPU-only queue gets the recycling it implies. It
+    # is no longer described as doing something it does not do.
+    worker_max_tasks_per_child=100,
     worker_disable_rate_limits=False,
 
     # Monitoring
