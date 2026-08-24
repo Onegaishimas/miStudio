@@ -17,7 +17,7 @@ import numpy as np
 from datasets import load_from_disk
 
 from ..ml.forward_hooks import HookManager, HookType
-from ..ml.model_loader import load_model_from_hf
+from ..ml.model_loader import get_quantization_config, load_model_from_hf
 from ..models.model import QuantizationFormat
 from ..core.config import settings
 
@@ -365,17 +365,43 @@ class ActivationService:
         device = torch.device(f"cuda:{gpu_id}")
         logger.info(f"Loading model to device: {device} (CUDA device: {torch.cuda.get_device_name(gpu_id)})")
 
-        # Load model directly to GPU with explicit device parameter
+        # APPLY THE REQUESTED QUANTIZATION.
+        #
+        # This function took `quantization`, documented it, logged it and wrote
+        # it into the extraction metadata — and never passed it to
+        # `from_pretrained`. Every extraction loaded fp16 regardless. A Q4
+        # gemma-4-12B is 6 GB on disk and 24 GB in fp16, so it did not fit on a
+        # 23.56 GiB card: the OOM reported 2026-08-23 died placing the last
+        # fragment of the model, before a single activation was read.
+        #
+        # `get_quantization_config` already returns exactly what
+        # `from_pretrained` wants, and had precisely ONE caller — in
+        # `ml/model_loader.py`, the OTHER load path. Two paths, one of them
+        # honouring the setting.
+        #
+        # `torch_dtype` stays: with `load_in_4bit` it sets the dtype of the
+        # modules bitsandbytes does NOT quantize (norms, embeddings, the LM
+        # head), and it is what `bnb_4bit_compute_dtype` matches. Hidden states
+        # — what the hooks capture — are fp16 either way, which is the property
+        # the SAE encode path depends on.
+        quantization_config = get_quantization_config(quantization)
+
         # IMPORTANT: Use explicit cuda:N instead of device_map="auto" to force GPU placement
         # device_map="auto" with accelerate can offload to CPU if it thinks there's not enough memory
         model = AutoModelForCausalLM.from_pretrained(
             actual_model_path,
             device_map={"": device},  # Force all layers to specified GPU
-            torch_dtype=torch.float16,  # Always use FP16 for memory efficiency
+            torch_dtype=torch.float16,
+            quantization_config=quantization_config,  # None for FP16/FP32
             low_cpu_mem_usage=True,  # Minimize CPU memory during loading
         )
 
-        logger.info(f"Model loaded successfully. Device: {model.device}, dtype: {model.dtype}")
+        logger.info(
+            "Model loaded successfully. Device: %s, dtype: %s, quantization: %s "
+            "(config applied: %s)",
+            model.device, model.dtype, quantization.value,
+            quantization_config is not None,
+        )
 
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(actual_model_path)
