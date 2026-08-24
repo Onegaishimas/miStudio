@@ -126,7 +126,7 @@ def execute_neuronpedia_export(self, job_id: str):
 
     try:
         # Import here to avoid circular imports
-        from ..core.database import sync_session_maker
+        from ..core.database import SyncSessionLocal as sync_session_maker
 
         with sync_session_maker() as db:
             # Get the job
@@ -159,7 +159,7 @@ def execute_neuronpedia_export(self, job_id: str):
 
             try:
                 # Create an async session for the service
-                from ..core.database import async_session_maker
+                from ..core.database import AsyncSessionLocal as async_session_maker
 
                 async def run_export():
                     async with async_session_maker() as async_db:
@@ -232,7 +232,7 @@ def compute_dashboard_data_task(
 
     try:
         import asyncio
-        from ..core.database import async_session_maker
+        from ..core.database import AsyncSessionLocal as async_session_maker
 
         computed = 0
 
