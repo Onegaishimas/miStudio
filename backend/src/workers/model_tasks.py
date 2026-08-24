@@ -663,6 +663,17 @@ def update_model_progress(self, model_id: str, progress: float, status: Optional
         return {"error": str(e)}
 
 
+class PermanentExtractionError(Exception):
+    """An extraction failure that retrying cannot fix.
+
+    Celery's retry exists for transient faults — a busy GPU, a flaky mount. A
+    missing model row or a missing extraction row is not transient: the second
+    attempt fails identically, and on 2026-08-24 each attempt re-resolved the
+    model and started downloading it again. `autoretry_for` must never include
+    this.
+    """
+
+
 @celery_app.task(
     bind=True,
     base=DatabaseTask,
@@ -717,6 +728,30 @@ def extract_activations(
             f"Starting activation extraction for model {model_id}, "
             f"dataset {dataset_id}, layers {layer_indices}, hooks {hook_types}, gpu={gpu_id}"
         )
+
+        # REFUSE TO RUN WITHOUT SOMEWHERE TO REPORT.
+        #
+        # 2026-08-24: this task ran for 3.5 hours against an `extraction_id`
+        # whose row was never created. Every progress write logged
+        # "not found for progress update" and continued — roughly 300 times —
+        # so the UI sat on "Starting extraction..." while the GPU was pinned at
+        # 100%, the failure at the end could not be recorded either ("not found
+        # to mark failed"), and the retry that followed re-resolved the model
+        # and kicked off a spurious 15 GB download.
+        #
+        # Every one of those symptoms is downstream of the same fact, known in
+        # the first millisecond: there is nowhere to write the result. A job
+        # whose outcome cannot be recorded has no reason to consume a GPU.
+        if extraction_id:
+            with self.get_db() as _db:
+                _row = ExtractionDatabaseService.get_extraction(_db, extraction_id)
+            if _row is None:
+                raise PermanentExtractionError(
+                    f"Extraction {extraction_id} has no database row, so this run "
+                    f"could never be recorded. Refusing to start. (The row is "
+                    f"created by the API before dispatch; if it is missing the "
+                    f"request did not commit.)"
+                )
 
         # Pre-task GPU memory check - ensure clean state before loading model
         import torch
@@ -1093,6 +1128,21 @@ def extract_activations(
                 error_type=error_type,
                 suggested_retry_params=suggested_params
             )
+
+        # DO NOT RETRY WHAT CANNOT SUCCEED.
+        #
+        # A missing model row or a missing extraction row fails identically on
+        # every attempt. On 2026-08-24 each retry re-resolved the model and
+        # began downloading it again — three attempts, one spurious 15 GB
+        # fetch, and a UI that showed nothing throughout. Retry is for
+        # transient faults; this is a permanent one.
+        if isinstance(exc, PermanentExtractionError) or "not found in database" in str(exc):
+            logger.error(
+                "Not retrying extraction %s: %s. This cannot succeed on a "
+                "second attempt, and retrying re-triggers model resolution.",
+                extraction_id, exc,
+            )
+            raise
 
         # Retry if not at max retries
         if self.request.retries < self.max_retries:

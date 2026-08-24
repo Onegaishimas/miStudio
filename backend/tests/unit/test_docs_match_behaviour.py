@@ -610,3 +610,79 @@ class TestNothingTriesToDisablePasswordAuth:
         # ...and must not fire on prose that forbids it.
         prose = "# never set PasswordAuthentication no on this host"
         assert prose.strip().startswith("#")
+
+
+class TestTheCertificateGuidanceIsSafe:
+    """The cert docs must not teach an agent to leak the CA or lock us out.
+
+    A CA private key is a bigger secret than the password it replaces: it mints
+    access indefinitely, for anyone who holds it. The written procedure is what
+    stops the next agent copying it to the server "so signing works there", or
+    reaching for TrustedUserCAKeys and an sshd reload it cannot safely perform.
+    """
+
+    def _doc(self):
+        return (REPO / "CLAUDE.md").read_text()
+
+    def test_the_procedure_is_documented(self):
+        doc = self._doc()
+        assert "Certificate auth" in doc, "the cert onboarding section is gone"
+        assert "ssh-keygen -s" in doc, "the signing command is not documented"
+        assert "-O clear -O permit-pty" in doc, (
+            "the extension-stripping flags are undocumented; the default cert "
+            "carries agent and port forwarding"
+        )
+
+    def test_it_says_where_the_ca_private_key_lives_and_does_not(self):
+        doc = self._doc()
+        assert "mistudio_user_ca" in doc
+        assert "never on a server" in doc.lower() or "never in" in doc.lower(), (
+            "the doc does not warn that the CA private key stays on the "
+            "workstation; an agent will copy it to the node"
+        )
+
+    def test_the_ca_private_key_is_not_in_this_repo(self):
+        """The check that actually matters, not just the words about it."""
+        import subprocess
+
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        offenders = [f for f in tracked
+                     if "mistudio_user_ca" in f and not f.endswith(".pub")]
+        assert not offenders, (
+            f"the CA PRIVATE key is tracked in git: {offenders}. It mints "
+            f"access to the GPU node for anyone who clones this repo, and the "
+            f"mirror publishes it permanently."
+        )
+
+    def test_no_tracked_file_contains_a_private_key_block(self):
+        import subprocess
+
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        marker = "-----BEGIN OPENSSH PRIVATE KEY" + "-----"
+        offenders = []
+        for rel in tracked:
+            path = REPO / rel
+            if not path.exists() or path.is_dir():
+                continue
+            try:
+                if marker in path.read_text(errors="ignore"):
+                    offenders.append(rel)
+            except OSError:  # pragma: no cover
+                continue
+        assert not offenders, f"private key material is tracked: {offenders}"
+
+    def test_the_docs_do_not_instruct_an_sshd_reload(self):
+        """Per-user cert-authority is the documented route precisely because
+        it needs no root and cannot take sshd down."""
+        doc = self._doc()
+        cert_section = doc.split("### Certificate auth", 1)[1].split("### ", 1)[0]
+        bare = re.sub(r"`[^`\n]*`", "", cert_section)
+        assert "systemctl reload ssh" not in bare, (
+            "the cert section tells an agent to reload sshd; the documented "
+            "route is a cert-authority line in authorized_keys, which needs "
+            "no root and cannot lock anyone out"
+        )

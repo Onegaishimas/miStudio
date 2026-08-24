@@ -202,6 +202,65 @@ k8s() { ssh -o BatchMode=yes "${K8S_USER}@${K8S_HOST}" "$1"; }
 
 **One-time setup, per machine:** `ssh-copy-id ${K8S_USER}@${K8S_HOST}`
 
+### Certificate auth (live since 2026-08-24) — how to onboard an agent
+
+The node trusts a **user CA**. Any key that CA signs is admitted as `sean`; no server change is
+needed per agent, and every certificate carries a hard expiry. That expiry is the point: an
+`authorized_keys` entry is permanent by default, a certificate is temporary by default.
+
+Trust is established **per-user, not system-wide** — a `cert-authority` line in
+`~sean/.ssh/authorized_keys`, not `TrustedUserCAKeys` in `sshd_config`. That needs no root, no
+`sshd` reload, and therefore carries no risk of locking anyone out. It is scoped to this one
+account, which is exactly the scope wanted.
+
+```
+cert-authority ssh-ed25519 AAAA…  miStudio user CA (workstation-held)
+```
+
+**The CA private key lives at `~/.ssh/mistudio_user_ca` on the operator workstation only.** Never in
+this repo, never on a server — only the `.pub` is copied anywhere. Anyone holding it can mint access
+to the node indefinitely.
+
+#### Signing a certificate for a new agent
+
+One command on the workstation that holds the CA. Nothing to do on the server.
+
+```bash
+ssh-keygen -s ~/.ssh/mistudio_user_ca \
+  -I "some-agent@its-host" \      # key id — appears in the node's auth log
+  -n sean \                       # principal: the username it may log in as
+  -V -5m:+30d \                   # validity; -5m absorbs clock skew
+  -z 3 \                          # serial — INCREMENT; revocation keys on it
+  -O clear -O permit-pty \        # drop agent/port/X11 forwarding
+  /path/to/agent_id_ed25519.pub
+```
+
+That writes `agent_id_ed25519-cert.pub` beside the public key. The agent copies its private key **and
+the `-cert.pub`** into `~/.ssh/`; OpenSSH finds the cert automatically from the `-cert.pub` naming.
+No `ssh-copy-id`, no touching the server.
+
+`-O clear -O permit-pty` matters: the default extensions include agent and port forwarding, which an
+automation certificate has no business carrying.
+
+#### Verified, not assumed (2026-08-24)
+
+A throwaway key **absent from `authorized_keys`** was refused bare, then admitted once signed —
+nothing else changed between the two attempts. An **expired** cert and a cert for the **wrong
+principal** were both refused. So the expiry and principal guarantees are enforced, not merely
+configured.
+
+#### Revoking one agent
+
+Does not need the CA private key, and does not invalidate anyone else:
+
+```bash
+ssh-keygen -k -f ~/.ssh/mistudio_revoked -u -s ~/.ssh/mistudio_user_ca -z <serial> /dev/null
+# copy to the node, then (needs root):  RevokedKeys /etc/ssh/mistudio_revoked
+```
+
+Without root, revoke by removing the `cert-authority` line and re-adding it after re-issuing the
+certs you still want — blunt, but it needs no privilege.
+
 ### 🔒 NEVER disable password authentication (standing user directive, 2026-08-24)
 
 `PasswordAuthentication` on `192.168.244.61` **stays `yes`. No agent may turn it off**, and no agent
