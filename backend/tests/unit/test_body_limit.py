@@ -139,43 +139,49 @@ class TestTheCapHolds:
 class TestTheExemptListIsCheckedAgainstTheRegistry:
     """A hand-maintained path list rots. MIS-E2E-154 found 41 dead ones."""
 
-    def test_exempt_list_names_only_real_routes(self):
+    #: Read from the SERVED schema, not `app.routes`. This build wraps included
+    #: routers in `_IncludedRouter` objects with no `.path`, so `app.routes`
+    #: yields 10 entries for a 230-route API — and the first version of these
+    #: two tests iterated it, which made both of them vacuous. Two other guards
+    #: in this suite already document the same trap.
+    def _served_paths(self):
         from src.main import app as real_app
 
-        mounted = {getattr(r, "path", "") for r in real_app.routes}
+        paths = set(real_app.openapi()["paths"])
+        assert len(paths) > 100, (
+            f"only {len(paths)} paths in the served schema — the probe is blind, "
+            f"and a blind probe agrees with everything"
+        )
+        return paths
+
+    def test_exempt_list_names_only_real_routes(self):
+        served = self._served_paths()
         for prefix in EXEMPT_PREFIXES:
-            assert any(path.startswith(prefix) for path in mounted), (
-                f"EXEMPT_PREFIXES names {prefix!r}, which matches no mounted "
+            assert any(path.startswith(prefix) for path in served), (
+                f"EXEMPT_PREFIXES names {prefix!r}, which matches no served "
                 f"route — a body cap is being waived for a path that does not exist"
             )
 
     def test_a_file_upload_route_must_be_exempted_deliberately(self):
         """If a route starts taking an UploadFile, 1 MB will break it silently."""
-        import inspect
-
-        from fastapi import UploadFile
-
         from src.main import app as real_app
 
-        for route in real_app.routes:
-            endpoint = getattr(route, "endpoint", None)
-            path = getattr(route, "path", "")
-            if endpoint is None:
-                continue
-            try:
-                hints = inspect.signature(endpoint).parameters
-            except (ValueError, TypeError):
-                continue
-            takes_file = any(
-                getattr(p.annotation, "__name__", "") == "UploadFile"
-                or p.annotation is UploadFile
-                for p in hints.values()
-            )
-            if takes_file:
-                assert any(path.startswith(pref) for pref in EXEMPT_PREFIXES), (
-                    f"{path} accepts an UploadFile but is not in EXEMPT_PREFIXES; "
-                    f"it will be capped at {MAX_BODY_BYTES // 1024} KB"
-                )
+        spec = real_app.openapi()
+        served = self._served_paths()
+        offenders = []
+        for path in served:
+            for method, operation in spec["paths"][path].items():
+                body = operation.get("requestBody", {}).get("content", {})
+                # multipart/form-data is how FastAPI renders an UploadFile.
+                if "multipart/form-data" not in body:
+                    continue
+                if not any(path.startswith(pref) for pref in EXEMPT_PREFIXES):
+                    offenders.append(f"{method.upper()} {path}")
+
+        assert not offenders, (
+            f"{offenders} accept a file upload but are not in EXEMPT_PREFIXES; "
+            f"they will be capped at {MAX_BODY_BYTES // 1024} KB"
+        )
 
 
 class TestTheMiddlewareIsActuallyMounted:

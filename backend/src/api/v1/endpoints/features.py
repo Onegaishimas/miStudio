@@ -95,6 +95,33 @@ async def list_extractions(
     )
 
 
+@router.get(
+    "/extractions/{extraction_id}",
+    response_model=ExtractionStatusResponse,
+    summary="Get one extraction job"
+)
+async def get_extraction(
+    extraction_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """One extraction job's detail: SAE, status, feature counts, config.
+
+    This route did not exist. `docs/mcp-contract.md` advertised it, and the MCP
+    tool `get_extraction_summary` called it — so every agent invocation got a
+    405 from the DELETE-only path below. Found by sweeping every `client.get/
+    post/...` call in the MCP tools against the served OpenAPI schema; it was
+    the only one, and `test_mcp_tools_call_real_routes.py` now keeps it so.
+    """
+    extraction_service = ExtractionService(db)
+    extraction = await extraction_service.get_extraction(extraction_id)
+    if not extraction:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Extraction job {extraction_id} not found"
+        )
+    return ExtractionStatusResponse(**extraction)
+
+
 @router.delete(
     "/extractions/{extraction_id}",
     summary="Delete extraction job"
