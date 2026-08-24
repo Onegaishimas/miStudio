@@ -627,7 +627,8 @@ class ExtractionService:
         self,
         status_filter: Optional[List[str]] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        extraction_ids: Optional[List[str]] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         List all extraction jobs with optional filtering.
@@ -639,6 +640,10 @@ class ExtractionService:
             status_filter: Optional list of statuses to filter by
             limit: Maximum number of results to return
             offset: Number of results to skip
+            extraction_ids: Optional list of ids to restrict to. `get_extraction`
+                uses this to serve one job through exactly this enrichment path
+                rather than a second copy of it — the enrichment is ~120 lines
+                and a duplicate would be free to drift.
 
         Returns:
             Tuple of (list of extraction job dicts, total count)
@@ -650,11 +655,15 @@ class ExtractionService:
 
         if status_filter:
             query = query.where(ExtractionJob.status.in_(status_filter))
+        if extraction_ids is not None:
+            query = query.where(ExtractionJob.id.in_(extraction_ids))
 
         # Get total count
         count_query = select(func.count()).select_from(ExtractionJob)
         if status_filter:
             count_query = count_query.where(ExtractionJob.status.in_(status_filter))
+        if extraction_ids is not None:
+            count_query = count_query.where(ExtractionJob.id.in_(extraction_ids))
 
         count_result = await self.db.execute(count_query)
         total = count_result.scalar_one()
@@ -795,6 +804,26 @@ class ExtractionService:
             })
 
         return extractions_list, total
+
+    async def get_extraction(self, extraction_id: str) -> Optional[Dict[str, Any]]:
+        """One extraction job's detail, enriched exactly as the list is.
+
+        MIS-E2E-114 (adjacent): the MCP tool `get_extraction_summary` issued
+        `GET /extractions/{id}` and no such route existed — only DELETE — so
+        every agent call returned 405. The contract advertised it, which is how
+        it went unnoticed.
+
+        Routed through `list_extractions` with a single-id filter rather than
+        given its own query: the enrichment that resolves model, dataset and
+        SAE names across four tables is ~120 lines, and a second copy of it is
+        a copy that can drift. Reusing the path also means this endpoint and
+        the list can never disagree about the same job.
+
+        Returns None when there is no such job, so the caller renders the 404.
+        """
+        rows, _ = await self.list_extractions(extraction_ids=[extraction_id], limit=1)
+        return rows[0] if rows else None
+
 
     async def delete_extraction(self, extraction_id: str) -> None:
         """
