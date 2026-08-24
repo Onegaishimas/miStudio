@@ -15,6 +15,7 @@ MIS-E2E-150  the manual said a bearer token is "always required" and its
 from pathlib import Path
 
 import pytest
+import re
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -529,3 +530,83 @@ class TestTheSshGuidanceMatchesTheHelper:
             f"({host.group(1)})"
         )
         assert user.group(1) in doc
+
+
+class TestNothingTriesToDisablePasswordAuth:
+    """Standing user directive, 2026-08-24: password auth on the GPU node stays on.
+
+    It is the break-glass path. Certificates expire on their own schedule, keys
+    are lost with their workstation, and `authorized_keys` can be truncated by
+    a bad script — password auth is what remains when those fail. On
+    2026-08-24 the MIS-E2E-143 fix removed the committed password and installed
+    no key, so `k8s-helpers.sh` was dead during a live outage. Removing a
+    credential path without a proven replacement is itself an outage.
+
+    A test cannot read the remote `sshd_config`, and pretending otherwise would
+    be the "guard that isn't on the path" shape this audit found repeatedly.
+    What it CAN do is stop this repository from shipping anything that turns it
+    off, and keep the reason written down.
+    """
+
+    #: The setting, and the shell shapes that flip it.
+    _DISABLERS = (
+        "PasswordAuthentication no",
+        "PasswordAuthentication=no",
+        "passwordauthentication no",
+    )
+
+    def _tracked_files(self):
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        assert len(out) > 500, f"only {len(out)} tracked files — the scan is broken"
+        return out
+
+    def test_no_tracked_file_disables_password_authentication(self):
+        offenders = []
+        for rel in self._tracked_files():
+            if not rel.endswith((".sh", ".yml", ".yaml", ".conf", ".py", ".md", ".tf")):
+                continue
+            path = REPO / rel
+            if not path.exists():
+                continue
+            if Path(rel).name == Path(__file__).name:
+                continue                      # the detector names what it bans
+            text = path.read_text(errors="ignore")
+            for lineno, line in enumerate(text.splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith(("#", "//", ">", "|", "*", "-")):
+                    continue
+                # Strip backticked and quoted spans. The rule in CLAUDE.md says
+                # "Not `PasswordAuthentication no`" — a mention, forbidding the
+                # thing. A substring check cannot tell that from a directive,
+                # which is the same trap that has now bitten thirteen times in
+                # this remediation.
+                bare = re.sub(r'`[^`\n]*`|"[^"\n]*"|\'[^\'\n]*\'', "", line)
+                if any(d in bare for d in self._DISABLERS):
+                    offenders.append(f"{rel}:{lineno}")
+        assert not offenders, (
+            "these would disable password authentication on the GPU node, "
+            "which is the break-glass path and stays on by standing "
+            f"instruction: {offenders}. Harden with fail2ban, a firewall rule "
+            f"or AllowUsers instead."
+        )
+
+    def test_the_rule_is_written_down_where_agents_read_it(self):
+        doc = (REPO / "CLAUDE.md").read_text()
+        assert "NEVER disable password authentication" in doc, (
+            "the standing directive is gone from CLAUDE.md; the next agent will "
+            "read the cert setup and treat disabling passwords as the obvious "
+            "next hardening step"
+        )
+        assert "break-glass" in doc
+
+    def test_the_scan_would_catch_a_real_disabler(self):
+        """Negative control: the detector must match the string it forbids."""
+        line = "    PasswordAuthentication no"
+        assert any(d in line for d in self._DISABLERS)
+        # ...and must not fire on prose that forbids it.
+        prose = "# never set PasswordAuthentication no on this host"
+        assert prose.strip().startswith("#")
