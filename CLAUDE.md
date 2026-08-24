@@ -389,7 +389,7 @@ pgrep -f celery  # Celery worker should be running
 - ✅ 015_FPRD/FTDD/FTID/FTASKS|MultiSAE_Steering · ✅ 016_…|Circuit_Discovery (v2.0) · ✅ 017_…|Circuit_Validation · ✅ 018_…|Circuit_Portability
 - ✅ PPRD v3.9 (§3.16–3.19) · ✅ PADR v3.0 (IDL-31..36)
 
-### Feature 020 (= files 019_*) — Circuit Strength Calibration (doc chain COMPLETE, impl PLANNED 2026-07-21)
+### Feature 020 (= files 019_*) — Circuit Strength Calibration (✅ COMPLETE — doc chain + implementation, closed 2026-07-22)
 - ✅ 019_FPRD/FTDD/FTID/FTASKS|Circuit_Calibration — **files are `019_*`, product feature is PPRD row 20** (the +1 offset above; not an error). The arc's next step. Grounded in the served-circuit finding: placeholder strengths shipped fluent-but-FALSE at "usable" 1.40; usable band was ~0.4–0.6 effective.
 - ✅ PPRD v3.10 (row 20, §3.20) · ✅ PADR v3.1 (IDL-37: two-detector usable-band search — onset by output-drift, correctness cliff by LLM judge on generated NEUTRAL-topic falsifiable probes; adaptive bisection; additive nullable `calibration` block clamps intensity_range to [onset,cliff]; badge not gate; provisional cross-plane)
 - Next: execute 019 Phase 1 (schema/contract) via 008_process-task-list.md. Contract crosses to miLLM (additive nullable) — schema-sync + vendored-identity guards are acceptance-blocking.
@@ -455,7 +455,7 @@ lens) reading what a model is *poised to say* at every layer and position. 32 bu
   resolution; band rendering is unreachable from the panel until a band report exists; MCP parity is
   owned by files `028_*`.
 
-#### Feature 022 (= files `021_*`) — J-Space Fitting, Validation & the Phase-0 Gate (⏳ In progress 2026-07-31)
+#### Feature 022 (= files `021_*`) — J-Space Fitting, Validation & the Phase-0 Gate (✅ Shipped 2026-08-10 — see Current Status; the outstanding list below is historical)
 - ✅ 021_FPRD/FTDD/FTID/FTASKS|JSpace_Fitting_And_Gate
 - **Shipped:** `ml/jlens_fitter.py` (model-agnostic fit; freezing by patching the OPERATIONS, not the
   modules), `services/jlens_validation.py` (the six BR-030 classes, fail-closed), `ml/jlens_metrics.py`

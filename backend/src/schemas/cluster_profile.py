@@ -10,9 +10,10 @@ Two families:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+import json
+from typing import ClassVar, Any, Dict, List, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SCHEMA_VERSION = "1"
 DEFINITION_KIND = "mistudio.cluster-definition"
@@ -56,6 +57,35 @@ class MemberMeta(BaseModel):
     signature: Optional[str] = Field(None, max_length=200)
     example: Optional[MemberExample] = None
     neuronpedia: Optional[str] = Field(None, max_length=500)
+
+    #: Ceiling on everything NOT declared above, serialized. MIS-E2E-042.
+    #:
+    #: Every declared field here is bounded — `max_length` on the strings, a
+    #: range on the float, 10 entries on `top_tokens`. The extras were not
+    #: bounded at all, and `extra="allow"` means they are persisted AND
+    #: re-exported: a circuit definition is the artifact this product exists to
+    #: exchange, including through a HuggingFace marketplace. Anything imported
+    #: travels onward under miStudio's name.
+    #:
+    #: 8 KB is far more than display metadata needs (the declared fields cap out
+    #: near 2 KB) and far less than a useful smuggling channel.
+    MAX_EXTRA_BYTES: ClassVar[int] = 8192
+
+    @model_validator(mode="after")
+    def _bound_the_extras(self) -> "MemberMeta":
+        extras = self.__pydantic_extra__ or {}
+        if not extras:
+            return self
+        size = len(json.dumps(extras, default=str, separators=(",", ":")))
+        if size > self.MAX_EXTRA_BYTES:
+            raise ValueError(
+                f"member meta carries {size} bytes of undeclared keys "
+                f"({sorted(extras)[:5]}…), over the {self.MAX_EXTRA_BYTES}-byte "
+                f"limit. `meta` is deliberately extensible so consumers can pass "
+                f"through what they do not understand — it is not a payload "
+                f"channel."
+            )
+        return self
 
     @field_validator("neuronpedia")
     @classmethod
