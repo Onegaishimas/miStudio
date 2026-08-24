@@ -321,3 +321,80 @@ def test_emit_still_uses_http_when_there_is_no_loop(monkeypatch):
 
     assert we.emit_progress("trainings/t1/progress", "training:progress", {}) is True
     assert posted["n"] == 1
+
+
+class TestRetryClassificationIsPinned:
+    """MIS-E2E-137 / -142, mutation M26.
+
+    The emitter caught only `httpx.TimeoutException`, so a `ConnectError`
+    (connection refused during a pod restart) or a `RemoteProtocolError`
+    (half-closed keep-alive) fell through to `except Exception` and was
+    abandoned on the first attempt. The events configured with retries are the
+    TERMINAL ones — `steering:completed`, `neuronpedia:push_completed`,
+    `enhanced_labeling:completed` — where a dropped emit leaves the UI showing
+    a finished job as still running, forever.
+
+    The fix widened the handler to `TransportError`. M26 re-narrowed it and
+    survived: nothing asserted WHICH failures are retryable, so the decision
+    was undefended.
+    """
+
+    def test_transport_error_is_the_retry_boundary(self):
+        import inspect
+
+        from src.workers import websocket_emitter
+
+        # Whitespace removed: the tokenizer joins with spaces, so
+        # `httpx.TransportError` comes back as `httpx . TransportError` and a
+        # plain substring check misses it — which is how this test first failed
+        # against code that was already correct.
+        source = "".join(_code_only_ws(inspect.getsource(websocket_emitter)).split())
+        assert "httpx.TransportError" in source, (
+            "the retry handler no longer catches TransportError; a connection "
+            "refused mid-restart is abandoned on the first attempt"
+        )
+        assert "excepthttpx.TimeoutException" not in source, (
+            "the handler is narrowed back to TimeoutException, which excludes "
+            "ConnectError and RemoteProtocolError"
+        )
+
+    def test_the_classification_matches_the_installed_httpx(self):
+        """The premise, checked against the library rather than assumed."""
+        import httpx
+
+        assert issubclass(httpx.ConnectError, httpx.TransportError)
+        assert issubclass(httpx.RemoteProtocolError, httpx.TransportError)
+        assert issubclass(httpx.ReadTimeout, httpx.TransportError)
+        # ...and the exclusion is deliberate: the server answered, so retrying
+        # just repeats a rejected request.
+        assert not issubclass(httpx.HTTPStatusError, httpx.TransportError)
+
+    def test_the_narrow_class_really_would_miss_them(self):
+        """Without this the assertion above could be vacuous."""
+        import httpx
+
+        assert not issubclass(httpx.ConnectError, httpx.TimeoutException)
+        assert not issubclass(httpx.RemoteProtocolError, httpx.TimeoutException)
+
+
+def _code_only_ws(source: str) -> str:
+    """Comments and docstrings stripped — the module explains M26 in prose."""
+    import io
+    import tokenize
+
+    out, prev = [], tokenize.INDENT
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT:
+                continue
+            if tok.type == tokenize.STRING and prev in (
+                tokenize.INDENT, tokenize.NEWLINE, tokenize.NL, tokenize.DEDENT,
+            ):
+                prev = tok.type
+                continue
+            out.append(tok.string)
+            if tok.type not in (tokenize.NL, tokenize.NEWLINE):
+                prev = tok.type
+    except tokenize.TokenError:  # pragma: no cover
+        return source
+    return " ".join(out)

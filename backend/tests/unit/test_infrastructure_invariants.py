@@ -248,3 +248,102 @@ def test_both_sensitive_settings_tabs_are_pin_gated():
         assert needle in panel, (
             f"the {tab} tab is not wrapped in <PinGate>; expected `{needle}`"
         )
+
+
+class TestGpuTasksAreRoutedToTheGpuQueue:
+    """MIS-E2E-097, mutation M17.
+
+    The k8s deployment runs two workers: a GPU one consuming the default queue
+    and a CPU-only one consuming `low_priority`. Routing is what keeps a GPU
+    task off the CPU worker — and `task_routes` globs match the TASK NAME, so a
+    task whose name does not match its glob silently lands wherever the
+    decorator says.
+
+    M17 removed `queue="steering"` from the GPU steering task and the suite
+    stayed green: nothing asserted where GPU work goes. Removing that routing
+    sends a CUDA task to a worker with no GPU, where it fails at model load —
+    or worse, runs on a node that has one and contends with the real GPU
+    worker for the single card.
+    """
+
+    #: Tasks that touch CUDA and must never land on a CPU-only worker.
+    GPU_MODULES = ("steering_tasks",)
+
+    def _decorated_tasks(self, module_name: str):
+        import ast
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[2] / "src" / "workers"
+               / f"{module_name}.py")
+        tree = ast.parse(src.read_text())
+        out = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for dec in node.decorator_list:
+                if not isinstance(dec, ast.Call):
+                    continue
+                target = getattr(dec.func, "attr", "")
+                if target != "task":
+                    continue
+                kwargs = {k.arg: getattr(k.value, "value", None) for k in dec.keywords}
+                out.append((node.name, kwargs))
+        return out
+
+    def test_the_scan_finds_the_tasks(self):
+        tasks = self._decorated_tasks("steering_tasks")
+        assert len(tasks) >= 3, (
+            f"only {len(tasks)} celery tasks found in steering_tasks — the AST "
+            f"scan is broken, and a broken scan agrees with everything"
+        )
+
+    def test_every_gpu_task_declares_the_steering_queue(self):
+        offenders = []
+        for module_name in self.GPU_MODULES:
+            for name, kwargs in self._decorated_tasks(module_name):
+                if kwargs.get("queue") != "steering":
+                    offenders.append(f"{module_name}.{name} -> {kwargs.get('queue')!r}")
+        assert not offenders, (
+            "these CUDA tasks are not routed to the steering queue and will be "
+            "picked up by the CPU-only worker: " + ", ".join(offenders)
+        )
+
+    def test_the_steering_queue_is_actually_consumed(self):
+        """A queue nothing consumes is worse than no routing at all.
+
+        The consumer is NOT in the k8s manifest — I asserted that first and it
+        failed, which looked like a live defect until I checked. The long-lived
+        GPU worker deliberately consumes
+        `high_priority,datasets,processing,training,extraction,sae` and not
+        `steering`; the steering consumer is spawned ON DEMAND by the API
+        process with `-Q steering`, so the GPU sits free between runs. Verified
+        against the running pod's command line before changing this assertion.
+        """
+        import ast
+        from pathlib import Path
+
+        endpoint = (Path(__file__).resolve().parents[2] / "src" / "api" / "v1"
+                    / "endpoints" / "steering.py")
+        tree = ast.parse(endpoint.read_text())
+
+        spawns = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and getattr(node.func, "attr", "") == "Popen"):
+                continue
+            argv = node.args[0] if node.args else None
+            if not isinstance(argv, ast.List):
+                continue
+            literals = [e.value for e in argv.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if "-Q" in literals:
+                spawns.append(literals[literals.index("-Q") + 1])
+
+        assert spawns, (
+            "nothing spawns a worker with `-Q`; the steering queue has no "
+            "consumer, so a routed task would sit in the broker forever"
+        )
+        assert all(q == "steering" for q in spawns), (
+            f"a spawned worker consumes {spawns}, not the steering queue the "
+            f"GPU tasks are routed to"
+        )
