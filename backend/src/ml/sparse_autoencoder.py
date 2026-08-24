@@ -263,8 +263,25 @@ class SparseAutoencoder(nn.Module):
         # Compute losses
         losses = {}
         if return_loss:
-            # Reconstruction loss (MSE)
-            loss_reconstruction = F.mse_loss(x_reconstructed, x, reduction='mean')
+            # MIS-E2E-086: reconstruction is measured in NORMALIZED space,
+            # the same space the L1 penalty lives in.
+            #
+            # It used to be `F.mse_loss(x_reconstructed, x)` — raw — while the
+            # L1 term is `z.abs().sum()`, and `z` comes from encoding the
+            # NORMALIZED input. Adding those two together weights each sample
+            # by roughly ‖x‖²/d, so high-norm tokens dominate the objective and
+            # the effective sparsity coefficient varies per sample. That defeats
+            # the stated purpose of normalization: making one set of
+            # hyperparameters transfer across layers whose activation scales
+            # differ. `constant_norm_rescale` is the DEFAULT, so this was live
+            # on every training that did not opt out.
+            #
+            # `loss_zero` moves with it, so the recon/zero ratio still compares
+            # two quantities in one space. The reported FVU is unaffected — the
+            # JumpReLU path computes it separately as a raw-space variance
+            # ratio, which is self-consistent and is the right space to report
+            # reconstruction quality in.
+            loss_reconstruction = F.mse_loss(x_reconstructed_norm, x_normalized, reduction='mean')
 
             # L1 sparsity penalty (per-sample L1 norm, then averaged over batch)
             # This is the correct formulation from Anthropic's "Towards Monosemanticity"
@@ -276,14 +293,18 @@ class SparseAutoencoder(nn.Module):
             l0_sparsity = (z > 0).float().mean()
 
             # Zero ablation loss (how much worse is reconstruction without SAE features?)
-            x_zero = self.decoder_bias.expand_as(x)
-            loss_zero = F.mse_loss(x_zero, x, reduction='mean')
+            x_zero = self.decoder_bias.expand_as(x_normalized)
+            loss_zero = F.mse_loss(x_zero, x_normalized, reduction='mean')
 
             # Ghost gradient penalty (encourages dead neurons to activate)
             ghost_penalty = torch.tensor(0.0, device=z.device)
             if self.ghost_gradient_penalty > 0:
-                # Pre-activation values (before ReLU)
-                pre_activation = self.encoder(x)
+                # MIS-E2E-086: the NORMALIZED tensor, which is what `encode`
+                # is given everywhere else. Encoding raw `x` here computed the
+                # dead-neuron resurrection signal on an input the encoder never
+                # sees, so the neurons were being revived against the wrong
+                # distribution.
+                pre_activation = self.encoder(x_normalized)
                 # Dead neurons have pre_activation < 0 (would be zeroed by ReLU)
                 dead_mask = (pre_activation <= 0).float()
                 # Penalty for dead neurons (encourages positive pre-activations)
@@ -415,14 +436,28 @@ class SkipAutoencoder(SparseAutoencoder):
         # Compute losses (same as base SAE)
         losses = {}
         if return_loss:
-            loss_reconstruction = F.mse_loss(x_reconstructed, x, reduction='mean')
+            # MIS-E2E-086: normalized space, matching the L1 term below.
+            loss_reconstruction = F.mse_loss(x_reconstructed_norm, x_normalized, reduction='mean')
             # L1 penalty: per-sample L1 norm, averaged over batch
             l1_penalty = z.abs().sum(dim=-1).mean()
             l0_sparsity = (z > 0).float().mean()
 
-            # Zero ablation: just the skip connection (in denormalized space)
-            x_zero = self.skip_scale * x
-            loss_zero = F.mse_loss(x_zero, x, reduction='mean')
+            # Zero ablation: decoder bias only, the SAME definition every other
+            # architecture in this module uses.
+            #
+            # This used to be `skip_scale * x_normalized`, "the skip connection
+            # alone". That is architecturally defensible but produces a number
+            # that cannot be read: `skip_scale` defaults to 1.0, so the baseline
+            # was `mse(x, x)` — exactly 0.0 for every Skip-SAE training ever
+            # run. `loss_zero` is persisted to `training_metrics.loss_zero`, a
+            # column shared by all architectures, and a reader comparing
+            # reconstruction against a 0.0 baseline concludes the SAE made
+            # things infinitely worse.
+            #
+            # A shared column has to mean one thing in every row. Bias-only is
+            # that thing: "what you get with no latent features at all".
+            x_zero = self.decoder_bias.expand_as(x_normalized)
+            loss_zero = F.mse_loss(x_zero, x_normalized, reduction='mean')
 
             # Total loss: reconstruction + L1 sparsity
             loss_total = loss_reconstruction + self.l1_alpha * l1_penalty

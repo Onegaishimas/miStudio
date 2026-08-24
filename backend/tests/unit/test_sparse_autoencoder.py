@@ -151,8 +151,20 @@ class TestSparseAutoencoderLossCalculation:
         assert 'l0_sparsity' in losses, "L0 sparsity missing"
         assert 'ghost_penalty' in losses, "Ghost penalty missing"
 
-    def test_reconstruction_loss_is_mse(self):
-        """Test that reconstruction loss is MSE between input and output."""
+    def test_reconstruction_loss_is_mse_in_normalized_space(self):
+        """Reconstruction MSE is measured where the L1 penalty lives.
+
+        This test used to assert MSE against the RAW input, which pinned
+        MIS-E2E-086 rather than preventing it: the reconstruction term was
+        computed in raw space and then added to an L1 term computed on `z`,
+        which comes from the NORMALIZED input. Adding the two weights each
+        sample by roughly ‖x‖²/d.
+
+        `normalize_activations` is per-sample, so with the default
+        `constant_norm_rescale` the two spaces differ by a different factor for
+        every row — which is exactly why the mismatch is not a constant that
+        the learning rate could absorb.
+        """
         hidden_dim = 512
         latent_dim = 4096
         batch_size = 16
@@ -164,14 +176,30 @@ class TestSparseAutoencoderLossCalculation:
         )
 
         x = torch.randn(batch_size, hidden_dim)
-        x_reconstructed, _, losses = model(x, return_loss=True)
+        _, _, losses = model(x, return_loss=True)
 
-        # Manually compute MSE
-        expected_mse = torch.nn.functional.mse_loss(x_reconstructed, x, reduction='mean')
+        x_normalized, norm_coeff = model.normalize(x)
+        expected = torch.nn.functional.mse_loss(
+            model.decode(model.encode(x_normalized)), x_normalized, reduction='mean'
+        )
+        assert torch.allclose(losses['loss_reconstruction'], expected, atol=1e-6), \
+            "reconstruction loss is not the normalized-space MSE"
 
-        # Compare with model's reconstruction loss
-        assert torch.allclose(losses['loss_reconstruction'], expected_mse, atol=1e-6), \
-            "Reconstruction loss does not match MSE"
+    def test_the_two_spaces_actually_differ_on_this_fixture(self):
+        """Guard the test above: if they coincided, it would prove nothing.
+
+        A fixture where normalized and raw space agree is the "fixtures agree
+        by construction" trap — the assertion would hold either way.
+        """
+        model = SparseAutoencoder(hidden_dim=512, latent_dim=4096, l1_alpha=0.0)
+        x = torch.randn(16, 512)
+        x_normalized, coeff = model.normalize(x)
+        assert not torch.allclose(x_normalized, x, atol=1e-3), (
+            "normalization is a no-op on this fixture, so the space distinction "
+            "the test above rests on does not exist here"
+        )
+        # And per-sample, so it is not one global scalar.
+        assert coeff.numel() > 1 or float(coeff.std()) >= 0
 
     def test_l1_penalty_calculation(self):
         """Test that L1 penalty is per-sample L1 norm averaged over batch.
@@ -1054,3 +1082,209 @@ class TestJumpReLUSAEGradientFlow:
             if param.grad is not None:
                 assert not torch.isnan(param.grad).any(), \
                     f"Gradient for {name} contains NaN"
+
+
+class TestGhostGradientUsesTheEncodersOwnInput:
+    """MIS-E2E-086, second half.
+
+    The dead-neuron resurrection penalty encoded RAW `x` while the encoder is
+    given the NORMALIZED tensor everywhere else, so the resurrection signal was
+    computed against a distribution the encoder never sees.
+    """
+
+    def test_the_penalty_is_computed_on_the_normalized_tensor(self):
+        import ast
+        import inspect
+
+        from src.ml.sparse_autoencoder import SparseAutoencoder
+
+        source = inspect.getsource(SparseAutoencoder.forward)
+        tree = ast.parse(inspect.cleandoc(source))
+        encoder_calls = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "attr", "") == "encoder"
+        ]
+        assert encoder_calls, "the ghost-gradient encoder call is gone"
+        for call in encoder_calls:
+            arg = call.args[0]
+            assert getattr(arg, "id", None) == "x_normalized", (
+                "self.encoder(...) is called with something other than "
+                "x_normalized; the encoder is trained on normalized inputs, so "
+                "encoding raw x here resurrects neurons against the wrong "
+                "distribution"
+            )
+
+    def test_the_penalty_actually_changes_when_normalization_does(self):
+        """Behavioural, not just structural: the two inputs give different values."""
+        import torch
+
+        from src.ml.sparse_autoencoder import SparseAutoencoder
+
+        model = SparseAutoencoder(
+            hidden_dim=64, latent_dim=256, l1_alpha=0.0, ghost_gradient_penalty=1.0
+        )
+        # Large magnitudes so raw and normalized differ substantially.
+        x = torch.randn(8, 64) * 50.0
+        x_normalized, _ = model.normalize(x)
+
+        raw_pre = model.encoder(x)
+        norm_pre = model.encoder(x_normalized)
+        raw_penalty = ((raw_pre <= 0).float() * torch.relu(-raw_pre)).mean()
+        norm_penalty = ((norm_pre <= 0).float() * torch.relu(-norm_pre)).mean()
+        assert not torch.allclose(raw_penalty, norm_penalty, atol=1e-4), (
+            "raw and normalized give the same penalty on this fixture, so the "
+            "test above cannot distinguish the fix from the defect"
+        )
+
+        _, _, losses = model(x, return_loss=True)
+        assert torch.allclose(losses["ghost_penalty"], norm_penalty, atol=1e-5), (
+            "the reported ghost penalty does not match the normalized-input one"
+        )
+
+
+class TestZeroAblationSharesTheReconstructionSpace:
+    """`loss_zero` is the "how bad without the SAE" baseline.
+
+    It is only meaningful next to `loss_reconstruction`, so the two must be
+    measured in the same space. Control C191 moved `loss_zero` back to raw
+    space while reconstruction stayed normalized and every other test passed —
+    the two numbers would have been silently incomparable, and the ratio
+    between them is what a reader interprets as "did the SAE help".
+    """
+
+    def test_zero_ablation_is_measured_in_normalized_space(self):
+        import torch
+
+        from src.ml.sparse_autoencoder import SparseAutoencoder
+
+        model = SparseAutoencoder(hidden_dim=64, latent_dim=256, l1_alpha=0.0)
+        x = torch.randn(8, 64) * 25.0
+        x_normalized, _ = model.normalize(x)
+
+        expected = torch.nn.functional.mse_loss(
+            model.decoder_bias.expand_as(x_normalized), x_normalized, reduction="mean"
+        )
+        _, _, losses = model(x, return_loss=True)
+        assert torch.allclose(losses["loss_zero"], expected, atol=1e-5), (
+            "loss_zero is not the normalized-space baseline; it cannot be "
+            "compared against loss_reconstruction"
+        )
+
+    def test_the_raw_baseline_would_be_a_different_number(self):
+        """Otherwise the assertion above holds either way."""
+        import torch
+
+        from src.ml.sparse_autoencoder import SparseAutoencoder
+
+        model = SparseAutoencoder(hidden_dim=64, latent_dim=256, l1_alpha=0.0)
+        x = torch.randn(8, 64) * 25.0
+        x_normalized, _ = model.normalize(x)
+        raw = torch.nn.functional.mse_loss(
+            model.decoder_bias.expand_as(x), x, reduction="mean"
+        )
+        norm = torch.nn.functional.mse_loss(
+            model.decoder_bias.expand_as(x_normalized), x_normalized, reduction="mean"
+        )
+        assert not torch.allclose(raw, norm, atol=1e-3), (
+            "raw and normalized baselines coincide on this fixture"
+        )
+
+    def test_both_loss_terms_are_in_one_space(self):
+        """The property that actually matters, stated directly."""
+        import torch
+
+        from src.ml.sparse_autoencoder import SparseAutoencoder
+
+        model = SparseAutoencoder(hidden_dim=64, latent_dim=256, l1_alpha=0.0)
+        x = torch.randn(8, 64) * 25.0
+        x_normalized, _ = model.normalize(x)
+        _, _, losses = model(x, return_loss=True)
+
+        recon = torch.nn.functional.mse_loss(
+            model.decode(model.encode(x_normalized)), x_normalized, reduction="mean"
+        )
+        zero = torch.nn.functional.mse_loss(
+            model.decoder_bias.expand_as(x_normalized), x_normalized, reduction="mean"
+        )
+        assert torch.allclose(losses["loss_reconstruction"], recon, atol=1e-5)
+        assert torch.allclose(losses["loss_zero"], zero, atol=1e-5)
+
+
+class TestSkipAutoencoderSharesTheSameSpaceRule:
+    """MIS-E2E-086 applies to `SkipAutoencoder` too, and nothing tested it.
+
+    Control C192 reverted only the SkipSAE reconstruction to raw space and the
+    whole suite stayed green — the base-SAE tests above do not exercise this
+    subclass's `forward`. "Fixed one representative, never generalized" is the
+    anti-pattern this audit found five times; this is its test-side twin.
+    """
+
+    def _model(self):
+        from src.ml.sparse_autoencoder import SkipAutoencoder
+
+        return SkipAutoencoder(hidden_dim=64, latent_dim=256, l1_alpha=0.0)
+
+    def test_reconstruction_is_measured_in_normalized_space(self):
+        import torch
+
+        model = self._model()
+        x = torch.randn(8, 64) * 25.0
+        x_normalized, _ = model.normalize(x)
+
+        expected = torch.nn.functional.mse_loss(
+            model.decode(model.encode(x_normalized), x_normalized),
+            x_normalized,
+            reduction="mean",
+        )
+        _, _, losses = model(x, return_loss=True)
+        assert torch.allclose(losses["loss_reconstruction"], expected, atol=1e-5), (
+            "SkipAutoencoder measures reconstruction in raw space while its L1 "
+            "term is computed on the normalized encode"
+        )
+
+    def test_the_baseline_means_the_same_thing_as_every_other_architecture(self):
+        """`training_metrics.loss_zero` is one column shared by all architectures.
+
+        It used to be `skip_scale * x` here — "the skip connection alone" —
+        and `skip_scale` defaults to 1.0, so the baseline was `mse(x, x)`,
+        exactly 0.0 for every Skip-SAE training ever recorded. A reader
+        comparing reconstruction against 0.0 concludes the SAE made things
+        infinitely worse. Bias-only is the definition the other architectures
+        use, so the column is comparable row to row.
+        """
+        import torch
+
+        model = self._model()
+        x = torch.randn(8, 64) * 25.0
+        x_normalized, _ = model.normalize(x)
+
+        expected = torch.nn.functional.mse_loss(
+            model.decoder_bias.expand_as(x_normalized), x_normalized, reduction="mean"
+        )
+        _, _, losses = model(x, return_loss=True)
+        assert torch.allclose(losses["loss_zero"], expected, atol=1e-5)
+
+    def test_the_baseline_is_not_degenerately_zero(self):
+        """The specific symptom: at the default skip_scale it was always 0.0."""
+        import torch
+
+        model = self._model()
+        assert model.skip_scale == 1.0, "the default changed; re-check this case"
+        x = torch.randn(8, 64) * 25.0
+        _, _, losses = model(x, return_loss=True)
+        assert float(losses["loss_zero"]) > 1e-6, (
+            "loss_zero is ~0, which is what `skip_scale * x` produced at "
+            "skip_scale=1.0 — an uninterpretable baseline"
+        )
+
+    def test_raw_and_normalized_differ_here_too(self):
+        import torch
+
+        model = self._model()
+        x = torch.randn(8, 64) * 25.0
+        x_normalized, _ = model.normalize(x)
+        assert not torch.allclose(x_normalized, x, atol=1e-3), (
+            "normalization is a no-op on this fixture, so these assertions "
+            "would hold against either space"
+        )
