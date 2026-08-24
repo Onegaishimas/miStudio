@@ -31,6 +31,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from ..core.config import settings
+from ..core.clock import utc_now, utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -1439,7 +1440,7 @@ def emit_steering_progress(
         "task_id": task_id,
         "percent": percent,
         "message": message,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": utc_now_iso(),
     }
 
     # Add optional fields if provided

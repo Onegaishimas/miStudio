@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from celery import shared_task
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def get_gpu_processes() -> List[GPUProcessInfo]:
                     if len(parts) >= 2:
                         uuid_to_idx[parts[0].strip()] = int(parts[1].strip())
 
-        now = datetime.utcnow()
+        now = utc_now()
 
         for line in result.stdout.strip().split('\n'):
             if not line.strip():

@@ -7,7 +7,7 @@
 
 // API base URL - should NOT include /api/v1 path as that's added by the store
 // Can be overridden with VITE_API_URL environment variable
-// Empty string means use same-origin (through nginx proxy at dev-mistudio.hitsai.local)
+// Empty string means use same-origin (the nginx reverse proxy in front of this app)
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // WebSocket URL - can be overridden with VITE_WS_URL environment variable

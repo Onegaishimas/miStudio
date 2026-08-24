@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Single source: reuse the profile service constant (review R1 — version drift).
 from .cluster_profile_service import APP_VERSION  # noqa: E402
+from ..core.clock import utc_now
 
 
 class CircuitValidationError(ValueError):
@@ -432,7 +433,7 @@ class CircuitService:
         )
         defn.provenance = DefinitionProvenance(
             created_at=circuit.created_at,
-            exported_at=datetime.utcnow(),
+            exported_at=utc_now(),
             mistudio_version=APP_VERSION,
         )
         return defn

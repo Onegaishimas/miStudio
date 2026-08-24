@@ -16,6 +16,7 @@ from typing import Optional
 import httpx
 
 from ..core.config import settings
+from ..core.clock import utc_now, utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class BackgroundMonitor:
 
     async def _collect_and_emit_metrics(self, system_service, gpu_service):
         """Collect all system metrics and emit via WebSocket."""
-        timestamp = datetime.utcnow().isoformat() + "Z"
+        timestamp = utc_now_iso()
         metrics_emitted = []
 
         # ================================================================

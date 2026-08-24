@@ -34,6 +34,7 @@ from ..models.model import Model
 from ..models.training import Training
 from .logit_lens_service import get_logit_lens_service, LogitLensResult
 from .histogram_service import get_histogram_service, HistogramData
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class NeuronpediaLocalClient:
                     INSERT INTO "User" (id, name, "emailUnsubscribeCode", admin, bot, "createdAt")
                     VALUES ($1, $2, $3, true, true, $4)
                     ''',
-                    user_id, "neuronpedia-saelens", email_unsubscribe_code, datetime.utcnow()
+                    user_id, "neuronpedia-saelens", email_unsubscribe_code, utc_now()
                 )
                 logger.info(f"Created Neuronpedia admin user with approved ID: {user_id}")
 
@@ -169,7 +170,7 @@ class NeuronpediaLocalClient:
                     '"updatedAt" = $2',
                     '"layers" = $3',
                 ]
-                params = [visibility, datetime.utcnow(), new_layers]
+                params = [visibility, utc_now(), new_layers]
                 idx = 4
                 if neurons_per_layer:
                     update_parts.append(f'"neuronsPerLayer" = ${idx}')
@@ -203,7 +204,7 @@ class NeuronpediaLocalClient:
                 ''',
                 model_id, display_name, creator_id, layers,
                 neurons_per_layer, source_set_name or None, default_source_id or None,
-                visibility, datetime.utcnow()
+                visibility, utc_now()
             )
             logger.info(f"Created Neuronpedia model: {model_id} with visibility={visibility}")
             return True
@@ -239,7 +240,7 @@ class NeuronpediaLocalClient:
                     VALUES ($1, $2, true, false, $3, 'miStudio', $4, $5, $6, $7)
                     ''',
                     release_name, visibility, description,
-                    creator_id, source_set_name, default_source_id, datetime.utcnow(),
+                    creator_id, source_set_name, default_source_id, utc_now(),
                 )
                 logger.info(f"Created SourceRelease: {release_name}")
 
@@ -286,7 +287,7 @@ class NeuronpediaLocalClient:
                 )
                 VALUES ($1, $2, $3, 'sae', 'miStudio', $4, $5, true, false, $1, ARRAY[]::text[], $6)
                 ''',
-                model_id, name, description, creator_id, visibility, datetime.utcnow()
+                model_id, name, description, creator_id, visibility, utc_now()
             )
             logger.info(f"Created Neuronpedia source set: {name} with visibility={visibility}")
             return True
@@ -325,7 +326,7 @@ class NeuronpediaLocalClient:
                 )
                 VALUES ($1, $2, $3, $4, $5, true, false, $6, $7)
                 ''',
-                source_id, model_id, set_name, creator_id, visibility, sae_release, datetime.utcnow()
+                source_id, model_id, set_name, creator_id, visibility, sae_release, utc_now()
             )
             logger.info(f"Created Neuronpedia source: {source_id} with visibility={visibility}")
             return True
@@ -373,7 +374,7 @@ class NeuronpediaLocalClient:
                 model_id, layer, index, creator_id, source_set_name,
                 pos_str, pos_values, neg_str, neg_values,
                 frac_nonzero, freq_hist_heights, freq_hist_values,
-                max_act_approx, datetime.utcnow()
+                max_act_approx, utc_now()
             )
             return True
 
@@ -404,7 +405,7 @@ class NeuronpediaLocalClient:
                 ''',
                 activation_id, model_id, layer, index, creator_id,
                 tokens, values, max_value, max_value_token_index, min_value,
-                datetime.utcnow()
+                utc_now()
             )
 
         return activation_id
@@ -432,7 +433,7 @@ class NeuronpediaLocalClient:
                 ON CONFLICT DO NOTHING
                 ''',
                 explanation_id, model_id, layer, index, description, author_id,
-                score, datetime.utcnow()
+                score, utc_now()
             )
 
         return explanation_id

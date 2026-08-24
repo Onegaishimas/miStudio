@@ -155,8 +155,10 @@ async def import_profiles(request: ImportRequest, db: AsyncSession = Depends(get
     warn-binds, imports unbound, blocks (n_features mismatch), or errors —
     one bad item never poisons the rest of a bundle.
     """
-    # Size cap on the parsed payload (defense against hostile re-serialization
-    # bombs; FastAPI body-size limits are deployment-dependent).
+    # This is NOT the transport cap — `core.body_limit` bounds what arrives on
+    # the wire for every route (MIS-E2E-036). This bounds what the payload
+    # becomes once parsed, which is a different quantity: a compact document
+    # can re-serialize far larger. Keep both.
     approx_size = len(json.dumps(request.payload, separators=(",", ":")))
     if approx_size > MAX_IMPORT_BYTES:
         raise HTTPException(status_code=413, detail="Import payload exceeds 1 MB")

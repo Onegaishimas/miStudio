@@ -32,16 +32,6 @@ vi.mock('../../utils/formatters', () => ({
   formatDateTime: (date: string) => new Date(date).toLocaleDateString(),
 }));
 
-// Mock WebSocket hook
-vi.mock('../../hooks/useWebSocket', () => ({
-  useWebSocket: () => ({
-    subscribe: vi.fn(),
-    unsubscribe: vi.fn(),
-    emit: vi.fn(),
-    isConnected: false,
-  }),
-}));
-
 // Mock API base URL
 vi.mock('../../config/api', () => ({
   API_BASE_URL: 'http://localhost:8000',

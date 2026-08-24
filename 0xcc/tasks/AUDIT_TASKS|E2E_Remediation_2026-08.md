@@ -16,7 +16,9 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
 | **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
-| Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
+| **Wave 7** | Task 14 — the P2/P3 tail | ⏳ **in progress** — 14.2 ✅ (dead code deleted, sourcemaps + console stripped and verified against the built bundle, all 37 `utcnow()` sites swept, schema `$id` made resolvable with miLLM's mirror synced, internal hostnames removed). 14.1 ⏳ — the body cap is now middleware covering every route. Controls C149–C157. |
+| **Wave 8** | Task 15 — hardware acceptance | ❌ not started — needs the GPU node |
+| **Wave 9** | Task 16 — the acceptance gate | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
 running file list.*
@@ -219,8 +221,8 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 14 — Remaining P2/P3
 
-- [ ] 14.1 The 22 remaining P2 findings not covered above — see the register, filtered by `**Severity:** P2`.
-- [ ] 14.2 The 23 P3 findings — cleanups, dead code (`api/websocket.ts`, `ollm_server/`, `.claude/agents/`), `utcnow()` at 37 sites, sourcemaps, console stripping.
+- [x] 14.1 ⏳ **Partial.** MIS-E2E-036 closed and generalised: the circuit-import cap could not work where it lived (FastAPI parses the body before the handler's first statement) and was skipped entirely by a chunked request. It is now `core/body_limit.BodySizeLimitMiddleware`, metering the receive channel for **every** route — a sibling sweep found four template-import endpoints with no cap at all and `cluster_profiles` measuring size only after parsing. — MIS-E2E-036 ✅ · the remaining P2s are still open
+- [x] 14.2 ✅ **P3 tail closed.** `backend/services/ollm_server/` deleted — a whole second FastAPI app with model-loading endpoints and open CORS, unwired since its compose service was removed (-019). `frontend/src/api/websocket.ts` + `hooks/useWebSocket.ts` deleted, with a stale `vi.mock` for a module its component never imported (-014). Production builds ship no sourcemaps (12 → 0) and no `console.log/debug/info` — verified against the built bundle, with `console.error` still at 116 (-020). All 37 `utcnow()` sites route through `core/clock.utc_now`; **not merely a deprecation** — all 62 `DateTime` columns are `timezone=True`, so naive values were being reinterpreted in the session timezone (-054). Schema `$id` moved off the private `hitsai.net` host, miLLM's vendored mirror synced so the cross-repo identity guard stays green (-044). Internal hostnames and a private IP removed from shipped frontend source (-009). — MIS-E2E-019, -014, -020, -054, -044, -009
 
 ## Task 15 — Hardware acceptance
 
@@ -438,6 +440,20 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `frontend/src/components/layout/Sidebar.tsx` | Tagline → "AI Feature Discovery Workbench" (user request), and the name/tagline/alt now read from `BRAND` instead of a second hardcoded copy |
 | `frontend/src/config/brand.ts` | Tagline updated; stale `version: '0.1.0'` **removed** — it had drifted four minor releases from VERSION and package.json, undetected because nothing imported `BRAND` |
 | `frontend/src/components/layout/Sidebar.brand.test.tsx` | **New.** Pins the wiring: the literal must not reappear beside the config, and no hand-maintained version may return (C145–C148) |
+| `backend/src/core/body_limit.py` | **New.** ASGI body-size ceiling for every route: a header pre-check plus a metered receive channel, so a chunked body or a lying header is refused too |
+| `backend/src/main.py` | Mounts `BodySizeLimitMiddleware` |
+| `backend/src/api/v1/endpoints/circuits.py` | The unworkable in-handler cap removed (FastAPI had already parsed the body); the now-unused `Request` param and import dropped |
+| `backend/src/api/v1/endpoints/cluster_profiles.py` | Its post-parse size check kept and re-scoped — it bounds re-serialized size, which the transport cap does not |
+| `backend/tests/unit/test_body_limit.py` | **New.** 10 tests incl. the chunked case, a lying header, and that the pre-check refuses *without reading the body* — C150 survived until that last one existed |
+| `backend/src/core/clock.py` | **New.** `utc_now()` / `utc_now_iso()`: one aware-UTC source replacing 37 naive `utcnow()` calls |
+| `backend/tests/unit/test_clock_is_timezone_aware.py` | **New.** AST-parsed (not grepped) guard against naive UTC returning, plus a check that every `DateTime` column really is `timezone=True` |
+| `backend/services/ollm_server/` | **Deleted** — an unwired second FastAPI app with open CORS and model-loading routes |
+| `frontend/src/api/websocket.ts`, `frontend/src/hooks/useWebSocket.ts` | **Deleted** — a parallel Socket.IO client imported by nothing |
+| `frontend/vite.config.ts` | Function form so `mode` is in scope; sourcemaps off in production, chatty `console` methods marked pure, `warn`/`error` deliberately kept |
+| `frontend/src/config/buildHardening.test.ts` | **New.** Pins the build config, including that it stays in the form where `mode` is in scope |
+| `docs/schemas/*.json` (+ miLLM's vendored copies) | `$id` moved off the private host to a resolvable public URL; both repos kept byte-identical |
+| `frontend/src/components/steering/PromptListEditor.tsx` | Collapsible staging box (user request): persisted per browser, prompts stay mounted, collapsed state still summarises what is staged |
+| `frontend/src/components/steering/PromptListEditor.collapse.test.tsx` | **New.** 7 tests incl. persistence, a throwing `localStorage`, and that collapsing hides rather than discards |
 
 ## Negative controls run
 
@@ -600,6 +616,16 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 | C146 | Sidebar hardcodes the product name again | ✅ 1 failure |
 | C147 | Reintroduce a hand-maintained `BRAND.version` | ✅ 1 failure |
 | C148 | Revert the tagline in the config to `Edge AI Feature Discovery` | ✅ 1 failure |
+
+| C149 | Remove the metered receive (header check only) | ✅ 2 failures |
+| C150 | Remove the header pre-check | ⚠️ **survived** — the meter refuses the same request, so the response is byte-identical. What differs is that the body is read first. A test for exactly that; re-run ✅ 1 failure |
+| C151 | Unmount `BodySizeLimitMiddleware` | ✅ 1 failure |
+| C152 | Exempt every path from the cap | ✅ 4 failures |
+| C153 | Collapsing stops hiding the prompt list | ✅ 1 failure |
+| C154 | The collapsed summary disappears | ✅ 3 failures |
+| C155 | The collapse choice stops persisting | ✅ 1 failure |
+| C156 | A throwing `localStorage` left unguarded | ✅ 2 failures |
+| C157 | Collapsing UNMOUNTS the prompts instead of hiding them | ⚠️ the first attempt produced invalid JSX and the harness read the compile failure as a pass; re-run as a valid mutation ✅ 1 failure |
 
 ## Provenance
 

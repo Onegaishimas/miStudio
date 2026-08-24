@@ -17,7 +17,7 @@ PUBLISHED = Path(__file__).resolve().parents[3] / "docs" / "schemas" / "circuit-
 def _generate() -> dict:
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://mistudio.hitsai.net/schemas/circuit-definition-v1.json",
+        "$id": "https://raw.githubusercontent.com/hitsainet/miStudio/main/docs/schemas/circuit-definition-v1.json",
         "title": "miStudio Circuit Definition v1",
         "description": (
             "Portable circuit definition (mistudio.circuit-definition/v1) — cross-layer "

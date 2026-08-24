@@ -17,6 +17,7 @@ from fastapi import FastAPI, Header, HTTPException
 from .api.v1.router import api_router
 from .core.config import settings
 from .core.database import get_db
+from .core.body_limit import BodySizeLimitMiddleware
 from .core.websocket import socket_app, sio, ws_manager
 from .db.schema_validator import validate_schema_on_startup
 from .ml.transformers_compat import patch_transformers_compatibility
@@ -81,6 +82,13 @@ app = FastAPI(
 # This module used to construct its own `WebSocketManager()`, so the
 # `__all__`-exported one that other modules import was permanently empty —
 # including the direct-emit path.
+
+# MIS-E2E-036: a body-size ceiling for every route.
+# It sits in middleware rather than in each handler because FastAPI parses the
+# body before a handler's first statement runs — a check inside the handler
+# rejects the response, never the cost — and because a `Content-Length`-only
+# check is skipped entirely by a chunked request.
+app.add_middleware(BodySizeLimitMiddleware)
 
 # Mount Socket.IO app
 app.mount("/ws", socket_app)

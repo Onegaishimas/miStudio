@@ -67,6 +67,7 @@ from ....services.steering_resilience import (
     get_resilience_status,
     reset_resilience,
 )
+from ....core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -990,7 +991,7 @@ async def submit_async_steering_comparison(
         status="pending",
         websocket_channel=f"steering/{task.id}",
         message="Steering comparison task submitted",
-        submitted_at=datetime.utcnow(),
+        submitted_at=utc_now(),
     )
 
 
@@ -1095,7 +1096,7 @@ async def submit_async_strength_sweep(
         status="pending",
         websocket_channel=f"steering/{task.id}",
         message="Strength sweep task submitted",
-        submitted_at=datetime.utcnow(),
+        submitted_at=utc_now(),
     )
 
 
@@ -1210,7 +1211,7 @@ async def submit_async_combined_steering(
         status="pending",
         websocket_channel=f"steering/{task.id}",
         message="Combined multi-feature steering task submitted",
-        submitted_at=datetime.utcnow(),
+        submitted_at=utc_now(),
     )
 
 
@@ -1285,7 +1286,7 @@ async def get_steering_task_result(task_id: str):
     if succeeded:
         task_status.percent = 100
         task_status.message = "Complete"
-        task_status.completed_at = datetime.utcnow()
+        task_status.completed_at = utc_now()
         task_result = raw_result
 
     # Handle failure
@@ -1293,7 +1294,7 @@ async def get_steering_task_result(task_id: str):
         task_status.percent = -1
         task_status.error = str(raw_result) if raw_result else "Unknown error"
         task_status.message = f"Failed: {task_status.error}"
-        task_status.completed_at = datetime.utcnow()
+        task_status.completed_at = utc_now()
 
     # MIS-E2E-062: this is where the API first learns a task's outcome, so this
     # is where the breaker learns it. Recorded once per task id, however many
