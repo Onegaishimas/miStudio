@@ -72,6 +72,9 @@ class TqdmWebSocketCallback(tqdm_original):
     Supports both dataset download progress and tokenization progress.
     """
 
+    #: Consecutive write failures before escalating WARNING -> ERROR.
+    DB_FAILURE_ALARM = 5
+
     def __init__(
         self,
         *args,
@@ -98,6 +101,10 @@ class TqdmWebSocketCallback(tqdm_original):
             *args, **kwargs: Passed to tqdm parent class
         """
         super().__init__(*args, **kwargs)
+        # Consecutive failed database progress writes. A single dropped tick is
+        # survivable; an unbroken run of them means the row is frozen and the
+        # job cannot report its own result (see the handler below).
+        self._db_write_failures = 0
         self.dataset_id = dataset_id
         self.tokenization_id = tokenization_id
         self.base_progress = base_progress
@@ -199,7 +206,19 @@ class TqdmWebSocketCallback(tqdm_original):
                     with get_sync_db() as db:
                         if self.tokenization_id:
                             # Update tokenization progress
-                            from ..models.dataset import DatasetTokenization
+                            #
+                            # `DatasetTokenization` lives in
+                            # `models/dataset_tokenization.py`, NOT `models/dataset.py`.
+                            # The line above correctly imports `Dataset` from
+                            # `..models.dataset` and this one copied that path,
+                            # so it raised ImportError on EVERY progress tick.
+                            # The caller catches it as "Failed to update database
+                            # progress" and continues, so tokenization ran to
+                            # completion while its row stayed frozen at whatever
+                            # value it last held — reported 2026-08-24 as a job
+                            # "stuck at 40%" that had in fact finished 789,850
+                            # samples in 6m30s.
+                            from ..models.dataset_tokenization import DatasetTokenization
                             tokenization_obj = db.query(DatasetTokenization).filter_by(id=self.tokenization_id).first()
                             if tokenization_obj:
                                 tokenization_obj.progress = mapped_progress  # Store as 0-100 percentage
@@ -212,8 +231,34 @@ class TqdmWebSocketCallback(tqdm_original):
                                 dataset_obj.progress = mapped_progress / 100.0  # Store as 0.0-1.0 fraction
                                 db.commit()
                 except Exception as e:
-                    # Don't let database errors break the operation
-                    logger.warning(f"Failed to update database progress: {e}")
+                    # A dropped progress tick is survivable. A dropped tick
+                    # EVERY time is not — the row freezes and the job becomes
+                    # unusable however well it computes.
+                    #
+                    # 2026-08-24: a bad import here raised on every tick for
+                    # seven months. Tokenization ran to completion — 789,850
+                    # samples in 6m30s — while the row sat at 40%. The operator
+                    # saw a stuck job and deleted finished work. "Don't let
+                    # database errors break the operation" is right for one
+                    # tick and catastrophic as a standing policy, because
+                    # nothing ever escalates.
+                    #
+                    # So: warn once, then escalate. A progress writer that has
+                    # never once succeeded is broken, not unlucky, and the job
+                    # depending on it cannot report its own result.
+                    self._db_write_failures += 1
+                    if self._db_write_failures == 1:
+                        logger.warning(f"Failed to update database progress: {e}")
+                    elif self._db_write_failures == self.DB_FAILURE_ALARM:
+                        logger.error(
+                            "Progress writes have failed %d consecutive times "
+                            "(%s). The row is frozen and this job cannot report "
+                            "its own completion — treat any 'stuck' progress as "
+                            "this, not as a hung job.",
+                            self._db_write_failures, e, exc_info=True,
+                        )
+                else:
+                    self._db_write_failures = 0
 
         return result
 

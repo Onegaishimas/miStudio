@@ -1283,9 +1283,26 @@ async def delete_dataset_tokenization(
     )
     remaining_tokenizations = remaining_result.scalars().all()
 
-    # If no tokenizations remain and dataset is in PROCESSING/ERROR, reset to READY
+    # Reset the dataset when nothing is still RUNNING — not when nothing remains.
+    #
+    # This used to require `not remaining_tokenizations`: the dataset was only
+    # released if the deleted one was the LAST. Cancelling a tokenization on a
+    # dataset that already had finished ones therefore left
+    # `datasets.status = PROCESSING` forever — reported 2026-08-24, where the
+    # UI showed an amber "Processing" badge beside two READY tokenizations and
+    # an idle worker.
+    #
+    # The condition was asking the wrong question. Whether other tokenizations
+    # EXIST says nothing about whether work is in flight; two finished ones are
+    # the strongest evidence the dataset is idle. What matters is whether any
+    # is unfinished.
+    in_flight = [
+        t for t in remaining_tokenizations
+        if t.status in (TokenizationStatus.QUEUED, TokenizationStatus.PROCESSING)
+    ]
+
     dataset_status_changed = False
-    if not remaining_tokenizations:
+    if not in_flight:
         dataset_result = await db.execute(
             select(Dataset).where(Dataset.id == dataset_id)
         )
@@ -1295,7 +1312,10 @@ async def delete_dataset_tokenization(
             dataset.progress = 0.0
             dataset.error_message = None  # Clear error message when resetting status
             dataset_status_changed = True
-            logger.info(f"Reset dataset {dataset_id} status to READY (no tokenizations remaining)")
+            logger.info(
+                "Reset dataset %s status to READY (%d tokenization(s) remain, none in flight)",
+                dataset_id, len(remaining_tokenizations),
+            )
 
     await db.commit()
 
