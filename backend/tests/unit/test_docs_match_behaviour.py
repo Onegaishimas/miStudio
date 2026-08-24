@@ -450,11 +450,15 @@ def test_claude_md_test_counts_are_not_silently_stale():
     # Strip the corrective note before checking: it QUOTES the stale figure in
     # order to say it was wrong, and a bare substring check reads the quote as a
     # regression. (Eighth time this trap has appeared in this remediation.)
-    without_note = "\n".join(
-        l for l in claude.splitlines()
-        if "MIS-E2E-163" not in l and "Do not hand-maintain" not in l and "it read" not in l
-        and "Superseded" not in l
-    )
+    # Drop QUOTED occurrences, not specific phrasings. The first version of
+    # this filter listed the exact words of the corrective note ("it read",
+    # "Do not hand-maintain"), so rewording that note broke the test against a
+    # file that was still correct — the quote-vs-assertion trap, this time
+    # inside the guard rather than the code. A stale count that matters is
+    # stated bare; one being corrected is in quotes.
+    import re as _re
+
+    without_note = _re.sub(r'"[^"\n]*"', "", claude)
     assert "995 passed" not in without_note, "the stale count is back"
 
 
@@ -468,3 +472,60 @@ def test_no_document_still_says_the_jlens_readout_returns_501():
         assert any(w in low for w in ("resolved", "since bound", "~~", "gone")), (
             f"CLAUDE.md still says the readout returns 501:\n  {line.strip()}"
         )
+
+
+class TestTheSshGuidanceMatchesTheHelper:
+    """CLAUDE.md tells every agent how to reach the GPU node. It must be true.
+
+    MIS-E2E-143's fix removed a committed password from `k8s-helpers.sh` and
+    installed no key, so the helper was dead the first time an incident needed
+    it. The written guidance is what stops the next agent reaching for
+    `sshpass` when that happens — so it has to describe the helper that exists.
+    """
+
+    def _helper(self):
+        return (REPO / "scripts" / "k8s-helpers.sh").read_text()
+
+    def _claude_md(self):
+        return (REPO / "CLAUDE.md").read_text()
+
+    def test_the_helper_uses_key_based_ssh(self):
+        helper = self._helper()
+        assert 'ssh -o BatchMode=yes "${K8S_USER}@${K8S_HOST}"' in helper, (
+            "the k8s() helper no longer matches the command CLAUDE.md documents"
+        )
+
+    def test_the_helper_has_no_password_auth(self):
+        # Comments explain why sshpass was removed, so check statements only.
+        code = "\n".join(
+            line for line in self._helper().splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        assert "sshpass" not in code, "sshpass is back in the helper"
+        assert "StrictHostKeyChecking=no" not in code, (
+            "StrictHostKeyChecking=no accepts any host key; the server is then "
+            "unauthenticated to us"
+        )
+
+    def test_claude_md_documents_the_ssh_route(self):
+        doc = self._claude_md()
+        assert "Reaching the GPU node" in doc, (
+            "the agent-facing SSH section is gone; the next agent that hits "
+            "`Permission denied (publickey)` will reach for sshpass"
+        )
+        assert "ssh-copy-id" in doc, "the recovery step is not documented"
+        assert "BatchMode=yes" in doc
+
+    def test_the_documented_defaults_match_the_helper(self):
+        import re
+
+        helper = self._helper()
+        doc = self._claude_md()
+        host = re.search(r'K8S_HOST="\$\{K8S_HOST:-([^}"]+)\}"', helper)
+        user = re.search(r'K8S_USER="\$\{K8S_USER:-([^}"]+)\}"', helper)
+        assert host and user, "the helper's defaults changed shape"
+        assert host.group(1) in doc, (
+            f"CLAUDE.md does not name the host the helper defaults to "
+            f"({host.group(1)})"
+        )
+        assert user.group(1) in doc
