@@ -414,18 +414,20 @@ celery_app.conf.update(
         "cleanup-stuck-nlp": {
             "task": "cleanup_stuck_nlp",
             "schedule": 600.0,
-            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 540.0,
             },
         },
         # Cleanup stuck extraction jobs - runs every 10 minutes
         "cleanup-stuck-extractions": {
             "task": "cleanup_stuck_extractions",
             "schedule": 600.0,
-            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 10 minutes (600 seconds)
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 540.0,
             },
         },
         # Cleanup stuck circuit runs (Feature 016, R2 Q3): a died capture
@@ -434,27 +436,30 @@ celery_app.conf.update(
         "cleanup-stuck-circuit-runs": {
             "task": "cleanup_stuck_circuit_runs",
             "schedule": 600.0,
-            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 540.0,
             },
         },
         # Cleanup stuck training jobs - runs every 10 minutes
         "cleanup-stuck-trainings": {
             "task": "cleanup_stuck_trainings",
             "schedule": 600.0,
-            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 10 minutes (600 seconds)
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 540.0,
             },
         },
         # Cleanup stuck activation extraction jobs - runs every 10 minutes
         "cleanup-stuck-activations": {
             "task": "cleanup_stuck_activations",
             "schedule": 600.0,
-            "expires": 540.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 10 minutes (600 seconds)
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 540.0,
             },
         },
         # Cleanup stuck enhanced labeling jobs - runs every 5 minutes
@@ -462,9 +467,10 @@ celery_app.conf.update(
         "cleanup-stuck-enhanced-labeling": {
             "task": "cleanup_stuck_enhanced_labeling",
             "schedule": 300.0,
-            "expires": 270.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 5 minutes
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 270.0,
             },
         },
         # Cleanup old task_queue entries - runs hourly
@@ -472,9 +478,10 @@ celery_app.conf.update(
         "cleanup-task-queue": {
             "task": "cleanup_task_queue",
             "schedule": 3600.0,
-            "expires": 3240.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every hour
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 3240.0,
             },
         },
         # Close rows whose worker stopped reporting — every 5 minutes.
@@ -491,9 +498,10 @@ celery_app.conf.update(
         "cleanup-orphaned-tasks": {
             "task": "cleanup_orphaned_tasks",
             "schedule": 300.0,
-            "expires": 270.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 270.0,
             },
         },
         # Checkpoint retention pruning (Feature 021) - runs daily.
@@ -502,9 +510,10 @@ celery_app.conf.update(
         "prune-checkpoints": {
             "task": "src.workers.prune_checkpoints.prune_checkpoints",
             "schedule": 86400.0,
-            "expires": 77760.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run daily
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 77760.0,
             },
         },
         # GPU Memory Watchdog - runs every minute to detect stuck processes
@@ -512,9 +521,10 @@ celery_app.conf.update(
         "gpu-memory-watchdog": {
             "task": "gpu_watchdog",
             "schedule": 60.0,
-            "expires": 54.0,  # MIS-E2E-095: drop a tick that queued behind a long job  # Run every 60 seconds (1 minute)
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 54.0,
             },
         },
         # Steering worker reconcile — respawns the (self-exiting) steering
@@ -522,9 +532,10 @@ celery_app.conf.update(
         "steering-worker-reconcile": {
             "task": "steering_worker_reconcile",
             "schedule": 30.0,
-            "expires": 27.0,  # MIS-E2E-095: drop a tick that queued behind a long job
             "options": {
                 "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 27.0,
             },
         },
     },
