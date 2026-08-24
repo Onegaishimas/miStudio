@@ -109,7 +109,15 @@ class TestStartEnhancedLabeling:
         assert data["feature_id"] == feature.id
         assert data["status"] == "queued"
         assert data["method"] == "openai_compatible"
-        assert data["endpoint"] == "http://llm.local/v1"
+        # MIS-E2E-111: `endpoint` is deliberately NOT in the response. It is
+        # the internal LLM server URL, and this schema published it to the
+        # browser while its sibling withheld it. These two assertions used to
+        # require the leak, which is a test pinning a defect rather than
+        # preventing it.
+        assert "endpoint" not in data, (
+            "the internal LLM endpoint URL is back in the response body"
+        )
+
         assert data["model"] == "my-model"
         assert data["workers"] == 4
         assert data["examples_total"] == 20
@@ -148,7 +156,7 @@ class TestStartEnhancedLabeling:
         assert response.status_code == 201
         data = response.json()
         assert data["method"] == "openai"
-        assert data["endpoint"] == "https://api.openai.com/v1"
+        assert "endpoint" not in data, "see MIS-E2E-111 above"
         assert data["model"] == "gpt-4o-mini"
 
     async def test_openai_method_without_api_key_returns_400(

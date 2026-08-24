@@ -21,6 +21,23 @@ PROBE_TIMEOUT_S = 3.0
 _HEALTH_PATHS = {"millm": "/api/health", "mistudio": "/api/v1/system/health"}
 
 
+def _retrieve_exception(task: "asyncio.Task") -> None:
+    """Consume a background task's result so asyncio does not warn about it.
+
+    MIS-E2E-118: this was `lambda t: t.exception()`. Calling `.exception()` on
+    a CANCELLED task re-raises `CancelledError` — inside a done callback, where
+    asyncio catches it and logs `ERROR asyncio: Exception in callback`. So every
+    graceful shutdown, which cancels the in-flight refresh, printed an
+    ERROR-level traceback for a task behaving exactly as intended.
+
+    Cosmetic on its own, and that is the problem: it is precisely the noise
+    that teaches an operator to skim shutdown logs.
+    """
+    if task.cancelled():
+        return
+    task.exception()
+
+
 class HealthGate:
     """TTL-cached availability probes, one entry per product."""
 
@@ -87,8 +104,7 @@ class HealthGate:
             try:
                 task = asyncio.get_running_loop().create_task(
                     self.check(product))
-                task.add_done_callback(
-                    lambda t: t.exception())  # retrieve, never warn
+                task.add_done_callback(_retrieve_exception)
                 self._refreshing[product] = task
             except RuntimeError:
                 pass  # no loop (sync test context) — next check() will probe

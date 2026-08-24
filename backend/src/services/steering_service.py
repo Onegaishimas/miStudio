@@ -1169,13 +1169,22 @@ class SteeringService:
                 else:
                     hidden_states = output
 
-                logger.info(
-                    f"[Steering Hook] FIRED on {type(module).__name__}, "
-                    f"output_type={'tuple' if is_tuple else 'tensor'}, "
-                    f"shape={hidden_states.shape}, dtype={hidden_states.dtype}, "
-                    f"features={[c.feature_idx for c in feature_configs]}, "
-                    f"strengths={[c.strength for c in feature_configs]}"
-                )
+                # MIS-E2E-068(3): DEBUG, and guarded.
+                #
+                # This was `logger.info` inside the forward hook, so it fired on
+                # every forward pass — hundreds of lines per generation, each
+                # rebuilding two lists by comprehension purely to format a
+                # message that is almost always discarded. The guard matters as
+                # much as the level: without it the f-string and both
+                # comprehensions are evaluated even when DEBUG is off.
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        f"[Steering Hook] FIRED on {type(module).__name__}, "
+                        f"output_type={'tuple' if is_tuple else 'tensor'}, "
+                        f"shape={hidden_states.shape}, dtype={hidden_states.dtype}, "
+                        f"features={[c.feature_idx for c in feature_configs]}, "
+                        f"strengths={[c.strength for c in feature_configs]}"
+                    )
 
                 # Validate shape - ensure we have 3D tensor [batch, seq, hidden]
                 if len(hidden_states.shape) != 3:
@@ -1405,12 +1414,41 @@ class SteeringService:
         self._reset_model_state(model)
 
         # Tokenize - fresh tokenization of ONLY the current prompt
-        inputs = tokenizer(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=2048 - params.max_new_tokens,
-        ).to(self._device)
+        #
+        # MIS-E2E-068(2): the window comes from the MODEL, not a constant.
+        #
+        # This was `max_length=2048 - params.max_new_tokens`, which ignores the
+        # real context window and silently truncates. Two ways it bit: on a
+        # model with a larger window it discarded prompt the model could have
+        # read, and at the schema-allowed `max_new_tokens=2048` the budget went
+        # to zero or negative — so the prompt was cut to nothing and the model
+        # generated from an empty context, with no error anywhere.
+        #
+        # A prompt that genuinely does not fit is now REFUSED rather than
+        # quietly shortened: a truncated prompt produces a confident answer to
+        # a question the user did not ask.
+        context_window = getattr(self._model.config, "max_position_embeddings", None) \
+            or getattr(tokenizer, "model_max_length", None) or 2048
+        # Some tokenizers use a sentinel for "no limit".
+        if context_window > 1_000_000:
+            context_window = getattr(self._model.config, "max_position_embeddings", 2048)
+
+        prompt_budget = context_window - params.max_new_tokens
+        if prompt_budget <= 0:
+            raise ValueError(
+                f"max_new_tokens={params.max_new_tokens} leaves no room for a "
+                f"prompt in this model's {context_window}-token context window. "
+                f"Reduce max_new_tokens to at most {context_window - 1}."
+            )
+
+        inputs = tokenizer(prompt, return_tensors="pt").to(self._device)
+        if inputs["input_ids"].shape[-1] > prompt_budget:
+            raise ValueError(
+                f"Prompt is {inputs['input_ids'].shape[-1]} tokens but only "
+                f"{prompt_budget} fit alongside max_new_tokens="
+                f"{params.max_new_tokens} in this model's {context_window}-token "
+                f"context window. Shorten the prompt or lower max_new_tokens."
+            )
 
         # Build generation config with sensible defaults
         gen_kwargs = {

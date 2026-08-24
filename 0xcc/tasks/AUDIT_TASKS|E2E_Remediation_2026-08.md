@@ -229,6 +229,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 14.6 ✅ **MCP contract defects.** **-115**: `mistudio_howto` — a read-only documentation tool — called `os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")` to make the millm_* categories register long enough to list. That is a **permanent process mutation**: the unauthenticated `/health` endpoint re-reads the setting per request, so after any agent read the docs the server advertised the placeholder as its real miLLM URL for the life of the process. Replaced with a per-instance `millm_api_url_override` on `MCPSettings`. **-116**: `httpx.InvalidURL` derives from `Exception`, **not** `httpx.HTTPError` — verified from its MRO — so it escaped the gate and broke the contract the server instructions state to agents (unavailable ⇒ a value, never a raise). Caught, plus a catch-all so the gate always answers. — MIS-E2E-115, -116
 - [x] 14.7 ✅ **SSRF surface and a test touching real infrastructure.** **-075**: `CalibrationBody.judge_endpoint` is free-form per-request input handed to an `OpenAI` client constructed **inside the backend pod**, with no validation — not even a scheme check. Verified live: `file:///etc/passwd` was accepted. It now reuses `validate_llm_endpoint_url`, the same check the labeling path applies to the same kind of field, so the two cannot drift. **-027**: two dataset tests dispatched a REAL Celery task — failing with `ConnectionRefusedError` where Redis is absent, and enqueueing a genuine download where it is present. Now patched at the worker module (the endpoint imports the task inside the handler, so patching the endpoint module raises `AttributeError`), and **verified passing against an unreachable broker**. — MIS-E2E-075, -027
 - [x] 14.8 ✅ **The frontend trio — nine defects, most of them silent.** **-125**: the shared polling helper stopped permanently on ONE transient fetch error, and its only caller discards the stop handle, so a 10-minute download that hit a single 502 showed as in-progress forever; it also had no in-flight guard, so a slow response could report stale state after stopping. Now tolerates a run of 5, resets on success, and refuses to report once stopped. **-130**: `getByCategory('endpoints')` swept in `openai_compatible_model` — a model NAME rendered beside URLs with a **"Delete endpoint" button that removed the labeling model**; `remove('ollama_url')` was neither awaited nor caught; and the `[settings]` sync effect rewrote all five Labeling fields on every upsert, so saving one card silently reverted unsaved edits in another. **-131**: `mountedRef` was set false on cleanup and never true again, so under StrictMode the estimate poll was **dead on arrival in dev**; the slice export clicked a detached anchor (a no-op in Firefox) and revoked the URL on the next line; `parseSeedRefs` validated only `layer`, so `6` became `feature_idx: NaN` → `null` in the POST; and un-ticking Force left a stale hidden `captureId` submitting behind an empty select. — MIS-E2E-125, -130, -131
+- [x] 14.9 ✅ **A fabricated number, a leaked URL, a noisy shutdown.** **-068(1)**: `features_extracted: int(latent_dim * progress)` reported a count derived from the sampling bar, not from any row — **zero feature records exist until the commit phase that follows**, so the UI showed a rising count of features that did not exist. **-068(2)**: `max_length=2048 - max_new_tokens` ignored the model's real window; at the schema-allowed `max_new_tokens=2048` the budget was **zero or negative**, so the prompt was cut to nothing and the model generated from empty context. Now read from `max_position_embeddings` and an over-long prompt is **refused**, not quietly shortened. **-068(3)**: a `logger.info` inside the forward hook fired per pass, rebuilding two comprehensions to format a message usually discarded — now DEBUG behind `isEnabledFor`. **-111**: `EnhancedLabelingJobResponse` published the internal LLM server URL while its sibling withheld it; **two tests asserted the leak** and were replaced. **-118**: `lambda t: t.exception()` re-raises `CancelledError` on a cancelled task, so every graceful shutdown logged an ERROR traceback. — MIS-E2E-068, -111, -118
 
 ## Task 15 — Hardware acceptance
 
@@ -494,6 +495,11 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `frontend/src/components/panels/SettingsPanel.tsx` | Endpoint list filtered by key prefix; the clear is awaited and caught; labeling fields seed once (-130) |
 | `frontend/src/components/panels/CircuitsPanel.tsx` | `mountedRef` reset on mount; export appends the anchor; seed refs validated; stale `captureId` cleared (-131) |
 | `frontend/src/components/panels/settingsAndCircuits.defects.test.ts` | **New.** 9 tests, one per defect, each confirmed by its own mutation |
+| `backend/src/services/extraction_service.py` | Sampling reports 0 features written, because none are (-068) |
+| `backend/src/services/steering_service.py` | Context window read from the model; an over-long prompt is refused; the hook log is guarded DEBUG (-068) |
+| `backend/src/schemas/enhanced_labeling.py` | `endpoint` withheld, matching the sibling schema (-111) |
+| `backend/src/mcp_server/health_gate.py` | `_retrieve_exception` returns early for a cancelled task (-118) |
+| `backend/tests/unit/test_wave7_group4.py` | **New.** 13 tests, with a `code_only()` tokenizer helper — the tenth time a fix's own explanatory comment defeated a substring check |
 
 ## Negative controls run
 
@@ -722,6 +728,12 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 | C207 | Export anchor detached again | ✅ 1 failure |
 | C208 | `NaN` feature_idx accepted again | ✅ 1 failure |
 | C209 | Stale `captureId` left selected | ✅ 1 failure |
+
+| C210 | The fabricated feature count returns | ✅ 2 failures |
+| C211 | The hardcoded 2048 window returns | ✅ 1 failure |
+| C212 | The hook log back to INFO, unguarded | ✅ 1 failure |
+| C213 | `endpoint` republished in the response | ✅ 1 failure |
+| C214 | The cancelled-task guard removed | ✅ 1 failure |
 
 ## Provenance
 

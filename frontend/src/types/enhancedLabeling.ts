@@ -11,7 +11,9 @@ export interface EnhancedLabelingJob {
   examples_total: number;
   examples_completed: number;
   workers: number;
-  endpoint: string;
+  // MIS-E2E-111: the server no longer returns `endpoint`. It was the
+  // internal LLM server URL, published to the browser by a schema that
+  // listed every column while its sibling deliberately withheld it.
   model: string;
   celery_task_id: string | null;
   pass1_summaries: Array<{
