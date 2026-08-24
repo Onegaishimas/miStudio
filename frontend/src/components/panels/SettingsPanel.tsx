@@ -365,7 +365,19 @@ function PinManagementSection() {
 
 function EndpointsTab() {
   const { settings, getByCategory, upsert, remove } = useSettingsStore();
-  const endpoints = getByCategory('endpoints');
+  // MIS-E2E-130(1): filter by the KEY SHAPE, not the category.
+  //
+  // `category: 'endpoints'` is also carried by `ollama_url` and — worse —
+  // `openai_compatible_model`, which is a model NAME. Both rendered in the
+  // "Saved Endpoints" list beside real URLs, each with a delete button. So a
+  // control labelled "Delete endpoint" removed the labeling model, with no
+  // confirmation and nothing on screen explaining what had gone.
+  //
+  // `handleAdd` writes every real endpoint as `endpoint:<url>`, so that prefix
+  // is the actual membership test. The category stays as it is: rewriting it
+  // would need a migration for rows already stored, and this is the property
+  // the list cares about anyway.
+  const endpoints = getByCategory('endpoints').filter((s) => s.key.startsWith('endpoint:'));
   const [url, setUrl] = useState('');
   const [label, setLabel] = useState('');
   const [toast, setToast] = useState<string | null>(null);
@@ -562,7 +574,20 @@ function EndpointsTab() {
           </button>
           {ollamaUrlSetting && (
             <button
-              onClick={() => { remove('ollama_url'); setOllamaUrl(''); }}
+              onClick={async () => {
+                // MIS-E2E-130(2): awaited AND caught. This used to clear the
+                // field optimistically and drop the promise, so a failed
+                // DELETE looked like success and the old value reappeared on
+                // reload — with no error shown at any point.
+                try {
+                  await remove('ollama_url');
+                  setOllamaUrl('');
+                  setToast('Cleared');
+                } catch (err) {
+                  setToast(err instanceof Error ? err.message : 'Failed to clear');
+                }
+                setTimeout(() => setToast(null), 2000);
+              }}
               className="p-2 text-slate-500 hover:text-red-400 transition-colors"
               title="Clear (revert to server default)"
             >
@@ -866,13 +891,26 @@ function LabelingTab() {
   };
 
   // Sync local state when settings load
+  // MIS-E2E-130(3): seed the fields ONCE, not on every `settings` change.
+  //
+  // This effect depended on `[settings]`, and `upsert` refreshes that array.
+  // So saving any one card rewrote all five inputs from the server — silently
+  // discarding edits the user had typed into the others but not yet saved.
+  // The trigger was invisible: you save card A and card B reverts.
+  //
+  // The fields are *pre-fill* values, so seeding them when the settings first
+  // arrive is the whole intent. `seededRef` makes that explicit rather than
+  // relying on a dependency array to approximate it.
+  const seededRef = useRef(false);
   useEffect(() => {
+    if (seededRef.current || settings.length === 0) return;
+    seededRef.current = true;
     setBatchSize(getValue('labeling_default_batch_size', '10'));
     setMaxExamples(getValue('labeling_default_max_examples', '25'));
     setEnhancedWorkers(getValue('enhanced_labeling_max_workers', '8'));
     setEnhancedMethod(getValue('enhanced_labeling_method', 'openai_compatible'));
     setEnhancedOpenaiModel(getValue('enhanced_labeling_openai_model', 'gpt-4o-mini'));
-  }, [settings]);
+  }, [settings, getValue]);
 
   return (
     <div className="max-w-2xl">

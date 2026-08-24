@@ -567,8 +567,16 @@ function CircuitsListTab({ onNavigateToSteering }: { onNavigateToSteering?: () =
       a.href = url;
       const safe = name.toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/^-+|-+$/g, '') || 'circuit';
       a.download = `${safe}.slices.json`;
+      // MIS-E2E-131(4): the anchor has to be IN the document. Firefox ignores
+      // a click on a detached element, so this button was a silent no-op
+      // there. The other three export sites in this repo all append first;
+      // this was the only one that did not.
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      // Revoking on the very next line can also race the download in some
+      // browsers — give the click a turn of the event loop first.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     }).catch((e) => setError(String(e.message ?? e)));
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -736,8 +744,18 @@ function CaptureTab() {
 
   const [captures, setCaptures] = useState<CircuitCapture[]>([]);
   // Guards the recursive estimate poll against firing after unmount (R1 CR#9).
+  //
+  // MIS-E2E-131(1): the cleanup set this false and NOTHING set it back. React
+  // StrictMode — on in `main.tsx` — mounts, unmounts and remounts every
+  // component in development, so by the time the real mount happened the flag
+  // was already false and the estimate poll was dead on arrival. The "Cost
+  // estimate" panel simply never appeared while developing, which is the worst
+  // possible place for a feature to be invisible.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (datasets.length === 0) fetchDatasets();
@@ -1331,7 +1349,15 @@ function DiscoveryTab() {
         return { layer, cluster_profile_id: parts[2] };
       }
       return { layer, feature_idx: parseInt(parts[1], 10) };
-    }).filter((r) => !isNaN(r.layer));
+    }).filter((r) => {
+      // MIS-E2E-131(3): only `layer` was validated. A line like "6" — no
+      // colon — produced `feature_idx: NaN`, which `JSON.stringify` writes as
+      // `null`, so the POST body carried a silently malformed seed instead of
+      // the user being told their input was incomplete.
+      if (isNaN(r.layer)) return false;
+      if ('cluster_profile_id' in r) return true;
+      return !isNaN((r as { feature_idx: number }).feature_idx);
+    });
   };
 
   const runDiscovery = () => {
@@ -1414,7 +1440,24 @@ function DiscoveryTab() {
             ))}
           </select>
           <label className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400 mt-1.5">
-            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={force}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setForce(next);
+                // MIS-E2E-131(2): un-ticking Force narrows `eligible` to
+                // non-stale captures, but the selected id stayed put. The
+                // select then showed NO selection while "Run discovery"
+                // submitted the hidden stale id — and the server's refusal
+                // named a capture the user could not see anywhere on screen.
+                if (!next && captureId
+                    && !captures.some((c) => c.id === captureId
+                                             && c.status === 'completed' && !c.stale)) {
+                  setCaptureId('');
+                }
+              }}
+            />
             Force — allow mining a stale capture store
           </label>
         </div>

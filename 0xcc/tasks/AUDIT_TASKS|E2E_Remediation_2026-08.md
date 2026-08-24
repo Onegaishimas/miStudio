@@ -228,6 +228,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 14.5 ✅ **SAE loss spaces (-086), plus a defect the audit did not record.** Reconstruction MSE was raw-space while the L1 penalty is computed on `z` from the NORMALIZED encode, so the two were added together and each sample got weighted by ~‖x‖²/d — defeating the reason normalization exists (cross-layer hyperparameter transfer), and live by default since `constant_norm_rescale` is the schema default. Fixed in `SparseAutoencoder` and `SkipAutoencoder`; the ghost-gradient penalty now encodes `x_normalized` instead of raw `x`. JumpReLU needed no change — its L0 term is a *count*, which is scale-free — and Transcoder never normalizes, so both were already self-consistent. **An existing test pinned the defect** (`test_reconstruction_loss_is_mse` asserted raw-space MSE) and was replaced. **New defect found by C193:** `SkipAutoencoder`'s `loss_zero` was `skip_scale * x` with `skip_scale` defaulting to **1.0**, i.e. `mse(x, x)` — **exactly 0.0 for every Skip-SAE training ever recorded**, in a `training_metrics.loss_zero` column shared with every other architecture. Now bias-only, so the column means one thing in every row. — MIS-E2E-086 ✅ + 1 new
 - [x] 14.6 ✅ **MCP contract defects.** **-115**: `mistudio_howto` — a read-only documentation tool — called `os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")` to make the millm_* categories register long enough to list. That is a **permanent process mutation**: the unauthenticated `/health` endpoint re-reads the setting per request, so after any agent read the docs the server advertised the placeholder as its real miLLM URL for the life of the process. Replaced with a per-instance `millm_api_url_override` on `MCPSettings`. **-116**: `httpx.InvalidURL` derives from `Exception`, **not** `httpx.HTTPError` — verified from its MRO — so it escaped the gate and broke the contract the server instructions state to agents (unavailable ⇒ a value, never a raise). Caught, plus a catch-all so the gate always answers. — MIS-E2E-115, -116
 - [x] 14.7 ✅ **SSRF surface and a test touching real infrastructure.** **-075**: `CalibrationBody.judge_endpoint` is free-form per-request input handed to an `OpenAI` client constructed **inside the backend pod**, with no validation — not even a scheme check. Verified live: `file:///etc/passwd` was accepted. It now reuses `validate_llm_endpoint_url`, the same check the labeling path applies to the same kind of field, so the two cannot drift. **-027**: two dataset tests dispatched a REAL Celery task — failing with `ConnectionRefusedError` where Redis is absent, and enqueueing a genuine download where it is present. Now patched at the worker module (the endpoint imports the task inside the handler, so patching the endpoint module raises `AttributeError`), and **verified passing against an unreachable broker**. — MIS-E2E-075, -027
+- [x] 14.8 ✅ **The frontend trio — nine defects, most of them silent.** **-125**: the shared polling helper stopped permanently on ONE transient fetch error, and its only caller discards the stop handle, so a 10-minute download that hit a single 502 showed as in-progress forever; it also had no in-flight guard, so a slow response could report stale state after stopping. Now tolerates a run of 5, resets on success, and refuses to report once stopped. **-130**: `getByCategory('endpoints')` swept in `openai_compatible_model` — a model NAME rendered beside URLs with a **"Delete endpoint" button that removed the labeling model**; `remove('ollama_url')` was neither awaited nor caught; and the `[settings]` sync effect rewrote all five Labeling fields on every upsert, so saving one card silently reverted unsaved edits in another. **-131**: `mountedRef` was set false on cleanup and never true again, so under StrictMode the estimate poll was **dead on arrival in dev**; the slice export clicked a detached anchor (a no-op in Firefox) and revoked the URL on the next line; `parseSeedRefs` validated only `layer`, so `6` became `feature_idx: NaN` → `null` in the POST; and un-ticking Force left a stale hidden `captureId` submitting behind an empty select. — MIS-E2E-125, -130, -131
 
 ## Task 15 — Hardware acceptance
 
@@ -488,6 +489,11 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/api/v1/endpoints/circuits.py` | `judge_endpoint` validated through the shared `validate_llm_endpoint_url` (-075) |
 | `backend/tests/api/v1/endpoints/test_datasets.py` | `TestDownloadDataset` neutralises the Celery dispatch; verified green with the broker unreachable (-027) |
 | `backend/tests/unit/test_api_tests_do_not_dispatch.py` | **New.** Structural guard that the dispatch stays patched, and at the module where the task actually lives |
+| `frontend/src/utils/polling.ts` | Tolerates a run of transient errors, resets on success, and never reports after stop (-125) |
+| `frontend/src/utils/polling.test.ts` | **New.** 5 tests incl. a failure pattern chosen to discriminate — the first one did not, and C203 survived it |
+| `frontend/src/components/panels/SettingsPanel.tsx` | Endpoint list filtered by key prefix; the clear is awaited and caught; labeling fields seed once (-130) |
+| `frontend/src/components/panels/CircuitsPanel.tsx` | `mountedRef` reset on mount; export appends the anchor; seed refs validated; stale `captureId` cleared (-131) |
+| `frontend/src/components/panels/settingsAndCircuits.defects.test.ts` | **New.** 9 tests, one per defect, each confirmed by its own mutation |
 
 ## Negative controls run
 
@@ -705,6 +711,17 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 
 | C198 | Remove the dispatch patch, run with no broker | ✅ 42 Redis-retry errors |
 | C199 | Remove the `judge_endpoint` validator | ✅ `file:///etc/passwd` accepted (rejected with the fix) |
+
+| C200 | One fetch error stops polling again | ✅ 2 failures |
+| C201 | The post-stop guard on `onUpdate` removed | ✅ 1 failure |
+| C202 | The in-flight guard removed | ✅ 1 failure |
+| C203 | The consecutive-error counter never resets | ⚠️ **survived** — my failure pattern (2 fail / 1 ok / 2 fail) never reached the threshold either way, so it held with or without the reset. Changed to 4 / 1 / 4; re-run ✅ 1 failure |
+| C204 | Endpoints list unfiltered again | ✅ 1 failure |
+| C205 | The seed-once guard removed | ✅ 1 failure |
+| C206 | `mountedRef` never set true again | ✅ 1 failure |
+| C207 | Export anchor detached again | ✅ 1 failure |
+| C208 | `NaN` feature_idx accepted again | ✅ 1 failure |
+| C209 | Stale `captureId` left selected | ✅ 1 failure |
 
 ## Provenance
 

@@ -1,337 +1,121 @@
 /**
- * Unit tests for polling utility.
+ * MIS-E2E-125: the shared polling helper gave up too easily and reported too late.
  *
- * This module tests the shared polling utility used by Zustand stores
- * to monitor resource status, including configuration, callbacks, and cleanup.
+ * 1. A single transient fetch error terminated polling permanently, and the
+ *    only caller discards the returned stop handle — so a ten-minute model
+ *    download that hit one 502 stopped updating and could never resume. The
+ *    download finished; the UI showed it in progress indefinitely.
+ * 2. There was no in-flight guard, so a slow response could resolve after
+ *    polling had stopped and push stale non-terminal state through onUpdate.
  */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { startPolling } from './polling';
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { startPolling, PollingConfig } from './polling';
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
 
-describe('polling utility', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
+function harness(fetchStatus: () => Promise<unknown>, over: Record<string, unknown> = {}) {
+  const onUpdate = vi.fn();
+  const onComplete = vi.fn();
+  const onError = vi.fn();
+  const stop = startPolling({
+    fetchStatus: fetchStatus as never,
+    onUpdate,
+    onComplete,
+    onError,
+    isTerminal: (r: never) => (r as { done?: boolean })?.done === true,
+    interval: 10,
+    maxPolls: 100,
+    resourceId: 'r1',
+    resourceType: 'test',
+    ...over,
+  } as never);
+  return { stop, onUpdate, onComplete, onError };
+}
+
+describe('startPolling — transient errors', () => {
+  it('survives a single failed fetch and keeps polling', async () => {
+    let call = 0;
+    const fetchStatus = vi.fn(async () => {
+      call++;
+      if (call === 1) throw new Error('502 Bad Gateway');
+      return { done: false };
+    });
+
+    const { onUpdate, onError } = harness(fetchStatus);
+
+    await vi.advanceTimersByTimeAsync(10);   // the failure
+    await vi.advanceTimersByTimeAsync(10);   // must still be polling
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalled();
+    expect(fetchStatus.mock.calls.length).toBeGreaterThan(1);
   });
 
-  afterEach(() => {
-    vi.clearAllTimers();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
+  it('still gives up on a sustained run of failures', async () => {
+    const fetchStatus = vi.fn(async () => {
+      throw new Error('connection refused');
+    });
+    const { onError } = harness(fetchStatus);
+
+    for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(10);
+
+    expect(onError).toHaveBeenCalled();
+    const calls = fetchStatus.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(fetchStatus.mock.calls.length).toBe(calls); // stopped for good
   });
 
-  describe('startPolling', () => {
-    it('should start polling and call fetchStatus at interval', async () => {
-      const mockResource = { id: '1', status: 'processing', progress: 50 };
-      const fetchStatus = vi.fn().mockResolvedValue(mockResource);
-      const onUpdate = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
-
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      // First poll happens immediately via setInterval
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-      expect(onUpdate).toHaveBeenCalledWith(mockResource);
-      expect(isTerminal).toHaveBeenCalledWith(mockResource);
-
-      // Second poll
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(fetchStatus).toHaveBeenCalledTimes(2);
-      expect(onUpdate).toHaveBeenCalledTimes(2);
+  it('a success resets the failure run', async () => {
+    // The pattern has to DISCRIMINATE: four failures, a success, four more.
+    // With the reset the longest run is 4 and polling continues. Without it
+    // the count reaches 8 and polling stops — so this fails if the reset is
+    // removed. An earlier version used 2/1/2, which never reached the
+    // threshold either way and so proved nothing (control C203 survived it).
+    let call = 0;
+    const fetchStatus = vi.fn(async () => {
+      call++;
+      if (call === 5) return { done: false };
+      throw new Error('flaky');
     });
+    const { onError } = harness(fetchStatus);
 
-    it('should stop polling when terminal state reached', async () => {
-      const mockResource = { id: '1', status: 'ready', progress: 100 };
-      const fetchStatus = vi.fn().mockResolvedValue(mockResource);
-      const onUpdate = vi.fn();
-      const onComplete = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(true);
+    for (let i = 0; i < 9; i++) await vi.advanceTimersByTimeAsync(10);
+    expect(onError).not.toHaveBeenCalled();
+  });
+});
 
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        onComplete,
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
+describe('startPolling — reporting after stop', () => {
+  it('does not call onUpdate for a response that lands after stop()', async () => {
+    let release: (v: unknown) => void = () => {};
+    const fetchStatus = vi.fn(
+      () => new Promise((res) => { release = res; })
+    );
 
-      startPolling(config);
+    const { stop, onUpdate } = harness(fetchStatus);
+    await vi.advanceTimersByTimeAsync(10);   // poll goes out, hangs
 
-      await vi.advanceTimersByTimeAsync(500);
+    stop();                                   // caller stops
+    release({ done: false });                 // slow response lands
+    await vi.advanceTimersByTimeAsync(1);
 
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-      expect(onUpdate).toHaveBeenCalledWith(mockResource);
-      expect(isTerminal).toHaveBeenCalledWith(mockResource);
-      expect(onComplete).toHaveBeenCalledWith(mockResource);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
 
-      // No more polls after terminal state
-      await vi.advanceTimersByTimeAsync(500);
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-    });
+  it('does not overlap two polls when a response is slower than the interval', async () => {
+    const resolvers: Array<(v: unknown) => void> = [];
+    const fetchStatus = vi.fn(
+      () => new Promise((res) => { resolvers.push(res); })
+    );
 
-    it('should stop polling after max polls reached', async () => {
-      const mockResource = { id: '1', status: 'processing', progress: 50 };
-      const fetchStatus = vi.fn().mockResolvedValue(mockResource);
-      const onUpdate = vi.fn();
-      const onError = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
+    harness(fetchStatus);
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(10);
 
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        onError,
-        isTerminal,
-        interval: 100,
-        maxPolls: 3,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      // Poll 1
-      await vi.advanceTimersByTimeAsync(100);
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-
-      // Poll 2
-      await vi.advanceTimersByTimeAsync(100);
-      expect(fetchStatus).toHaveBeenCalledTimes(2);
-
-      // Poll 3 (max reached)
-      await vi.advanceTimersByTimeAsync(100);
-      expect(fetchStatus).toHaveBeenCalledTimes(3);
-      expect(onError).toHaveBeenCalledWith(
-        'Polling timeout: test did not reach terminal state after 3 attempts'
-      );
-
-      // No more polls after max
-      await vi.advanceTimersByTimeAsync(100);
-      expect(fetchStatus).toHaveBeenCalledTimes(3);
-    });
-
-    it('should handle fetch errors and stop polling', async () => {
-      const fetchError = new Error('Fetch failed');
-      const fetchStatus = vi.fn().mockRejectedValue(fetchError);
-      const onUpdate = vi.fn();
-      const onError = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
-
-      const config: PollingConfig<any> = {
-        fetchStatus,
-        onUpdate,
-        onError,
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-      expect(onUpdate).not.toHaveBeenCalled();
-      expect(onError).toHaveBeenCalledWith('Polling failed: Fetch failed');
-
-      // No more polls after error
-      await vi.advanceTimersByTimeAsync(500);
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-    });
-
-    it('should return a stop function that stops polling', async () => {
-      const mockResource = { id: '1', status: 'processing', progress: 50 };
-      const fetchStatus = vi.fn().mockResolvedValue(mockResource);
-      const onUpdate = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
-
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      const stopPolling = startPolling(config);
-
-      // First poll
-      await vi.advanceTimersByTimeAsync(500);
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-
-      // Stop polling
-      stopPolling();
-
-      // No more polls after stopping
-      await vi.advanceTimersByTimeAsync(500);
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-    });
-
-    it('should use default interval and maxPolls', async () => {
-      const mockResource = { id: '1', status: 'processing', progress: 50 };
-      const fetchStatus = vi.fn().mockResolvedValue(mockResource);
-      const onUpdate = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
-
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        isTerminal,
-        // No interval or maxPolls specified - should use defaults (500ms, 100 polls)
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      const stopPolling = startPolling(config);
-
-      // Default interval is 500ms
-      await vi.advanceTimersByTimeAsync(500);
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-
-      // Stop before hitting max polls
-      stopPolling();
-    });
-
-    it('should not call onComplete if not provided', async () => {
-      const mockResource = { id: '1', status: 'ready', progress: 100 };
-      const fetchStatus = vi.fn().mockResolvedValue(mockResource);
-      const onUpdate = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(true);
-
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        // No onComplete provided
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-      expect(onUpdate).toHaveBeenCalledWith(mockResource);
-      expect(isTerminal).toHaveBeenCalledWith(mockResource);
-      // No error should be thrown
-    });
-
-    it('should not call onError if not provided', async () => {
-      const fetchError = new Error('Fetch failed');
-      const fetchStatus = vi.fn().mockRejectedValue(fetchError);
-      const onUpdate = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
-
-      const config: PollingConfig<any> = {
-        fetchStatus,
-        onUpdate,
-        // No onError provided
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-      expect(onUpdate).not.toHaveBeenCalled();
-      // No error should be thrown
-    });
-
-    it('should handle non-Error exceptions', async () => {
-      const fetchStatus = vi.fn().mockRejectedValue('String error');
-      const onUpdate = vi.fn();
-      const onError = vi.fn();
-      const isTerminal = vi.fn().mockReturnValue(false);
-
-      const config: PollingConfig<any> = {
-        fetchStatus,
-        onUpdate,
-        onError,
-        isTerminal,
-        interval: 500,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(fetchStatus).toHaveBeenCalledTimes(1);
-      expect(onError).toHaveBeenCalledWith('Polling failed: String error');
-    });
-
-    it('should track poll count correctly across multiple polls', async () => {
-      let pollCount = 0;
-      const mockResource = { id: '1', status: 'processing', progress: 50 };
-      const fetchStatus = vi.fn().mockImplementation(async () => {
-        pollCount++;
-        return { ...mockResource, progress: pollCount * 10 };
-      });
-      const onUpdate = vi.fn();
-      const isTerminal = vi.fn().mockImplementation((resource) => resource.progress >= 50);
-
-      const config: PollingConfig<typeof mockResource> = {
-        fetchStatus,
-        onUpdate,
-        isTerminal,
-        interval: 100,
-        maxPolls: 10,
-        resourceId: '1',
-        resourceType: 'test',
-      };
-
-      startPolling(config);
-
-      // Poll 1 (progress 10)
-      await vi.advanceTimersByTimeAsync(100);
-      expect(onUpdate).toHaveBeenCalledWith({ ...mockResource, progress: 10 });
-
-      // Poll 2 (progress 20)
-      await vi.advanceTimersByTimeAsync(100);
-      expect(onUpdate).toHaveBeenCalledWith({ ...mockResource, progress: 20 });
-
-      // Poll 3 (progress 30)
-      await vi.advanceTimersByTimeAsync(100);
-      expect(onUpdate).toHaveBeenCalledWith({ ...mockResource, progress: 30 });
-
-      // Poll 4 (progress 40)
-      await vi.advanceTimersByTimeAsync(100);
-      expect(onUpdate).toHaveBeenCalledWith({ ...mockResource, progress: 40 });
-
-      // Poll 5 (progress 50 - terminal)
-      await vi.advanceTimersByTimeAsync(100);
-      expect(onUpdate).toHaveBeenCalledWith({ ...mockResource, progress: 50 });
-
-      // Should stop at terminal state
-      expect(fetchStatus).toHaveBeenCalledTimes(5);
-    });
+    // Three ticks, one still in flight: only one request should be out.
+    expect(fetchStatus.mock.calls.length).toBe(1);
+    resolvers.forEach((r) => r({ done: true }));
   });
 });
