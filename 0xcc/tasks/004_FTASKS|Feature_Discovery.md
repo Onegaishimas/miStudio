@@ -395,10 +395,10 @@
 | File | Purpose |
 |------|---------|
 | `frontend/src/types/features.ts` | TypeScript types |
-| `frontend/src/api/features.ts` | API client |
+| `frontend/src/api/features.ts` | API client ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `frontend/src/stores/featuresStore.ts` | Zustand store |
-| `frontend/src/components/features/FeatureBrowser.tsx` | Browser |
-| `frontend/src/components/features/FeatureCard.tsx` | Card |
+| `frontend/src/components/features/FeatureBrowser.tsx` | Browser ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `frontend/src/components/features/FeatureCard.tsx` | Card ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `frontend/src/components/features/FeatureDetailModal.tsx` | Modal |
 | `frontend/src/components/features/TokenHighlight.tsx` | Highlight |
 

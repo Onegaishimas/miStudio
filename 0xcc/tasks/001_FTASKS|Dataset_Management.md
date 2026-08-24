@@ -241,7 +241,7 @@
 | `backend/src/models/dataset.py` | SQLAlchemy model |
 | `backend/src/schemas/dataset.py` | Pydantic schemas |
 | `backend/src/services/dataset_service.py` | Business logic |
-| `backend/src/services/huggingface_dataset_service.py` | HF integration |
+| `backend/src/services/huggingface_dataset_service.py` | HF integration ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/workers/dataset_tasks.py` | Celery tasks |
 | `backend/src/api/v1/endpoints/datasets.py` | API routes |
 

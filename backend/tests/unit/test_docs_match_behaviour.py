@@ -392,3 +392,79 @@ def test_every_document_names_the_real_monitor_implementation(path):
         f"actually does it. Five documents once attributed this to Celery Beat "
         f"and a task (`collect_system_metrics`) that does not exist."
     )
+
+
+# ── MIS-E2E-010 / -163 · CLAUDE.md and the slash commands ──────────────────
+
+def test_referenced_context_files_exist():
+    """MIS-E2E-010. Four commands referenced a health dashboard that was never
+    created, and `/review` Step 5 tells the reviewer to UPDATE it — so the
+    health step could never have run.
+    """
+    dashboard = REPO / ".claude" / "context" / "health" / "dashboard.md"
+    referencing = [
+        p for p in (REPO / ".claude" / "commands").glob("*.md")
+        if "health/dashboard.md" in p.read_text()
+    ]
+    if referencing:
+        assert dashboard.exists(), (
+            f"{[p.name for p in referencing]} reference "
+            f"`.claude/context/health/dashboard.md`, which does not exist"
+        )
+        # `.exists()` alone is not enough — control C144 emptied the file and
+        # the check still passed. A command reading an empty dashboard is no
+        # better off than one reading a missing file.
+        assert len(dashboard.read_text().strip()) > 200, (
+            "the health dashboard exists but is empty; `/review` Step 5 tells "
+            "the reviewer to update it, and there is nothing to update"
+        )
+
+
+def test_claude_md_does_not_claim_a_nonexistent_file_is_auto_loaded():
+    """It told a resuming session that `0xcc/session_state.json` "is
+    automatically loaded". The file has never existed."""
+    claude = (REPO / "CLAUDE.md").read_text()
+    for line in claude.splitlines():
+        if "session_state.json" not in line:
+            continue
+        assert "does not exist" in line.lower() or "MIS-E2E-010" in line, (
+            f"CLAUDE.md still presents session_state.json as real:\n  {line.strip()}"
+        )
+
+
+def test_claude_md_test_counts_are_not_silently_stale():
+    """MIS-E2E-163. Three different counts coexisted — 995, 2461/1149, and the
+    real ~2883/1211 — so any of them could be quoted in good faith.
+
+    The count cannot be checked automatically without running both suites, so
+    what IS enforced is that the line tells the reader to re-measure. A stale
+    number that admits it is stale is recoverable; one that does not is not.
+    """
+    claude = (REPO / "CLAUDE.md").read_text()
+    idx = claude.index("**Test Status:**")
+    block = claude[idx: idx + 600]
+    assert "Do not hand-maintain" in block or "Re-measure" in block, (
+        "the Test Status line gives a bare number with no instruction to "
+        "re-measure; it was wrong by 3.3x once already"
+    )
+    # Strip the corrective note before checking: it QUOTES the stale figure in
+    # order to say it was wrong, and a bare substring check reads the quote as a
+    # regression. (Eighth time this trap has appeared in this remediation.)
+    without_note = "\n".join(
+        l for l in claude.splitlines()
+        if "MIS-E2E-163" not in l and "Do not hand-maintain" not in l and "it read" not in l
+        and "Superseded" not in l
+    )
+    assert "995 passed" not in without_note, "the stale count is back"
+
+
+def test_no_document_still_says_the_jlens_readout_returns_501():
+    """The endpoint is bound; three places still described it as unimplemented."""
+    claude = (REPO / "CLAUDE.md").read_text()
+    for line in claude.splitlines():
+        if "501" not in line or "/jlens/readout" not in line:
+            continue
+        low = line.lower()
+        assert any(w in low for w in ("resolved", "since bound", "~~", "gone")), (
+            f"CLAUDE.md still says the readout returns 501:\n  {line.strip()}"
+        )

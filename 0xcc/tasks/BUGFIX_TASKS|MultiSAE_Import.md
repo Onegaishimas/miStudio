@@ -402,3 +402,24 @@ Training checkpoint structure:
 | 6 | backend/tests/unit/test_sae_import.py | New | Unit tests |
 | 6 | backend/tests/integration/test_sae_import_integration.py | New | Integration tests |
 | 6 | frontend/src/components/training/SAEImportModal.test.tsx | New | Component tests |
+
+
+## Status (triaged 2026-08-24, MIS-E2E-012)
+
+**SHIPPED — Feature 015 / PPRD row 16**
+
+`steering_service.py` carries 23 references to the multi-SAE map and `resolve_sae_map` validates `feature.layer == sae.layer` before dispatch. 59 unchecked boxes for work the circuits arc closed.
+
+> This file had no `## Relevant Files` section, which the framework requires and
+> which is the only doc→code join a reader has. Six ad-hoc task files were in
+> that state, holding **193 of the repo's 348 unchecked boxes** — more than the
+> entire numbered feature chain. Unchecked boxes over shipped work are not
+> neutral: they hide the ones that are genuinely open.
+
+## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `backend/src/services/steering_service.py` | `resolve_sae_map` and per-feature SAE routing |
+| `backend/src/api/v1/endpoints/steering.py` | `resolve_referenced_saes` — the shared submit-time validation |
+| `backend/src/services/sae_manager_service.py` | The SAE registry these resolve against |

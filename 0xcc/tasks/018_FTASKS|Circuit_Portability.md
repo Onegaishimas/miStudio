@@ -87,7 +87,7 @@ caps meter, edit name/narrative, import/export/slices buttons, reversible promot
 | `backend/src/schemas/circuit_definition.py` (NEW) · `docs/schemas/circuit-definition-v1.json` (NEW) | contract |
 | `backend/src/models/circuit.py` (NEW) + migration · `services/circuit_service.py` (NEW) | storage/promotion |
 | `backend/src/services/circuit_edge_type_service.py` (NEW) + audit fixture | typing |
-| `backend/src/services/circuit_contract_service.py` (NEW) | export/import/slices |
+| `backend/src/services/circuit_contract_service.py` (NEW) | export/import/slices ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/api/v1/endpoints/circuits.py` (NEW) · MCP tools/circuits.py | REST + MCP |
 | `frontend/src/components/circuits/RungChip.tsx`, `EdgeTable.tsx`, `CapsMeter.tsx` (NEW) + Review tab | UI |
 | `manual/docs/**` | docs |

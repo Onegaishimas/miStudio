@@ -92,7 +92,7 @@ occupancy figure carries a control seed; the envelope guard fails on a materiali
 | `backend/src/api/v1/router.py` | registration |
 | `backend/tests/unit/test_jlens_readout.py` | modes, wire conformance, provenance |
 | `backend/tests/unit/test_jlens_model_agnostic.py` | two-architecture, hook control, name guard |
-| `backend/tests/unit/test_jlens_envelope.py` | model-derived envelope |
+| `backend/tests/unit/test_jlens_envelope.py` | model-derived envelope ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 Reused unchanged: `ml/layer_discovery.py`, `ml/forward_hooks.py`,
 `services/analysis_service.py` (`load_unembedding_matrix`, `resolve_snapshot_dir`).

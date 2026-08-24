@@ -84,7 +84,7 @@
 | `backend/src/schemas/cluster_profile.py` (NEW) · `docs/schemas/cluster-definition-v1.json` (NEW) | contract |
 | `backend/src/services/cluster_profile_service.py` (+tests, NEW) | CRUD/serialize/compat |
 | `backend/src/api/v1/endpoints/cluster_profiles.py` (NEW) | REST |
-| `backend/src/services/sae_service.py` (delete guard) | RESTRICT UX |
+| `backend/src/services/sae_service.py` (delete guard) | RESTRICT UX ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/mcp_server/tools/profiles.py` (NEW) + server gating | MCP |
 | `frontend/src/{types,api,stores}/clusterProfile*` (NEW) | client layer |
 | `frontend/src/components/steering/SaveProfileDialog.tsx`, `ProfilesMenu.tsx` (NEW) | UI |

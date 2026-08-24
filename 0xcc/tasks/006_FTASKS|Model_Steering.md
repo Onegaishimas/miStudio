@@ -320,7 +320,7 @@
 | `frontend/src/components/steering/StrengthSlider.tsx` | Slider |
 | `frontend/src/components/steering/SelectedFeatureCard.tsx` | Card |
 | `frontend/src/components/steering/ComparisonResults.tsx` | Results |
-| `frontend/src/components/steering/CombinedResults.tsx` | Combined mode results (Planned) |
+| `frontend/src/components/steering/CombinedResults.tsx` | Combined mode results (Planned) ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `frontend/src/components/panels/SteeringPanel.tsx` | Panel |
 
 ---

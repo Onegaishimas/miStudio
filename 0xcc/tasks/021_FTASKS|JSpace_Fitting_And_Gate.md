@@ -140,7 +140,7 @@ harness.
 | `backend/src/workers/jlens_fit_tasks.py` | Celery task |
 | `backend/src/api/v1/endpoints/jlens.py` | extended; binds the readout |
 | `backend/src/mcp_server/tools/jlens.py` | MCP parity, registered |
-| `frontend/src/components/jlens/ArtifactsPanel.tsx` | fit + validation UI |
+| `frontend/src/components/jlens/ArtifactsPanel.tsx` | fit + validation UI ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 ---
 

@@ -265,10 +265,18 @@
 ### Task 7.7: Create Loss Chart Component
 - [x] Real-time loss curve
 - [x] L0 and FVU metrics
-- [x] Zoom and pan
+- [ ] Zoom and pan
+
+> **Unchecked 2026-08-24 (MIS-E2E-154).** The first two shipped — as inline SVG
+> charts in `TrainingCard.tsx`, not the `LossChart.tsx` named below, which has
+> **no add-commit anywhere in repo history**. Zoom and pan has no
+> implementation anywhere, and was the one box among the 22 dead-path entries
+> that claimed a *capability* rather than a file location. The rest are a
+> documentation defect; this one was a false completion.
 
 **Files:**
-- `frontend/src/components/training/LossChart.tsx`
+- `frontend/src/components/training/TrainingCard.tsx` — the inline SVG charts that actually ship this
+- ~~`frontend/src/components/training/LossChart.tsx`~~ ⚠️ **never written**
 
 ### Task 7.8: Create WebSocket Hook
 - [x] Subscribe to training channel
@@ -314,7 +322,7 @@
 | File | Purpose |
 |------|---------|
 | `backend/src/ml/sparse_autoencoder.py` | SAE architectures |
-| `backend/src/ml/activation_extraction.py` | Activation hooks |
+| `backend/src/ml/activation_extraction.py` | Activation hooks ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/models/training.py` | SQLAlchemy models |
 | `backend/src/schemas/training.py` | Pydantic schemas |
 | `backend/src/services/training_service.py` | Business logic |
@@ -328,8 +336,8 @@
 | `frontend/src/api/trainings.ts` | API client |
 | `frontend/src/stores/trainingsStore.ts` | Zustand store |
 | `frontend/src/components/training/TrainingCard.tsx` | Card |
-| `frontend/src/components/training/TrainingForm.tsx` | Form |
-| `frontend/src/components/training/LossChart.tsx` | Chart |
+| `frontend/src/components/training/TrainingForm.tsx` | Form ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `frontend/src/components/training/LossChart.tsx` | Chart ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `frontend/src/components/panels/TrainingPanel.tsx` | Panel |
 
 ---

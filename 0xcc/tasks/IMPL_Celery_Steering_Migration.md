@@ -995,3 +995,24 @@ This architecture enables:
 - GPU resource isolation per worker pod
 - Automatic recovery from crashes via K8s restart policy
 - No zombie processes (container termination releases all resources)
+
+
+## Status (triaged 2026-08-24, MIS-E2E-012)
+
+**SHIPPED — the boxes are stale, not the work**
+
+`steering.py` serves six `/steering/async/*` routes and PADR IDL-13 records the migration as done. 61 unchecked boxes describing shipped work is worse than no file: it is the largest single block of apparent open work in the repo (32 KB, 61 of the 348 repo-wide) and it points a reader at a migration that already happened.
+
+> This file had no `## Relevant Files` section, which the framework requires and
+> which is the only doc→code join a reader has. Six ad-hoc task files were in
+> that state, holding **193 of the repo's 348 unchecked boxes** — more than the
+> entire numbered feature chain. Unchecked boxes over shipped work are not
+> neutral: they hide the ones that are genuinely open.
+
+## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `backend/src/api/v1/endpoints/steering.py` | The async submit/poll/cancel routes this migration created |
+| `backend/src/workers/steering_tasks.py` | The Celery tasks they dispatch |
+| `backend/src/services/steering_core.py` | The unified steering core (PADR IDL-38) |
