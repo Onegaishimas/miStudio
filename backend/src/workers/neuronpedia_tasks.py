@@ -18,6 +18,7 @@ from ..services.neuronpedia_export_service import (
     ExportConfig,
 )
 from .websocket_emitter import emit_export_progress
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class NeuronpediaTask(DatabaseTask):
             if job:
                 job.status = ExportStatus.FAILED.value
                 job.error_message = error_message
-                job.completed_at = datetime.utcnow()
+                job.completed_at = utc_now()
                 db.commit()
 
                 # Emit WebSocket event
@@ -139,7 +140,7 @@ def execute_neuronpedia_export(self, job_id: str):
 
             # Mark as started
             job.status = ExportStatus.COMPUTING.value
-            job.started_at = datetime.utcnow()
+            job.started_at = utc_now()
             db.commit()
 
             # Update progress

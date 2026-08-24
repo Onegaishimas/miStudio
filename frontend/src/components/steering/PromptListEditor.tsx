@@ -10,11 +10,18 @@
  * - Multi-line paste detection: automatically splits pasted text into multiple prompts
  * - Save prompts as templates
  * - Load prompts from templates
+ * - Collapsible: the staging box is tall (five prompts fill most of the
+ *   viewport), which pushes the generated results below the fold. Collapsing
+ *   it hands that vertical space to the results without discarding the
+ *   prompts. The choice is remembered per browser.
  */
 
 import { useState } from 'react';
-import { Plus, X, Trash2, Save, FolderOpen } from 'lucide-react';
+import { Plus, X, Trash2, Save, FolderOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { PromptTemplate } from '../../types/promptTemplate';
+
+/** localStorage key for the collapsed state of the staging box. */
+const COLLAPSE_KEY = 'mistudio.steering.promptsCollapsed';
 
 interface PromptListEditorProps {
   prompts: string[];
@@ -46,6 +53,29 @@ export function PromptListEditor({
 }: PromptListEditorProps) {
   const nonEmptyCount = prompts.filter((p) => p.trim().length > 0).length;
   const canRemove = prompts.length > 1;
+
+  // Collapsed staging box. Persisted so the choice survives a reload — a user
+  // who works mostly in the results does not want to re-collapse every visit.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === 'true';
+    } catch {
+      // Private windows and blocked site-data both throw on access.
+      return false;
+    }
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, String(next));
+      } catch {
+        // Not being able to remember the choice must not break the toggle.
+      }
+      return next;
+    });
+  };
 
   // Modal states
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -134,14 +164,26 @@ export function PromptListEditor({
     <div className="space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-controls="steering-prompt-list"
+          title={collapsed
+            ? 'Expand the prompt editor'
+            : 'Collapse the prompt editor to give the results more room'}
+          className="flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+        >
+          {collapsed
+            ? <ChevronRight className="w-4 h-4 flex-shrink-0" />
+            : <ChevronDown className="w-4 h-4 flex-shrink-0" />}
           Prompts
           {prompts.length > 1 && (
-            <span className="ml-2 text-slate-500 font-normal">
+            <span className="ml-1 text-slate-500 font-normal">
               ({nonEmptyCount} of {prompts.length} with content)
             </span>
           )}
-        </label>
+        </button>
         <div className="flex items-center gap-2">
           {/* Load Template button */}
           {onLoadTemplate && (
@@ -190,8 +232,27 @@ export function PromptListEditor({
         </div>
       </div>
 
+      {/* Collapsed summary — the box still has to say what it is holding, or
+          collapsing it just hides state the user is about to run against. */}
+      {collapsed && (
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="w-full text-left px-4 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-600 transition-colors"
+        >
+          {nonEmptyCount === 0
+            ? 'No prompts yet — click to add one'
+            : `${nonEmptyCount} prompt${nonEmptyCount === 1 ? '' : 's'} ready — click to edit`}
+          {nonEmptyCount > 0 && (
+            <span className="block mt-1 truncate text-slate-400 dark:text-slate-500 italic">
+              {prompts.find((p) => p.trim().length > 0)}
+            </span>
+          )}
+        </button>
+      )}
+
       {/* Prompt inputs */}
-      <div className="space-y-2">
+      <div id="steering-prompt-list" hidden={collapsed} className="space-y-2">
         {prompts.map((prompt, index) => (
           <div key={index} className="relative group">
             <div className="flex items-start gap-2">
@@ -251,7 +312,7 @@ export function PromptListEditor({
       </div>
 
       {/* Batch mode hint */}
-      {prompts.length > 1 && nonEmptyCount > 1 && (
+      {!collapsed && prompts.length > 1 && nonEmptyCount > 1 && (
         <p className="text-xs text-slate-500">
           Batch mode: Each prompt will be processed sequentially with the same feature configuration.
         </p>

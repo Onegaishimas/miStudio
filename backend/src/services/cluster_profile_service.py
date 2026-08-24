@@ -33,6 +33,7 @@ from ..schemas.cluster_profile import (
     ProfileBudget,
     ProfileMember,
 )
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ class ClusterProfileService:
             profile.members = [m.model_dump() for m in enriched]
         if data.budget is not None:
             profile.budget = data.budget.model_dump()
-        profile.updated_at = datetime.utcnow()
+        profile.updated_at = utc_now()
         await db.commit()
         await db.refresh(profile)
         return profile
@@ -362,7 +363,7 @@ class ClusterProfileService:
             budget=ProfileBudget(**profile.budget) if profile.budget else None,
             provenance=DefinitionProvenance(
                 created_at=profile.created_at,
-                exported_at=datetime.utcnow(),
+                exported_at=utc_now(),
                 mistudio_version=APP_VERSION,
             ),
         )

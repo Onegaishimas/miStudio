@@ -9,7 +9,7 @@ Every response carries the rung AND the server-rendered rung_language string
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,26 +146,22 @@ async def create_circuit(body: CircuitCreate, db: AsyncSession = Depends(get_db)
     return _out(circuit)
 
 
-MAX_IMPORT_BYTES = 1_048_576  # house cap (cluster_profiles precedent): near this is hostile
 
 
 @router.post("/import", status_code=201)
-async def import_circuit(payload: Dict[str, Any], request: Request,
+async def import_circuit(payload: Dict[str, Any],
                          db: AsyncSession = Depends(get_db)):
     """Import a mistudio.circuit-definition/v1 file (BR-013 round-trip).
 
     Kind-keyed: unknown kinds/major versions are rejected explicitly. Payloads
     over the house 1 MB cap are rejected (R2 B3).
     """
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            declared = int(content_length)
-        except ValueError:  # malformed header must be a 400, not a 500 (R3-B4)
-            raise HTTPException(status_code=400, detail="Malformed Content-Length header")
-        if declared > MAX_IMPORT_BYTES:
-            raise HTTPException(status_code=413,
-                                detail=f"Import exceeds the {MAX_IMPORT_BYTES // 1024} KB cap")
+    # The body cap moved to `core.body_limit.BodySizeLimitMiddleware`
+    # (MIS-E2E-036). It could not work here: FastAPI parses `payload` before
+    # this function's first statement, so the bytes were already read and
+    # already in memory by the time the check ran — and a chunked request sends
+    # no Content-Length, so the check did not run at all. The middleware meters
+    # the receive channel instead, and returns the same 413.
     kind = payload.get("kind")
     if kind != "mistudio.circuit-definition":
         raise HTTPException(

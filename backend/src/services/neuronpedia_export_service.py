@@ -189,7 +189,7 @@ class NeuronpediaExportService:
 
         # Update status to computing
         job.status = ExportStatus.COMPUTING.value
-        job.started_at = datetime.utcnow()
+        job.started_at = utc_now()
         await db.commit()
 
         try:
@@ -262,7 +262,7 @@ class NeuronpediaExportService:
             job.status = ExportStatus.COMPLETED.value
             job.output_path = str(archive_path)
             job.file_size_bytes = archive_path.stat().st_size
-            job.completed_at = datetime.utcnow()
+            job.completed_at = utc_now()
             job.progress = 100.0
             job.current_stage = "Complete"
             await db.commit()
@@ -274,7 +274,7 @@ class NeuronpediaExportService:
             logger.exception(f"Export job {job_id} failed: {e}")
             job.status = ExportStatus.FAILED.value
             job.error_message = str(e)
-            job.completed_at = datetime.utcnow()
+            job.completed_at = utc_now()
             await db.commit()
             raise
 
@@ -473,7 +473,7 @@ class NeuronpediaExportService:
                 "version": "1.0.0",
                 "sae_id": sae.id,
             },
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": utc_now_iso(),
             "export_version": "1.0",
         }
 
@@ -618,6 +618,7 @@ sparse autoencoder training and analysis tool.
 
 ```python
 from sae_lens import SAE
+from ..core.clock import utc_now, utc_now_iso
 
 sae = SAE.load_from_pretrained(
     path="./saelens/",
@@ -626,7 +627,7 @@ sae = SAE.load_from_pretrained(
 ```
 
 ## Export Date
-{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
+{utc_now().strftime("%Y-%m-%d %H:%M:%S UTC")}
 """
 
         with open(output_dir / "README.md", "w") as f:
@@ -689,7 +690,7 @@ sae = SAE.load_from_pretrained(
             return False
 
         job.status = ExportStatus.CANCELLED.value
-        job.completed_at = datetime.utcnow()
+        job.completed_at = utc_now()
         await db.commit()
 
         return True

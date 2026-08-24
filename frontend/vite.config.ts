@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   resolve: {
     alias: {
@@ -27,9 +27,23 @@ export default defineConfig({
       },
     },
   },
+  // 364 `console.log`/`debug`/`info` calls reach the browser otherwise, some
+  // of them printing request payloads. Marking them pure lets the default
+  // esbuild minifier drop them from a production build. `console.warn` and
+  // `console.error` are deliberately absent: those are the ones a user is ever
+  // asked to read back. (MIS-E2E-020)
+  esbuild: {
+    pure: mode === 'production'
+      ? ['console.log', 'console.debug', 'console.info', 'console.trace']
+      : [],
+  },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // MIS-E2E-020. Sourcemaps were unconditionally on, so every production
+    // build shipped 12 `.map` files reconstructing the full original source —
+    // including comments — to anyone who opened devtools. Keep them for a dev
+    // build, where they are the point, and drop them from a production one.
+    sourcemap: mode !== 'production',
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
@@ -88,4 +102,4 @@ export default defineConfig({
     setupFiles: './src/test/setup.ts',
     css: true,
   },
-});
+}));

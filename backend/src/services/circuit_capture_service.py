@@ -34,6 +34,7 @@ from ..models.dataset import Dataset
 from ..models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from ..models.external_sae import ExternalSAE
 from .circuit_capture_store import open_writers
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ class CircuitCaptureService:
                 "heldout_docs": [],  # filled at capture completion
             },
             "attention_capture": config.get("attention_capture"),  # {layers, heads, top_k}|None
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utc_now().isoformat(),
             "stale": False,
         }
         run = CircuitCaptureRun(status="pending", manifest=manifest)

@@ -21,7 +21,7 @@ PUBLISHED = Path(__file__).resolve().parents[3] / "docs" / "schemas" / "cluster-
 def _generate() -> dict:
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://mistudio.hitsai.net/schemas/cluster-definition-v1.json",
+        "$id": "https://raw.githubusercontent.com/hitsainet/miStudio/main/docs/schemas/cluster-definition-v1.json",
         "title": "miStudio Cluster Definition v1",
         "description": (
             "Portable cluster definition (mistudio.cluster-definition/v1) — the consumer-neutral "

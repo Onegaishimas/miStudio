@@ -31,6 +31,7 @@ from ..schemas.sae import (
     SAEImportFromTrainingResponse,
 )
 from .huggingface_sae_service import HuggingFaceSAEService
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +419,7 @@ class SAEManagerService:
             file_size_bytes=total_size,
             progress=100.0,
             sae_metadata=sae_metadata,
-            downloaded_at=datetime.utcnow()
+            downloaded_at=utc_now()
         )
 
         db.add(db_sae)
@@ -574,7 +575,7 @@ class SAEManagerService:
             sae_metadata={
                 "original_path": str(source_path)
             },
-            downloaded_at=datetime.utcnow()
+            downloaded_at=utc_now()
         )
 
         db.add(db_sae)
@@ -626,7 +627,7 @@ class SAEManagerService:
             sae.sae_metadata = current_metadata
 
         if status == SAEStatus.READY:
-            sae.downloaded_at = datetime.utcnow()
+            sae.downloaded_at = utc_now()
 
         await db.commit()
         await db.refresh(sae)

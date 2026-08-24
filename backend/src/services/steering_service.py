@@ -63,6 +63,7 @@ from ..schemas.steering import (
     CombinedSteeringResponse,
     CombinedFeatureApplied,
 )
+from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -1896,7 +1897,7 @@ class SteeringService:
                     steered_multi=steered_multi_outputs,
                     metrics_summary=metrics_summary,
                     total_time_ms=total_time_ms,
-                    created_at=datetime.utcnow(),
+                    created_at=utc_now(),
                 )
 
             # Single-strength mode: one output per feature (existing behavior)
@@ -2005,7 +2006,7 @@ class SteeringService:
                 steered_multi=None,  # Not in multi-strength mode
                 metrics_summary=metrics_summary,
                 total_time_ms=total_time_ms,
-                created_at=datetime.utcnow(),
+                created_at=utc_now(),
             )
 
         except Exception as e:
@@ -2351,7 +2352,7 @@ class SteeringService:
                 unsteered=unsteered,
                 results=results,
                 total_time_ms=total_time_ms,
-                created_at=datetime.utcnow(),
+                created_at=utc_now(),
             )
 
         except Exception as e:
@@ -2606,7 +2607,7 @@ class SteeringService:
                 baseline_metrics=baseline_metrics,
                 total_steering_strength=total_steering_strength,
                 total_time_ms=total_time_ms,
-                created_at=datetime.utcnow(),
+                created_at=utc_now(),
             )
 
         except Exception as e:

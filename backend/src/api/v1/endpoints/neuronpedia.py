@@ -38,6 +38,7 @@ from ....services.neuronpedia_local_service import (
     get_neuronpedia_local_push_service,
     LocalPushConfig,
 )
+from ....core.clock import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +430,7 @@ async def push_to_local_neuronpedia(
         raise HTTPException(404, f"SAE not found: {sae_id}")
 
     # Generate a unique push job ID
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = utc_now().strftime("%Y%m%d_%H%M%S")
     push_job_id = f"push_{sae_id}_{timestamp}"
 
     try:
