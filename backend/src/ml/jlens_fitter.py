@@ -293,102 +293,113 @@ def frozen_attention_and_norms(
     """
     patched: List[Callable[[], None]] = []
 
-    # PROCESS-WIDE MUTATION, SERIALISED. Patching
-    # `torch.nn.functional.scaled_dot_product_attention` reaches every model in
-    # this process, not only the one being fitted. That reach is the point — it
-    # is what makes the freeze architecture-agnostic — but it means two
-    # concurrent fits would nest their patches and restore each other's
-    # originals in the wrong order, leaving attention permanently frozen for
-    # everything afterwards, with no error and no way to notice.
+    # MIS-E2E-082: EVERYTHING below is inside the try.
     #
-    # The task queue serialises fits today, so this guards the invariant rather
-    # than a symptom already seen. It is worth closing anyway: the failure is
-    # silent, permanent, and would present as "readouts went strange".
-    # ONLY WHEN SOMETHING IS ACTUALLY PATCHED. With both flags off this context
-    # touches no global state, and taking the lock anyway would serialise fits
-    # that cannot interfere with each other.
-    if freeze_qk or freeze_norms:
-        _FREEZE_LOCK.acquire()
-        patched.append(_FREEZE_LOCK.release)
-
-    if freeze_qk:
-        original_sdpa = torch.nn.functional.scaled_dot_product_attention
-
-        def frozen_sdpa(query, key, value, *args, **kwargs):
-            # Recover the pattern with Q/K detached, then apply it to V. The
-            # pattern is a constant; V still carries gradient.
-            with torch.no_grad():
-                weights = original_sdpa(
-                    query,
-                    key,
-                    torch.eye(
-                        value.shape[-2], device=value.device, dtype=value.dtype
-                    ).expand(*value.shape[:-1], value.shape[-2]),
-                    *args,
-                    **kwargs,
-                )
-            # GROUPED-QUERY ATTENTION. Under GQA there are fewer KV heads than
-            # query heads, and callers may hand SDPA the un-repeated K/V with
-            # `enable_gqa=True` and let it broadcast internally. The recovered
-            # pattern then has one row group per QUERY head while `value` still
-            # has only the KV heads, and the matmul is a shape error — which is
-            # the good case. The head counts are read off the tensors rather
-            # than off a config, so this covers MHA (n_rep == 1, a no-op), GQA
-            # and MQA without naming an architecture (BR-032).
-            n_rep = weights.shape[-3] // value.shape[-3]
-            if n_rep > 1:
-                # repeat_interleave, not repeat: transformers' repeat_kv expands
-                # then reshapes, which places each KV head next to its own query
-                # group. `repeat` would tile the whole block and silently pair
-                # every query head with the WRONG KV head — same shape, wrong
-                # attention output, no error anywhere.
-                value = value.repeat_interleave(n_rep, dim=-3)
-            return weights @ value
-
-        torch.nn.functional.scaled_dot_product_attention = frozen_sdpa
-        patched.append(
-            lambda: setattr(
-                torch.nn.functional, "scaled_dot_product_attention", original_sdpa
-            )
-        )
-
-    handles = [_freeze_norm(m) for m in _norm_modules(model)] if freeze_norms else []
-
-    # THE FREEZE MUST HAVE ACTUALLY APPLIED (MIS-E2E-079).
-    #
-    # This is the gate `CLAUDE.md` promised under the name `affine_residual`,
-    # implemented soundly. The affine version could not work — freezing does not
-    # make the map affine, so it would refuse every genuine fit — but the hazard
-    # it was aimed at is real: an incomplete freeze yields a matrix of the right
-    # shape that passes STRUCTURAL, NAMING and ENVELOPE validation and reads out
-    # plausible nonsense, and the artifact then records `freeze_qk: true` as
-    # though it held.
-    #
-    # Checking that the patch LANDED is direct, cheap and certain, where
-    # inferring it from the matrix is neither. `_norm_modules` is the specific
-    # reason this matters: it once used a substring match, and a model whose
-    # norm modules do not match the predicate yields an EMPTY list here — a
-    # `freeze_norms=True` fit that froze nothing at all, silently.
-    if freeze_qk and torch.nn.functional.scaled_dot_product_attention is not frozen_sdpa:
-        for undo in reversed(patched):
-            undo()
-        raise RuntimeError(
-            "freeze_qk was requested but the SDPA patch is not in place — "
-            "something replaced torch.nn.functional.scaled_dot_product_attention "
-            "after it was patched. Refusing to fit: the lens would record "
-            "freeze_qk=true for a fit that was not frozen."
-        )
-    if freeze_norms and not handles:
-        for undo in reversed(patched):
-            undo()
-        raise RuntimeError(
-            "freeze_norms was requested but no norm module was found on this "
-            "model, so nothing was frozen. Refusing to fit rather than "
-            "recording freeze_norms=true for an unfrozen fit. Check that "
-            "_norm_modules' predicate matches this architecture's norm layers."
-        )
-
+    # The lock acquisition and the SDPA patch used to sit ABOVE it. An
+    # exception anywhere between them and the `yield` — a model whose norm
+    # predicate matches nothing, a bad layer index, an OOM while walking the
+    # modules — escaped without running the `finally`, so the process-wide
+    # attention patch stayed installed for every subsequent forward pass in
+    # that worker, and `_FREEZE_LOCK` was never released, so every later fit
+    # blocked forever on a lock nobody held. Both failures are silent and
+    # permanent, and the second one only ever presents as a hung worker.
     try:
+
+        # PROCESS-WIDE MUTATION, SERIALISED. Patching
+        # `torch.nn.functional.scaled_dot_product_attention` reaches every model in
+        # this process, not only the one being fitted. That reach is the point — it
+        # is what makes the freeze architecture-agnostic — but it means two
+        # concurrent fits would nest their patches and restore each other's
+        # originals in the wrong order, leaving attention permanently frozen for
+        # everything afterwards, with no error and no way to notice.
+        #
+        # The task queue serialises fits today, so this guards the invariant rather
+        # than a symptom already seen. It is worth closing anyway: the failure is
+        # silent, permanent, and would present as "readouts went strange".
+        # ONLY WHEN SOMETHING IS ACTUALLY PATCHED. With both flags off this context
+        # touches no global state, and taking the lock anyway would serialise fits
+        # that cannot interfere with each other.
+        if freeze_qk or freeze_norms:
+            _FREEZE_LOCK.acquire()
+            patched.append(_FREEZE_LOCK.release)
+
+        if freeze_qk:
+            original_sdpa = torch.nn.functional.scaled_dot_product_attention
+
+            def frozen_sdpa(query, key, value, *args, **kwargs):
+                # Recover the pattern with Q/K detached, then apply it to V. The
+                # pattern is a constant; V still carries gradient.
+                with torch.no_grad():
+                    weights = original_sdpa(
+                        query,
+                        key,
+                        torch.eye(
+                            value.shape[-2], device=value.device, dtype=value.dtype
+                        ).expand(*value.shape[:-1], value.shape[-2]),
+                        *args,
+                        **kwargs,
+                    )
+                # GROUPED-QUERY ATTENTION. Under GQA there are fewer KV heads than
+                # query heads, and callers may hand SDPA the un-repeated K/V with
+                # `enable_gqa=True` and let it broadcast internally. The recovered
+                # pattern then has one row group per QUERY head while `value` still
+                # has only the KV heads, and the matmul is a shape error — which is
+                # the good case. The head counts are read off the tensors rather
+                # than off a config, so this covers MHA (n_rep == 1, a no-op), GQA
+                # and MQA without naming an architecture (BR-032).
+                n_rep = weights.shape[-3] // value.shape[-3]
+                if n_rep > 1:
+                    # repeat_interleave, not repeat: transformers' repeat_kv expands
+                    # then reshapes, which places each KV head next to its own query
+                    # group. `repeat` would tile the whole block and silently pair
+                    # every query head with the WRONG KV head — same shape, wrong
+                    # attention output, no error anywhere.
+                    value = value.repeat_interleave(n_rep, dim=-3)
+                return weights @ value
+
+            torch.nn.functional.scaled_dot_product_attention = frozen_sdpa
+            patched.append(
+                lambda: setattr(
+                    torch.nn.functional, "scaled_dot_product_attention", original_sdpa
+                )
+            )
+
+        handles = [_freeze_norm(m) for m in _norm_modules(model)] if freeze_norms else []
+
+        # THE FREEZE MUST HAVE ACTUALLY APPLIED (MIS-E2E-079).
+        #
+        # This is the gate `CLAUDE.md` promised under the name `affine_residual`,
+        # implemented soundly. The affine version could not work — freezing does not
+        # make the map affine, so it would refuse every genuine fit — but the hazard
+        # it was aimed at is real: an incomplete freeze yields a matrix of the right
+        # shape that passes STRUCTURAL, NAMING and ENVELOPE validation and reads out
+        # plausible nonsense, and the artifact then records `freeze_qk: true` as
+        # though it held.
+        #
+        # Checking that the patch LANDED is direct, cheap and certain, where
+        # inferring it from the matrix is neither. `_norm_modules` is the specific
+        # reason this matters: it once used a substring match, and a model whose
+        # norm modules do not match the predicate yields an EMPTY list here — a
+        # `freeze_norms=True` fit that froze nothing at all, silently.
+        # No manual undo before these raises: they are inside the `try` now
+        # (MIS-E2E-082), so the `finally` unwinds `patched`. Running both would
+        # release `_FREEZE_LOCK` twice — `RuntimeError: release unlocked lock`,
+        # which is what the existing tests caught the moment the try moved up.
+        if freeze_qk and torch.nn.functional.scaled_dot_product_attention is not frozen_sdpa:
+            raise RuntimeError(
+                "freeze_qk was requested but the SDPA patch is not in place — "
+                "something replaced torch.nn.functional.scaled_dot_product_attention "
+                "after it was patched. Refusing to fit: the lens would record "
+                "freeze_qk=true for a fit that was not frozen."
+            )
+        if freeze_norms and not handles:
+            raise RuntimeError(
+                "freeze_norms was requested but no norm module was found on this "
+                "model, so nothing was frozen. Refusing to fit rather than "
+                "recording freeze_norms=true for an unfrozen fit. Check that "
+                "_norm_modules' predicate matches this architecture's norm layers."
+            )
+
         yield
     finally:
         # Reverse order: the lock was acquired first and must be released

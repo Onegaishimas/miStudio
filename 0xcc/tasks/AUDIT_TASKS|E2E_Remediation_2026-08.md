@@ -278,10 +278,10 @@ inherits a decision rather than a silence.
 
 Not verifiable in the audit session — `ssh` to the GPU node was unavailable, and these are the findings this repo's history says only hardware confirms.
 
-- [ ] 15.1 Verify the SDPA patch + `_FREEZE_LOCK` leak on a real fit. — MIS-E2E-082
-- [ ] 15.2 Verify circuit capture runs the SAE off-distribution. — MIS-E2E-083
+- [x] 15.1 ✅ **-082 was still OPEN and is now fixed.** The lock acquisition and the process-wide SDPA patch sat ABOVE the `try`, so an exception before the `yield` escaped without running the `finally`: the attention patch stayed installed for every later forward pass in that worker, and `_FREEZE_LOCK` was never released. Everything now sits inside the `try`. Two `raise` paths had manual cleanup that the `finally` then repeated — `RuntimeError: release unlocked lock`, masking the real error — caught immediately by the existing tests and removed. **C224 reproduces the original symptom exactly: the suite HANGS**, because the leaked lock blocks the next fit forever. — MIS-E2E-082
+- [x] 15.2 ✅ **-083 verified.** `encode_with_training_normalization` is on all four capture-plane callers (capture, attribution, faithfulness, intervention) plus training, and `test_sae_encode_normalization.py` enforces it with an **AST scan over the live modules** — not a grep — carrying its own control (`test_the_ast_scan_would_catch_the_original_defect`) and a check that the loader passes the trained mode through. The only remaining bare `SAE.encode(x)` in the tree is inside a module docstring illustrating the math. — MIS-E2E-083
 - [ ] 15.3 Drive the end-to-end journey with Playwright: dataset → train → finalize → extract → label → cluster → circuit → calibrate → steer → export → J-Lens. — P12
-- [ ] 15.4 Benchmark `/task-queue/active` specifically for the blocking-Redis fix. A fix measured against a path it did not touch is not a verified fix. — MIS-E2E-102
+- [x] 15.4 ✅ **-102 was still OPEN — fixed, then benchmarked on the path that changed.** `_celery_view` does synchronous Redis result-backend reads and was called directly inside the `async def` handler, so every Monitor poll froze the whole process. Now `asyncio.to_thread` + `gather`. Measured with a 50 ms stand-in round-trip over 12 rows, sampling loop responsiveness **during** the work: wall **601 ms → 53 ms**, worst event-loop stall **601 ms → 0.4 ms**. My first benchmark reported 0.1 ms for both arms — its probes were gathered before the blocking call and completed on the first yield, never overlapping the stall. — MIS-E2E-102
 
 ---
 
@@ -551,6 +551,9 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `0xcc/adrs/000_PADR|miStudio.md` | IDL-38's "one steering core" scoped to the paths it actually covers; the served path is tracked debt (-076) |
 | `backend/tests/unit/test_migrations_do_not_fstring_sql.py` | **New.** New migrations may not interpolate externally-read data into SQL, nor define a hand-rolled escaper. Identifier interpolation stays legal — SQL cannot bind one (-047) |
 | `backend/tests/unit/test_generate_text_reaches_the_model.py` | **New.** Drives `_generate_text` against a stub model. Nothing in 3,438 tests called it, which is how a fix that broke every steering generation shipped green |
+| `backend/src/ml/jlens_fitter.py` | Lock and SDPA patch moved inside the `try`; the now-duplicate manual cleanup before two raises removed (-082) |
+| `backend/src/api/v1/endpoints/task_queue.py` | `_celery_view`'s synchronous Redis reads moved off the event loop with `to_thread` + `gather` (-102) |
+| `backend/tests/unit/test_active_does_not_block_the_loop.py` | **New.** Structural + behavioural: a watchdog samples loop responsiveness during the work, with an in-test control proving the probe can see a stall |
 
 ## Negative controls run
 
@@ -795,6 +798,10 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 
 | C220 | Restore `self._model` — the exact production failure | ✅ 5 failures |
 | C221 | Remove the prompt-too-long refusal | ✅ 1 failure |
+
+| C222 | The Celery reads go back on the event loop | ✅ 2 failures |
+| C223 | Dispatched to a thread but awaited sequentially | ✅ 1 failure |
+| C224 | Lock + SDPA patch back above the `try` | ✅ **HANGS** — the leaked `_FREEZE_LOCK` blocks the next fit forever, which is the reported symptom reproduced exactly rather than an assertion |
 
 ## Provenance
 
