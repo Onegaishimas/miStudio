@@ -95,6 +95,10 @@ export interface PollingConfig<T> {
  * stopPolling();
  * ```
  */
+/** How many consecutive fetch failures end a poll. One transient 502
+ *  must not, which is MIS-E2E-125(1); a genuinely dead endpoint must. */
+const MAX_CONSECUTIVE_ERRORS = 5;
+
 export function startPolling<T>(config: PollingConfig<T>): () => void {
   const {
     fetchStatus,
@@ -110,6 +114,18 @@ export function startPolling<T>(config: PollingConfig<T>): () => void {
 
   let pollCount = 0;
   let intervalId: number | null = null;
+  // MIS-E2E-125(2): a slow response could resolve AFTER polling stopped and
+  // call `onUpdate` with non-terminal state, re-showing a finished job as
+  // in-progress. `stopped` is checked on every path that reports.
+  let stopped = false;
+  // ...and a slow response could still be in flight when the next tick fires,
+  // so two overlapping polls could report out of order.
+  let inFlight = false;
+  // MIS-E2E-125(1): tolerate transient failures. A single 502 during a
+  // ten-minute model download used to end polling permanently, and the only
+  // caller discards the returned handle, so nothing could restart it — the
+  // download completed while the UI showed it in progress forever.
+  let consecutiveErrors = 0;
 
   console.log(`[Polling] Starting polling for ${resourceType} ${resourceId}`, {
     interval,
@@ -117,6 +133,8 @@ export function startPolling<T>(config: PollingConfig<T>): () => void {
   });
 
   const poll = async () => {
+    if (stopped || inFlight) return;
+    inFlight = true;
     pollCount++;
 
     console.log(`[Polling] Poll ${pollCount}/${maxPolls} for ${resourceType} ${resourceId}`);
@@ -124,6 +142,8 @@ export function startPolling<T>(config: PollingConfig<T>): () => void {
     try {
       // Fetch current status
       const resource = await fetchStatus();
+
+      consecutiveErrors = 0;
 
       // Check if resource doesn't exist (was deleted or never existed)
       if (!resource) {
@@ -138,7 +158,9 @@ export function startPolling<T>(config: PollingConfig<T>): () => void {
         return;
       }
 
-      // Notify update callback
+      // Notify update callback — unless polling has been stopped since this
+      // request went out (MIS-E2E-125(2)).
+      if (stopped) return;
       onUpdate(resource);
 
       // Check if we've reached a terminal state
@@ -182,20 +204,34 @@ export function startPolling<T>(config: PollingConfig<T>): () => void {
         return;
       }
     } catch (error) {
-      console.error(`[Polling] Fetch error for ${resourceType} ${resourceId}:`, error);
+      consecutiveErrors++;
+      console.error(
+        `[Polling] Fetch error ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS} ` +
+          `for ${resourceType} ${resourceId}:`,
+        error
+      );
 
-      // Stop polling on error
+      // MIS-E2E-125(1): only give up after a RUN of failures. One 502 in the
+      // middle of a long download is not a reason to stop watching it.
+      if (consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+        return;
+      }
+
       if (intervalId !== null) {
         window.clearInterval(intervalId);
         intervalId = null;
       }
+      stopped = true;
 
-      // Notify error
       if (onError) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-        onError(`Polling failed: ${errorMessage}`);
+        onError(
+          `Polling failed after ${MAX_CONSECUTIVE_ERRORS} consecutive errors: ${errorMessage}`
+        );
       }
+    } finally {
+      inFlight = false;
     }
   };
 
@@ -210,5 +246,8 @@ export function startPolling<T>(config: PollingConfig<T>): () => void {
       intervalId = null;
       pollCount = 0;
     }
+    // Set even if the interval was already cleared: an in-flight request may
+    // still resolve, and it must not report after the caller stopped us.
+    stopped = true;
   };
 }
