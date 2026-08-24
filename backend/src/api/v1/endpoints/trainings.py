@@ -540,7 +540,23 @@ async def delete_checkpoint(
     except CheckpointFileDeleteError as e:
         # The row was deliberately kept so the file is not stranded — report the
         # failure rather than 204ing over a delete that did not happen.
-        raise HTTPException(status_code=500, detail=str(e))
+        #
+        # MIS-E2E-110: the message is NOT returned. It embeds the checkpoint's
+        # `storage_path` and the raw OSError text, and this route is
+        # unauthenticated — so a 500 handed a caller a real filesystem path and
+        # an errno. Every other `detail=str(e)` in this API is a domain
+        # exception on a 4xx, where the message IS the explanation the user
+        # needs; this was the only one on a 500. The operator still gets the
+        # path, in the log.
+        logger.error(
+            "Checkpoint %s: file delete failed, row kept to avoid stranding it: %s",
+            checkpoint_id, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=("The checkpoint file could not be deleted, so the record was "
+                    "kept rather than stranding the file. See the server log."),
+        )
 
     return None
 

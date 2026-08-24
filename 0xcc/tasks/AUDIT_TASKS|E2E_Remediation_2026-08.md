@@ -17,7 +17,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | **Wave 7** | Task 14 — the P2/P3 tail | ⏳ **in progress** — 14.2 ✅ (dead code deleted, sourcemaps + console stripped and verified against the built bundle, all 37 `utcnow()` sites swept, schema `$id` made resolvable with miLLM's mirror synced, internal hostnames removed). 14.1 ⏳ — the body cap is now middleware covering every route. Controls C149–C157. |
-| **Wave 8** | Task 15 — hardware acceptance | ⏳ **started** — cluster access restored (the Part 1 credential removal left no key installed, so `k8s-helpers.sh` was dead the first time it was needed). Live on k8s after the beat hotfix: backend **4/4 Running**, health 200 on both hostnames, `/api/v1/version` reports a real version, the new `GET /extractions/{id}` returns 404 not 405, a 2 MB import is refused **413**, and the frontend ships no sourcemaps and no `console.log`. 15.1–15.4 open. |
+| **Wave 8** | Task 15 — hardware acceptance | ⏳ **started** — cluster access restored (the Part 1 credential removal left no key installed, so `scripts/k8s-helpers.sh` was dead the first time it was needed). Live on k8s after the beat hotfix: backend **4/4 Running**, health 200 on both hostnames, `/api/v1/version` reports a real version, the new `GET /extractions/{id}` returns 404 not 405, a 2 MB import is refused **413**, and the frontend ships no sourcemaps and no `console.log`. 15.1–15.4 open. |
 | **Wave 9** | Task 16 — the acceptance gate | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
@@ -223,6 +223,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 - [x] 14.1 ⏳ **Partial.** **-036** closed and generalised: the circuit-import cap could not work where it lived (FastAPI parses the body before the handler's first statement) and was skipped entirely by a chunked request. Now `core/body_limit.BodySizeLimitMiddleware`, metering the receive channel for **every** route — a sibling sweep found four template-import endpoints with no cap at all. **-095**: all 11 beat entries now carry `expires` at 90% of their period **inside `options`** (the first attempt put it at the entry's top level and crashlooped `celery beat` on k8s — `ScheduleEntry.__init__() got an unexpected keyword argument 'expires'`; the test asserted the same wrong shape, so both agreed and the suite stayed green. It now builds a real `ScheduleEntry`); without one, an hour of ticks blocked behind a GPU job all fire at once when the queue drains. **-117**: `hmac.compare_digest` raises `TypeError` on two non-ASCII `str`s, so a token like `tökén` returned **500 from an unauthenticated LAN-reachable port** — now compared as UTF-8 bytes. **-094**: the comment claimed `max_tasks_per_child` restarts the solo worker and reclaims VRAM; it recycles a prefork *child* and the solo pool has none, so that reclaim never happened. The claim is gone and the real mechanism (55 `empty_cache()` sites + the GPU watchdog) is named. **-101**: a failed model activation extraction appeared **nowhere** in the Monitor — federated into `/active` but not `/failed`, and unlike tokenizations (whose exemption is genuine) `extract_activations` writes no `task_queue` row either. This is the class of failure the user hit on 2026-08-23. Now federated, and a generalised guard fails when any `/active` source is missing from `/failed` without a recorded reason. — MIS-E2E-036, -095, -117, -094, -101 ✅ · the remaining P2s are still open
 - [x] 14.2 ✅ **P3 tail closed.** `backend/services/ollm_server/` deleted — a whole second FastAPI app with model-loading endpoints and open CORS, unwired since its compose service was removed (-019). `frontend/src/api/websocket.ts` + `hooks/useWebSocket.ts` deleted, with a stale `vi.mock` for a module its component never imported (-014). Production builds ship no sourcemaps (12 → 0) and no `console.log/debug/info` — verified against the built bundle, with `console.error` still at 116 (-020). All 37 `utcnow()` sites route through `core/clock.utc_now`; **not merely a deprecation** — all 62 `DateTime` columns are `timezone=True`, so naive values were being reinterpreted in the session timezone (-054). Schema `$id` moved off the private `hitsai.net` host, miLLM's vendored mirror synced so the cross-repo identity guard stays green (-044). Internal hostnames and a private IP removed from shipped frontend source (-009). — MIS-E2E-019, -014, -020, -054, -044, -009
+- [x] 14.3 ✅ **Second P3/P2 sweep.** **-110**: all 27 `detail=str(e)` sites classified — 26 are DOMAIN exceptions on 4xx where the message IS the explanation (stripping them would make the API worse); exactly **one** was a 500 embedding a checkpoint's filesystem path and a raw `OSError` on an unauthenticated route. Fixed, and a guard now flags *any* handler putting caught-exception text into a 5xx anywhere under `src/api/` — the generalisation IDL-22 lacked. **-001**: four stale persona files deleted; the copies the commands actually read live at `.claude/context/agents/` and are current, so this was a second unread copy, not a stale live one. **-022**: `audit_migrations.py` and `check_type_mismatches.py` deleted (unreferenced, regex-based, superseded by `test_orm_matches_migrated_schema.py`); the 22 non-hex revision ids are **deliberately kept** — a revision id is the value in every deployed DB's `alembic_version`, so renaming strands every install — and grandfathered by a list that may only shrink. **-008**: the five dumps are untracked and `backups/` gitignored, with a guard on both dumps and literal credentials. — MIS-E2E-110, -001, -022, -008
 
 ## Task 15 — Hardware acceptance
 
@@ -460,6 +461,13 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_task_docs_traceability.py` | Guard widened to distinguish **Deleted** from *never written* — different claims — and its detector extracted so C163 (an annotation matching every row) now fails |
 | `backend/src/api/v1/endpoints/task_queue.py` | `/failed` federates activation extractions — a failed one was in no list at all (-101) |
 | `backend/tests/unit/test_monitor_federation_contract.py` | Extended: every `/active` source must also reach `/failed` or be recorded as a deliberate exemption, and the exemption list is checked against real federators |
+| `backend/src/api/v1/endpoints/trainings.py` | The one 5xx that returned raw exception text (a checkpoint path + errno) now logs it and returns a generic detail (-110) |
+| `backend/tests/unit/test_no_raw_exception_text_on_5xx.py` | **New.** AST guard over all of `src/api/`: caught-exception text may not reach a 5xx body. 4xx domain messages stay legal |
+| `.claude/agents/{architect,product_engineer,qa_engineer,test_engineer}.md` | **Deleted** — a stale second copy describing a different project; the commands read `.claude/context/agents/`, which is current |
+| `backend/audit_migrations.py`, `backend/check_type_mismatches.py` | **Deleted** — unreferenced regex-based schema auditors superseded by `test_orm_matches_migrated_schema.py` |
+| `backend/tests/unit/test_migration_revision_ids.py` | **New.** New migrations must use generated hex ids; the 22 legacy ids are grandfathered by a list that may only shrink |
+| `.gitignore` | `backups/` and `*.sql.gz` ignored so no new dump enters git (-008) |
+| `backend/tests/unit/test_no_dumps_or_secrets_tracked.py` | **New.** Checks the git INDEX: no dump tracked, `backups/` ignored, and no literal credential in a tracked shell/YAML file |
 
 ## Negative controls run
 
@@ -648,6 +656,14 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 
 | C174 | Put `expires` back at an entry's TOP LEVEL — the exact shape that crashlooped `celery beat` in production | ✅ 4 failures |
 | C175 | Drop an expiry from `options` | ✅ 3 failures |
+
+| C176 | The 500 returns `str(e)` again (the checkpoint path leak) | ✅ 1 failure |
+| C177 | A brand-new module leaks caught-exception text on a 503 — the generalisation | ✅ 1 failure |
+| C178 | A new migration with a hand-typed revision id | ✅ 1 failure |
+| C179 | The grandfather list widened to admit it — the escape hatch | ✅ 1 failure |
+| C180 | `K8S_PASS="pass"` re-added to a tracked script | ✅ 1 failure |
+| C181 | A database dump re-tracked | ✅ 1 failure |
+| C182 | `backups/` un-ignored | ✅ 1 failure |
 
 ## Provenance
 

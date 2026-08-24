@@ -166,3 +166,12 @@ site/
 !poetry.lock
 !Pipfile.lock
 **/tmp_api/
+
+# Database dumps. MIS-E2E-008: five were committed and are permanently
+# retrievable from the public mirror's history — GitHub serves commits by SHA
+# whether or not they are reachable, so they cannot be un-published. They are
+# untracked from here on so no new dump joins them. `scripts/backup-db.sh`
+# writes into this directory; the files stay on disk, they just do not enter
+# git.
+backups/
+*.sql.gz
