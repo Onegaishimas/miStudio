@@ -149,3 +149,54 @@ async def test_restart_accepts_the_real_token():
     assert result["status"] == "restarting"
     # And it scheduled the exit rather than performing it inline.
     assert tasks.tasks, "the restart was authorised but nothing was scheduled"
+
+
+class TestCalibrationJudgeEndpointIsValidated:
+    """MIS-E2E-075: free-form input handed to a client running inside the pod.
+
+    `judge_endpoint` arrives per-request and is passed to an `OpenAI` client
+    constructed in the backend. Unvalidated, that is a server-side request
+    forgery primitive: the caller picks the host the pod connects to, and the
+    pod reaches things the caller cannot — cloud instance metadata above all.
+
+    The check reuses `validate_llm_endpoint_url`, the same one the labeling path
+    applies to the same kind of field, so the two cannot drift apart.
+    """
+
+    def _body(self, **kwargs):
+        from src.api.v1.endpoints.circuits import CalibrationBody
+
+        return CalibrationBody(**kwargs)
+
+    def test_a_non_http_scheme_is_rejected(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            self._body(judge_endpoint="file:///etc/passwd")
+
+    def test_cloud_metadata_is_rejected(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            self._body(judge_endpoint="http://169.254.169.254/latest/meta-data/")
+
+    def test_an_internal_llm_server_is_still_allowed(self):
+        """The normal case. A guard that blocks it would just be turned off."""
+        body = self._body(judge_endpoint="http://127.0.0.1:8001/v1")
+        assert body.judge_endpoint == "http://127.0.0.1:8001/v1"
+
+    def test_omitting_it_is_still_allowed(self):
+        assert self._body().judge_endpoint is None
+
+    def test_it_uses_the_shared_validator_not_a_second_copy(self):
+        import inspect
+
+        from src.api.v1.endpoints import circuits
+
+        source = inspect.getsource(circuits.CalibrationBody)
+        assert "validate_llm_endpoint_url" in source, (
+            "a second hand-rolled URL check here will drift from the labeling "
+            "path's; MIS-E2E-072 and -092 are both that shape"
+        )

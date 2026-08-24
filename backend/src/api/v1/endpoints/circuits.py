@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, field_validator, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.database import get_db
@@ -331,6 +331,29 @@ class CalibrationBody(BaseModel):
     # cliff cannot be found without a judge.
     judge_endpoint: Optional[str] = None
     judge_model: Optional[str] = None
+
+    @field_validator("judge_endpoint")
+    @classmethod
+    def _validate_judge_endpoint(cls, v: Optional[str]) -> Optional[str]:
+        """MIS-E2E-075: this URL is POSTed to from inside the cluster.
+
+        `judge_endpoint` is free-form per-request input handed straight to an
+        `OpenAI` client running in the backend pod, with no validation — not
+        even a scheme check. That is a server-side request forgery primitive:
+        a caller chooses the host the pod connects to, and the pod can reach
+        things the caller cannot, including cloud instance metadata.
+
+        `validate_llm_endpoint_url` is the check the labeling path already
+        applies to exactly this kind of field — it permits http/https to public,
+        RFC-1918 and loopback addresses, since an internal LLM server is the
+        normal case, and blocks metadata addresses and non-http schemes. Reusing
+        it rather than writing a second one keeps the two paths from drifting.
+        """
+        if v is None:
+            return v
+        from src.utils.url_validation import validate_llm_endpoint_url
+
+        return validate_llm_endpoint_url(v)
 
 
 @router.post("/{circuit_id}/calibration", status_code=202)

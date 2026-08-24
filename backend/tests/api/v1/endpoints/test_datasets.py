@@ -365,6 +365,30 @@ class TestDeleteDataset:
 
 
 class TestDownloadDataset:
+    """MIS-E2E-027: these dispatched a REAL Celery task.
+
+    Both tests below call an endpoint that ends in `download_dataset_task.delay()`.
+    With no broker mocked, Celery connects to Redis to publish the message, so
+    on a machine where Redis is not running they fail with a
+    `ConnectionRefusedError` raised out of `celery.backends.redis.ResultConsumer`
+    — a unit test failing on infrastructure it never meant to exercise. Worse,
+    where Redis *is* running they enqueue a genuine dataset download.
+
+    `_no_real_dispatch` replaces `.delay` for the duration. The endpoint's own
+    behaviour — the 202, the row it writes, the id it stores — is what these
+    tests are for, and all of it still runs.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_real_dispatch(self):
+        from unittest.mock import MagicMock, patch
+
+        with patch(
+            "src.workers.dataset_tasks.download_dataset_task.delay"
+        ) as dispatch:
+            dispatch.return_value = MagicMock(id="test-task-id")
+            yield dispatch
+
     """Tests for POST /api/v1/datasets/download endpoint."""
 
     async def test_download_dataset_success(self, client: AsyncClient):
