@@ -584,14 +584,25 @@ def _all_tools() -> dict[str, list[tuple[str, str]]]:
 
     from . import CATEGORY_MODULES, MILLM_CATEGORY_MODULES
 
-    # millm_* categories register only with a configured URL; a placeholder is
-    # enough to enumerate them, since nothing is called here.
-    os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")
+    # MIS-E2E-115: do NOT write to os.environ.
+    #
+    # This used to `os.environ.setdefault("MILLM_API_URL", "http://millm.invalid")`
+    # so the millm_* categories would register long enough to be listed. But
+    # `setdefault` is a permanent process mutation: after any agent called
+    # `mistudio_howto` — a read-only documentation tool — the unauthenticated
+    # `/health` endpoint, which re-reads the setting per request, advertised
+    # `http://millm.invalid` as the configured miLLM URL for the life of the
+    # process. A docs lookup silently changed what the server reported about
+    # its own configuration.
+    #
+    # The placeholder now rides on the throwaway settings object below, so it
+    # exists only for this enumeration.
 
     out: dict[str, list[tuple[str, str]]] = {}
     for category in {**CATEGORY_MODULES, **MILLM_CATEGORY_MODULES}:
         mcp, _client = build_server(
-            MCPSettings(tool_categories=category, allow_anonymous=True),
+            MCPSettings(tool_categories=category, allow_anonymous=True,
+                        millm_api_url_override="http://millm.invalid"),
             stdio=True,
         )
         # `mistudio_howto` is itself an async tool, so this runs INSIDE a

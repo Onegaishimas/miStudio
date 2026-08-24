@@ -38,10 +38,23 @@ class MCPSettings(BaseSettings):
     def api_url(self) -> str:
         return os.environ.get("MISTUDIO_API_URL", "http://localhost:8000").rstrip("/")
 
+    #: Per-instance override for `millm_api_url`, so a caller that needs the
+    #: millm_* categories to register can say so WITHOUT touching os.environ.
+    #: MIS-E2E-115: `mistudio_howto` used `os.environ.setdefault` for this, a
+    #: permanent process mutation — after any agent read the docs, the
+    #: unauthenticated `/health` endpoint advertised the placeholder URL as the
+    #: real configuration for the life of the process.
+    millm_api_url_override: str = Field(
+        default="",
+        description="Overrides MILLM_API_URL for this settings object only",
+    )
+
     # miLLM base URL (Unified MCP, Feature 9). Empty = millm_* categories
     # are skipped at registration even when requested (logged once).
     @property
     def millm_api_url(self) -> str:
+        if self.millm_api_url_override:
+            return self.millm_api_url_override.rstrip("/")
         return os.environ.get("MILLM_API_URL", "").rstrip("/")
 
     def enabled_categories(self) -> set[str]:

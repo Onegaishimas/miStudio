@@ -139,6 +139,20 @@ class HealthGate:
             return False, f"timed out after {PROBE_TIMEOUT_S}s ({url})"
         except httpx.HTTPError as e:
             return False, f"{type(e).__name__}: {e} ({url})"
+        except httpx.InvalidURL as e:
+            # MIS-E2E-116: `InvalidURL` derives from `Exception`, NOT from
+            # `httpx.HTTPError` — its MRO is (InvalidURL, Exception, ...). So a
+            # malformed configured URL escaped both handlers above and
+            # propagated out of the gate, breaking the one promise the gate
+            # makes: the server instructions tell agents an unavailable product
+            # returns {"unavailable": …, "reason": …} and never raises. A
+            # typo'd MILLM_API_URL turned every gated tool into a traceback.
+            return False, f"malformed URL: {e} ({url!r})"
+        except Exception as e:  # noqa: BLE001 - the gate's contract is to answer
+            # Anything else is still an answer, not an exception. This gate is
+            # the boundary that turns "cannot reach it" into a value; if it
+            # raises, every caller downstream has to re-implement that.
+            return False, f"probe failed, {type(e).__name__}: {e} ({url})"
         # Strictly 2xx: a 3xx from an ingress fronting a dead backend must
         # not count as available (009 R1; redirects are not followed).
         if not 200 <= response.status_code < 300:
