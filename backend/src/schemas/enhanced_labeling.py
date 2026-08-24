@@ -17,7 +17,14 @@ class EnhancedLabelingJobResponse(BaseModel):
     examples_total: int
     examples_completed: int
     workers: int
-    endpoint: str
+    # MIS-E2E-111: `endpoint` is NOT published.
+    #
+    # This schema is `from_attributes=True` over the job row, so declaring the
+    # field returned the configured LLM server URL to the client — e.g.
+    # "http://ollama.hitsai.local:11434/v1", an internal hostname and port not
+    # otherwise discoverable from the browser. The sibling labeling schema
+    # deliberately omits it; this one just listed every column.
+    #
     model: str
     celery_task_id: Optional[str]
     pass1_summaries: Optional[list[dict[str, Any]]]

@@ -1653,7 +1653,19 @@ class ExtractionService:
                                     "status": ExtractionStatus.EXTRACTING.value,
                                     "sae_id": sae_id,
                                     "progress": progress,
-                                    "features_extracted": int(latent_dim * progress),
+                                    # MIS-E2E-068(1): report what has actually
+                                    # been WRITTEN, which during sampling is
+                                    # zero — no feature record exists until the
+                                    # commit phase that follows this loop.
+                                    #
+                                    # This used to be `int(latent_dim * progress)`,
+                                    # a number derived from the sampling bar
+                                    # rather than from any row, so the UI showed
+                                    # a rising count of features that did not
+                                    # exist. `samples_processed` below is the
+                                    # real measure of progress here and is
+                                    # already in this payload.
+                                    "features_extracted": 0,
                                     "total_features": latent_dim,
                                     # Live metrics
                                     "current_batch": current_batch,
