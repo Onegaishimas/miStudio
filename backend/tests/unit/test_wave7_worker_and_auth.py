@@ -33,20 +33,67 @@ class TestEveryBeatEntryExpires:
             f"only {len(beat_schedule)} beat entries — did the schedule move?"
         )
 
-    def test_every_entry_declares_an_expiry(self, beat_schedule):
-        missing = [name for name, cfg in beat_schedule.items() if "expires" not in cfg]
-        assert not missing, (
-            f"{missing} have no `expires`. A tick queued behind a long GPU task "
-            f"is still delivered when the queue drains, so an hour of blocked "
-            f"ticks fires at once against state that has moved on."
+    def test_every_entry_is_a_shape_celery_accepts(self, beat_schedule):
+        """Build the real object. This is the test that was missing.
+
+        The first version of this fix put `expires` at the TOP LEVEL of each
+        entry, and the first version of this test asserted `"expires" in cfg`
+        — so the test and the code shared one wrong mental model and agreed
+        with each other. The suite was green and `celery beat` crashlooped in
+        production with:
+
+            TypeError: ScheduleEntry.__init__() got an unexpected keyword
+            argument 'expires'
+
+        `expires` is a message option; it belongs in `options`. Nothing short
+        of constructing what Celery constructs would have caught that.
+        """
+        from celery.beat import ScheduleEntry
+
+        from src.core.celery_app import celery_app
+
+        broken = {}
+        for name, cfg in beat_schedule.items():
+            try:
+                ScheduleEntry(name=name, app=celery_app, **cfg)
+            except Exception as exc:  # noqa: BLE001 - reporting any rejection
+                broken[name] = f"{type(exc).__name__}: {exc}"
+        assert not broken, (
+            f"celery beat cannot build these entries and will crashloop on "
+            f"startup: {broken}"
         )
+
+    def test_every_entry_declares_an_expiry(self, beat_schedule):
+        missing = [
+            name for name, cfg in beat_schedule.items()
+            if "expires" not in cfg.get("options", {})
+        ]
+        assert not missing, (
+            f"{missing} have no `expires` in their options. A tick queued "
+            f"behind a long GPU task is still delivered when the queue drains, "
+            f"so an hour of blocked ticks fires at once against state that has "
+            f"moved on."
+        )
+
+    def test_the_expiry_survives_into_the_built_entry(self, beat_schedule):
+        """Present in the dict is not the same as reaching Celery."""
+        from celery.beat import ScheduleEntry
+
+        from src.core.celery_app import celery_app
+
+        for name, cfg in beat_schedule.items():
+            entry = ScheduleEntry(name=name, app=celery_app, **cfg)
+            assert entry.options.get("expires"), (
+                f"{name} builds, but its expiry did not reach the entry's "
+                f"options — the message will be sent without one"
+            )
 
     def test_each_expiry_is_shorter_than_its_own_period(self, beat_schedule):
         wrong = {
-            name: (cfg["schedule"], cfg["expires"])
+            name: (cfg["schedule"], cfg["options"]["expires"])
             for name, cfg in beat_schedule.items()
             if not isinstance(cfg["schedule"], (int, float))
-            or cfg["expires"] >= cfg["schedule"]
+            or cfg["options"]["expires"] >= cfg["schedule"]
         }
         assert not wrong, (
             f"{wrong}: an expiry at or beyond the period never discards anything "
