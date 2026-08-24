@@ -221,7 +221,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 14 — Remaining P2/P3
 
-- [x] 14.1 ⏳ **Partial.** MIS-E2E-036 closed and generalised: the circuit-import cap could not work where it lived (FastAPI parses the body before the handler's first statement) and was skipped entirely by a chunked request. It is now `core/body_limit.BodySizeLimitMiddleware`, metering the receive channel for **every** route — a sibling sweep found four template-import endpoints with no cap at all and `cluster_profiles` measuring size only after parsing. — MIS-E2E-036 ✅ · the remaining P2s are still open
+- [x] 14.1 ⏳ **Partial.** **-036** closed and generalised: the circuit-import cap could not work where it lived (FastAPI parses the body before the handler's first statement) and was skipped entirely by a chunked request. Now `core/body_limit.BodySizeLimitMiddleware`, metering the receive channel for **every** route — a sibling sweep found four template-import endpoints with no cap at all. **-095**: all 11 beat entries now carry `expires` at 90% of their period; without one, an hour of ticks blocked behind a GPU job all fire at once when the queue drains. **-117**: `hmac.compare_digest` raises `TypeError` on two non-ASCII `str`s, so a token like `tökén` returned **500 from an unauthenticated LAN-reachable port** — now compared as UTF-8 bytes. **-094**: the comment claimed `max_tasks_per_child` restarts the solo worker and reclaims VRAM; it recycles a prefork *child* and the solo pool has none, so that reclaim never happened. The claim is gone and the real mechanism (55 `empty_cache()` sites + the GPU watchdog) is named. — MIS-E2E-036, -095, -117, -094 ✅ · the remaining P2s are still open
 - [x] 14.2 ✅ **P3 tail closed.** `backend/services/ollm_server/` deleted — a whole second FastAPI app with model-loading endpoints and open CORS, unwired since its compose service was removed (-019). `frontend/src/api/websocket.ts` + `hooks/useWebSocket.ts` deleted, with a stale `vi.mock` for a module its component never imported (-014). Production builds ship no sourcemaps (12 → 0) and no `console.log/debug/info` — verified against the built bundle, with `console.error` still at 116 (-020). All 37 `utcnow()` sites route through `core/clock.utc_now`; **not merely a deprecation** — all 62 `DateTime` columns are `timezone=True`, so naive values were being reinterpreted in the session timezone (-054). Schema `$id` moved off the private `hitsai.net` host, miLLM's vendored mirror synced so the cross-repo identity guard stays green (-044). Internal hostnames and a private IP removed from shipped frontend source (-009). — MIS-E2E-019, -014, -020, -054, -044, -009
 
 ## Task 15 — Hardware acceptance
@@ -454,6 +454,10 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `docs/schemas/*.json` (+ miLLM's vendored copies) | `$id` moved off the private host to a resolvable public URL; both repos kept byte-identical |
 | `frontend/src/components/steering/PromptListEditor.tsx` | Collapsible staging box (user request): persisted per browser, prompts stay mounted, collapsed state still summarises what is staged |
 | `frontend/src/components/steering/PromptListEditor.collapse.test.tsx` | **New.** 7 tests incl. persistence, a throwing `localStorage`, and that collapsing hides rather than discards |
+| `backend/src/core/celery_app.py` | All 11 beat entries carry `expires` (-095); the false `max_tasks_per_child` VRAM-reclaim claim replaced with what actually reclaims (-094) |
+| `backend/src/mcp_server/server.py` | Bearer token compared as UTF-8 bytes — two non-ASCII `str`s made `compare_digest` raise, returning 500 from an unauthenticated port (-117) |
+| `backend/tests/unit/test_wave7_worker_and_auth.py` | **New.** 10 tests: beat expiry read from the loaded config not the source text, a live 401 for a non-ASCII token, and the corrected claim pinned both ways |
+| `backend/tests/unit/test_task_docs_traceability.py` | Guard widened to distinguish **Deleted** from *never written* — different claims — and its detector extracted so C163 (an annotation matching every row) now fails |
 
 ## Negative controls run
 
@@ -626,6 +630,15 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 | C155 | The collapse choice stops persisting | ✅ 1 failure |
 | C156 | A throwing `localStorage` left unguarded | ✅ 2 failures |
 | C157 | Collapsing UNMOUNTS the prompts instead of hiding them | ⚠️ the first attempt produced invalid JSX and the harness read the compile failure as a pass; re-run as a valid mutation ✅ 1 failure |
+
+| C158 | One beat entry loses its `expires` | ✅ 2 failures |
+| C159 | An expiry set beyond its own period | ✅ 1 failure |
+| C160 | Bearer token compared as `str` again | ✅ 2 failures |
+| C161 | The false VRAM-reclaim claim returns | ✅ 2 failures |
+| C162 | A deleted path loses its `**Deleted**` mark | ✅ 1 failure |
+| C163 | Widen `DELETED` to `\|`, so it matches every row | ⚠️ **survived** — the guard accepted every dead path and nothing noticed. Detector extracted and tested directly; re-run ✅ 2 failures |
+| C164 | Same widening applied to `NEVER_WRITTEN` | ✅ 2 failures |
+| C165 | The detector stops recording offenders | ✅ 1 failure |
 
 ## Provenance
 

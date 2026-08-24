@@ -78,7 +78,16 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         header = request.headers.get("authorization", "")
         provided = header[7:] if header.lower().startswith("bearer ") else ""
-        if not provided or not hmac.compare_digest(provided, self._token):
+        # MIS-E2E-117: `hmac.compare_digest` raises TypeError when either str
+        # argument contains a non-ASCII character, so a token like "tökén"
+        # produced a 500 — from an unauthenticated, LAN-reachable port. A 500
+        # on a bad credential also tells the caller their input reached
+        # something, which a 401 does not. Compare as UTF-8 bytes: every input
+        # encodes, the comparison stays constant-time, and a wrong token is a
+        # 401 whatever alphabet it is written in.
+        if not provided or not hmac.compare_digest(
+            provided.encode("utf-8"), self._token.encode("utf-8")
+        ):
             return JSONResponse({"detail": "Invalid or missing bearer token"}, status_code=401)
         return await call_next(request)
 
