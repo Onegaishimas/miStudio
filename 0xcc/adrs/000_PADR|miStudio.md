@@ -3286,6 +3286,22 @@ false positives, and a guard that cries wolf gets disabled.
 
 **Tradeoffs:** the recorder standardizes on the circuit hook target, which differs from the live feature/cluster SERVE path on models with a residual-norm module (accepted: a transcript must match the calibrated band, and the serve path is unchanged); transcripts grow manifest size (bounded by the caps); cluster/feature records are not circuit-linked so they are retrieved by manifest_id, returned in the record result.
 
+**SCOPE CORRECTION 2026-08-24 (MIS-E2E-076).** "One steering core" is accurate for the paths this
+decision migrated and **not** for the product as a whole. `steering_core.build_steer_generator` is
+used by `circuit_calibration_service` and `steering_recorder_service`. The **user-facing** steering
+path — `steering_service._create_steering_hook` / `_register_steering_hooks`, reached from the
+Steering panel and the `steer_*` MCP tools — was never migrated and remains a second
+implementation of the same additive residual-stream math.
+
+That matters beyond tidiness: the hook target correction in item 1 above was found on hardware
+*in the recorder*, and a second implementation is a second place for that class of bug to live
+independently. The two are not currently known to disagree — `steering_service` was separately
+corrected to hook `structure.layers_module[L]` — but nothing enforces that they agree.
+
+Recorded as **tracked debt rather than fixed**: migrating the served path is a GPU-behaviour change
+that needs hardware verification against a known-good steer, not a static refactor. Until then the
+honest statement is *two implementations, one of them unified across three artifact types*.
+
 ---
 
 ### IDL-39: Training finalization from a checkpoint, and step-granular checkpoint retention
