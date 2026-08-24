@@ -166,3 +166,23 @@ For marker-less data, use these rules:
 3. Capitalized after lowercase = new word
 4. After punctuation = new word
 5. Short token after long token (not common word) = likely continuation
+
+
+## Status (triaged 2026-08-24, MIS-E2E-012)
+
+**SHIPPED — 13 of 13 boxes checked**
+
+`get_token_with_marker` is used in the extraction path. Nothing open; recorded for completeness so the file is not re-triaged.
+
+> This file had no `## Relevant Files` section, which the framework requires and
+> which is the only doc→code join a reader has. Six ad-hoc task files were in
+> that state, holding **193 of the repo's 348 unchecked boxes** — more than the
+> entire numbered feature chain. Unchecked boxes over shipped work are not
+> neutral: they hide the ones that are genuinely open.
+
+## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `backend/src/services/extraction_service.py` | Uses `get_token_with_marker` to preserve BPE markers |
+| `frontend/src/components/features/FeatureTokenAnalysis.tsx` | Strips the marker for display (MIS-E2E-030 arc) |

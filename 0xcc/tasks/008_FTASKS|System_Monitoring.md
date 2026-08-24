@@ -209,7 +209,7 @@
 | File | Purpose |
 |------|---------|
 | `backend/src/services/system_monitor_service.py` | Metrics collection |
-| ~~`backend/src/workers/system_monitor_tasks.py`~~ | **Deleted 2026-07-10** — superseded by `services/background_monitor.py` |
+| ~~`backend/src/workers/system_monitor_tasks.py`~~ | **Deleted 2026-07-10** — superseded by `services/background_monitor.py` ⚠️ **never written** — removed later (MIS-E2E-154) |
 | `backend/src/workers/websocket_emitter.py` | WebSocket emission |
 | `backend/src/core/celery_app.py` | Beat schedule |
 | `backend/src/api/v1/endpoints/system.py` | API routes |
@@ -221,8 +221,8 @@
 | `frontend/src/hooks/useSystemMonitorWebSocket.ts` | WebSocket hook |
 | `frontend/src/components/SystemMonitor/SystemMonitor.tsx` | Main component |
 | `frontend/src/components/SystemMonitor/UtilizationChart.tsx` | GPU chart |
-| `frontend/src/components/SystemMonitor/MemoryChart.tsx` | Memory chart |
-| `frontend/src/components/SystemMonitor/IOChart.tsx` | I/O chart |
+| `frontend/src/components/SystemMonitor/MemoryChart.tsx` | Memory chart ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `frontend/src/components/SystemMonitor/IOChart.tsx` | I/O chart ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 ---
 

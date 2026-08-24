@@ -19,6 +19,7 @@ import {
 import logoSvg from '../../assets/logo.svg';
 import { useUIStore } from '../../stores/uiStore';
 import type { ActivePanel } from '../../config/panels';
+import { BRAND } from '../../config/brand';
 
 const APP_VERSION = '0.5.0';
 
@@ -71,14 +72,14 @@ export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
         <div className="flex items-center gap-2 min-w-0">
           <img
             src={logoSvg}
-            alt="MechInterp Studio"
+            alt={BRAND.name}
             className="w-8 h-8 flex-shrink-0"
           />
           {!collapsed && (
             <div className="overflow-hidden min-w-0 flex-1">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">MechInterp Studio</div>
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{BRAND.name}</div>
               <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
-                AI Feature Discovery
+                {BRAND.tagline}
               </div>
             </div>
           )}

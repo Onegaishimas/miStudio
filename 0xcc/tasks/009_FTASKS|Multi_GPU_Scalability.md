@@ -181,17 +181,17 @@
 ### Backend (To Create)
 | File | Purpose |
 |------|---------|
-| `backend/src/services/gpu_availability_service.py` | GPU availability |
-| `backend/src/ml/distributed_training.py` | DDP infrastructure |
-| `backend/src/workers/distributed_tasks.py` | Distributed Celery task |
-| `backend/alembic/versions/xxx_add_multi_gpu_columns.py` | Schema updates |
+| `backend/src/services/gpu_availability_service.py` | GPU availability ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `backend/src/ml/distributed_training.py` | DDP infrastructure ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `backend/src/workers/distributed_tasks.py` | Distributed Celery task ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `backend/alembic/versions/xxx_add_multi_gpu_columns.py` | Schema updates ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 ### Frontend (To Create)
 | File | Purpose |
 |------|---------|
-| `frontend/src/components/training/GPUSelector.tsx` | GPU selection UI |
-| `frontend/src/components/SystemMonitor/PerGPUView.tsx` | Per-GPU view |
-| `frontend/src/components/SystemMonitor/AggregatedView.tsx` | Aggregated view |
+| `frontend/src/components/training/GPUSelector.tsx` | GPU selection UI ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `frontend/src/components/SystemMonitor/PerGPUView.tsx` | Per-GPU view ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `frontend/src/components/SystemMonitor/AggregatedView.tsx` | Aggregated view ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 ---
 

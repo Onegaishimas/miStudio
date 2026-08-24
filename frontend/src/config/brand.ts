@@ -12,9 +12,11 @@
 export const BRAND = {
   name: 'MechInterp Studio',
   shortName: 'miStudio',
-  tagline: 'AI Feature Discovery Platform',
+  tagline: 'AI Feature Discovery Workbench',
   description: 'Professional tool for training and analyzing Sparse Autoencoders',
-  version: '0.1.0',
+  // No `version` here. It read '0.1.0' while VERSION and package.json both
+  // said 0.5.0 — undetected because nothing imported BRAND. The version
+  // has exactly one source: the VERSION file, served by GET /api/v1/version.
   repository: 'https://github.com/Onegaishimas/miStudio',
 } as const;
 

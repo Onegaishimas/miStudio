@@ -218,7 +218,7 @@
 | `backend/src/services/sae_manager_service.py` | Unified management |
 | `backend/src/services/huggingface_sae_service.py` | HF downloads |
 | `backend/src/ml/community_format.py` | Format handling |
-| `backend/src/ml/sae_loader.py` | SAE loading |
+| `backend/src/ml/sae_loader.py` | SAE loading ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/api/v1/endpoints/saes.py` | API routes |
 
 ### Frontend

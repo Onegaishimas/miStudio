@@ -32,3 +32,22 @@
 - [ ] 4.1 MCP tools for annotation, interventions, watchlists + reachability (BR-027 full parity).
 - [ ] 4.2 Surface estimates before a run in the UI and in tool descriptions.
 - [ ] 4.3 Review rounds 2 and 3.
+
+## Relevant Files
+
+> **Added 2026-08-24 (MIS-E2E-153).** This file had no `## Relevant Files`
+> section, and neither did the four beside it — the five FTASKS with the most
+> implementation and the least traceability. The PPRD marked their rows
+> "Planned" and `CLAUDE.md`'s Document Inventory had no entry for them at all,
+> while their own boxes ran 68–100% checked and the code below exists. A shipped
+> feature with no doc→code join is one nobody can review, and the framework
+> names this section as the join.
+>
+> Paths verified to exist at the time of writing; `test_task_docs_traceability`
+> fails if one stops resolving.
+
+| File | Purpose |
+|---|---|
+| `backend/src/mcp_server/tools/jlens.py` | The J-space MCP surface — full parity with the workbench |
+| `backend/src/api/v1/endpoints/jlens.py` | REST surface for readout, artifacts, band report and gate |
+| `backend/tests/unit/test_jlens_reachable_mcp.py` | Reachability harness: a tool is not shipped until removing its registration fails |

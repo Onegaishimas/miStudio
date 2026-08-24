@@ -473,3 +473,23 @@ Features documented:
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 ```
+
+
+## Status (triaged 2026-08-24, MIS-E2E-012)
+
+**PARTIAL — 13 done / 25 open**
+
+A January-2025 documentation sweep, largely superseded by the manual overhaul and by this audit's Task 13. Kept as history; its open boxes should be closed against the current manual rather than worked as written.
+
+> This file had no `## Relevant Files` section, which the framework requires and
+> which is the only doc→code join a reader has. Six ad-hoc task files were in
+> that state, holding **193 of the repo's 348 unchecked boxes** — more than the
+> entire numbered feature chain. Unchecked boxes over shipped work are not
+> neutral: they hide the ones that are genuinely open.
+
+## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `manual/docs/` | The Docusaurus manual these tasks predate |
+| `0xcc/audits/E2E-2026-08/` | Task 13 of this audit, which supersedes much of it |

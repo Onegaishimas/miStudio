@@ -58,3 +58,22 @@ them, and the guard is tight on purpose. Fixed the line-joining instead and rewo
 **One mutation survived its first run** (reverting the comment-joining) because I had reworded
 around it rather than testing it. Now pinned by two regressions — a split denial that must pass and a
 split overclaim that must fail — and re-verified as a negative control.
+
+## Relevant Files
+
+> **Added 2026-08-24 (MIS-E2E-153).** This file had no `## Relevant Files`
+> section, and neither did the four beside it — the five FTASKS with the most
+> implementation and the least traceability. The PPRD marked their rows
+> "Planned" and `CLAUDE.md`'s Document Inventory had no entry for them at all,
+> while their own boxes ran 68–100% checked and the code below exists. A shipped
+> feature with no doc→code join is one nobody can review, and the framework
+> names this section as the join.
+>
+> Paths verified to exist at the time of writing; `test_task_docs_traceability`
+> fails if one stops resolving.
+
+| File | Purpose |
+|---|---|
+| `backend/src/schemas/jspace_claims.py` | J-space rung assignment on the existing evidence ladder |
+| `frontend/src/config/jspaceClaims.ts` | The frontend's copy of the rung vocabulary and its non-causal phrasing |
+| `backend/tests/unit/test_causal_language_audit.py` | Enforces that a readout is never presented in causal language |

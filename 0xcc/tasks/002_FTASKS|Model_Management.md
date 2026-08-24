@@ -247,8 +247,8 @@
 | `backend/src/models/model.py` | SQLAlchemy model |
 | `backend/src/schemas/model.py` | Pydantic schemas |
 | `backend/src/services/model_service.py` | Business logic |
-| `backend/src/services/huggingface_model_service.py` | HF integration |
-| `backend/src/services/quantization_service.py` | Quantization |
+| `backend/src/services/huggingface_model_service.py` | HF integration ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `backend/src/services/quantization_service.py` | Quantization ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/ml/model_loader.py` | Model loading singleton |
 | `backend/src/workers/model_tasks.py` | Celery tasks |
 | `backend/src/api/v1/endpoints/models.py` | API routes |

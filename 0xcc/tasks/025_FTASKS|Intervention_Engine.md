@@ -35,3 +35,22 @@
 **Acceptance:** a result cannot exist without its control; clamping holds every named
 (position, layer); dynamic top-k never ablates clean-pass behaviour; the swap default scales with
 the model; and every run records the primitive that produced it.
+
+## Relevant Files
+
+> **Added 2026-08-24 (MIS-E2E-153).** This file had no `## Relevant Files`
+> section, and neither did the four beside it — the five FTASKS with the most
+> implementation and the least traceability. The PPRD marked their rows
+> "Planned" and `CLAUDE.md`'s Document Inventory had no entry for them at all,
+> while their own boxes ran 68–100% checked and the code below exists. A shipped
+> feature with no doc→code join is one nobody can review, and the framework
+> names this section as the join.
+>
+> Paths verified to exist at the time of writing; `test_task_docs_traceability`
+> fails if one stops resolving.
+
+| File | Purpose |
+|---|---|
+| `backend/src/services/jlens_intervention.py` | Paired-run execution with clamping, projective ablation, coordinate swap |
+| `backend/src/workers/jlens_intervention_tasks.py` | GPU-bound Celery entry point for the above |
+| `backend/src/services/jlens_causal.py` | Causal-claim helpers shared with the claims-discipline surface |

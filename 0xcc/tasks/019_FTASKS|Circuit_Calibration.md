@@ -72,9 +72,9 @@
 |------|---------|
 | `backend/src/schemas/circuit_definition.py` (extend) + `docs/schemas/circuit-definition-v1.json` (regen) + vendored copy | `calibration` block; contract |
 | `backend/src/services/circuit_calibration_service.py` (NEW) + `workers/circuit_calibration_tasks.py` (NEW) | search + clamp + persist (GPU task) |
-| `backend/src/services/probe_generator.py` (NEW) | neutral-topic falsifiable probes |
+| `backend/src/services/probe_generator.py` (NEW) | neutral-topic falsifiable probes ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/services/circuit_service.py` (extend) | `update`-only clamp write-through |
-| `backend/src/api/v1/endpoints/circuit_calibration.py` (NEW) + WS | REST + progress |
+| `backend/src/api/v1/endpoints/circuit_calibration.py` (NEW) + WS | REST + progress ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | `backend/src/mcp_server/tools/circuits.py` (extend) | `calibrate_circuit_strength`, `reproduce_calibration`, band in `get_circuit` |
 | `backend/tests/unit/test_calibration_*.py` (NEW) | schema back-compat, clamp, probe neutrality, bisection, **load-bearing-judge control**, reachability |
 | `frontend/src/components/panels/CircuitsPanel.tsx` (calibration section) + `CalibrationManifestDrawer.tsx` (NEW) | UI |

@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 6** | Task 13 — documentation (19 findings) | ⏳ **in progress** — 13.1–13.4 ✅ 13.6 ✅ 13.7 partial 13.8 ✅ 13.9 ✅ 13.11 ✅ · 13.5, 13.10 open |
+| **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | Waves 4–9 | Mutations, realtime, provenance, docs, P2/P3, hardware, acceptance | ❌ not started |
 
@@ -210,10 +210,10 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 - [x] 13.4 ✅ README and CLAUDE.md both point at `docker compose up -d`. The script is described for what it is — a one-machine dev convenience — with the reasons it cannot work elsewhere. — MIS-E2E-162
 - [ ] 13.5 Correct IDL-5 and the **five** documents propagating it; IDL-16's three false claims; IDL-1/12's channel and event conventions; IDL-11's DLQ and backoff; IDL-38's "one steering core". — MIS-E2E-156, -157, -158, -159, -076
 - [x] 13.6 ✅ Re-counted from evidence: **9** rows (16–24), not 13 — row 21 already read "Implemented". Status verified against the **code**, not another document: each row's primary module was checked to exist, and 25–29 stay Planned because theirs do not. The PPRD inventory is declared **authoritative for status**, with `CLAUDE.md` the narrative that yields to it. — MIS-E2E-011
-- [x] 13.7 ⏳ **Partial.** The off-by-one instruction references are fixed — `001_generate-brd.md` was added at the front and the list never renumbered, so every entry named a real file performing a **different action**, and `008_housekeeping.md` did not exist. Now pinned by `test_every_instruct_reference_names_a_file_that_exists`. The startup section is corrected too. **Remaining:** the phantom paths, the stale test counts and the "returns 501" claims in the status narrative. — MIS-E2E-155 ✅ · -010, -163 open
+- [x] 13.7 ✅ **Complete.** The off-by-one instruction references are fixed — `001_generate-brd.md` was added at the front and the list never renumbered, so every entry named a real file performing a **different action**, and `008_housekeeping.md` did not exist. The startup section is corrected. **Now also:** the phantom `session_state.json` / `research_context.json` references (including in the folder-structure diagram, which presented both as real), the stale `995 passed` / `1007` counts, and the "returns 501" claims the J-Lens binding invalidated. Pinned by `test_every_instruct_reference_names_a_file_that_exists`, `test_claude_md_does_not_claim_a_nonexistent_file_is_auto_loaded` and `test_claude_md_test_counts_are_not_silently_stale`. — MIS-E2E-155, -010, -163
 - [x] 13.8 ✅ **PADR IDL-47** (v3.5). States the posture, the **four classes that escape it** — credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach, each found live in this audit — the infrastructure boundary (the API behind nginx, *not* the broker or `/api/internal`), the four conditions that invalidate the decision, and that the PIN is a UI affordance and never security. — MIS-E2E-002, -166
 - [x] 13.9 ✅ Re-measured: **9** missing against the current ORM, not 11 (two of the named ones are non-ORM). All nine documented; the unearned claim replaced by `test_data_model_doc_covers_every_table`, which diffs the page against `Base.metadata`. `alembic_version` and `feature_activations_default` are **listed exemptions with reasons**. Control: adding a new ORM table fails the guard until it is documented. — MIS-E2E-050, -164
-- [ ] 13.10 Add `## Relevant Files` to FTASKS 024–028 and the six ad-hoc files; triage the 348 unchecked boxes; fix the 22 dead paths. — MIS-E2E-153, -154, -012
+- [x] 13.10 ✅ `## Relevant Files` added to FTASKS 024–028 and the six ad-hoc files, each entry carrying a triage verdict (SHIPPED / OPEN / PARTIAL) backed by code evidence rather than a bare path. 41 dead paths annotated `⚠️ **never written**` with the git-history evidence (`no add-commit anywhere in repo history`) rather than silently deleted — the claim that they were planned is real history. `- [x] Zoom and pan` unchecked: a false completion, no implementation exists. Pinned by `test_task_docs_traceability.py` (C141–C143). — MIS-E2E-153, -154, -012
 - [x] 13.11 ✅ Filter fixed (`fn.attr in ("get", …)` also matched `dict.get("kind")`), contract regenerated, the three phantom endpoints gone. Tool-count prose derived — it said **92/13** while the manual said **97/13** and the generated contract said **116/14**; only the contract was derived.
   ⚠️ Two attempts at the derivation were wrong and the tests caught both: summing `CATEGORY_MODULES` counts **modules** (16), and `_all_tools()` **builds a server**, which calls this — infinite recursion. Now an AST count, worded **"up to"** because `get_approval_status` is registered only when `steering_approval` is on. A test pins the ceiling-vs-served difference to exactly that named set. — MIS-E2E-114, -017, -161
 
@@ -278,7 +278,7 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/tests/unit/test_circuit_definition_roundtrip.py` | **New.** Document-equality round-trip + a fail-closed check that the endpoint passes every contract block |
 | `backend/src/api/v1/endpoints/circuits.py` | MIS-E2E-037: `calibration` was absent from the import dict, so an imported circuit lost its whole calibrated band |
 | `backend/check_migrations.py` | Claim narrowed to what it checks — it compares column names only and said "All models match the database schema" |
-| `backend/find_column_gaps.py` | **Deleted** (MIS-E2E-049) — its `create_table` regex truncated at the first `)`, so every report was a false positive |
+| `backend/find_column_gaps.py` | **Deleted** (MIS-E2E-049) — its `create_table` regex truncated at the first `)`, so every report was a false positive ⚠️ **never written** — removed later (MIS-E2E-154) |
 | `backend/tests/unit/test_analysis_cache_upsert.py` | **New** (out-of-band). Pins the cache upsert that fixed the production 500 |
 | `backend/src/services/analysis_service.py` | Cache upsert; ablation's dead precondition removed; correlations scoped to the SAE |
 | `backend/src/models/{feature,feature_analysis_cache}.py` | Declare the unique constraints that existed only in migrations |
@@ -400,7 +400,7 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/api/v1/endpoints/system.py` | MIS-E2E-099: `/system/restart` gated on the internal token (`settings` was not even imported) |
 | `docker-compose.yml` | MIS-E2E-146: postgres and the Celery broker bound to loopback. MIS-E2E-147: frontend `3000:8080` |
 | `backend/tests/unit/test_privilege_operations.py` | **New.** 8 tests; `pkill` asserted as a parsed CALL, and the restart exercised in all three directions |
-| `k8s/mistudio-deployment.yaml` | **Deleted** (MIS-E2E-144) — a stale second copy `k8s_deploy` re-applied |
+| `k8s/mistudio-deployment.yaml` | **Deleted** (MIS-E2E-144) — a stale second copy `k8s_deploy` re-applied ⚠️ **never written** — removed later (MIS-E2E-154) |
 | `scripts/k8s-helpers.sh` | MIS-E2E-144/-147: applies `k8s/base` via kustomize, restarts `mistudio-mcp`, and fails per-step instead of one `&&` chain |
 | `k8s/base/{postgres,redis}.yaml` | MIS-E2E-145: `strategy: Recreate` over hostPath |
 | `k8s/base/ingress.yaml` | MIS-E2E-148: `/api/internal` denied on **both** hosts |
@@ -430,6 +430,14 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `manual/docs/advanced/settings-reference.md` | MIS-E2E-160: the PIN described as the UI affordance it is |
 | `backend/src/workers/websocket_emitter.py` | MIS-E2E-136: in-process emit when a loop is running; HTTP only from a worker |
 | `frontend/src/components/layout/Sidebar.tsx` · `config/brand.ts` | Tagline: "Edge AI Feature Discovery" → "AI Feature Discovery" (user request) |
+| `CLAUDE.md` | 13.7: phantom `session_state.json` / `research_context.json` (incl. the folder diagram), stale suite counts, and the obsolete "returns 501" J-Lens claims |
+| `.claude/context/health/dashboard.md` | **New** (13.10). Referenced by 4 slash commands and never created — `/review` Step 5 told the reviewer to update a file that did not exist |
+| `0xcc/tasks/02{4,5,6,7,8}_FTASKS|*.md` + 6 ad-hoc task files | 13.10: `## Relevant Files` added with per-entry triage verdicts; 41 never-written paths annotated with git-history evidence |
+| `backend/tests/unit/test_docs_match_behaviour.py` | **New.** Pins the CLAUDE.md corrections and the dashboard's existence *and non-emptiness* — C144 initially survived because `.exists()` passes on an empty file |
+| `backend/tests/unit/test_task_docs_traceability.py` | **New.** Every task file has `## Relevant Files`; every listed path resolves or is marked never-written; no task claims a capability with no implementation |
+| `frontend/src/components/layout/Sidebar.tsx` | Tagline → "AI Feature Discovery Workbench" (user request), and the name/tagline/alt now read from `BRAND` instead of a second hardcoded copy |
+| `frontend/src/config/brand.ts` | Tagline updated; stale `version: '0.1.0'` **removed** — it had drifted four minor releases from VERSION and package.json, undetected because nothing imported `BRAND` |
+| `frontend/src/components/layout/Sidebar.brand.test.tsx` | **New.** Pins the wiring: the literal must not reappear beside the config, and no hand-maintained version may return (C145–C148) |
 
 ## Negative controls run
 
@@ -451,7 +459,7 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC12 | Restore the real key in ONE Postman writer (MIS-E2E-072) | ✅ 2 failures |
 | NC13 | Remove `settings_pin_hash` from `_PROTECTED_KEYS` (MIS-E2E-055/-165) | ✅ 4 of 6 failures — the 2 listing tests still pass because the belt-and-braces `is_sensitive=True` masks the value independently |
 | NC4 | Revert `_cache_analysis` to the blind INSERT | ✅ 2 failures |
-| NC14 | Revert `models.py` requantize to `resolve_data_path` (MIS-E2E-071) | ✅ 1 failure |
+| NC14 | Revert `models.py` requantize to `resolve_data_path` (MIS-E2E-071) | ✅ 1 failure ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | NC15 | Revert `dataset_tasks` raw deletion to `resolve_data_path` | ✅ 1 failure |
 | NC16 | Disable the guard's `min_depth` check | ✅ 6 failures |
 | NC17 | Disable the guard's symlink re-check | ✅ 1 failure |
@@ -472,7 +480,7 @@ here as they are verified, because "a test exists" is not the same claim.
 | NC32 | Remove the per-client subscription cap | ✅ 1 failure |
 | NC33 | Remove validation from the MANAGER, leaving only the handler | ✅ 1 failure |
 | NC34 | Re-register a duplicate `subscribe` in `main.py` (MIS-E2E-138) | ✅ 1 failure |
-| NC35 | Construct a second `WebSocketManager()` in `main.py` | ✅ 1 failure |
+| NC35 | Construct a second `WebSocketManager()` in `main.py` | ✅ 1 failure ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 | NC36 | Rebind the dataset PATCH route to the internal `DatasetUpdate` | ✅ 1 failure |
 | NC37 | Disable the dataset sink's allow-list | ✅ 1 failure |
 | NC38 | Restore `PATCH /api/trainings/{id}` | ✅ 1 failure |
@@ -583,6 +591,15 @@ here as they are verified, because "a test exists" is not the same claim.
 
 **6 of the 14 surviving audit mutations are now killed** — M2, M3, M5, the cache divergence, **M13 (NC81)** and **M22 (NC86)**. Earlier count: — M2 (NC3), M3 (NC7),
 M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
+
+| C141 | Strip `## Relevant Files` from an FTASKS file | ✅ 2 failures |
+| C142 | Remove a dead path's `never written` annotation | ✅ 1 failure |
+| C143 | Re-check `- [x] Zoom and pan` (the false completion) | ✅ 1 failure |
+| C144 | Empty the health dashboard | ⚠️ **survived** — `.exists()` passes on a 0-byte file. Check tightened to require content; re-run ✅ 1 failure, and ✅ again when deleted outright |
+| C145 | Sidebar hardcodes the tagline again beside the config | ✅ 1 failure |
+| C146 | Sidebar hardcodes the product name again | ✅ 1 failure |
+| C147 | Reintroduce a hand-maintained `BRAND.version` | ✅ 1 failure |
+| C148 | Revert the tagline in the config to `Edge AI Feature Discovery` | ✅ 1 failure |
 
 ## Provenance
 

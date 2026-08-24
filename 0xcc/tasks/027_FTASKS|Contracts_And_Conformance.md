@@ -28,3 +28,22 @@
 - [ ] 4.2 miLLM mirror update + schema-sync guard extension.
 - [ ] 4.3 Template-lens compute path.
 - [ ] 4.4 Review rounds 2 and 3.
+
+## Relevant Files
+
+> **Added 2026-08-24 (MIS-E2E-153).** This file had no `## Relevant Files`
+> section, and neither did the four beside it — the five FTASKS with the most
+> implementation and the least traceability. The PPRD marked their rows
+> "Planned" and `CLAUDE.md`'s Document Inventory had no entry for them at all,
+> while their own boxes ran 68–100% checked and the code below exists. A shipped
+> feature with no doc→code join is one nobody can review, and the framework
+> names this section as the join.
+>
+> Paths verified to exist at the time of writing; `test_task_docs_traceability`
+> fails if one stops resolving.
+
+| File | Purpose |
+|---|---|
+| `backend/src/schemas/jspace_contracts.py` | Additive interchange kinds for the lens artifact, annotation and watchlist |
+| `backend/src/services/jlens_artifact_service.py` | Stage → validate → commit → serve for a mounted artifact |
+| `docs/schemas/` | The frozen interchange schemas these validate against |

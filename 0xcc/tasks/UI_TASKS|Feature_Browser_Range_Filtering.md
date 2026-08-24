@@ -273,3 +273,28 @@ Medium - Essential for feature discovery workflow to identify optimal features
 
 ## Estimated Effort
 ~2-3 hours (backend: 30min, frontend: 1.5-2hrs, testing: 30min)
+
+
+## Status (triaged 2026-08-24, MIS-E2E-012)
+
+**OPEN — 28 boxes, no implementation found**
+
+No frequency-range filter exists in the Feature Browser. This is genuine backlog, and saying so is the point of the triage: the other files' open boxes were noise hiding this one.
+
+> This file had no `## Relevant Files` section, which the framework requires and
+> which is the only doc→code join a reader has. Six ad-hoc task files were in
+> that state, holding **193 of the repo's 348 unchecked boxes** — more than the
+> entire numbered feature chain. Unchecked boxes over shipped work are not
+> neutral: they hide the ones that are genuinely open.
+
+## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `frontend/src/components/features/ExtractionJobCard.tsx` | The feature-browsing surface these tasks extend |
+| `frontend/src/stores/featuresStore.ts` | Holds the feature list a range filter would narrow |
+
+> There is no `FeaturesPanel.tsx` — my first draft of this table named one, and
+> the traceability test caught it before it landed. Browsing happens through
+> `ExtractionJobCard` and `FeatureDetailModal`. Naming a file that does not
+> exist is exactly the defect MIS-E2E-154 records 22 instances of.

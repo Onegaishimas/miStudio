@@ -34,3 +34,22 @@
 field is absent without a band report; annotation and readout share one projection; disagreement is
 a sortable, filterable queue that resolves nothing automatically; and a sweep calling most features
 workspace is reported implausible.
+
+## Relevant Files
+
+> **Added 2026-08-24 (MIS-E2E-153).** This file had no `## Relevant Files`
+> section, and neither did the four beside it — the five FTASKS with the most
+> implementation and the least traceability. The PPRD marked their rows
+> "Planned" and `CLAUDE.md`'s Document Inventory had no entry for them at all,
+> while their own boxes ran 68–100% checked and the code below exists. A shipped
+> feature with no doc→code join is one nobody can review, and the framework
+> names this section as the join.
+>
+> Paths verified to exist at the time of writing; `test_task_docs_traceability`
+> fails if one stops resolving.
+
+| File | Purpose |
+|---|---|
+| `backend/src/services/jlens_annotation.py` | Dual geometric/behavioral classification of dictionary features through the lens |
+| `backend/src/services/jlens_watchlist.py` | Named concept sets with detection thresholds — the runtime handoff artifact |
+| `backend/src/schemas/jlens.py` | Annotation and watchlist request/response shapes |

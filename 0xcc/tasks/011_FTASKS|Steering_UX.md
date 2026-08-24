@@ -134,20 +134,20 @@
 ### Backend
 | File | Purpose |
 |------|---------|
-| `schemas/steering.py` | max_length 4→20, drop compare color validator |
-| `schemas/sae.py` | `SAEFeatureSummary.activation_frequency` |
-| `api/v1/endpoints/saes.py` | map activation_frequency in browser |
+| `schemas/steering.py` | max_length 4→20, drop compare color validator ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `schemas/sae.py` | `SAEFeatureSummary.activation_frequency` ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `api/v1/endpoints/saes.py` | map activation_frequency in browser ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 ### Frontend
 | File | Purpose |
 |------|---------|
-| `utils/steeringStrength.ts` | baseline formula (+test) |
-| `types/steering.ts` | 20-color palette, SelectedFeature fields |
-| `stores/steeringStore.ts` | MAX 20, auto-baseline, steeringMode |
-| `stores/featureGroupsStore.ts` | selection-map widening |
-| `components/steering/SelectedFeatureCard.tsx` | compact tile |
-| `components/steering/FeatureSelector.tsx` | limit/labels/auto preset |
-| `components/panels/SteeringPanel.tsx` | Blended/Compare toggle |
+| `utils/steeringStrength.ts` | baseline formula (+test) ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `types/steering.ts` | 20-color palette, SelectedFeature fields ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `stores/steeringStore.ts` | MAX 20, auto-baseline, steeringMode ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `stores/featureGroupsStore.ts` | selection-map widening ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `components/steering/SelectedFeatureCard.tsx` | compact tile ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `components/steering/FeatureSelector.tsx` | limit/labels/auto preset ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
+| `components/panels/SteeringPanel.tsx` | Blended/Compare toggle ⚠️ **never written** — no add-commit anywhere in repo history (MIS-E2E-154) |
 
 ---
 

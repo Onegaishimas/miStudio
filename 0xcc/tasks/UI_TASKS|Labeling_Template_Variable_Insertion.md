@@ -135,3 +135,22 @@ Low - Quality of life improvement for template editing
 
 ## Estimated Effort
 ~1-2 hours
+
+
+## Status (triaged 2026-08-24, MIS-E2E-012)
+
+**PARTIAL — the panel exists; the insertion affordance is unverified**
+
+`LabelingPromptTemplatesPanel.tsx` exists and handles `{{variable}}` templates, but the click-to-insert affordance these 20 boxes describe was not confirmed. Left open rather than ticked on a partial match.
+
+> This file had no `## Relevant Files` section, which the framework requires and
+> which is the only doc→code join a reader has. Six ad-hoc task files were in
+> that state, holding **193 of the repo's 348 unchecked boxes** — more than the
+> entire numbered feature chain. Unchecked boxes over shipped work are not
+> neutral: they hide the ones that are genuinely open.
+
+## Relevant Files
+
+| File | Purpose |
+|---|---|
+| `frontend/src/components/panels/LabelingPromptTemplatesPanel.tsx` | The template editor these tasks extend |
