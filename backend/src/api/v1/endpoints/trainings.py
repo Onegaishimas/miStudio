@@ -26,6 +26,7 @@ from ....services.training_service import TrainingService
 from ....services.checkpoint_service import CheckpointService
 from ....workers.training_tasks import train_sae_task, resume_training_task
 from ....core.celery_app import revoke_task
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,18 @@ async def create_training(
     try:
         db_training = await TrainingService.create_training(db, training)
 
-        # Start training task asynchronously
-        task = train_sae_task.delay(db_training.id)
-
-        # Update training with celery task ID
-        await TrainingService.start_training(db, db_training.id, task.id)
+        # MIS-E2E-104: generate the id BEFORE dispatching, and persist it before
+        # the task can exist. The old order was `delay()` then write the id
+        # returned — so between those two statements a GPU training was running
+        # with nothing in the database recording which Celery task it was. A
+        # failure in that window (or a worker restart) left an orphan the
+        # janitors could not revoke, because revocation needs the id.
+        #
+        # `apply_async(task_id=...)` accepts a caller-supplied id, so the id
+        # exists before anything is queued.
+        task_id = str(uuid.uuid4())
+        await TrainingService.start_training(db, db_training.id, task_id)
+        train_sae_task.apply_async(args=[db_training.id], task_id=task_id)
 
         # Refresh to get updated record
         db_training = await TrainingService.get_training(db, db_training.id)

@@ -154,21 +154,36 @@ def _get_nested_attr(obj: object, path: str) -> Optional[object]:
 
 def _find_matching_attr(module: nn.Module, patterns: Sequence[str]) -> Optional[str]:
     """
-    Find the first attribute name that matches any of the given patterns.
+    Find the attribute matching the EARLIEST pattern in `patterns`.
+
+    MIS-E2E-087. This used to loop `dir(module)` and test membership in
+    `patterns`. `dir()` is sorted alphabetically, so the caller's carefully
+    ordered preference list was discarded and whichever attribute sorted first
+    won. On a Llama-style layer that means `input_layernorm` — the PRE-attention
+    norm — is returned where `LAYER_NORM_PATTERNS` asks for
+    `post_attention_layernorm`, the residual-stream point. The docstring here
+    even asserted that order does not matter, which is how it survived.
+
+    `_is_transformer_layer` (below) already iterates the patterns in order, so
+    the two functions disagreed about the same model. They now agree.
 
     Args:
         module: Module to search
-        patterns: Ordered attribute-name patterns; membership only, so order
-            does not matter here (see the note on the constants).
+        patterns: Attribute-name patterns, MOST PREFERRED FIRST.
 
     Returns:
         Matching attribute name, or None if no match
     """
-    for attr_name in dir(module):
-        if attr_name.lower() in patterns:
-            attr = getattr(module, attr_name, None)
-            if attr is not None and isinstance(attr, nn.Module):
-                return attr_name
+    # Map lower-cased attribute name -> real name, so a pattern can be matched
+    # against the module without another pass over dir() per pattern.
+    available = {name.lower(): name for name in dir(module)}
+    for pattern in patterns:
+        attr_name = available.get(pattern.lower())
+        if attr_name is None:
+            continue
+        attr = getattr(module, attr_name, None)
+        if attr is not None and isinstance(attr, nn.Module):
+            return attr_name
     return None
 
 

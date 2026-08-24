@@ -128,23 +128,30 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """
-    Remove migrated tokenization records.
+    """Refuses. MIS-E2E-039.
 
-    Note: This only removes records that were created by this migration.
-    Any tokenizations created after this migration won't be affected.
-    """
-    # Get database connection
-    conn = op.get_bind()
+    This used to run:
 
-    # Delete all tokenization records for datasets that have tokenized_path
-    # This is a safe downgrade since the data still exists in the datasets table
-    delete_query = text("""
         DELETE FROM dataset_tokenizations
-        WHERE dataset_id IN (
-            SELECT id FROM datasets WHERE tokenized_path IS NOT NULL
-        )
-    """)
+        WHERE dataset_id IN (SELECT id FROM datasets WHERE tokenized_path IS NOT NULL)
 
-    conn.execute(delete_query)
-    print("Removed migrated tokenization records")
+    under a docstring promising it *"only removes records that were created by
+    this migration"*. It cannot know that. Nothing marks a row as
+    migration-created, and `tokenized_path` stays set on the dataset forever —
+    so every tokenization a user has made since, for any of those datasets, is
+    matched and deleted. The comment called this "safe … since the data still
+    exists in the datasets table", but `datasets.tokenized_path` is one path,
+    while `dataset_tokenizations` is one row per (dataset, model, max_length):
+    the rows it deletes are not reconstructible from what it points at.
+
+    A downgrade that cannot identify its own rows must not guess. Refusing is
+    recoverable — the operator can decide what to remove and do it deliberately
+    — whereas a wrong DELETE is not.
+    """
+    raise RuntimeError(
+        "Refusing to downgrade 2e1feb9cc451: this migration left no marker "
+        "distinguishing the tokenization rows it created from ones users have "
+        "made since, and the only available filter (datasets.tokenized_path IS "
+        "NOT NULL) matches both. Delete the rows you actually want by hand, "
+        "then stamp this revision down with `alembic stamp`."
+    )
