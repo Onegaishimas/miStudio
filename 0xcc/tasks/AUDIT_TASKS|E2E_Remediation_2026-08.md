@@ -14,7 +14,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 2** | Tasks 1–5 — the 13 P0s | ✅ **CLOSED** — Tasks 1–5, all 13 P0s. 46 negative controls recorded. |
 | **Wave 3** | Task 6 — wrong results presented as correct (9 findings) | ✅ **CLOSED** — all 9. 29 negative controls. |
 | **Wave 4** | Task 8 — pin the surviving audit mutations | ✅ **CLOSED** — all 9. Three pins found **live** defects. |
-| **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
+| **Wave 6** | Task 13 — documentation (19 findings) | ✅ **CLOSED** — 13.1–13.11, incl. 13.5 (verified 2026-08-24: the corrections landed in Wave 6, only the checkbox lagged). 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | **Wave 7** | Task 14 — the P2/P3 tail | ✅ **CLOSED** — 14.1–14.15. Every P2/P3 either fixed with a verified-red control, or recorded as accepted debt **with its reason** (coverage, process, one forward-only data loss). Controls C149–C219. Three findings were **wrong or incomplete as written** and are corrected in place. |
 | **Wave 8** | Task 15 — hardware acceptance | ✅ **CLOSED** — 15.1–15.4. Cluster access restored. **Two of the three "verify" items turned out to be unfixed** (-082 freeze-leak, -102 blocking Redis) and were fixed then verified; -083 was genuinely done. -102 benchmarked on the path that changed: event-loop stall **601 ms → 0.4 ms**. Full journey driven live, including a real steered generation. |
@@ -36,7 +36,28 @@ running file list.*
 - [x] 0.2 ~~Make the mirror private~~ — **superseded**: mirror stays public by decision; the orphan snapshot removes the need until 0.4 is done. One setting, immediate, reversible. — MIS-E2E-143
 - [x] 0.3 ✅ `scripts/k8s-helpers.sh` moved to key-based auth reading from the environment; remove `StrictHostKeyChecking=no`. — MIS-E2E-143
 - [x] 0.4 ✅ **Fixed `sync-to-clean.yml` so the mirror carries no source history** — publish a squashed single commit, or `git filter-repo` before pushing. Deleting files from a tip commit does not remove them from a force-pushed history. — MIS-E2E-143
-- [ ] 0.5 Review the five `backups/*.sql.gz` dumps for credentials and user prompt text; rotate anything they hold. `git rm` them and add `backups/` to `.gitignore`. — MIS-E2E-008, -143
+- [~] 0.5 ⚠ **Review done — it found credentials. Rotation is USER ACTION.**
+  **The `git rm` + `.gitignore` half is complete** (Wave 7, commit `4e16686`): all five dumps are
+  untracked, `backups/` and `*.sql.gz` are ignored, and `test_no_dumps_or_secrets_tracked.py` fails if
+  one is re-added.
+
+  **The content review — which nobody had done — found two real HuggingFace access tokens**, stored in
+  a model-download row's `config` JSON:
+
+  ```
+  {"repo_id": "google/gemma-2b", "quantization": "Q4",
+   "access_token": "hf_wRIMGeGgDB…", "trust_remote_code": false}
+  ```
+
+  Two distinct `hf_*` tokens across the five dumps. **Both must be revoked at
+  huggingface.co/settings/tokens.** The dumps were tracked from `b0d6fc0` (2025-12-18) until
+  `4e16686` (2026-08-24) — roughly eight months — and MIS-E2E-143 records them among the objects
+  already published to the public mirror, which cannot be withdrawn.
+
+  Also checked and **clean**: no `sk-*` OpenAI keys, no `ghp_*` GitHub tokens, no private keys, no
+  PBKDF2/PIN material. `app_settings` — the table holding encrypted API keys and the PIN hash — did
+  not exist yet in December, so these dumps predate it entirely. The dumps do contain dataset and
+  prompt-template text, which is user content rather than credentials. — MIS-E2E-008, -143
 - [x] 0.6 ✅ Added a CI check that inspects the **published** tree's history against the exclusion list and fails the sync. — MIS-E2E-143
 - [x] 0.7 ✅ Deleted (21 files). Verified byte-identical to their `0xcc/` originals first; the one non-duplicate — a reading-list manifest — was **relocated** to `0xcc/docs/clustering-document-set.md` pointing at the originals, rather than destroyed. — MIS-E2E-007, -164
 
@@ -210,7 +231,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
   ⚠️ **A test was pinning this defect** — `test_anonymous_flag_allows_empty_token` asserted the flag satisfies the guard, i.e. certified the hole. Rewritten. Third defect-pinning test found in this remediation. — MIS-E2E-150
 - [x] 13.3 ✅ Both pages rewritten around the **Secret** the deployment actually reads (`secretKeyRef` → `mistudio-secrets`), with a verification step that reports failure — unlike `sed`, which exits 0 on zero matches, so all four steps "succeeded" while setting nothing. The danger callout records what the old steps did, including the one that **renamed the database and its user to the password string**. — MIS-E2E-152
 - [x] 13.4 ✅ README and CLAUDE.md both point at `docker compose up -d`. The script is described for what it is — a one-machine dev convenience — with the reasons it cannot work elsewhere. — MIS-E2E-162
-- [ ] 13.5 Correct IDL-5 and the **five** documents propagating it; IDL-16's three false claims; IDL-1/12's channel and event conventions; IDL-11's DLQ and backoff; IDL-38's "one steering core". — MIS-E2E-156, -157, -158, -159, -076
+- [x] 13.5 ✅ **All six corrections verified in place.** **IDL-5** now reads *"In-process asyncio task for system monitoring (superseded 'Celery Beat')"* — the phantom `collect_system_metrics` task never existed, and all five propagating documents (README, CLAUDE.md, PPRD, 008_FTDD, 008_FTASKS) name `services/background_monitor.py` instead. Pinned by six guards in `test_docs_match_behaviour.py`, including one asserting no Celery task by that name is registered and one per document. **IDL-16**'s three false claims are stated as limits rather than capabilities (and the first is now *true*: `_required_tables()` derives from `Base.metadata`). **IDL-1/12** carry the real pluralised channels and colon-delimited events, with the one emitter that bypasses the standard path recorded rather than silently excepted. **IDL-11** is split into implemented vs aspiration — no DLQ, no backoff. **IDL-38**'s "one steering core" is scoped to the two paths it actually covers, with the served path recorded as tracked debt. — MIS-E2E-156, -157, -158, -159, -076
 - [x] 13.6 ✅ Re-counted from evidence: **9** rows (16–24), not 13 — row 21 already read "Implemented". Status verified against the **code**, not another document: each row's primary module was checked to exist, and 25–29 stay Planned because theirs do not. The PPRD inventory is declared **authoritative for status**, with `CLAUDE.md` the narrative that yields to it. — MIS-E2E-011
 - [x] 13.7 ✅ **Complete.** The off-by-one instruction references are fixed — `001_generate-brd.md` was added at the front and the list never renumbered, so every entry named a real file performing a **different action**, and `008_housekeeping.md` did not exist. The startup section is corrected. **Now also:** the phantom `session_state.json` / `research_context.json` references (including in the folder-structure diagram, which presented both as real), the stale `995 passed` / `1007` counts, and the "returns 501" claims the J-Lens binding invalidated. Pinned by `test_every_instruct_reference_names_a_file_that_exists`, `test_claude_md_does_not_claim_a_nonexistent_file_is_auto_loaded` and `test_claude_md_test_counts_are_not_silently_stale`. — MIS-E2E-155, -010, -163
 - [x] 13.8 ✅ **PADR IDL-47** (v3.5). States the posture, the **four classes that escape it** — credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach, each found live in this audit — the infrastructure boundary (the API behind nginx, *not* the broker or `/api/internal`), the four conditions that invalidate the decision, and that the PIN is a UI affordance and never security. — MIS-E2E-002, -166
