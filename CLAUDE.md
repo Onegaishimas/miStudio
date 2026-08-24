@@ -202,6 +202,25 @@ k8s() { ssh -o BatchMode=yes "${K8S_USER}@${K8S_HOST}" "$1"; }
 
 **One-time setup, per machine:** `ssh-copy-id ${K8S_USER}@${K8S_HOST}`
 
+### 🔒 NEVER disable password authentication (standing user directive, 2026-08-24)
+
+`PasswordAuthentication` on `192.168.244.61` **stays `yes`. No agent may turn it off**, and no agent
+may suggest it as a hardening step. This is not a default to be improved on — it is a decision.
+
+Password auth is the **break-glass path**. Key and certificate auth both have failure modes that end
+with nobody able to reach the GPU node: a certificate expires on its own schedule, a key can be lost
+with its workstation, and `~/.ssh/authorized_keys` can be truncated by a bad script. Password auth
+is what remains when those fail.
+
+This is not hypothetical here. On 2026-08-24 the MIS-E2E-143 fix removed the committed password from
+`scripts/k8s-helpers.sh` and installed no key, so the helper was dead the first time an incident
+needed it — during a live outage. **Removing a credential path without a proven replacement is
+itself an outage.** The password has since been rotated, which is the correct mitigation for
+disclosure; disabling it is not.
+
+If you want the node harder, do it somewhere that does not remove the last way in: fail2ban, a
+firewall rule limiting port 22 to the LAN, or `AllowUsers`. Not `PasswordAuthentication no`.
+
 ### If `ssh` returns `Permission denied (publickey)`
 
 Your key is not in the node's `~/.ssh/authorized_keys`. **Do not reach for `sshpass`, and do not
