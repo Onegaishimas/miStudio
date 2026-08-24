@@ -178,6 +178,50 @@ pgrep -f celery  # Celery worker should be running
 # - API docs: http://localhost:8000/docs
 ```
 
+## Reaching the GPU node (agents: read this before any `ssh`)
+
+**Authentication is key-based. There is no password anywhere in this repo, and there must never be
+one again.**
+
+```bash
+source scripts/k8s-helpers.sh   # then: k8s_status, k8s_logs, k8s "any command"
+```
+
+`k8s()` is one line and deliberately plain:
+
+```bash
+k8s() { ssh -o BatchMode=yes "${K8S_USER}@${K8S_HOST}" "$1"; }
+```
+
+- `K8S_HOST` defaults to `192.168.244.61`, `K8S_USER` to `sean`; override by exporting them.
+- `BatchMode=yes` makes it **fail instead of prompting**. That is intentional: a hang waiting on a
+  password prompt inside an agent looks like a dead command, and a fallback to password auth is the
+  thing that was removed.
+- `StrictHostKeyChecking=no` is gone too. It accepted any host key, so the connection was
+  unauthenticated in *both* directions.
+
+**One-time setup, per machine:** `ssh-copy-id ${K8S_USER}@${K8S_HOST}`
+
+### If `ssh` returns `Permission denied (publickey)`
+
+Your key is not in the node's `~/.ssh/authorized_keys`. **Do not reach for `sshpass`, and do not
+add a password to any file.** Run `ssh-copy-id` once (it will prompt interactively), or ask the
+user to add your public key. This happened on 2026-08-24: the audit removed the committed password
+without installing a key, so `k8s-helpers.sh` was dead the first time an incident needed it —
+removing a credential and leaving no working path is its own outage.
+
+### What NOT to do
+
+| Don't | Why |
+|---|---|
+| `sshpass -p …` | Puts a credential on a command line, visible in `ps` to every process on the host |
+| `K8S_PASS=…` in any tracked file | `test_no_dumps_or_secrets_tracked.py` fails the build, and the mirror publishes it permanently |
+| `-o StrictHostKeyChecking=no` | Accepts any host key; the server is then unauthenticated to you |
+| `pkill -f steering@` | Pattern-kills any matching process on the host. Use the tracked PIDs in `api/v1/endpoints/steering.py` |
+
+Deploys are GitOps: push to `main` → mirror sync → image build → ArgoCD. `k8s_deploy` is
+break-glass only. See `0xcc/plans/CICD-Runbook.md`.
+
 ## Quick Resume Commands
 
 ### Lean Session Start (Recommended)

@@ -54,6 +54,12 @@ running file list.*
   `4e16686` (2026-08-24) — roughly eight months — and MIS-E2E-143 records them among the objects
   already published to the public mirror, which cannot be withdrawn.
 
+  **Exposure, measured rather than assumed:** the tokens appear **only inside the compressed `.gz`
+  blobs**, never in a plain tracked file — searched across all reachable commits. GitHub does not
+  index compressed content, so they would not surface in a code search; the realistic exposure is
+  anyone who cloned the mirror during those eight months, plus blob retrieval by SHA. Rotate
+  promptly, not frantically.
+
   Also checked and **clean**: no `sk-*` OpenAI keys, no `ghp_*` GitHub tokens, no private keys, no
   PBKDF2/PIN material. `app_settings` — the table holding encrypted API keys and the PIN hash — did
   not exist yet in December, so these dumps predate it entirely. The dumps do contain dataset and
