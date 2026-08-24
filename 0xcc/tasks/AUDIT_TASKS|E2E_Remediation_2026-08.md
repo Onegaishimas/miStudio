@@ -17,7 +17,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | **Wave 7** | Task 14 — the P2/P3 tail | ⏳ **in progress** — 14.2 ✅ (dead code deleted, sourcemaps + console stripped and verified against the built bundle, all 37 `utcnow()` sites swept, schema `$id` made resolvable with miLLM's mirror synced, internal hostnames removed). 14.1 ⏳ — the body cap is now middleware covering every route. Controls C149–C157. |
-| **Wave 8** | Task 15 — hardware acceptance | ❌ not started — needs the GPU node |
+| **Wave 8** | Task 15 — hardware acceptance | ⏳ **started** — cluster access restored (the Part 1 credential removal left no key installed, so `k8s-helpers.sh` was dead the first time it was needed). Live on k8s after the beat hotfix: backend **4/4 Running**, health 200 on both hostnames, `/api/v1/version` reports a real version, the new `GET /extractions/{id}` returns 404 not 405, a 2 MB import is refused **413**, and the frontend ships no sourcemaps and no `console.log`. 15.1–15.4 open. |
 | **Wave 9** | Task 16 — the acceptance gate | ❌ not started |
 
 *This table is updated as work lands — see the Relevant Files section for the
