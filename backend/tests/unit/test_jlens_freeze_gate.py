@@ -178,3 +178,87 @@ def test_a_refused_freeze_releases_the_lock():
     # And the next fit still works.
     with frozen_attention_and_norms(_WithNorm(), freeze_qk=False, freeze_norms=True):
         pass
+
+
+class TestTheFreezeContextLeaksNothingOnFailure:
+    """MIS-E2E-082 / task 15.1.
+
+    The lock acquisition and the process-wide SDPA patch sat ABOVE the `try`.
+    An exception between them and the `yield` escaped without running the
+    `finally`, so the attention patch stayed installed for every subsequent
+    forward pass in that worker and `_FREEZE_LOCK` was never released, leaving
+    every later fit blocked on a lock nobody held. Both silent and permanent;
+    the second presents only as a hung worker.
+    """
+
+    def _model_with_no_norms(self):
+        import torch.nn as nn
+
+        class NoNorms(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Linear(4, 4)
+
+        return NoNorms()
+
+    def test_a_failure_before_yield_releases_the_lock(self):
+        import pytest
+
+        from src.ml.jlens_fitter import _FREEZE_LOCK, frozen_attention_and_norms
+
+        assert not _FREEZE_LOCK.locked(), "the lock was already held on entry"
+        with pytest.raises(RuntimeError, match="no norm module"):
+            with frozen_attention_and_norms(self._model_with_no_norms(),
+                                            freeze_qk=False, freeze_norms=True):
+                pass  # pragma: no cover
+        assert not _FREEZE_LOCK.locked(), (
+            "_FREEZE_LOCK is still held after a failed freeze; every later fit "
+            "in this process blocks on it forever"
+        )
+
+    def test_a_failure_before_yield_restores_sdpa(self):
+        import pytest
+        import torch
+
+        from src.ml.jlens_fitter import frozen_attention_and_norms
+
+        original = torch.nn.functional.scaled_dot_product_attention
+        with pytest.raises(RuntimeError, match="no norm module"):
+            with frozen_attention_and_norms(self._model_with_no_norms(),
+                                            freeze_qk=True, freeze_norms=True):
+                pass  # pragma: no cover
+        assert torch.nn.functional.scaled_dot_product_attention is original, (
+            "the process-wide SDPA patch survived a failed freeze; every model "
+            "in this worker now runs under frozen-Q/K attention"
+        )
+
+    def test_the_lock_is_reusable_after_repeated_failures(self):
+        import pytest
+
+        from src.ml.jlens_fitter import _FREEZE_LOCK, frozen_attention_and_norms
+
+        for _ in range(3):
+            with pytest.raises(RuntimeError):
+                with frozen_attention_and_norms(self._model_with_no_norms(),
+                                                freeze_qk=False, freeze_norms=True):
+                    pass  # pragma: no cover
+        assert _FREEZE_LOCK.acquire(blocking=False), (
+            "the lock cannot be taken after three failed freezes"
+        )
+        _FREEZE_LOCK.release()
+
+    def test_it_does_not_double_release(self):
+        """Moving the try up made the finally re-run the manual cleanup.
+
+        That surfaced as `RuntimeError: release unlocked lock` masking the real
+        error — a worse failure than the leak it replaced.
+        """
+        import pytest
+
+        from src.ml.jlens_fitter import frozen_attention_and_norms
+
+        with pytest.raises(RuntimeError) as exc:
+            with frozen_attention_and_norms(self._model_with_no_norms(),
+                                            freeze_qk=False, freeze_norms=True):
+                pass  # pragma: no cover
+        assert "release unlocked lock" not in str(exc.value)

@@ -20,6 +20,7 @@ from ....schemas.task_queue import (
     TaskQueueRetryRequest,
     TaskQueueRetryResponse,
 )
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -710,8 +711,25 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
     """
     tasks = await TaskQueueService.get_active_tasks(db)
 
+    # MIS-E2E-102: the Celery result-backend reads go OFF the event loop.
+    #
+    # `_celery_view` builds an `AsyncResult` and reads it — synchronous Redis
+    # I/O, up to three round-trips per row — and it was being called directly
+    # inside this coroutine. Synchronous I/O in an `async def` blocks the whole
+    # event loop, and the Monitor page polls this endpoint continuously: every
+    # poll stalled every other request in the process for the duration of N
+    # sequential Redis round-trips.
+    #
+    # `to_thread` moves them to the default executor and `gather` overlaps
+    # them, so the cost is one round-trip's latency rather than N, and the loop
+    # stays free either way. Order is preserved: gather returns results
+    # positionally, and the loop below zips them back against `tasks`.
+    celery_views = await asyncio.gather(
+        *(asyncio.to_thread(_celery_view, task) for task in tasks)
+    ) if tasks else []
+
     enriched_tasks = []
-    for task in tasks:
+    for task, (orphaned, live) in zip(tasks, celery_views):
         entity_info = await TaskQueueService.get_entity_info(
             db, task.entity_id, task.entity_type
         )
@@ -726,7 +744,6 @@ async def list_active_tasks(db: AsyncSession = Depends(get_db)):
         # Reported, not rewritten. This endpoint reads; a background janitor is
         # the right place to make the state terminal, and inventing a write here
         # would mean a GET with side effects.
-        orphaned, live = _celery_view(task)
         if orphaned:
             row["status"] = "orphaned"
             row["error_message"] = (
