@@ -221,7 +221,7 @@ Each is a mutation that survived. Write the test, then re-run the mutation as a 
 
 ## Task 14 — Remaining P2/P3
 
-- [x] 14.1 ⏳ **Partial.** **-036** closed and generalised: the circuit-import cap could not work where it lived (FastAPI parses the body before the handler's first statement) and was skipped entirely by a chunked request. Now `core/body_limit.BodySizeLimitMiddleware`, metering the receive channel for **every** route — a sibling sweep found four template-import endpoints with no cap at all. **-095**: all 11 beat entries now carry `expires` at 90% of their period; without one, an hour of ticks blocked behind a GPU job all fire at once when the queue drains. **-117**: `hmac.compare_digest` raises `TypeError` on two non-ASCII `str`s, so a token like `tökén` returned **500 from an unauthenticated LAN-reachable port** — now compared as UTF-8 bytes. **-094**: the comment claimed `max_tasks_per_child` restarts the solo worker and reclaims VRAM; it recycles a prefork *child* and the solo pool has none, so that reclaim never happened. The claim is gone and the real mechanism (55 `empty_cache()` sites + the GPU watchdog) is named. — MIS-E2E-036, -095, -117, -094 ✅ · the remaining P2s are still open
+- [x] 14.1 ⏳ **Partial.** **-036** closed and generalised: the circuit-import cap could not work where it lived (FastAPI parses the body before the handler's first statement) and was skipped entirely by a chunked request. Now `core/body_limit.BodySizeLimitMiddleware`, metering the receive channel for **every** route — a sibling sweep found four template-import endpoints with no cap at all. **-095**: all 11 beat entries now carry `expires` at 90% of their period; without one, an hour of ticks blocked behind a GPU job all fire at once when the queue drains. **-117**: `hmac.compare_digest` raises `TypeError` on two non-ASCII `str`s, so a token like `tökén` returned **500 from an unauthenticated LAN-reachable port** — now compared as UTF-8 bytes. **-094**: the comment claimed `max_tasks_per_child` restarts the solo worker and reclaims VRAM; it recycles a prefork *child* and the solo pool has none, so that reclaim never happened. The claim is gone and the real mechanism (55 `empty_cache()` sites + the GPU watchdog) is named. **-101**: a failed model activation extraction appeared **nowhere** in the Monitor — federated into `/active` but not `/failed`, and unlike tokenizations (whose exemption is genuine) `extract_activations` writes no `task_queue` row either. This is the class of failure the user hit on 2026-08-23. Now federated, and a generalised guard fails when any `/active` source is missing from `/failed` without a recorded reason. — MIS-E2E-036, -095, -117, -094, -101 ✅ · the remaining P2s are still open
 - [x] 14.2 ✅ **P3 tail closed.** `backend/services/ollm_server/` deleted — a whole second FastAPI app with model-loading endpoints and open CORS, unwired since its compose service was removed (-019). `frontend/src/api/websocket.ts` + `hooks/useWebSocket.ts` deleted, with a stale `vi.mock` for a module its component never imported (-014). Production builds ship no sourcemaps (12 → 0) and no `console.log/debug/info` — verified against the built bundle, with `console.error` still at 116 (-020). All 37 `utcnow()` sites route through `core/clock.utc_now`; **not merely a deprecation** — all 62 `DateTime` columns are `timezone=True`, so naive values were being reinterpreted in the session timezone (-054). Schema `$id` moved off the private `hitsai.net` host, miLLM's vendored mirror synced so the cross-repo identity guard stays green (-044). Internal hostnames and a private IP removed from shipped frontend source (-009). — MIS-E2E-019, -014, -020, -054, -044, -009
 
 ## Task 15 — Hardware acceptance
@@ -458,6 +458,8 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/mcp_server/server.py` | Bearer token compared as UTF-8 bytes — two non-ASCII `str`s made `compare_digest` raise, returning 500 from an unauthenticated port (-117) |
 | `backend/tests/unit/test_wave7_worker_and_auth.py` | **New.** 10 tests: beat expiry read from the loaded config not the source text, a live 401 for a non-ASCII token, and the corrected claim pinned both ways |
 | `backend/tests/unit/test_task_docs_traceability.py` | Guard widened to distinguish **Deleted** from *never written* — different claims — and its detector extracted so C163 (an annotation matching every row) now fails |
+| `backend/src/api/v1/endpoints/task_queue.py` | `/failed` federates activation extractions — a failed one was in no list at all (-101) |
+| `backend/tests/unit/test_monitor_federation_contract.py` | Extended: every `/active` source must also reach `/failed` or be recorded as a deliberate exemption, and the exemption list is checked against real federators |
 
 ## Negative controls run
 
@@ -639,6 +641,10 @@ M5 (NC5), and the cache divergence (NC2/NC4). Task 16.2 requires all 14.
 | C163 | Widen `DELETED` to `\|`, so it matches every row | ⚠️ **survived** — the guard accepted every dead path and nothing noticed. Detector extracted and tested directly; re-run ✅ 2 failures |
 | C164 | Same widening applied to `NEVER_WRITTEN` | ✅ 2 failures |
 | C165 | The detector stops recording offenders | ✅ 1 failure |
+
+| C166 | Remove the failed-activation federation | ✅ 3 failures |
+| C167 | Federate with lowercase `failed` (this table's enum labels are uppercase) | ✅ 1 failure |
+| C168 | A different `/active` source dropped from `/failed` — the generalised case | ✅ 2 failures |
 
 ## Provenance
 
