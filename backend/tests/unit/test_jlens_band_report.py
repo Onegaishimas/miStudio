@@ -232,20 +232,105 @@ def test_report_with_boundaries_states_how_they_were_derived():
     assert "this model's own" in report.derivation
 
 
-def test_no_band_constant_exists_in_the_derivation_module():
-    """BR-002: porting must be impossible BY CONSTRUCTION, not by policy."""
-    from src.ml import jlens_metrics
-    from src.services import jlens_band_report
+#: The published boundaries. Measured on one specific model; BR-002 says they
+#: must be impossible to port here BY CONSTRUCTION.
+_PUBLISHED_BOUNDARIES = (38, 40, 90, 92)
 
-    for module in (jlens_metrics, jlens_band_report):
-        tree = ast.parse(inspect.getsource(module))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-                assert node.value not in (38, 40, 90, 92), (
-                    f"{module.__name__} contains {node.value}, one of the "
-                    "published band boundaries — those were measured on a "
-                    "different model"
-                )
+
+def _jlens_modules():
+    """Every jlens module, DISCOVERED — not a hand-list.
+
+    MIS-E2E-090. This guard used to name two modules, `jlens_metrics` and
+    `jlens_band_report`. Mutation M13 put the literals in
+    `jlens_band_service.py`, a sibling it did not scan, and the suite stayed
+    green. A guard whose scope is narrower than its claim is the shape this
+    audit found three times (BR-002's two modules, `EXPECTED_CALLS`' 16 of 116,
+    `REQUIRED_TABLES`' 17 of 36).
+    """
+    import importlib
+    import pkgutil
+
+    import src.ml as ml_pkg
+    import src.services as svc_pkg
+
+    found = []
+    for pkg in (ml_pkg, svc_pkg):
+        for info in pkgutil.iter_modules(pkg.__path__):
+            if "jlens" not in info.name:
+                continue
+            found.append(importlib.import_module(f"{pkg.__name__}.{info.name}"))
+    assert len(found) >= 6, (
+        f"only {len(found)} jlens modules discovered — the scan is broken, and "
+        f"a broken scan agrees with everything"
+    )
+    return found
+
+
+def _embedded_numbers(module):
+    """Numeric and string constants reachable in the COMPILED module.
+
+    Compiling rather than reading the AST is what closes the second half of
+    MIS-E2E-090. Mutation M12 wrote the same constants as `4 * 10` and
+    `int("90")`: no `ast.Constant` node holds 40 or 90, so an AST scan for
+    literals saw nothing. CPython folds `4 * 10` to `40` at compile time, and
+    `int("90")` leaves `"90"` in `co_consts`, so both are visible here.
+    """
+    code = compile(inspect.getsource(module), module.__name__, "exec")
+    seen = []
+
+    def walk(c):
+        for const in c.co_consts:
+            if isinstance(const, (int, float)) and not isinstance(const, bool):
+                seen.append(const)
+            elif isinstance(const, str):
+                try:
+                    seen.append(int(const))
+                except ValueError:
+                    pass
+            elif hasattr(const, "co_consts"):
+                walk(const)
+
+    walk(code)
+    return seen
+
+
+def test_no_band_constant_exists_in_any_jlens_module():
+    """BR-002: porting must be impossible BY CONSTRUCTION, not by policy."""
+    for module in _jlens_modules():
+        for value in _embedded_numbers(module):
+            assert value not in _PUBLISHED_BOUNDARIES, (
+                f"{module.__name__} embeds {value}, one of the published band "
+                f"boundaries. Those were measured on a different model; a "
+                f"reader who sees them here will believe they transfer."
+            )
+
+
+def test_the_scan_sees_a_computed_constant():
+    """Negative control in-test: an AST-literal scan would miss these."""
+    import types
+
+    probe = types.ModuleType("probe")
+    probe_src = "def f():\n    return 4 * 10, int('90')\n"
+    probe.__dict__["__source__"] = probe_src
+
+    code = compile(probe_src, "probe", "exec")
+    found = []
+
+    def walk(c):
+        for const in c.co_consts:
+            if isinstance(const, (int, float)) and not isinstance(const, bool):
+                found.append(const)
+            elif isinstance(const, str):
+                try:
+                    found.append(int(const))
+                except ValueError:
+                    pass
+            elif hasattr(const, "co_consts"):
+                walk(const)
+
+    walk(code)
+    assert 40 in found, "the folder no longer catches `4 * 10`"
+    assert 90 in found, "the folder no longer catches `int('90')`"
 
 
 # --------------------------------------------------------------------- gate

@@ -18,7 +18,7 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | **Wave 7** | Task 14 — the P2/P3 tail | ✅ **CLOSED** — 14.1–14.15. Every P2/P3 either fixed with a verified-red control, or recorded as accepted debt **with its reason** (coverage, process, one forward-only data loss). Controls C149–C219. Three findings were **wrong or incomplete as written** and are corrected in place. |
 | **Wave 8** | Task 15 — hardware acceptance | ⏳ **in progress** — cluster access restored. Verified live on k8s: backend **4/4 Running**, health 200 on both hostnames, a real version string, `GET /extractions/{id}` 404 not 405, a 2 MB import refused **413**, frontend shipping no sourcemaps and no `console.log`, `celery beat` scheduling real tasks, and **a real steered generation** — `sae_52baacaf08d2` f11859@80 on gemma-2-2b-it gave baseline *"Now, his wife is in charge…"* vs steered *"and now his GRANDDAUGHTER IS IN CHARGE!"*, so the path generates AND the steer bites. 15.1–15.4 open. |
-| **Wave 9** | Task 16 — the acceptance gate | ❌ not started |
+| **Wave 9** | Task 16 — the acceptance gate | ⏳ **in progress** — **16.2 DONE: all 13 surviving audit mutations re-run and killed.** 8 died against work already shipped; **5 were still alive** (M8/M9 hook target, M12 band constants, M17 queue routing, M26 retry classification) and now have tests. |
 
 *This table is updated as work lands — see the Relevant Files section for the
 running file list.*
@@ -288,7 +288,34 @@ Not verifiable in the audit session — `ssh` to the GPU node was unavailable, a
 ## Task 16 — Feature Acceptance
 
 - [ ] 16.1 Every P0 closed, each with a test that **fails when the fix is removed**.
-- [ ] 16.2 Re-run all 14 surviving mutations as negative controls; each must now be killed. Record the controls.
+- [x] 16.2 ✅ **All 13 surviving mutations re-run; all 13 now killed.** (The plan said 14; the mutation
+  logs record 13.)
+  - **Killed by work already shipped (8):** M2 schema validator · M3 circuit import dict · M5 feature
+    CASCADE · M7 sensitive-key encryption · M14 `weights_only` · M18 checkpoint parent guard · M22
+    frontend baseline slope · M13 band constants in a sibling module.
+  - **Still alive, now pinned (5):**
+    - **M8 / M9 — the hook target, in BOTH cores.** This is the defect hardware found and static review
+      did not: hooking the discovered `"residual"` module lands on a post-attention RMSNorm, and a
+      vector added at a normalisation layer is renormalised away — steered output came back
+      byte-identical to the baseline at every usable dial. The fix shipped in July; **nothing ever
+      pinned it**, in either implementation.
+    - **M12 — band constants written as `4 * 10` and `int("90")`.** The BR-002 guard scanned
+      `ast.Constant` literals, so a computed constant walked straight past it, and it scanned two
+      hand-listed modules. Now compiles the source (CPython folds `4 * 10` at compile time) and
+      discovers every jlens module from the package.
+    - **M17 — `queue="steering"` removed.** Nothing asserted where GPU work goes.
+    - **M26 — retry narrowed back to `TimeoutException`.** Nothing asserted WHICH failures are retried,
+      so a `ConnectError` during a pod restart was abandoned on the first attempt, on exactly the
+      terminal events whose loss leaves a finished job showing as running forever.
+  - **A correction worth recording:** the first M17 test asserted the steering queue is consumed by a
+    worker in `k8s/base/backend.yaml`. It failed, and that looked like a live defect — the GPU worker
+    really does consume `high_priority,datasets,processing,training,extraction,sae` and not `steering`.
+    Checking the running pod showed why: the steering consumer is spawned **on demand** by the API with
+    `-Q steering`, so the GPU stays free between runs. The test was wrong, not the code.
+  - **A harness correction:** the first harness took its verdict from pytest's exit code. This suite's
+    atexit GPU cleanup can exit non-zero with zero failures, so it reported **survived mutations as
+    killed** — M8 and M9 both. Verdicts now come from the JUnit XML failure count. A second bug
+    word-split the `-k` expression, collecting 0 tests and reporting "0 of 0" as a pass.
 - [ ] 16.3 Full suites green: backend and frontend, **with `frontend-ci.yml`'s excludes removed** and lint blocking.
 - [ ] 16.4 Re-run the P12 live probes: `GET /api/v1/settings` returns no PIN material; the mirror's history carries nothing on the exclusion list.
 - [ ] 16.5 Update `CLAUDE.md` Current Status and the Document Inventory.
@@ -554,6 +581,10 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `backend/src/ml/jlens_fitter.py` | Lock and SDPA patch moved inside the `try`; the now-duplicate manual cleanup before two raises removed (-082) |
 | `backend/src/api/v1/endpoints/task_queue.py` | `_celery_view`'s synchronous Redis reads moved off the event loop with `to_thread` + `gather` (-102) |
 | `backend/tests/unit/test_active_does_not_block_the_loop.py` | **New.** Structural + behavioural: a watchdog samples loop responsiveness during the work, with an in-test control proving the probe can see a stall |
+| `backend/tests/unit/test_hook_target_is_the_whole_layer.py` | **New.** Pins the whole-layer hook target in BOTH steering cores (M8/M9), with a fixture proving the two hook points are not equivalent |
+| `backend/tests/unit/test_jlens_band_report.py` | BR-002 guard now compiles the source (catching `4 * 10`) and discovers every jlens module instead of naming two (M12/M13) |
+| `backend/tests/unit/test_realtime_contracts.py` | Retry classification pinned to `TransportError`, checked against the installed httpx (M26) |
+| `backend/tests/unit/test_infrastructure_invariants.py` | GPU tasks must declare the steering queue, and something must spawn a consumer for it (M17) |
 
 ## Negative controls run
 
