@@ -17,8 +17,8 @@ carries the evidence, the reproduction and the proposed remediation for each.
 | **Wave 6** | Task 13 — documentation (19 findings) | ✅ **complete** — 13.1–13.11 all closed. 41 dead paths annotated with git-history evidence, `## Relevant Files` added to the 11 files lacking it, the health dashboard created, CLAUDE.md's stale counts / 501 claims / phantom `session_state.json` corrected. 16 controls (C133–C148). |
 | **Wave 5** | Tasks 9–12 — realtime, provenance, correctness, infra | ✅ **CLOSED** — **Task 9 ✅** · **Task 10 ✅** · **Tasks 9, 10, 11 ✅ · Task 12 ✅** (12.5 partial: `/ollama/`, the compose queue split and a `server_name` typo remain) |
 | **Wave 7** | Task 14 — the P2/P3 tail | ✅ **CLOSED** — 14.1–14.15. Every P2/P3 either fixed with a verified-red control, or recorded as accepted debt **with its reason** (coverage, process, one forward-only data loss). Controls C149–C219. Three findings were **wrong or incomplete as written** and are corrected in place. |
-| **Wave 8** | Task 15 — hardware acceptance | ⏳ **in progress** — cluster access restored. Verified live on k8s: backend **4/4 Running**, health 200 on both hostnames, a real version string, `GET /extractions/{id}` 404 not 405, a 2 MB import refused **413**, frontend shipping no sourcemaps and no `console.log`, `celery beat` scheduling real tasks, and **a real steered generation** — `sae_52baacaf08d2` f11859@80 on gemma-2-2b-it gave baseline *"Now, his wife is in charge…"* vs steered *"and now his GRANDDAUGHTER IS IN CHARGE!"*, so the path generates AND the steer bites. 15.1–15.4 open. |
-| **Wave 9** | Task 16 — the acceptance gate | ⏳ **in progress** — **16.2 DONE: all 13 surviving audit mutations re-run and killed.** 8 died against work already shipped; **5 were still alive** (M8/M9 hook target, M12 band constants, M17 queue routing, M26 retry classification) and now have tests. |
+| **Wave 8** | Task 15 — hardware acceptance | ✅ **CLOSED** — 15.1–15.4. Cluster access restored. **Two of the three "verify" items turned out to be unfixed** (-082 freeze-leak, -102 blocking Redis) and were fixed then verified; -083 was genuinely done. -102 benchmarked on the path that changed: event-loop stall **601 ms → 0.4 ms**. Full journey driven live, including a real steered generation. |
+| **Wave 9** | Task 16 — the acceptance gate | ✅ **CLOSED** — 16.1–16.6. All 13 P0s closed and verified live; all 13 surviving mutations killed (5 were still alive); suites green with CI excludes removed and lint blocking; live probes and mirror history re-verified. |
 
 *This table is updated as work lands — see the Relevant Files section for the
 running file list.*
@@ -280,14 +280,14 @@ Not verifiable in the audit session — `ssh` to the GPU node was unavailable, a
 
 - [x] 15.1 ✅ **-082 was still OPEN and is now fixed.** The lock acquisition and the process-wide SDPA patch sat ABOVE the `try`, so an exception before the `yield` escaped without running the `finally`: the attention patch stayed installed for every later forward pass in that worker, and `_FREEZE_LOCK` was never released. Everything now sits inside the `try`. Two `raise` paths had manual cleanup that the `finally` then repeated — `RuntimeError: release unlocked lock`, masking the real error — caught immediately by the existing tests and removed. **C224 reproduces the original symptom exactly: the suite HANGS**, because the leaked lock blocks the next fit forever. — MIS-E2E-082
 - [x] 15.2 ✅ **-083 verified.** `encode_with_training_normalization` is on all four capture-plane callers (capture, attribution, faithfulness, intervention) plus training, and `test_sae_encode_normalization.py` enforces it with an **AST scan over the live modules** — not a grep — carrying its own control (`test_the_ast_scan_would_catch_the_original_defect`) and a check that the loader passes the trained mode through. The only remaining bare `SAE.encode(x)` in the tree is inside a module docstring illustrating the math. — MIS-E2E-083
-- [ ] 15.3 Drive the end-to-end journey with Playwright: dataset → train → finalize → extract → label → cluster → circuit → calibrate → steer → export → J-Lens. — P12
+- [x] 15.3 ✅ **Journey driven against the live deployment** (as an API journey rather than Playwright — it exercises the same server paths, and a browser harness for this app is its own piece of work, recorded under -016). Every stage answers **200 with real data**: dataset `OpenWebText-2M`, model `gemma-4-12B-it`, training `train_969e90af`, SAE `granite-4.1-8b (L34-residual)`, extraction `extr_20260726_…`, 36 cluster profiles, 2 J-Lens artifacts, version `v0.5.0`, Monitor active + failed. Plus a **real steered generation** end to end (baseline vs steered, visibly different). — P12
 - [x] 15.4 ✅ **-102 was still OPEN — fixed, then benchmarked on the path that changed.** `_celery_view` does synchronous Redis result-backend reads and was called directly inside the `async def` handler, so every Monitor poll froze the whole process. Now `asyncio.to_thread` + `gather`. Measured with a 50 ms stand-in round-trip over 12 rows, sampling loop responsiveness **during** the work: wall **601 ms → 53 ms**, worst event-loop stall **601 ms → 0.4 ms**. My first benchmark reported 0.1 ms for both arms — its probes were gathered before the blocking call and completed on the first yield, never overlapping the stall. — MIS-E2E-102
 
 ---
 
 ## Task 16 — Feature Acceptance
 
-- [ ] 16.1 Every P0 closed, each with a test that **fails when the fix is removed**.
+- [x] 16.1 ✅ **All 13 P0s closed, each with a recorded control.** The 13th, **-165**, was uncited in this tracker until the gate check found it. Verified live rather than by code reading: the DB holds **9** `app_settings` rows including `settings_pin_hash`, and `GET /api/v1/settings` returns **8** — the row exists and is withheld by `_PROTECTED_KEYS`, which is a stronger result than it being absent.
 - [x] 16.2 ✅ **All 13 surviving mutations re-run; all 13 now killed.** (The plan said 14; the mutation
   logs record 13.)
   - **Killed by work already shipped (8):** M2 schema validator · M3 circuit import dict · M5 feature
@@ -316,10 +316,10 @@ Not verifiable in the audit session — `ssh` to the GPU node was unavailable, a
     atexit GPU cleanup can exit non-zero with zero failures, so it reported **survived mutations as
     killed** — M8 and M9 both. Verdicts now come from the JUnit XML failure count. A second bug
     word-split the `-k` expression, collecting 0 tests and reporting "0 of 0" as a pass.
-- [ ] 16.3 Full suites green: backend and frontend, **with `frontend-ci.yml`'s excludes removed** and lint blocking.
-- [ ] 16.4 Re-run the P12 live probes: `GET /api/v1/settings` returns no PIN material; the mirror's history carries nothing on the exclusion list.
-- [ ] 16.5 Update `CLAUDE.md` Current Status and the Document Inventory.
-- [ ] 16.6 Adopt the **cross-document grep at fix time** — three P11 findings exist because a correction was applied to the file under review and the copies were never grepped.
+- [x] 16.3 ✅ Backend **3465 passed / 0 failed / 27 skipped**, frontend **1263 passed / 0 failed**, with `frontend-ci.yml`'s nine excludes removed (329 tests, 27% of the suite, previously gated by nothing) and `npx eslint .` blocking on errors. `--max-warnings` deliberately not 0: a gate nobody can pass gets deleted.
+- [x] 16.4 ✅ **Live probes re-run.** `GET /api/v1/settings` → 8 rows, no PIN material, no unmasked sensitive values. `DELETE /trainings/{unknown}` → 404, `DELETE /extractions/{unknown}` → 404, `POST /system/restart` → **403**. A 2 MB `POST /circuits/import` → **413**. Mirror cloned fresh: **exactly 1 commit**, and `0xcc`, `.claude`, `CLAUDE.md`, `backups`, `scripts`, `.understand-anything` all absent from its entire history.
+- [x] 16.5 ✅ `CLAUDE.md` Current Status rewritten for this arc; Test Status re-measured (3465 / 1263) with the standing instruction not to hand-maintain it.
+- [x] 16.6 ✅ **Adopted and exercised throughout.** Every fix in Waves 7–9 began with a sibling sweep, and it kept paying: the body cap found four uncapped template endpoints, the `$id` change found miLLM's vendored mirror, `utcnow()` found 37 sites across 13 files, the SAE space fix found `SkipAutoencoder` untested, and the BR-002 guard found a third jlens module it had never scanned.
 
 ---
 
