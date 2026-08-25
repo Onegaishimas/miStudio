@@ -21,8 +21,15 @@ measurement, and the config that lets `empty_cache()` actually shrink the pool.
 
 from unittest.mock import patch
 
+import tempfile
+from pathlib import Path as _Path
+
 import pytest
 import yaml
+
+
+def tmp_dir():
+    return _Path(tempfile.mkdtemp())
 
 from pathlib import Path
 
@@ -118,3 +125,124 @@ class TestTheAllocatorCanActuallyShrink:
             "fixed-size segments cannot be handed back once fragmented"
         )
         assert "expandable_segments:True" in gpu_worker_conf
+
+
+class TestAFailedLoadStillGivesTheMemoryBack:
+    """The path that actually bit: an OOM DURING the load.
+
+    `model` is bound only when `_load_model` returns, so an OOM part-way
+    through arrives in the finally with several GB resident and the name still
+    None. That branch used to log "no model to clean up" and return, so the
+    failure kept everything it had allocated -- and the next extraction died
+    against a card reporting 21.75 MiB free of 23.56 GiB.
+    """
+
+    def _service(self):
+        svc = ActivationService.__new__(ActivationService)
+        return svc
+
+    def test_the_finally_releases_when_the_load_raised(self):
+        from src.services.activation_service import ActivationExtractionError
+
+        svc = self._service()
+        released = []
+
+        def _boom(*a, **k):
+            raise RuntimeError(
+                "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a "
+                "total capacity of 23.56 GiB of which 21.75 MiB is free"
+            )
+
+        with patch.object(ActivationService, "_log_gpu_memory", lambda *a, **k: None), \
+             patch.object(ActivationService, "_extraction_dir", lambda self, eid: tmp_dir()), \
+             patch.object(ActivationService, "_load_model", _boom), \
+             patch.object(
+                 ActivationService,
+                 "_release_gpu_memory",
+                 lambda self, gpu_id=0: released.append(gpu_id) or {},
+             ):
+            with pytest.raises(ActivationExtractionError):
+                svc.extract_activations(
+                    model_id="m1", model_path="/m", architecture="gemma3",
+                    quantization=_Q(), dataset_path="/d",
+                    layer_indices=[10], hook_types=["residual"],
+                    max_samples=16, batch_size=8,
+                )
+
+        assert released == [0], (
+            "a load that OOM'd left the card untouched -- this is the branch "
+            "that logged 'no model to clean up' and returned"
+        )
+
+    def test_an_oom_does_not_carry_the_failed_load_up_the_stack(self):
+        """The traceback holds the frames that hold the tensors."""
+        from src.services.activation_service import ActivationExtractionError
+
+        svc = self._service()
+
+        def _boom(*a, **k):
+            raise RuntimeError("CUDA out of memory. Tried to allocate 4.00 GiB")
+
+        with patch.object(ActivationService, "_log_gpu_memory", lambda *a, **k: None), \
+             patch.object(ActivationService, "_extraction_dir", lambda self, eid: tmp_dir()), \
+             patch.object(ActivationService, "_load_model", _boom), \
+             patch.object(ActivationService, "_release_gpu_memory", lambda *a, **k: {}):
+            with pytest.raises(ActivationExtractionError) as exc:
+                svc.extract_activations(
+                    model_id="m1", model_path="/m", architecture="gemma3",
+                    quantization=_Q(), dataset_path="/d",
+                    layer_indices=[10], hook_types=["residual"],
+                    max_samples=16, batch_size=8,
+                )
+
+        assert exc.value.__cause__ is None, (
+            "the OOM chain is still attached, so the failed load's frames stay "
+            "alive and hold their tensors"
+        )
+        assert "out of memory" in str(exc.value).lower(), (
+            "the message no longer says OOM, so the retry logic cannot "
+            "classify it and will not halve the batch size"
+        )
+
+    def test_the_retry_classifier_still_sees_an_oom(self):
+        """Breaking the chain must not break the smaller-batch retry."""
+        from src.services.activation_service import ActivationExtractionError
+        from src.workers.model_tasks import classify_extraction_error
+
+        wrapped = ActivationExtractionError(
+            "Extraction failed: CUDA out of memory. Tried to allocate 4.00 GiB"
+        )
+        error_type, params = classify_extraction_error(wrapped, batch_size=128)[:2]
+
+        assert error_type == "OOM"
+        assert params["batch_size"] == 64
+
+    def test_a_non_oom_failure_keeps_its_chain(self):
+        """Dropping context is a cost paid only where memory is at stake."""
+        from src.services.activation_service import ActivationExtractionError
+
+        svc = self._service()
+        original = ValueError("dataset is empty")
+
+        def _boom(*a, **k):
+            raise original
+
+        with patch.object(ActivationService, "_log_gpu_memory", lambda *a, **k: None), \
+             patch.object(ActivationService, "_extraction_dir", lambda self, eid: tmp_dir()), \
+             patch.object(ActivationService, "_load_model", _boom), \
+             patch.object(ActivationService, "_release_gpu_memory", lambda *a, **k: {}):
+            with pytest.raises(ActivationExtractionError) as exc:
+                svc.extract_activations(
+                    model_id="m1", model_path="/m", architecture="gemma3",
+                    quantization=_Q(), dataset_path="/d",
+                    layer_indices=[10], hook_types=["residual"],
+                    max_samples=16, batch_size=8,
+                )
+
+        assert exc.value.__cause__ is original
+
+
+class _Q:
+    """Stand-in for QuantizationFormat: only `.value` is read."""
+
+    value = "q4"
