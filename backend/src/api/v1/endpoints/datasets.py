@@ -17,7 +17,7 @@ import redis
 from ....core.deps import get_db
 from ....core.celery_app import celery_app
 from ....core.config import settings
-from ....models.dataset import DatasetStatus
+from ....models.dataset import Dataset, DatasetStatus
 from ....models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from ....schemas.dataset import (
     DatasetPatchRequest,
