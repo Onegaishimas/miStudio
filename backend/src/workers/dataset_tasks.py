@@ -71,6 +71,55 @@ def cleanup_child_processes():
         print(f"[CLEANUP] Error cleaning up child processes: {e}")
 
 
+class TokenizationSignalState:
+    """Mutable shutdown state shared between one tokenization task and its handler."""
+
+    __slots__ = ("shutdown_requested", "complete")
+
+    def __init__(self):
+        self.shutdown_requested = False
+        self.complete = False
+
+
+def make_tokenization_signal_handler(state, owner_pid, cleanup=None):
+    """
+    Build the SIGTERM/SIGINT handler for a single tokenization task.
+
+    ``owner_pid`` is the pid of the process installing the handler. A handler
+    installed with ``signal.signal`` is inherited across ``fork``, and
+    ``Dataset.map(num_proc=N)`` forks a pool of N workers. Shutting that pool
+    down signals every worker -- including on the ordinary path where the map
+    ran to completion. So an inherited handler is reached during routine
+    teardown, not only during cancellation, and any process other than the
+    owner must decline: restore the default disposition and re-deliver, which
+    is what the pool is asking the worker to do.
+
+    Only the owner interprets the signal as an operator cancelling the job.
+    """
+    cleanup = cleanup or cleanup_child_processes
+
+    def signal_handler(signum, frame):
+        if os.getpid() != owner_pid:
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+            return
+
+        print(f"[SIGNAL] Received signal {signum}")
+        state.shutdown_requested = True
+
+        # If tokenization is already complete, let it finish saving
+        if state.complete:
+            print(f"[SIGNAL] Tokenization complete, allowing graceful save...")
+            return  # Don't raise, let the task finish saving
+
+        # Otherwise, clean up and terminate
+        print(f"[SIGNAL] Tokenization in progress, cleaning up child processes...")
+        cleanup()
+        raise SystemExit(f"Task terminated by signal {signum}")
+
+    return signal_handler
+
+
 def release_redis_lock(dataset_id: str, redis_client: redis.Redis = None) -> None:
     """
     Release Redis distributed lock for a dataset operation.
@@ -457,29 +506,14 @@ def tokenize_dataset_task(
         dict: Tokenization result with statistics
     """
     # Graceful shutdown state - allows completion if we're past the critical tokenization point
-    graceful_shutdown_requested = False
-    tokenization_complete = False
+    signal_state = TokenizationSignalState()
     saved_tokenized_dataset = None
     saved_tokenized_path = None
 
     # Register signal handlers for proper cleanup of child processes
-    def signal_handler(signum, frame):
-        nonlocal graceful_shutdown_requested
-        print(f"[SIGNAL] Received signal {signum}")
-        graceful_shutdown_requested = True
-
-        # If tokenization is already complete, let it finish saving
-        if tokenization_complete:
-            print(f"[SIGNAL] Tokenization complete, allowing graceful save...")
-            return  # Don't raise, let the task finish saving
-
-        # Otherwise, clean up and terminate
-        print(f"[SIGNAL] Tokenization in progress, cleaning up child processes...")
-        cleanup_child_processes()
-        raise SystemExit(f"Task terminated by signal {signum}")
-
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+    signal_handler = make_tokenization_signal_handler(signal_state, os.getpid())
+    previous_sigterm = signal.signal(signal.SIGTERM, signal_handler)
+    previous_sigint = signal.signal(signal.SIGINT, signal_handler)
 
     # Initialize variables that might be referenced in exception handler
     dataset_uuid = None
@@ -915,7 +949,7 @@ def tokenize_dataset_task(
             logger.info(f"[TQDM_PATCH] Restored original tqdm classes")
 
         # Mark tokenization as complete - from here on, graceful shutdown is allowed
-        tokenization_complete = True
+        signal_state.complete = True
         print(f"[TOKENIZATION] Tokenization complete, marking for graceful shutdown protection")
 
         # Force cleanup of input dataset to prevent multiprocessing cleanup issues
@@ -940,7 +974,7 @@ def tokenize_dataset_task(
         print(f"[TOKENIZATION] Dataset saved to {saved_tokenized_path}")
 
         # Check if graceful shutdown was requested during tokenization
-        if graceful_shutdown_requested:
+        if signal_state.shutdown_requested:
             print(f"[SIGNAL] Graceful shutdown requested, skipping statistics calculation")
             # Still update database with basic success status
             with self.get_db() as db:
@@ -1290,6 +1324,12 @@ def tokenize_dataset_task(
             print(f"Failed to save task to queue: {queue_exc}")
 
         raise
+
+    finally:
+        # The solo pool reuses this process, so a handler left installed would
+        # outlive its state object and be reached by the NEXT task's signals.
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        signal.signal(signal.SIGINT, previous_sigint)
 
 
 @celery_app.task(

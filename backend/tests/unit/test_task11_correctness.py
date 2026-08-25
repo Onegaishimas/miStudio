@@ -156,6 +156,7 @@ _JANITORS = [
     "src.workers.cleanup_stuck_activations",
     "src.workers.cleanup_stuck_enhanced_labeling",
     "src.workers.cleanup_stuck_circuit_runs",
+    "src.workers.cleanup_stuck_tokenizations",
 ]
 
 #: Janitors that legitimately do NOT consult a Celery task id, with the reason.
