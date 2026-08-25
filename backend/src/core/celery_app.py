@@ -285,6 +285,7 @@ celery_app.conf.update(
         # ---------------------------------------------------------------
         "cleanup_stuck_nlp": {"queue": "low_priority"},
         "cleanup_stuck_extractions": {"queue": "low_priority"},
+        "cleanup_stuck_tokenizations": {"queue": "low_priority"},
         "cleanup_stuck_trainings": {"queue": "low_priority"},
         "cleanup_stuck_activations": {"queue": "low_priority"},
         "cleanup_stuck_circuit_runs": {"queue": "low_priority"},
@@ -301,6 +302,9 @@ celery_app.conf.update(
             "queue": "low_priority",
         },
         "src.workers.cleanup_stuck_extractions.*": {
+            "queue": "low_priority",
+        },
+        "src.workers.cleanup_stuck_tokenizations.*": {
             "queue": "low_priority",
         },
         "src.workers.cleanup_stuck_trainings.*": {
@@ -421,6 +425,16 @@ celery_app.conf.update(
             },
         },
         # Cleanup stuck extraction jobs - runs every 10 minutes
+        # Tokenization was the only long-running status with no janitor, so a
+        # lost worker held PROCESSING forever with a frozen progress bar.
+        "cleanup-stuck-tokenizations": {
+            "task": "cleanup_stuck_tokenizations",
+            "schedule": 600.0,
+            "options": {
+                "queue": "low_priority",
+                "expires": 540.0,
+            },
+        },
         "cleanup-stuck-extractions": {
             "task": "cleanup_stuck_extractions",
             "schedule": 600.0,
@@ -583,6 +597,7 @@ celery_app.autodiscover_tasks(
         "src.workers.extraction_tasks",
         "src.workers.labeling_tasks",
         "src.workers.cleanup_stuck_extractions",
+        "src.workers.cleanup_stuck_tokenizations",
         "src.workers.cleanup_stuck_nlp",
         "src.workers.cleanup_stuck_trainings",
         "src.workers.cleanup_stuck_activations",
