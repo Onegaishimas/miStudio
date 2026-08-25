@@ -64,8 +64,31 @@ class Settings(BaseSettings):
         default=[
             "http://localhost:3000",
             "http://localhost",
+            # THE DEPLOYED HOSTNAMES MUST BE HERE.
+            #
+            # This list gained a second consumer in MIS-E2E-105: Socket.IO's
+            # `cors_allowed_origins` moved from "*" to this setting. Nothing had
+            # depended on it before, so it still listed only localhost — and
+            # every browser on a real hostname got **403 on the WebSocket
+            # upgrade**. socket.io then falls back to polling forever, which
+            # LOOKS connected: REST works, the page renders, and only pushed
+            # events silently never arrive. Reported 2026-08-25 as "progress
+            # only updates when I refresh".
+            #
+            # A CLI client sends no Origin header and is allowed, so probing
+            # with curl or python-socketio does not reproduce it. Only a browser
+            # does.
+            "http://k8s-mistudio.hitsai.local",
+            "https://k8s-mistudio.hitsai.local",
+            "http://mistudio.hitsai.local",
+            "https://mistudio.hitsai.net",
+            "http://mistudio.hitsai.net",
         ],
-        description="Allowed CORS origins",
+        description=(
+            "Allowed CORS origins. Consumed by Socket.IO's cors_allowed_origins "
+            "as well as HTTP CORS — an origin missing here cannot upgrade to a "
+            "WebSocket and silently degrades to polling-only."
+        ),
     )
 
     # Security

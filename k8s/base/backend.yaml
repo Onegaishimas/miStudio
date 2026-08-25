@@ -79,6 +79,13 @@ spec:
             # socket.io logger, and a task-success print. Nothing behavioural.
             - name: ENVIRONMENT
               value: production
+            # MIS-E2E-105 follow-up. Socket.IO's `cors_allowed_origins` reads
+            # this list, so an origin missing here gets 403 on the WebSocket
+            # UPGRADE and silently degrades to polling-only: REST works, the
+            # page renders, and pushed progress events never arrive. It has to
+            # name the hostnames this deployment is actually reached on.
+            - name: ALLOWED_ORIGINS
+              value: "http://k8s-mistudio.hitsai.local,https://k8s-mistudio.hitsai.local,https://mistudio.hitsai.net,http://mistudio.hitsai.net,http://localhost:3000,http://localhost"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
