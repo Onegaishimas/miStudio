@@ -78,6 +78,31 @@ class ActivationService:
             "reserved": torch.cuda.memory_reserved(gpu_id) / (1024 ** 3),
         }
 
+    def _release_gpu_memory(self, gpu_id: int = 0) -> dict:
+        """Hand the allocator's pool back when there is no model object to drop.
+
+        Used on the paths where a model reference was never obtained -- a load
+        that raised, or a job whose model was already cleaned. Collecting and
+        emptying the cache costs milliseconds and is the difference between the
+        next extraction starting on a clear card or on a full one.
+        """
+        import gc
+
+        before = self._gpu_memory(gpu_id)
+
+        for _ in range(3):
+            gc.collect()
+
+        if torch.cuda.is_available():
+            try:
+                with torch.cuda.device(gpu_id):
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize(gpu_id)
+            except Exception as e:                      # pragma: no cover
+                logger.warning(f"Could not empty the CUDA cache on {gpu_id}: {e}")
+
+        return self._report_cleanup(gpu_id, before)
+
     def _report_cleanup(self, gpu_id: int, before: dict) -> dict:
         """Compare the card before and after, and say which one happened."""
         after = self._gpu_memory(gpu_id)
@@ -346,6 +371,19 @@ class ActivationService:
 
         except Exception as e:
             logger.exception(f"Activation extraction failed: {e}")
+
+            # An OOM's traceback pins every frame of the load that failed, and
+            # those frames hold exactly the tensors that need releasing -- so
+            # carrying the chain up the stack keeps several GB alive past the
+            # cleanup below. The full trace is already in the log above, and
+            # the message survives, which is what classify_extraction_error
+            # matches on to schedule the smaller-batch retry.
+            if "out of memory" in str(e).lower():
+                e.__traceback__ = None
+                raise ActivationExtractionError(
+                    f"Extraction failed: {str(e)}"
+                ) from None
+
             raise ActivationExtractionError(f"Extraction failed: {str(e)}") from e
 
         finally:
@@ -354,7 +392,20 @@ class ActivationService:
                 logger.info(f"Cleaning up model for extraction {extraction_id} on GPU {gpu_id}")
                 self._cleanup_model(model, gpu_id)
             else:
-                logger.info(f"No model to clean up for extraction {extraction_id} (already cleaned or never loaded)")
+                # A load that died part-way still left its weights on the card.
+                #
+                # `model` is bound only when _load_model RETURNS, so an OOM
+                # during loading arrives here with several GB resident and the
+                # name still None. This branch used to log "nothing to clean
+                # up" and return, which is how a failed extraction kept
+                # everything it had allocated. The next one then OOMs against a
+                # nearly full card -- 2026-08-25, a 26-second failure reporting
+                # "total capacity of 23.56 GiB of which 21.75 MiB is free".
+                logger.info(
+                    f"No model handle for extraction {extraction_id}; releasing "
+                    f"whatever a failed load left on GPU {gpu_id}"
+                )
+                self._release_gpu_memory(gpu_id)
 
     def _load_model(
         self,
