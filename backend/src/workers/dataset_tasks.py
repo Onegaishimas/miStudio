@@ -71,6 +71,24 @@ def cleanup_child_processes():
         print(f"[CLEANUP] Error cleaning up child processes: {e}")
 
 
+def apply_tokenization_success(tokenization_obj, tokenized_path, stats):
+    """Write a completed tokenization onto its row.
+
+    Clearing `error_message` is part of success. A row that failed and was then
+    re-run kept the old text, and the tokenizations list renders
+    `error_message` whatever the status -- so a READY tokenization went on
+    displaying a failure it had already recovered from.
+    """
+    tokenization_obj.status = TokenizationStatus.READY
+    tokenization_obj.progress = 100.0
+    tokenization_obj.completed_at = datetime.now(UTC)
+    tokenization_obj.tokenized_path = tokenized_path
+    tokenization_obj.vocab_size = stats["vocab_size"]
+    tokenization_obj.num_tokens = stats["num_tokens"]
+    tokenization_obj.avg_seq_length = stats["avg_seq_length"]
+    tokenization_obj.error_message = None
+
+
 class TokenizationSignalState:
     """Mutable shutdown state shared between one tokenization task and its handler."""
 
@@ -1107,13 +1125,9 @@ def tokenize_dataset_task(
                     raise ValueError(f"Tokenization {tokenization_id} not found")
 
                 # Update tokenization record with results
-                tokenization_obj.status = TokenizationStatus.READY
-                tokenization_obj.progress = 100.0
-                tokenization_obj.completed_at = datetime.now(UTC)
-                tokenization_obj.tokenized_path = saved_tokenized_path
-                tokenization_obj.vocab_size = stats["vocab_size"]
-                tokenization_obj.num_tokens = stats["num_tokens"]
-                tokenization_obj.avg_seq_length = stats["avg_seq_length"]
+                apply_tokenization_success(
+                    tokenization_obj, saved_tokenized_path, stats
+                )
 
                 # Update parent dataset status to READY
                 dataset_obj = db.query(Dataset).filter_by(id=dataset_uuid).first()
