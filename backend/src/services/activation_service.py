@@ -63,7 +63,43 @@ class ActivationService:
             reserved = torch.cuda.memory_reserved(gpu_id) / (1024 ** 3)    # GB
             logger.info(f"[GPU {gpu_id} Memory - {stage}] Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB")
 
-    def _cleanup_model(self, model: torch.nn.Module, gpu_id: int = 0) -> None:
+    #: Reserved GB left on the card that still counts as a successful release.
+    #: A CUDA context plus allocator bookkeeping is a few hundred MB; anything
+    #: approaching a model's footprint is a pool that never came back.
+    RESERVED_FLOOR_GB = 1.0
+
+    @staticmethod
+    def _gpu_memory(gpu_id: int = 0) -> dict:
+        """Allocated and reserved GB, or zeros when there is no CUDA device."""
+        if not torch.cuda.is_available():
+            return {"allocated": 0.0, "reserved": 0.0}
+        return {
+            "allocated": torch.cuda.memory_allocated(gpu_id) / (1024 ** 3),
+            "reserved": torch.cuda.memory_reserved(gpu_id) / (1024 ** 3),
+        }
+
+    def _report_cleanup(self, gpu_id: int, before: dict) -> dict:
+        """Compare the card before and after, and say which one happened."""
+        after = self._gpu_memory(gpu_id)
+        released = before["reserved"] - after["reserved"]
+
+        if after["reserved"] > self.RESERVED_FLOOR_GB:
+            logger.warning(
+                f"GPU {gpu_id} did not give the memory back: reserved "
+                f"{before['reserved']:.2f} -> {after['reserved']:.2f} GB "
+                f"(released {released:.2f} GB) with {after['allocated']:.2f} GB "
+                "still allocated. That pool is unavailable to anything else on "
+                "the card until this process exits."
+            )
+        else:
+            logger.info(
+                f"Model unloaded from GPU {gpu_id}: released "
+                f"{released:.2f} GB, {after['reserved']:.2f} GB reserved"
+            )
+
+        return {"before": before, "after": after, "released": released}
+
+    def _cleanup_model(self, model: torch.nn.Module, gpu_id: int = 0) -> dict:
         """
         Explicitly clean up model from GPU memory.
 
@@ -75,6 +111,8 @@ class ActivationService:
             gpu_id: GPU device ID that the model was loaded on
         """
         import gc
+
+        before = self._gpu_memory(gpu_id)
 
         try:
             # Log memory before cleanup
@@ -129,7 +167,15 @@ class ActivationService:
             # Log memory after cleanup
             self._log_gpu_memory("after_cleanup", gpu_id)
 
-            logger.info(f"Model cleaned up from GPU {gpu_id} memory")
+            # Report what actually happened, not that the code ran.
+            #
+            # This used to log success unconditionally. On 2026-08-25 three
+            # consecutive extractions logged "Model cleaned up" with 5.38 GB,
+            # 9.32 GB and 7.16 GB still allocated, and a fourth left a 6.99 GB
+            # reserved pool that never came back -- nvidia-smi showed 7.3 GB
+            # held by a worker with no live tensors, nine hours later. A claim
+            # nothing measures cannot surface its own failure.
+            return self._report_cleanup(gpu_id, before)
 
         except Exception as e:
             logger.warning(f"Error during model cleanup: {e}")
@@ -141,6 +187,10 @@ class ActivationService:
                         torch.cuda.empty_cache()
                 except Exception:
                     pass
+
+            # A failed cleanup is precisely when the card's state matters, so
+            # measure here too rather than returning None and saying nothing.
+            return self._report_cleanup(gpu_id, before)
 
     def extract_activations(
         self,

@@ -155,6 +155,17 @@ spec:
               value: high_priority,datasets,processing,training,extraction,sae
             - name: CELERY_WORKER_NAME
               value: gpu
+            # Return VRAM to the driver when an extraction finishes.
+            #
+            # The default caching allocator carves fixed-size segments, and
+            # `empty_cache()` can only hand back a segment nothing lives in.
+            # After a 12B extraction the worker sat at Allocated 0.01 GB /
+            # Reserved 6.99 GB -- no live tensors, 7.3 GB unavailable to
+            # anything else on the card, held for nine hours (2026-08-25).
+            # Expandable segments use one growable mapping whose pages can
+            # actually be unmapped, so the pool shrinks instead of flooring.
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: expandable_segments:True
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
