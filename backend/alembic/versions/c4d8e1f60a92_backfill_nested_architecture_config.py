@@ -66,17 +66,47 @@ def _rebuild(config_dir: Path) -> dict:
     return extract_architecture_config(config)
 
 
-def upgrade() -> None:
-    conn = op.get_bind()
+def _affected_rows(conn):
+    """Rows whose stored config records no layer count.
 
-    rows = conn.execute(
+    `models.id` is the primary key -- there is no `model_id` column. Naming a
+    column that does not exist made this SELECT raise, and because the
+    entrypoint refuses to serve without successful migrations, that took the
+    API down rather than skipping a backfill.
+    """
+    return conn.execute(
         sa.text(
-            "SELECT model_id, file_path, architecture_config FROM models "
+            "SELECT id, file_path, architecture_config FROM models "
             "WHERE file_path IS NOT NULL "
             "AND NOT jsonb_exists(COALESCE(architecture_config, '{}'::jsonb), "
             "                     'num_hidden_layers')"
         )
     ).fetchall()
+
+
+def _write_config(conn, model_id: str, config: dict) -> None:
+    """Store a rebuilt config. Keyed by `id`; `models` has no `model_id`."""
+    conn.execute(
+        sa.text(
+            "UPDATE models SET architecture_config = CAST(:cfg AS jsonb) "
+            "WHERE id = :mid"
+        ),
+        {"cfg": json.dumps(config, default=str), "mid": model_id},
+    )
+
+
+def upgrade() -> None:
+    conn = op.get_bind()
+
+    try:
+        rows = _affected_rows(conn)
+    except Exception as exc:                           # pragma: no cover
+        # A backfill of descriptive metadata must never be why the API cannot
+        # start. This query referenced a column that does not exist and
+        # crashlooped the backend for 34 minutes (2026-08-25); the per-row
+        # handler below could not help, because the failure was the SELECT.
+        logger.warning("architecture_config backfill: skipped entirely (%s)", exc)
+        return
 
     repaired = 0
     for model_id, file_path, existing in rows:
@@ -100,13 +130,7 @@ def upgrade() -> None:
             merged = dict(existing or {})
             merged.update(rebuilt)
 
-            conn.execute(
-                sa.text(
-                    "UPDATE models SET architecture_config = CAST(:cfg AS jsonb) "
-                    "WHERE model_id = :mid"
-                ),
-                {"cfg": json.dumps(merged, default=str), "mid": model_id},
-            )
+            _write_config(conn, model_id, merged)
             repaired += 1
             logger.info(
                 "architecture_config backfill: %s -> %s layers (towers: %s)",

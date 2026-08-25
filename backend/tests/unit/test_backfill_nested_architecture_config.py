@@ -77,7 +77,7 @@ class TestItOnlyTargetsBrokenRows:
     def test_the_query_filters_on_the_missing_layer_count(self):
         import inspect
 
-        src = inspect.getsource(mod.upgrade)
+        src = inspect.getsource(mod._affected_rows)
         assert "jsonb_exists" in src and "num_hidden_layers" in src, (
             "the backfill no longer restricts itself to rows missing a layer "
             "count, so it can overwrite a correct architecture_config"
@@ -88,3 +88,48 @@ class TestItOnlyTargetsBrokenRows:
 
         src = inspect.getsource(mod.upgrade)
         assert "merged.update(rebuilt)" in src
+
+
+class TestTheSqlMatchesTheRealSchema:
+    """The gap that took the API down.
+
+    The earlier tests here exercised the migration's HELPERS -- _rebuild and
+    _config_dir -- and never its SQL, so a SELECT naming a column that does not
+    exist passed every one of them. It reached production, the entrypoint
+    refuses to serve without successful migrations, and the backend
+    crashlooped for 34 minutes (11 restarts, 2026-08-25).
+
+    A column name is only proven by a database. These run the migration's OWN
+    query -- not a copy typed into the test, which would drift -- against the
+    real schema.
+
+    Deliberately NOT a source scrape: the first attempt at this test matched
+    the column name inside the docstring explaining that the column does not
+    exist, which is the recurring trap in this repo.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_migrations_own_query_executes(self, async_session):
+        rows = await async_session.run_sync(lambda sess: mod._affected_rows(sess))
+        assert isinstance(rows, list)
+
+    @pytest.mark.asyncio
+    async def test_its_update_targets_a_real_column(self, async_session):
+        """The UPDATE is only reached when a row needs repair, so drive the
+        migration's OWN statement -- a copy typed here would pass while the
+        real one named a column that does not exist."""
+        await async_session.run_sync(
+            lambda sess: mod._write_config(sess, "__no_such_model__", {})
+        )
+
+    def test_a_broken_select_cannot_stop_the_deploy(self):
+        """Even if the SQL is wrong again, the API must still come up."""
+        import inspect
+
+        src = inspect.getsource(mod.upgrade)
+        after_call = src.split("_affected_rows(conn)", 1)[1][:400]
+        assert "except Exception" in after_call, (
+            "the SELECT is unguarded again, so a bad query fails the migration "
+            "and the entrypoint will not serve"
+        )
+        assert "return" in src.split("_affected_rows(conn)", 1)[1][:700]
