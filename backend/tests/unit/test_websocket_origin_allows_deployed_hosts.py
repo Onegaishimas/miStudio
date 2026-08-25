@@ -97,3 +97,72 @@ class TestTheCheckItself:
         assert not _origin_allowed("", ["http://localhost"]), (
             "an empty origin matching the allowlist would make this note wrong"
         )
+
+
+class TestTheManifestValueActuallyLoads:
+    """The k8s value must parse, not merely exist.
+
+    My first version set it comma-separated. `allowed_origins` is a `list[str]`,
+    and pydantic-settings JSON-decodes complex types in EnvSettingsSource
+    BEFORE any `field_validator` runs — so `parse_allowed_origins`, which does
+    accept a comma-separated string, never saw the value. The process died at
+    import with `SettingsError: error parsing value for field "allowed_origins"`
+    and the API crashlooped in production.
+
+    Asserting the key is present was not enough; this feeds the real value
+    through the real Settings class.
+    """
+
+    def _manifest_value(self):
+        import re
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[3] / "k8s" / "base"
+                / "backend.yaml").read_text()
+        m = re.search(r"- name: ALLOWED_ORIGINS\n(?:\s*#[^\n]*\n)*\s*value:\s*(.+)", text)
+        assert m, "ALLOWED_ORIGINS not found in the manifest"
+        return m.group(1).strip().strip("'\"")
+
+    def test_the_manifest_value_parses_through_settings(self):
+        import os
+
+        from src.core.config import Settings
+
+        raw = self._manifest_value()
+        old = os.environ.get("ALLOWED_ORIGINS")
+        os.environ["ALLOWED_ORIGINS"] = raw
+        try:
+            parsed = Settings().allowed_origins
+        except Exception as exc:                       # noqa: BLE001
+            raise AssertionError(
+                f"the manifest's ALLOWED_ORIGINS value does not load: "
+                f"{type(exc).__name__}. This crashloops the API at import. "
+                f"Value was: {raw[:90]}"
+            ) from exc
+        finally:
+            if old is None:
+                os.environ.pop("ALLOWED_ORIGINS", None)
+            else:
+                os.environ["ALLOWED_ORIGINS"] = old
+
+        assert "https://mistudio.hitsai.net" in parsed
+        assert "http://k8s-mistudio.hitsai.local" in parsed
+
+    def test_a_comma_separated_value_is_rejected_loudly(self):
+        """Pin the trap, so nobody 'simplifies' the JSON back to commas."""
+        import os
+
+        import pytest
+
+        from src.core.config import Settings
+
+        old = os.environ.get("ALLOWED_ORIGINS")
+        os.environ["ALLOWED_ORIGINS"] = "http://a.local,http://b.net"
+        try:
+            with pytest.raises(Exception):
+                Settings()
+        finally:
+            if old is None:
+                os.environ.pop("ALLOWED_ORIGINS", None)
+            else:
+                os.environ["ALLOWED_ORIGINS"] = old

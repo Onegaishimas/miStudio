@@ -85,7 +85,14 @@ spec:
             # page renders, and pushed progress events never arrive. It has to
             # name the hostnames this deployment is actually reached on.
             - name: ALLOWED_ORIGINS
-              value: "http://k8s-mistudio.hitsai.local,https://k8s-mistudio.hitsai.local,https://mistudio.hitsai.net,http://mistudio.hitsai.net,http://localhost:3000,http://localhost"
+              # JSON ARRAY, not comma-separated. `allowed_origins` is a
+              # list[str], and pydantic-settings JSON-decodes complex
+              # types in EnvSettingsSource BEFORE any field_validator
+              # runs — so the `parse_allowed_origins` validator that
+              # accepts a comma-separated string never gets the value,
+              # and the process dies at import with SettingsError.
+              # A comma-separated value here crashlooped the API.
+              value: '["http://k8s-mistudio.hitsai.local", "https://k8s-mistudio.hitsai.local", "https://mistudio.hitsai.net", "http://mistudio.hitsai.net", "http://localhost:3000", "http://localhost"]'
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
