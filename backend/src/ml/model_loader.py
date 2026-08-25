@@ -42,9 +42,39 @@ class OutOfMemoryError(Exception):
 # This allows any transformer model with standard structure to be used.
 
 
+#: Sub-config attributes that carry the LANGUAGE model's dimensions when a
+#: config nests them, most specific first.
+#:
+#: Naming the text tower matters rather than scanning for the first nested
+#: match: google/gemma-4-12B-it ("gemma4_unified") also carries `audio_config`
+#: and `vision_config`, each with its own hidden_size, so a scan can silently
+#: record the audio tower's geometry as the model's.
+_TEXT_SUBCONFIG_NAMES = ("text_config", "llm_config", "language_config", "decoder")
+
+
+def _text_subconfig(config: AutoConfig) -> Optional[Any]:
+    """The nested sub-config holding the language model's shape, if any."""
+    for name in _TEXT_SUBCONFIG_NAMES:
+        sub = getattr(config, name, None)
+        # An INTEGER layer count, not merely the attribute. gemma-4's
+        # audio_config carries `num_hidden_layers: null`, and an object that
+        # answers to any attribute (a bare Mock, a lazy config wrapper) would
+        # otherwise qualify and supply every remaining field from nowhere.
+        if isinstance(getattr(sub, "num_hidden_layers", None), int):
+            return sub
+    return None
+
+
 def extract_architecture_config(config: AutoConfig) -> Dict[str, Any]:
     """
     Extract relevant architecture configuration from HuggingFace config.
+
+    Reads each field from the top level first, then from the nested text
+    sub-config. Multimodal and "unified" configs keep the decoder's dimensions
+    nested, so a top-level-only read stored three keys for gemma-4-12B-it and
+    no layer count at all -- the Training page derives its layer picker from
+    `num_hidden_layers`, so the model could be selected and offered no layers
+    (2026-08-25).
 
     Args:
         config: HuggingFace model configuration
@@ -55,6 +85,8 @@ def extract_architecture_config(config: AutoConfig) -> Dict[str, Any]:
     arch_config = {
         "model_type": config.model_type,
     }
+
+    text_config = _text_subconfig(config)
 
     # Common fields across architectures
     common_fields = [
@@ -76,6 +108,14 @@ def extract_architecture_config(config: AutoConfig) -> Dict[str, Any]:
     for field in common_fields:
         if hasattr(config, field):
             arch_config[field] = getattr(config, field)
+        elif text_config is not None and hasattr(text_config, field):
+            arch_config[field] = getattr(text_config, field)
+
+    # Record where the shape came from. A reader comparing this against a
+    # running model needs to know it describes the text tower of a multimodal
+    # config, not the whole thing.
+    if text_config is not None:
+        arch_config["shape_source"] = "text_config"
 
     return arch_config
 
