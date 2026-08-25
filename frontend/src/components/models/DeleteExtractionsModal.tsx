@@ -18,12 +18,25 @@ interface DeleteExtractionsModalProps {
   model: Model;
   onClose: () => void;
   onDelete: (extractionIds: string[]) => Promise<void>;
+  /**
+   * What the caller had selected when it opened this modal.
+   *
+   * Callers that show their own "Delete Selected (N)" button pass the rows the
+   * user actually picked. Without it the confirmation seeded itself with every
+   * deletable extraction, so choosing one row and pressing Delete Selected (1)
+   * arrived here with all of them ticked and the user had to un-tick the rest.
+   *
+   * Omit it when the modal is opened cold, with nothing chosen yet -- then
+   * select-all-deletable is the sensible starting point.
+   */
+  initialSelectedIds?: Iterable<string>;
 }
 
 export function DeleteExtractionsModal({
   model,
   onClose,
-  onDelete
+  onDelete,
+  initialSelectedIds
 }: DeleteExtractionsModalProps) {
   const [extractions, setExtractions] = useState<Extraction[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -43,13 +56,20 @@ export function DeleteExtractionsModal({
       const fetchedExtractions = data.extractions || [];
       setExtractions(fetchedExtractions);
 
-      // Select only deletable extractions by default
-      const deletableIds = new Set(
+      const deletableIds = new Set<string>(
         fetchedExtractions
           .filter((e: Extraction) => e.can_delete !== false)
           .map((e: Extraction) => e.extraction_id)
       );
-      setSelectedIds(deletableIds);
+
+      // Honour the caller's selection, narrowed to what can actually be
+      // deleted. Fall back to every deletable row only when the caller had no
+      // selection to carry over, or when none of it survived that filter --
+      // seeding nothing would leave the user staring at a disabled button.
+      const carried = new Set<string>(
+        [...(initialSelectedIds ?? [])].filter((id) => deletableIds.has(id))
+      );
+      setSelectedIds(carried.size > 0 ? carried : deletableIds);
     } catch (err) {
       console.error('[DeleteExtractionsModal] Failed to fetch:', err);
       setError(err instanceof Error ? err.message : 'Failed to load extractions');
