@@ -37,12 +37,26 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
   useEffect(() => {
     // Generate architecture data from model.architecture_config
     const config = model.architecture_config;
-    const numLayers = config?.num_layers || config?.num_hidden_layers || 12;
-    const hiddenDim = config?.hidden_size || 768;
-    const numHeads = config?.num_attention_heads || 12;
+
+    // Every number below is drawn as this model's architecture, so none of it
+    // may be invented. The previous defaults -- 12 layers, 768 wide, 12 heads,
+    // 50257 vocab -- are GPT-2's, so any model with an incomplete config was
+    // rendered as GPT-2 under its own name.
+    const numLayers = config?.num_layers ?? config?.num_hidden_layers ?? null;
+    const hiddenDim = config?.hidden_size ?? null;
+    const numHeads = config?.num_attention_heads ?? null;
+    const mlpDim = config?.intermediate_size ?? null;
+    const vocabSize = config?.vocab_size ?? null;
+
+    if (
+      numLayers === null || hiddenDim === null || numHeads === null ||
+      mlpDim === null || vocabSize === null
+    ) {
+      setArchitectureData(null);
+      return;
+    }
+
     const headDim = Math.floor(hiddenDim / numHeads);
-    const mlpDim = config?.intermediate_size || hiddenDim * 4;
-    const vocabSize = config?.vocab_size || 50257;
 
     const layers: LayerInfo[] = [
       { type: 'Embedding', size: `${vocabSize} × ${hiddenDim}` },
@@ -75,7 +89,15 @@ export function ModelArchitectureViewer({ model, onClose }: ModelArchitectureVie
   };
 
   if (!architectureData) {
-    return null;
+    return (
+      <div
+        role="alert"
+        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-500 dark:text-amber-400"
+      >
+        This model does not record the dimensions needed to draw its
+        architecture. Re-download it to refresh the stored config.
+      </div>
+    );
   }
 
   return (

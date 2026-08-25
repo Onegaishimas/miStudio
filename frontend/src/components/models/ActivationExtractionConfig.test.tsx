@@ -328,7 +328,12 @@ describe('ActivationExtractionConfig', () => {
       expect(screen.getByText(/Select Layers \(0 selected\)/)).toBeInTheDocument();
     });
 
-    it('should use default num_layers when not in config', () => {
+    it('should offer no layers when the config records no depth', () => {
+      // REWRITTEN 2026-08-25. This test used to assert the opposite --
+      // "Should default to 12 layers" -- and so pinned the defect rather than
+      // preventing it. gemma-4-12B-it has 48 layers and records its depth in a
+      // nested text_config; the picker showed L0-L11 and made layers 12-47
+      // unreachable, with nothing on screen saying the count was invented.
       const modelWithoutLayers = {
         ...testModel,
         architecture_config: {
@@ -345,10 +350,9 @@ describe('ActivationExtractionConfig', () => {
         />
       );
 
-      // Should default to 12 layers
-      expect(screen.getByText('L0')).toBeInTheDocument();
-      expect(screen.getByText('L11')).toBeInTheDocument();
-      expect(screen.queryByText('L12')).not.toBeInTheDocument();
+      expect(screen.queryByText('L0')).not.toBeInTheDocument();
+      expect(screen.queryByText('L11')).not.toBeInTheDocument();
+      expect(screen.getByText(/records no layer count/i)).toBeInTheDocument();
     });
   });
 

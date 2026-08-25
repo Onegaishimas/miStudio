@@ -61,11 +61,19 @@ export function ActivationExtractionConfig({
   // Subscribe to extraction progress updates for this model
   useModelExtractionProgress(extractionStarted ? model.id : undefined);
 
-  // Determine number of layers from model architecture
-  const numLayers = model.architecture_config?.num_layers ||
-                   model.architecture_config?.num_hidden_layers ||
-                   12;
-  const layers = Array.from({ length: numLayers }, (_, i) => i);
+  // The model's depth, or null when the stored config does not record it.
+  //
+  // This used to fall back to 12. A fabricated depth is worse than a missing
+  // one: the picker looked authoritative while capping a 48-layer model at
+  // L11, so layers 12-47 could not be reached and nothing said so
+  // (gemma-4-12B-it, 2026-08-25). Refusing to draw a picker is the same rule
+  // the J-Lens bands already follow -- no default constant anywhere.
+  const numLayers = model.architecture_config?.num_layers ??
+                    model.architecture_config?.num_hidden_layers ??
+                    null;
+  const layers = numLayers === null
+    ? []
+    : Array.from({ length: numLayers }, (_, i) => i);
 
   // Fetch datasets, templates, and GPU list on mount
   useEffect(() => {
@@ -479,6 +487,15 @@ export function ActivationExtractionConfig({
                 </button>
               </div>
             </div>
+            {numLayers === null ? (
+              <div
+                role="alert"
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-500 dark:text-amber-400"
+              >
+                This model records no layer count, so no layer list can be
+                offered. Re-download the model to refresh its architecture.
+              </div>
+            ) : (
             <div className="grid grid-cols-6 gap-2">
               {layers.map((layer) => (
                 <button
@@ -496,6 +513,7 @@ export function ActivationExtractionConfig({
                 </button>
               ))}
             </div>
+            )}
           </div>
 
           {/* Hook Type Selection */}
