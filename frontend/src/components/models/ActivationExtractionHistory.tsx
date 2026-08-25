@@ -461,6 +461,7 @@ export function ActivationExtractionHistory({
           model={model}
           onClose={() => setShowDeleteModal(false)}
           onDelete={handleDelete}
+          initialSelectedIds={selectedIds}
         />
       )}
     </div>
