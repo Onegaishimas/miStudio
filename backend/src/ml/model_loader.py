@@ -42,80 +42,153 @@ class OutOfMemoryError(Exception):
 # This allows any transformer model with standard structure to be used.
 
 
-#: Sub-config attributes that carry the LANGUAGE model's dimensions when a
-#: config nests them, most specific first.
-#:
-#: Naming the text tower matters rather than scanning for the first nested
-#: match: google/gemma-4-12B-it ("gemma4_unified") also carries `audio_config`
-#: and `vision_config`, each with its own hidden_size, so a scan can silently
-#: record the audio tower's geometry as the model's.
-_TEXT_SUBCONFIG_NAMES = ("text_config", "llm_config", "language_config", "decoder")
+#: Fields that describe the shape of one transformer stack. Read off whichever
+#: tower is being described, so the same list serves the text, vision and audio
+#: towers of a composite model.
+SHAPE_FIELDS = (
+    "num_hidden_layers",
+    "hidden_size",
+    "num_attention_heads",
+    "intermediate_size",
+    "max_position_embeddings",
+    "vocab_size",
+    "num_key_value_heads",       # GQA/MQA
+    "hidden_act",
+    "initializer_range",
+    "layer_norm_eps",
+    "use_cache",
+    "tie_word_embeddings",
+    "rope_theta",
+    # Mixture-of-experts. A DIFFERENT axis from tower nesting: an MoE config is
+    # flat, but each layer's FFN is a router over experts, so a reader that
+    # knows only num_hidden_layers cannot tell a dense 8B from an 8x7B. The
+    # names differ per implementation (Mixtral, Qwen-MoE, DeepSeek), and they
+    # are recorded only when present.
+    "num_experts",
+    "num_local_experts",
+    "num_experts_per_tok",
+    "n_routed_experts",
+    "n_shared_experts",
+    "moe_intermediate_size",
+    "shared_expert_intermediate_size",
+    "num_experts_shared",
+)
 
 
-def _text_subconfig(config: AutoConfig) -> Optional[Any]:
-    """The nested sub-config holding the language model's shape, if any."""
-    for name in _TEXT_SUBCONFIG_NAMES:
+def _describe(sub: Any) -> Dict[str, Any]:
+    """Shape fields present on one config object."""
+    described = {
+        field: getattr(sub, field)
+        for field in SHAPE_FIELDS
+        if getattr(sub, field, None) is not None
+    }
+    model_type = getattr(sub, "model_type", None)
+    if model_type is not None:
+        described["model_type"] = model_type
+    return described
+
+
+def _text_tower(config: AutoConfig) -> Tuple[Any, Optional[str]]:
+    """
+    The sub-config describing the LANGUAGE model, and the attribute holding it.
+
+    Asks transformers rather than matching names. `get_text_config()` returns
+    the config itself on a flat model and the text section on a composite one,
+    and the library extends it as new composite architectures land -- which a
+    hand-maintained list of names does not.
+    """
+    getter = getattr(config, "get_text_config", None)
+    try:
+        text = getter() if callable(getter) else config
+    except Exception:                                   # pragma: no cover
+        text = config
+
+    # Believe a separate text tower only if it presents an INTEGER depth.
+    # gemma-4's sibling towers carry `num_hidden_layers: null`, and an object
+    # that answers to every attribute would otherwise be accepted and then
+    # supply every remaining field from nowhere.
+    if text is None or text is config:
+        return config, None
+    if not isinstance(getattr(text, "num_hidden_layers", None), int):
+        return config, None
+
+    # Name it by the attribute it lives under, so callers can address the tower
+    # rather than only read its numbers.
+    for name in _tower_names(config):
+        if getattr(config, name, None) is text:
+            return text, name
+    return text, "text_config"
+
+
+def _tower_names(config: AutoConfig) -> Tuple[str, ...]:
+    """
+    Every sub-config this architecture declares.
+
+    `sub_configs` is a class attribute maintained by transformers -- e.g.
+    Gemma3Config declares {'text_config': Gemma3TextConfig, 'vision_config':
+    SiglipVisionConfig}. Enumerating it means a new modality on a new
+    architecture is described the day the library supports it, with no list
+    here to update.
+    """
+    declared = getattr(type(config), "sub_configs", None) or {}
+    return tuple(declared.keys())
+
+
+def _describe_towers(config: AutoConfig) -> Dict[str, Dict[str, Any]]:
+    """Each declared tower's own shape, keyed by its attribute name."""
+    towers = {}
+    for name in _tower_names(config):
         sub = getattr(config, name, None)
-        # An INTEGER layer count, not merely the attribute. gemma-4's
-        # audio_config carries `num_hidden_layers: null`, and an object that
-        # answers to any attribute (a bare Mock, a lazy config wrapper) would
-        # otherwise qualify and supply every remaining field from nowhere.
-        if isinstance(getattr(sub, "num_hidden_layers", None), int):
-            return sub
-    return None
+        if sub is None:
+            continue
+        described = _describe(sub)
+        if described:
+            towers[name] = described
+    return towers
 
 
 def extract_architecture_config(config: AutoConfig) -> Dict[str, Any]:
     """
-    Extract relevant architecture configuration from HuggingFace config.
+    Describe a model's architecture, whatever shape its config has.
 
-    Reads each field from the top level first, then from the nested text
-    sub-config. Multimodal and "unified" configs keep the decoder's dimensions
-    nested, so a top-level-only read stored three keys for gemma-4-12B-it and
-    no layer count at all -- the Training page derives its layer picker from
-    `num_hidden_layers`, so the model could be selected and offered no layers
-    (2026-08-25).
+    Flat decoder-only configs are described directly. Composite configs -- any
+    model with more than one tower, which today means vision-language, audio
+    and "omni" models -- are described by their TEXT tower at the top level,
+    with every declared tower recorded under `towers`.
 
-    Args:
-        config: HuggingFace model configuration
+    Top-level fields keep meaning "the stack an SAE is trained on", so existing
+    readers (the Training page's layer picker, memory estimation, the data
+    model docs) need no change. `towers` is additive, and is what interpreting
+    a non-text modality will need.
+
+    Why the text tower rather than the outer config: a composite config's outer
+    level carries the fusion metadata, not a transformer stack.
+    google/gemma-4-12B-it exposed exactly three usable keys there and no layer
+    count, so the Training page offered no layers at all (2026-08-25).
 
     Returns:
-        Dictionary containing architecture details
+        Dictionary containing architecture details. Always has `model_type`.
+        Composite models also carry `towers` and `text_tower`.
     """
-    arch_config = {
-        "model_type": config.model_type,
-    }
+    text, text_tower_name = _text_tower(config)
 
-    text_config = _text_subconfig(config)
+    arch_config: Dict[str, Any] = {"model_type": config.model_type}
 
-    # Common fields across architectures
-    common_fields = [
-        "num_hidden_layers",
-        "hidden_size",
-        "num_attention_heads",
-        "intermediate_size",
-        "max_position_embeddings",
-        "vocab_size",
-        "num_key_value_heads",  # For GQA/MQA
-        "hidden_act",
-        "initializer_range",
-        "layer_norm_eps",
-        "use_cache",
-        "tie_word_embeddings",
-        "rope_theta",  # For RoPE embeddings
-    ]
+    # The text tower's own numbers win, then anything the outer config declares
+    # that the tower does not (fusion-level settings such as tie_word_embeddings
+    # often live only at the top).
+    arch_config.update(_describe(config))
+    arch_config.update(_describe(text))
+    arch_config["model_type"] = config.model_type
 
-    for field in common_fields:
-        if hasattr(config, field):
-            arch_config[field] = getattr(config, field)
-        elif text_config is not None and hasattr(text_config, field):
-            arch_config[field] = getattr(text_config, field)
-
-    # Record where the shape came from. A reader comparing this against a
-    # running model needs to know it describes the text tower of a multimodal
-    # config, not the whole thing.
-    if text_config is not None:
-        arch_config["shape_source"] = "text_config"
+    towers = _describe_towers(config)
+    if towers:
+        arch_config["towers"] = towers
+    if text_tower_name is not None:
+        # Which tower the top-level numbers came from. A reader comparing this
+        # against a running model needs to know it describes one tower of a
+        # composite, not the whole thing.
+        arch_config["text_tower"] = text_tower_name
 
     return arch_config
 

@@ -225,7 +225,11 @@ describe('ModelArchitectureViewer', () => {
   });
 
   describe('Default Configuration Handling', () => {
-    it('should use defaults when architecture_config is missing', () => {
+    it('should refuse to draw anything when architecture_config is missing', () => {
+      // REWRITTEN 2026-08-25. This asserted "should render with default values
+      // (12 layers, 768 hidden, etc.)" -- those are GPT-2's dimensions, so any
+      // model with an incomplete config was drawn as GPT-2 under its own name.
+      // The test pinned that, which is why it survived.
       const modelWithoutConfig: Model = {
         ...testModel,
         architecture_config: undefined,
@@ -233,25 +237,46 @@ describe('ModelArchitectureViewer', () => {
 
       render(<ModelArchitectureViewer model={modelWithoutConfig} onClose={mockOnClose} />);
 
-      // Should render with default values (12 layers, 768 hidden, etc.)
-      expect(screen.getByText('Model Layers')).toBeInTheDocument();
-      expect(screen.getByText('Embedding')).toBeInTheDocument();
+      expect(screen.queryByText('Model Layers')).not.toBeInTheDocument();
+      expect(screen.queryByText('50257')).not.toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /does not record the dimensions/i
+      );
     });
 
-    it('should handle partial architecture config', () => {
+    it('should refuse a partial architecture config rather than fill the gaps', () => {
+      // REWRITTEN 2026-08-25, same reason: "Missing other fields - should use
+      // defaults" filled head count and vocabulary from GPT-2 and drew them as
+      // this model's.
       const modelWithPartialConfig: Model = {
         ...testModel,
         architecture_config: {
           num_layers: 6,
           hidden_size: 512,
-          // Missing other fields - should use defaults
         },
       };
 
       render(<ModelArchitectureViewer model={modelWithPartialConfig} onClose={mockOnClose} />);
 
-      expect(screen.getByText('512')).toBeInTheDocument(); // Hidden size
-      expect(screen.getByText('TransformerBlock_5')).toBeInTheDocument(); // Last layer
+      expect(screen.queryByText('TransformerBlock_5')).not.toBeInTheDocument();
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    it('should draw the full depth when every dimension is recorded', () => {
+      const complete: Model = {
+        ...testModel,
+        architecture_config: {
+          num_hidden_layers: 48,
+          hidden_size: 3840,
+          num_attention_heads: 16,
+          intermediate_size: 15360,
+          vocab_size: 262144,
+        },
+      };
+
+      render(<ModelArchitectureViewer model={complete} onClose={mockOnClose} />);
+
+      expect(screen.getByText('TransformerBlock_47')).toBeInTheDocument();
     });
   });
 
