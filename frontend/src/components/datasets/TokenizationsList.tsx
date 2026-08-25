@@ -77,7 +77,8 @@ interface TokenizationsListProps {
 }
 
 export function TokenizationsList({ datasetId }: TokenizationsListProps) {
-  const { tokenizations, tokenizationProgress, fetchTokenizations, deleteTokenization, cancelTokenization, createTokenization } = useDatasetsStore();
+  const { tokenizations, tokenizationProgress, fetchTokenizations, deleteTokenization, cancelTokenization, createTokenization, error: storeError } = useDatasetsStore();
+  const [actionError, setActionError] = useState<string | null>(null);
   const { models, fetchModels } = useModelsStore();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState('');
@@ -107,20 +108,28 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
 
   const handleDelete = async (tokenizationId: string, tokenizerName: string, maxLength: number) => {
     if (window.confirm(`Delete tokenization ${tokenizerName} (${maxLength} tokens)?`)) {
+      setActionError(null);
       try {
         await deleteTokenization(datasetId, tokenizationId);
       } catch (error) {
         console.error('Failed to delete tokenization:', error);
+        setActionError(
+          error instanceof Error ? error.message : 'Failed to delete tokenization'
+        );
       }
     }
   };
 
   const handleCancel = async (tokenizationId: string, tokenizerName: string, maxLength: number) => {
     if (window.confirm(`Cancel tokenization ${tokenizerName} (${maxLength} tokens)?`)) {
+      setActionError(null);
       try {
         await cancelTokenization(datasetId, tokenizationId);
       } catch (error) {
         console.error('Failed to cancel tokenization:', error);
+        setActionError(
+          error instanceof Error ? error.message : 'Failed to cancel tokenization'
+        );
       }
     }
   };
@@ -192,8 +201,27 @@ export function TokenizationsList({ datasetId }: TokenizationsListProps) {
   // All models are available - same model can have multiple tokenizations with different max_lengths
   const availableModels = models;
 
+  const bannerError = actionError || storeError;
+
   return (
     <div className="space-y-4">
+      {bannerError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">{bannerError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-red-400/70 hover:text-red-300"
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           Tokenizations ({datasetTokenizations.length})

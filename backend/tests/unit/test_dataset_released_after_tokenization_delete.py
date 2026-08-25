@@ -3,89 +3,177 @@
 Reported 2026-08-24. The Datasets modal showed an amber "Processing" badge on
 `hard-negatives` beside two READY tokenizations, with an idle worker and no
 running job. `datasets.status` had been stuck at PROCESSING since a cancelled
-tokenization hours earlier.
+tokenization hours earlier. The delete handler reset the dataset only when the
+row it removed was the LAST one, so cancelling on a dataset that already had
+finished tokenizations left it PROCESSING forever. Whether other tokenizations
+EXIST says nothing about whether work is in flight.
 
-The delete handler reset the dataset only when the row it removed was the LAST
-one:
+WHY THIS FILE WAS REWRITTEN (2026-08-25). The first version of these tests read
+the handler's source with `inspect.getsource` and asserted on substrings. It
+never called the handler. The reset block it was checking referenced `Dataset`,
+which this module never imported -- so every delete raised
 
-    if not remaining_tokenizations:      # zero remain
-        dataset.status = READY
+    NameError: name 'Dataset' is not defined
 
-So cancelling on a dataset that already had finished tokenizations left it
-PROCESSING forever. The condition asked the wrong question — whether other
-tokenizations EXIST says nothing about whether work is in flight, and two
-finished ones are the strongest evidence the dataset is idle.
+and returned 500, while all four source assertions passed. The delete button
+did nothing for a day and the suite stayed green.
+
+A guard that reads source proves the source LOOKS right. Only executing the
+path proves it runs. These tests drive the real handler.
 """
 
-import ast
-import inspect
+from types import SimpleNamespace
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 
-
-def _handler_source() -> str:
-    from src.api.v1.endpoints import datasets
-
-    return inspect.getsource(datasets.delete_dataset_tokenization)
+from src.api.v1.endpoints import datasets as ep
+from src.models.dataset import DatasetStatus
+from src.models.dataset_tokenization import TokenizationStatus
 
 
-class TestTheConditionAsksAboutWorkNotExistence:
-    def test_it_no_longer_requires_zero_remaining(self):
-        src = _handler_source()
-        assert "if not remaining_tokenizations:" not in src, (
-            "the reset still requires that NO tokenization remains, so "
-            "cancelling on a dataset with finished tokenizations leaves it "
-            "stuck in PROCESSING"
+class _Result:
+    """One `await db.execute(...)` outcome."""
+
+    def __init__(self, scalar=None, many=None):
+        self._scalar, self._many = scalar, many
+
+    def scalar_one_or_none(self):
+        return self._scalar
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: self._many or [])
+
+
+class _DB:
+    """Hands back queued results in order, exactly as the handler asks for them."""
+
+    def __init__(self, results):
+        self._results = list(results)
+        self.deleted, self.commits = [], 0
+
+    async def execute(self, _stmt):
+        assert self._results, "the handler issued more queries than expected"
+        return self._results.pop(0)
+
+    async def delete(self, obj):
+        self.deleted.append(obj)
+
+    async def commit(self):
+        self.commits += 1
+
+
+def _tokenization(status=TokenizationStatus.READY):
+    return SimpleNamespace(
+        id="tok_x_m_1_512",
+        status=status,
+        tokenized_path=None,          # keeps the file-cleanup branch out of it
+        model_id="m_1",
+    )
+
+
+async def _delete(db, dataset_id):
+    with patch.object(ep, "get_redis_client", lambda: SimpleNamespace(delete=lambda k: 1)), \
+         patch.object(ep, "emit_tokenization_status", lambda **kw: True), \
+         patch.object(ep, "emit_dataset_progress", lambda **kw: True):
+        return await ep.delete_dataset_tokenization(
+            dataset_id=dataset_id, tokenization_id="tok_x_m_1_512", db=db
         )
 
-    def test_it_checks_for_in_flight_work(self):
-        src = _handler_source()
-        assert "in_flight" in src, "nothing distinguishes running from finished"
-        tree = ast.parse(inspect.cleandoc(src))
-        names = {
-            n.attr for n in ast.walk(tree)
-            if isinstance(n, ast.Attribute)
-            and isinstance(n.value, ast.Name)
-            and n.value.id == "TokenizationStatus"
-        }
-        assert {"QUEUED", "PROCESSING"} <= names, (
-            f"the in-flight test does not cover both unfinished states; saw {names}"
+
+@pytest.mark.asyncio
+class TestTheHandlerActuallyRuns:
+    async def test_deleting_the_last_active_row_releases_a_stuck_dataset(self):
+        """The load-bearing path. A NameError anywhere in it surfaces here."""
+        dataset_id = uuid4()
+        dataset = SimpleNamespace(
+            id=dataset_id,
+            status=DatasetStatus.PROCESSING,
+            progress=80.0,
+            error_message="whatever",
         )
+        db = _DB([
+            _Result(scalar=_tokenization()),        # find the tokenization
+            _Result(many=[]),                       # remaining tokenizations
+            _Result(scalar=dataset),                # the parent dataset
+        ])
 
-    def test_the_reset_still_happens(self):
-        """Guard against 'fixing' this by never resetting at all."""
-        src = _handler_source()
-        assert "DatasetStatus.READY" in src
-        assert "dataset_status_changed = True" in src
+        await _delete(db, dataset_id)
 
-
-class TestTheStatesItActsOn:
-    """READY and ERROR are different: only a stuck one should be released."""
-
-    def test_only_processing_and_error_are_reset(self):
-        src = _handler_source()
-        assert "DatasetStatus.PROCESSING, DatasetStatus.ERROR" in src, (
-            "the reset should apply to a stuck dataset, not overwrite every "
-            "status — a DOWNLOADING dataset must not be flipped to READY"
+        assert db.commits == 1
+        assert dataset.status == DatasetStatus.READY, (
+            "the dataset stayed PROCESSING, so the card keeps an amber badge "
+            "with no job behind it"
         )
+        assert dataset.error_message is None
 
-    def test_finished_tokenizations_do_not_block_the_reset(self):
-        """The exact scenario: two READY rows must not count as in flight."""
-        from src.models.dataset_tokenization import TokenizationStatus
-
-        finished = [TokenizationStatus.READY]
-        in_flight_states = {TokenizationStatus.QUEUED, TokenizationStatus.PROCESSING}
-        assert not [t for t in finished if t in in_flight_states], (
-            "READY is being treated as in-flight; the dataset would stay stuck"
+    async def test_it_releases_even_when_finished_tokenizations_remain(self):
+        """The original defect: 'others exist' is not 'work is running'."""
+        dataset_id = uuid4()
+        dataset = SimpleNamespace(
+            id=dataset_id, status=DatasetStatus.PROCESSING, progress=0.0,
+            error_message=None,
         )
+        db = _DB([
+            _Result(scalar=_tokenization()),
+            _Result(many=[
+                SimpleNamespace(status=TokenizationStatus.READY),
+                SimpleNamespace(status=TokenizationStatus.READY),
+            ]),
+            _Result(scalar=dataset),
+        ])
 
-    def test_an_actually_running_tokenization_does_block_it(self):
-        """The fix must not release a dataset with real work underway."""
-        from src.models.dataset_tokenization import TokenizationStatus
+        await _delete(db, dataset_id)
+        assert dataset.status == DatasetStatus.READY
 
-        running = [TokenizationStatus.READY, TokenizationStatus.PROCESSING]
-        in_flight_states = {TokenizationStatus.QUEUED, TokenizationStatus.PROCESSING}
-        assert [t for t in running if t in in_flight_states], (
-            "a PROCESSING tokenization no longer blocks the reset, so the "
-            "dataset would be marked READY while work is still running"
+    @pytest.mark.parametrize(
+        "live", [TokenizationStatus.QUEUED, TokenizationStatus.PROCESSING]
+    )
+    async def test_it_leaves_the_dataset_alone_while_work_is_in_flight(self, live):
+        dataset_id = uuid4()
+        dataset = SimpleNamespace(
+            id=dataset_id, status=DatasetStatus.PROCESSING, progress=0.0,
+            error_message=None,
         )
+        db = _DB([
+            _Result(scalar=_tokenization()),
+            _Result(many=[SimpleNamespace(status=live)]),
+            # no third result: the handler must not query for the dataset
+        ])
+
+        await _delete(db, dataset_id)
+        assert dataset.status == DatasetStatus.PROCESSING
+
+    async def test_a_downloading_dataset_is_not_flipped_to_ready(self):
+        """The reset targets a STUCK dataset, not every status."""
+        dataset_id = uuid4()
+        dataset = SimpleNamespace(
+            id=dataset_id, status=DatasetStatus.DOWNLOADING, progress=42.0,
+            error_message=None,
+        )
+        db = _DB([
+            _Result(scalar=_tokenization()),
+            _Result(many=[]),
+            _Result(scalar=dataset),
+        ])
+
+        await _delete(db, dataset_id)
+        assert dataset.status == DatasetStatus.DOWNLOADING
+        assert dataset.progress == 42.0
+
+    async def test_a_missing_tokenization_is_a_404_not_a_500(self):
+        from fastapi import HTTPException
+
+        db = _DB([_Result(scalar=None)])
+        with pytest.raises(HTTPException) as exc:
+            await _delete(db, uuid4())
+        assert exc.value.status_code == 404
+
+    async def test_a_running_tokenization_is_a_409_not_a_500(self):
+        from fastapi import HTTPException
+
+        db = _DB([_Result(scalar=_tokenization(TokenizationStatus.PROCESSING))])
+        with pytest.raises(HTTPException) as exc:
+            await _delete(db, uuid4())
+        assert exc.value.status_code == 409
