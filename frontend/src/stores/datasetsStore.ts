@@ -297,6 +297,24 @@ export const useDatasetsStore = create<DatasetsState>()(
 
           // Refresh tokenizations list
           await _get().fetchTokenizations(datasetId);
+
+          // AND the dataset itself, or live progress never starts.
+          //
+          // Starting a tokenization moves the dataset to PROCESSING on the
+          // server, but this only refreshed the TOKENIZATION list — so the
+          // client's `datasets[]` entry still read `ready`.
+          // `useDatasetProgress` subscribes to `datasets/{id}/progress` only
+          // for datasets whose status is `downloading` or `processing`, so it
+          // never joined the room and no progress arrived. A browser refresh
+          // called `fetchDatasets()`, picked up `processing`, subscribed, and
+          // from then on it worked — which is exactly how this was reported
+          // 2026-08-25: "I have to refresh to get the tracking started; works
+          // fine after that."
+          //
+          // Refetching is preferred over optimistically setting the status
+          // locally: the server decides what state the dataset is in, and a
+          // guessed value that disagrees would be a second source of truth.
+          await _get().fetchDatasets();
           set({ loading: false });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to create tokenization';
@@ -347,6 +365,13 @@ export const useDatasetsStore = create<DatasetsState>()(
 
           // Refresh tokenizations list to get updated status
           await _get().fetchTokenizations(datasetId);
+
+          // The dataset returns to READY when nothing is left in flight, and
+          // the client has to see that. Without this the card keeps rendering
+          // the amber "Processing" badge after a cancel — the client half of
+          // the same bug fixed server-side on 2026-08-24, where the delete
+          // handler only released the dataset if NO tokenization remained.
+          await _get().fetchDatasets();
           set({ loading: false });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to cancel tokenization';
