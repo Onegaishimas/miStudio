@@ -1066,4 +1066,73 @@ const mockFinalizeTraining = vi.fn();
       expect(screen.getByText('ds_dataset1')).toBeInTheDocument();
     });
   });
+
+  describe('L0 is shown as a feature count, never a raw fraction', () => {
+    /**
+     * train_9355afa6, 2026-08-26: a healthy JumpReLU SAE (FVU 0.092, 0 dead
+     * neurons, ~7 of 30,720 latents active) rendered "L0: 0.000" in the
+     * checkpoint list, because the trainer stores L0 as a FRACTION --
+     * `(z > 0).float().mean()` = 0.000228 -- and this list printed it with
+     * toFixed(3). A good run reads as a collapsed dictionary, which is how a
+     * usable SAE gets discarded. The main card row was already correct.
+     */
+    const REAL_L0_FRACTION = 0.00022773744422011077;
+
+    const completed = () => ({
+      ...baseMockTraining,
+      status: TrainingStatus.COMPLETED,
+      current_l0_sparsity: REAL_L0_FRACTION,
+      hyperparameters: {
+        ...baseMockTraining.hyperparameters,
+        latent_dim: 30720,
+      },
+    });
+
+    it('renders the checkpoint L0 as a count, not 0.000', async () => {
+      mockFetchCheckpoints.mockResolvedValueOnce([
+        { id: 'ckpt_1', step: 48000, loss: 0.0182,
+          l0_sparsity: REAL_L0_FRACTION, is_best: true,
+          created_at: '2026-08-26T17:15:00Z' },
+      ]);
+
+      render(
+        <TrainingCard
+          training={completed() as never}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: /checkpoints \(1\)/i }));
+
+      const line = await screen.findByText(/Loss: 0\.0182/);
+      expect(line.textContent).toMatch(/L0: ~7/);
+      expect(line.textContent).not.toMatch(/L0: 0\.000/);
+    });
+
+    it('does not hide the L0 label when a checkpoint is genuinely dead', async () => {
+      // `cp.l0_sparsity && ...` treated 0 as absent, so a dead checkpoint
+      // showed no L0 at all rather than saying zero.
+      mockFetchCheckpoints.mockResolvedValueOnce([
+        { id: 'ckpt_1', step: 48000, loss: 0.5, l0_sparsity: 0,
+          is_best: false, created_at: '2026-08-26T17:15:00Z' },
+      ]);
+
+      render(
+        <TrainingCard
+          training={completed() as never}
+          isSelected={false}
+          onToggleSelect={mockOnToggleSelect}
+          models={mockModels}
+          datasets={mockDatasets}
+        />
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: /checkpoints \(1\)/i }));
+      const line = await screen.findByText(/Loss: 0\.5000/);
+      expect(line.textContent).toMatch(/L0: 0/);
+    });
+  });
 });
