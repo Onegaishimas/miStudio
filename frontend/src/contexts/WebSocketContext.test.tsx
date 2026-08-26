@@ -199,3 +199,131 @@ describe('unsubscribe clears the pending queue (MIS-E2E-126)', () => {
     expect(count).toBe(0);
   });
 });
+
+
+/**
+ * A subscription belongs to the SOCKET, not to the component that asked for it.
+ *
+ * Reported 2026-08-26: extraction progress on the Models list froze at
+ * "Extraction job queued, waiting for worker..." and only a browser refresh
+ * recovered it. The card and the extraction modal both subscribe to
+ * `models/{id}/extraction`; closing the modal ran its cleanup, which emitted
+ * `unsubscribe` and evicted the socket from the room while the card was still
+ * listening. The card's handler stayed registered and simply received nothing
+ * — which is why the one event that arrived while BOTH were mounted was the
+ * only one ever displayed.
+ *
+ * Proven against the live system first: a socket.io client subscribed to that
+ * channel received 13 `extraction:progress` events in 25 seconds, so the
+ * server was never the problem.
+ */
+describe('channel subscriptions are reference counted', () => {
+  function Subscriber({ channel }: { channel: string }) {
+    const { subscribe, unsubscribe } = useWebSocketContext();
+    useEffect(() => {
+      subscribe(channel);
+      return () => unsubscribe(channel);
+    }, [channel, subscribe, unsubscribe]);
+    return null;
+  }
+
+  const CH = 'models/m_b55c6926/extraction';
+
+  const subscribes = () => fake.emitted.filter(
+    (e) => e.event === 'subscribe' && (e.payload as { channel: string }).channel === CH
+  ).length;
+  const unsubscribes = () => fake.emitted.filter(
+    (e) => e.event === 'unsubscribe' && (e.payload as { channel: string }).channel === CH
+  ).length;
+
+  it('joins the room once for two subscribers', () => {
+    // Both must subscribe while CONNECTED. Subscribing before connect parks
+    // them in the pending Set, which dedupes on its own and would hide a
+    // missing guard.
+    fake = new FakeSocket();
+    const { rerender } = render(<WebSocketProvider>{null}</WebSocketProvider>);
+    act(() => fake.fireConnect());
+
+    rerender(
+      <WebSocketProvider>
+        <Subscriber channel={CH} />
+        <Subscriber channel={CH} />
+      </WebSocketProvider>
+    );
+
+    expect(subscribes()).toBe(1);
+  });
+
+  it('does NOT leave the room while another subscriber remains', () => {
+    fake = new FakeSocket();
+    const { rerender } = render(
+      <WebSocketProvider>
+        <Subscriber channel={CH} />
+        <Subscriber channel={CH} />
+      </WebSocketProvider>
+    );
+    act(() => fake.fireConnect());
+
+    // one of the two goes away — the modal being closed
+    rerender(
+      <WebSocketProvider>
+        <Subscriber channel={CH} />
+      </WebSocketProvider>
+    );
+
+    expect(unsubscribes()).toBe(0);
+  });
+
+  it('leaves the room once the last subscriber goes', () => {
+    fake = new FakeSocket();
+    const { rerender } = render(
+      <WebSocketProvider>
+        <Subscriber channel={CH} />
+        <Subscriber channel={CH} />
+      </WebSocketProvider>
+    );
+    act(() => fake.fireConnect());
+
+    rerender(<WebSocketProvider><Subscriber channel={CH} /></WebSocketProvider>);
+    rerender(<WebSocketProvider>{null}</WebSocketProvider>);
+
+    expect(unsubscribes()).toBe(1);
+  });
+
+  it('still delivers events to the survivor after the other unmounts', () => {
+    fake = new FakeSocket();
+    const seen: unknown[] = [];
+
+    function Listener() {
+      const { subscribe, unsubscribe, on, off } = useWebSocketContext();
+      useEffect(() => {
+        const h = (p: unknown) => seen.push(p);
+        subscribe(CH);
+        on('extraction:progress', h);
+        return () => {
+          unsubscribe(CH);
+          off('extraction:progress', h);
+        };
+      }, [subscribe, unsubscribe, on, off]);
+      return null;
+    }
+
+    const { rerender } = render(
+      <WebSocketProvider>
+        <Listener />
+        <Subscriber channel={CH} />
+      </WebSocketProvider>
+    );
+    act(() => fake.fireConnect());
+    rerender(
+      <WebSocketProvider>
+        <Listener />
+      </WebSocketProvider>
+    );
+
+    act(() => fake.deliver('extraction:progress', { progress: 42 }));
+
+    expect(unsubscribes()).toBe(0);
+    expect(seen).toContainEqual({ progress: 42 });
+  });
+});
