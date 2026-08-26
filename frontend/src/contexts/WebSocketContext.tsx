@@ -31,6 +31,21 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   // Track active subscriptions for auto-resubscribe
   const subscriptionsRef = useRef<Set<string>>(new Set());
 
+  // HOW MANY COMPONENTS WANT EACH CHANNEL.
+  //
+  // A subscription is a property of the SOCKET, not of the component that
+  // asked for it: two components subscribing to one channel share a single
+  // room membership on the server. Without a count, the first unmount emitted
+  // `unsubscribe` and evicted the socket from the room while other components
+  // were still listening — their handlers stayed registered and simply stopped
+  // receiving anything.
+  //
+  // Observed 2026-08-26: the Models list card and the extraction modal both
+  // subscribe to `models/{id}/extraction`. Closing the modal killed the card's
+  // updates, so progress froze at the one event that arrived while both were
+  // mounted ("queued, waiting for worker") and only a refresh recovered it.
+  const channelRefCountsRef = useRef<Map<string, number>>(new Map());
+
   // Track event handlers for persistence
   const eventHandlersRef = useRef<Map<string, Set<(...args: any[]) => void>>>(new Map());
 
@@ -150,6 +165,13 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // Subscribe to a channel
   const subscribe = useCallback((channel: string) => {
+    const claims = (channelRefCountsRef.current.get(channel) ?? 0) + 1;
+    channelRefCountsRef.current.set(channel, claims);
+    if (claims > 1) {
+      // Already joined for this socket; another component wants it too.
+      return;
+    }
+
     const socket = socketRef.current;
     if (!socket || !socket.connected) {
       console.log('[WebSocket] Socket not ready, queuing subscription to:', channel);
@@ -166,6 +188,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // Unsubscribe from a channel
   const unsubscribe = useCallback((channel: string) => {
+    const remaining = (channelRefCountsRef.current.get(channel) ?? 0) - 1;
+    if (remaining > 0) {
+      // Someone else is still listening — leaving the room would silence them.
+      channelRefCountsRef.current.set(channel, remaining);
+      return;
+    }
+    channelRefCountsRef.current.delete(channel);
+
     const socket = socketRef.current;
 
     // Remove from tracked subscriptions.
