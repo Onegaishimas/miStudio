@@ -144,3 +144,60 @@ class TestItIsDrivenByTheLibraryNotAList:
         out = extract_architecture_config(legacy)
         assert out["num_hidden_layers"] == 6
         assert "towers" not in out
+
+
+class TestHeterogeneousStacks:
+    """Layers that do not share one shape.
+
+    google/gemma-4-12B-it carries `per_layer_config` with 48 entries and
+    RAISES AmbiguousGlobalPerLayerAttributeError when asked for
+    num_key_value_heads -- there is no single global value. `getattr(obj, f,
+    None)` swallows AttributeError only, so that one refusal propagated and
+    discarded the entire description: the backfill logged "repaired 0
+    model(s)" and the Training page stayed blank (2026-08-25).
+    """
+
+    class _Refuses:
+        """A config shaped like gemma-4's text tower."""
+
+        model_type = "gemma4_text"
+        num_hidden_layers = 48
+        hidden_size = 3840
+        num_attention_heads = 16
+        intermediate_size = 15360
+        vocab_size = 262144
+
+        @property
+        def num_key_value_heads(self):
+            raise RuntimeError(
+                "'num_key_value_heads' is a per-layer attribute and may vary "
+                "across layers."
+            )
+
+    def test_one_refusing_field_does_not_discard_the_rest(self):
+        out = extract_architecture_config(self._Refuses())
+        assert out["num_hidden_layers"] == 48, (
+            "a single per-layer attribute took out the whole description"
+        )
+        assert out["hidden_size"] == 3840
+        assert out["vocab_size"] == 262144
+
+    def test_the_field_with_no_global_answer_is_simply_absent(self):
+        out = extract_architecture_config(self._Refuses())
+        assert "num_key_value_heads" not in out, (
+            "recorded a global value for an attribute that varies per layer"
+        )
+
+    def test_heterogeneity_is_recorded_not_flattened_away(self):
+        out = extract_architecture_config(self._Refuses())
+        assert out["heterogeneous_layers"] is True
+        assert out["per_layer_fields"] == ["num_key_value_heads"], (
+            "the field that has no global answer is not named, so a reader "
+            "cannot tell WHICH dimension varies across layers"
+        )
+
+    def test_a_homogeneous_model_is_not_marked_heterogeneous(self):
+        from transformers.models.llama.configuration_llama import LlamaConfig
+
+        out = extract_architecture_config(LlamaConfig(num_hidden_layers=32))
+        assert "heterogeneous_layers" not in out

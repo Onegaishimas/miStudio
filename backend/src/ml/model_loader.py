@@ -75,16 +75,61 @@ SHAPE_FIELDS = (
 )
 
 
+def _read(sub: Any, field: str) -> Tuple[Any, bool]:
+    """
+    Read one field. Returns (value, refused).
+
+    Three outcomes, and they are NOT the same thing:
+      * a value            -> the stack has one global value for this field
+      * (None, False)      -> the field is absent
+      * (None, True)       -> the config REFUSED, because the value varies per
+                              layer and no single global answer exists
+
+    google/gemma-4-12B-it is heterogeneous: asking its text config for
+    `num_key_value_heads` raises AmbiguousGlobalPerLayerAttributeError by
+    design. `getattr(obj, field, None)` swallows AttributeError and nothing
+    else, so that one refusal propagated and discarded the whole description --
+    the backfill logged "repaired 0 model(s)" and the Training page stayed
+    blank (2026-08-25).
+
+    AttributeError means absent; anything else means the config declined to
+    answer. That rule needs no import of a private exception class and so
+    survives a transformers upgrade.
+    """
+    try:
+        return getattr(sub, field), False
+    except AttributeError:
+        return None, False
+    except Exception:
+        return None, True
+
+
 def _describe(sub: Any) -> Dict[str, Any]:
     """Shape fields present on one config object."""
-    described = {
-        field: getattr(sub, field)
-        for field in SHAPE_FIELDS
-        if getattr(sub, field, None) is not None
-    }
-    model_type = getattr(sub, "model_type", None)
+    described: Dict[str, Any] = {}
+    varies_per_layer = []
+
+    for field in SHAPE_FIELDS:
+        value, refused = _read(sub, field)
+        if refused:
+            varies_per_layer.append(field)
+        elif value is not None:
+            described[field] = value
+
+    model_type, _ = _read(sub, "model_type")
     if model_type is not None:
         described["model_type"] = model_type
+
+    # A stack whose layers do not share one shape. Recorded rather than
+    # flattened away: anything reasoning per layer -- an SAE, a hook, a memory
+    # estimate -- must not assume every layer looks like the first. Detected by
+    # the config refusing, not by probing for a private attribute; in
+    # transformers 5 every config exposes a per-layer VIEW, so its presence
+    # says nothing.
+    if varies_per_layer:
+        described["heterogeneous_layers"] = True
+        described["per_layer_fields"] = sorted(varies_per_layer)
+
     return described
 
 
