@@ -14,6 +14,7 @@ import { useState, useEffect } from 'react';
 import { Cpu, CheckCircle, Loader, Activity, AlertCircle, Trash2, History, Clock } from 'lucide-react';
 import { Model, ModelStatus } from '../../types/model';
 import { COMPONENTS } from '../../config/brand';
+import { useModelExtractionProgress } from '../../hooks/useModelProgress';
 
 interface ModelCardProps {
   model: Model;
@@ -26,6 +27,16 @@ interface ModelCardProps {
 }
 
 export function ModelCard({ model, onClick, onExtract, onViewExtractions, onDelete, onCancel }: ModelCardProps) {
+  // Track this model's extraction from the CARD, which is where the progress
+  // bar lives.
+  //
+  // The subscription used to exist only inside the extraction modal, and only
+  // while it was open. Closing the modal unsubscribed, so the bar on the list
+  // froze at "queued, waiting for worker" until a browser refresh remounted
+  // everything and re-fetched the state (2026-08-26). The card owns the
+  // display, so the card owns the subscription.
+  useModelExtractionProgress(model.id);
+
   const [elapsedTime, setElapsedTime] = useState<number>(0);
 
   const isActive = model.status === ModelStatus.DOWNLOADING ||

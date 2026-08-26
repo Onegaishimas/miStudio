@@ -11,7 +11,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+// ModelCard subscribes to its own extraction progress, so it needs the
+// WebSocketProvider that useWebSocketContext() reads (2026-08-26).
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders as render } from '../../test/renderWithProviders';
 import { ModelCard } from './ModelCard';
 import { Model, ModelStatus, QuantizationFormat } from '../../types/model';
 
