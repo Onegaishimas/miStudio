@@ -47,6 +47,7 @@ import { estimateMultilayerTrainingMemory, formatMemorySize } from '../../utils/
 import { HyperparameterLabel, HyperparameterTooltip } from '../common/HyperparameterTooltip';
 import { calculateOptimalL1Alpha, validateSparsityConfig } from '../../utils/hyperparameterOptimization';
 import { COMPONENTS } from '../../config/brand';
+import { formatLayerIndices } from '../../utils/formatters';
 import type { TrainingTemplate } from '../../types/trainingTemplate';
 import { fireAndForget } from '../../utils/fireAndForget';
 
@@ -441,7 +442,41 @@ export const TrainingPanel: React.FC = () => {
       );
     }) ?? true
   );
-  const isFormValid = config.model_id && config.dataset_ids && config.dataset_ids.length > 0 && config.training_layers && config.training_layers.length > 0 && !vocabMismatch && allExtractionsSelected;
+  // EVERY selected extraction must contain the layers being trained.
+  //
+  // training_layers is autodiscovered from the FIRST selected extraction, and
+  // the rest were submitted unchecked. The server does validate — correctly,
+  // with a clear message — but only after creating a training row, so one
+  // mistake produced three identical failed records 15 seconds apart
+  // (2026-08-27). Catch it in the form, name the offender, and let the user
+  // pick a different extraction instead.
+  const extractionLayerMismatches = useMemo(() => {
+    const wanted = config.training_layers || [];
+    if (!config.extraction_ids || config.extraction_ids.length === 0) return [];
+    if (wanted.length === 0) return [];
+
+    return config.extraction_ids.flatMap((eid) => {
+      const ext: any = availableExtractions.find(
+        (e: any) => e.extraction_id === eid,
+      );
+      if (!ext) return [];
+      const available: number[] = Array.isArray(ext.layer_indices)
+        ? ext.layer_indices
+        : [];
+      const missing = wanted.filter((l) => !available.includes(l));
+      if (missing.length === 0) return [];
+
+      const ds = datasets.find((d) => String(d.id) === String(ext.dataset_id));
+      return [{
+        extractionId: eid,
+        datasetName: ds?.name || String(ext.dataset_id ?? 'unknown dataset'),
+        has: available,
+        missing,
+      }];
+    });
+  }, [config.extraction_ids, config.training_layers, availableExtractions, datasets]);
+
+  const isFormValid = config.model_id && config.dataset_ids && config.dataset_ids.length > 0 && config.training_layers && config.training_layers.length > 0 && !vocabMismatch && allExtractionsSelected && extractionLayerMismatches.length === 0;
 
   // Selection handlers
   const handleToggleSelection = (trainingId: string) => {
@@ -933,11 +968,15 @@ export const TrainingPanel: React.FC = () => {
                                   >
                                     <option value="">Select...</option>
                                     {dsExtractions.map((ext: any) => {
-                                      const layerCount = ext.layer_indices?.length || 0;
+                                      // Name the LAYERS, not just how many. Two
+                                      // extractions of one dataset — layer 45, and
+                                      // layers 44+46 — both read "…L" and could not
+                                      // be told apart (2026-08-27).
+                                      const layers = formatLayerIndices(ext.layer_indices);
                                       const sampleCount = ext.num_samples_processed || ext.samples_processed || 0;
                                       return (
                                         <option key={ext.extraction_id} value={ext.extraction_id}>
-                                          {layerCount}L, {sampleCount.toLocaleString()} samples — {ext.created_at ? new Date(ext.created_at).toLocaleDateString() : '?'}
+                                          {layers} · {sampleCount.toLocaleString()} samples · {ext.created_at ? new Date(ext.created_at).toLocaleDateString() : '?'}
                                         </option>
                                       );
                                     })}
@@ -948,6 +987,32 @@ export const TrainingPanel: React.FC = () => {
                               </div>
                             );
                           })}
+                          {extractionLayerMismatches.length > 0 && (
+                            <div
+                              role="alert"
+                              className="mt-1 p-2 bg-red-900/20 border border-red-600/40 rounded-md flex gap-2"
+                            >
+                              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                              <div className="text-xs text-red-400 space-y-1">
+                                <p>
+                                  Training layers {formatLayerIndices(config.training_layers)} are
+                                  not present in every selected extraction. Choose an extraction
+                                  that covers them, or change the training layers.
+                                </p>
+                                <ul className="space-y-0.5">
+                                  {extractionLayerMismatches.map((m) => (
+                                    <li key={m.extractionId}>
+                                      <span className="font-medium">{m.datasetName}</span>
+                                      {' — selected extraction has '}
+                                      {formatLayerIndices(m.has)}
+                                      {', missing '}
+                                      {formatLayerIndices(m.missing)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
                           {datasetsMissingExtractions.length > 0 && (
                             <div className="mt-1 p-2 bg-amber-900/20 border border-amber-600/40 rounded-md flex gap-2">
                               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
