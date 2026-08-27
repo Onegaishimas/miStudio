@@ -327,3 +327,89 @@ describe('channel subscriptions are reference counted', () => {
     expect(seen).toContainEqual({ progress: 42 });
   });
 });
+
+/**
+ * WebSocket faults must be visible in a PRODUCTION build.
+ *
+ * vite marks console.log/debug/info/trace pure, so the production bundle drops
+ * them. Every WebSocket lifecycle diagnostic used console.log, which meant that
+ * when a user reported extraction progress freezing mid-run (2026-08-27) their
+ * console held nothing — "the socket dropped" and "the subscription was
+ * refused" were indistinguishable from the browser.
+ *
+ * Worse, `subscribe_error` had no listener at all. The server emits it when
+ * validate_channel rejects a channel; the component went on believing it was
+ * subscribed and received nothing forever.
+ *
+ * These assert the CHANNEL of the log, not its text, because the channel is
+ * what survives minification.
+ */
+describe('WebSocket faults are diagnosable in production', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+  let error: ReturnType<typeof vi.spyOn>;
+  let log: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fake = new FakeSocket();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+    error.mockRestore();
+    log.mockRestore();
+  });
+
+  const joined = (spy: ReturnType<typeof vi.spyOn>) =>
+    spy.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+
+  it('reports a refused subscription instead of failing silently', () => {
+    render(<WebSocketProvider>{null}</WebSocketProvider>);
+    act(() => fake.fireConnect());
+
+    act(() =>
+      fake.deliver('subscribe_error', { error: "unknown channel topic 'model'" })
+    );
+
+    expect(joined(error)).toMatch(/REFUSED/i);
+    expect(joined(error)).toMatch(/unknown channel topic/);
+  });
+
+  it('warns on disconnect, on a channel the production build keeps', () => {
+    render(<WebSocketProvider>{null}</WebSocketProvider>);
+    act(() => fake.fireConnect());
+
+    act(() => fake.deliver('disconnect', 'transport close'));
+
+    expect(joined(warn)).toMatch(/Disconnected/);
+    expect(joined(warn)).toMatch(/transport close/);
+    // console.log is stripped in production, so it must NOT be the only record.
+    expect(joined(log)).not.toMatch(/Disconnected/);
+  });
+
+  it('warns when a reconnect resubscribes, so recovery is observable', () => {
+    function Sub() {
+      const { subscribe } = useWebSocketContext();
+      useEffect(() => {
+        subscribe('models/m_1/extraction');
+      }, [subscribe]);
+      return null;
+    }
+
+    render(
+      <WebSocketProvider>
+        <Sub />
+      </WebSocketProvider>
+    );
+    act(() => fake.fireConnect());
+
+    warn.mockClear();
+    act(() => fake.deliver('disconnect', 'ping timeout'));
+    act(() => fake.fireConnect());
+
+    expect(joined(warn)).toMatch(/Resubscribing/i);
+    expect(joined(warn)).toMatch(/models\/m_1\/extraction/);
+  });
+});
