@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { TrainingPanel } from './TrainingPanel';
 import { useTrainingsStore } from '../../stores/trainingsStore';
 import { useModelsStore } from '../../stores/modelsStore';
@@ -131,5 +131,71 @@ describe('extraction layers are visible and validated', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     );
     expect(screen.getByRole('button', { name: /start training/i })).not.toBeDisabled();
+  });
+});
+
+/**
+ * The extraction list must not go stale while the panel is open.
+ *
+ * Reported 2026-08-27: "There were never two extractions for the same model
+ * (different layers) in the dropdown. I couldn't select the correct one."
+ * The API returned both all along. The panel fetched the list only when
+ * `config.model_id` changed, so an extraction that completed while the user was
+ * on this panel never appeared — the only cures were navigating away and back,
+ * or reloading the browser.
+ */
+describe('the extraction list stays current', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('re-reads when the tab regains focus', async () => {
+    setup({ ...baseConfig, extraction_ids: [EXT_L44_46], training_layers: [44, 46] });
+    render(<TrainingPanel />);
+
+    await screen.findByText(/L44, L46 ·/);
+    const before = (globalThis.fetch as never as { mock: { calls: unknown[] } }).mock.calls.length;
+
+    window.dispatchEvent(new Event('focus'));
+
+    await waitFor(() => {
+      const after = (globalThis.fetch as never as { mock: { calls: unknown[] } }).mock.calls.length;
+      expect(after).toBeGreaterThan(before);
+    });
+  });
+
+  it('offers a manual refresh when the automatic triggers do not fire', async () => {
+    setup({ ...baseConfig, extraction_ids: [EXT_L44_46], training_layers: [44, 46] });
+    render(<TrainingPanel />);
+
+    const refresh = await screen.findByRole('button', { name: /refresh/i });
+    const before = (globalThis.fetch as never as { mock: { calls: unknown[] } }).mock.calls.length;
+
+    fireEvent.click(refresh);
+
+    await waitFor(() => {
+      const after = (globalThis.fetch as never as { mock: { calls: unknown[] } }).mock.calls.length;
+      expect(after).toBeGreaterThan(before);
+    });
+  });
+
+  it('shows an extraction that appears only on the second read', async () => {
+    // The stale state the user saw: only the L45 extraction is known yet.
+    let secondExtractionExists = false;
+    setup({ ...baseConfig, extraction_ids: [], training_layers: [44, 46] });
+    globalThis.fetch = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        extractions: secondExtractionExists ? EXTRACTIONS : [EXTRACTIONS[0]],
+      }),
+    })) as never;
+
+    render(<TrainingPanel />);
+    await screen.findByText(/L45 ·/);
+    expect(screen.queryByText(/L44, L46 ·/)).not.toBeInTheDocument();
+
+    // the extraction completes in another panel
+    secondExtractionExists = true;
+    window.dispatchEvent(new Event('focus'));
+
+    expect(await screen.findByText(/L44, L46 ·/)).toBeInTheDocument();
   });
 });

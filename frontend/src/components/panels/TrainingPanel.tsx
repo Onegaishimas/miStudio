@@ -15,7 +15,7 @@
  * - WebSocket integration for live updates
  */
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Play,
   ChevronDown,
@@ -205,8 +205,15 @@ export const TrainingPanel: React.FC = () => {
     fireAndForget(fetchTrainings());
   }, [fetchModels, fetchDatasets, fetchTrainings]);
 
-  // Fetch available extractions when model is selected
-  useEffect(() => {
+  // Load the extraction list, and KEEP IT CURRENT.
+  //
+  // This used to run only when `config.model_id` changed, so an extraction that
+  // finished while this panel was open never appeared. Reported 2026-08-27:
+  // "There were never two extractions for the same model (different layers) in
+  // the dropdown. I couldn't select the correct one." The API had both all
+  // along — the panel was showing a list fetched before the second one existed,
+  // and the only cures were navigating away and back, or reloading.
+  const refreshExtractions = useCallback(async () => {
     const fetchExtractions = async () => {
       if (!config.model_id) {
         setAvailableExtractions([]);
@@ -242,8 +249,45 @@ export const TrainingPanel: React.FC = () => {
       }
     };
 
-    fetchExtractions();
+    await fetchExtractions();
   }, [config.model_id]);
+
+  useEffect(() => {
+    refreshExtractions();
+  }, [refreshExtractions]);
+
+  // An extraction finishing is the event that changes this list, and it happens
+  // in another panel. Re-read when this tab regains focus, and when the selected
+  // model's extraction settles.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshExtractions();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [refreshExtractions]);
+
+  const selectedModelExtractionStatus = models.find(
+    (m) => m.id === config.model_id,
+  )?.extraction_status;
+
+  const seenExtractionStatus = React.useRef<string | undefined | null>(null);
+  useEffect(() => {
+    // Fires when an in-flight extraction reaches a settled state (or clears).
+    // Skip the first run: the effect above already fetched on mount, and firing
+    // both would double every page load's requests.
+    if (seenExtractionStatus.current === null) {
+      seenExtractionStatus.current = selectedModelExtractionStatus;
+      return;
+    }
+    if (seenExtractionStatus.current === selectedModelExtractionStatus) return;
+    seenExtractionStatus.current = selectedModelExtractionStatus;
+    refreshExtractions();
+  }, [selectedModelExtractionStatus, refreshExtractions]);
 
   // Group available extractions by dataset_id for per-dataset pickers
   const extractionsPerDataset = useMemo(() => {
@@ -909,9 +953,24 @@ export const TrainingPanel: React.FC = () => {
                   <label htmlFor="use-cached-activations" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 cursor-pointer">
                     Use Cached Activations (10-20x faster training)
                   </label>
-                  <p className="text-xs text-slate-500 mb-2">
-                    Select a cached extraction for each dataset. Requires a completed extraction per dataset for the selected model.
-                  </p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <p className="text-xs text-slate-500 flex-1">
+                      Select a cached extraction for each dataset. Requires a completed extraction per dataset for the selected model.
+                    </p>
+                    {/* An extraction finishing elsewhere used to be invisible here
+                        until the panel was remounted. The automatic refreshes
+                        should cover it; this is the escape hatch when they do
+                        not. */}
+                    <button
+                      type="button"
+                      onClick={() => refreshExtractions()}
+                      disabled={isLoadingExtractions || !config.model_id}
+                      title="Re-read the extraction list"
+                      className="text-xs px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {isLoadingExtractions ? 'Refreshing…' : 'Refresh'}
+                    </button>
+                  </div>
                   {config.extraction_ids !== undefined && (
                     <>
                       {extractionFetchError && !isLoadingExtractions && (
