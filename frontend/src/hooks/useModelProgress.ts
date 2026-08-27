@@ -338,23 +338,55 @@ export function useModelExtractionProgress(modelId?: string) {
   const { updateExtractionProgress, clearExtractionProgress, checkActiveExtraction } = useModelsStore();
   const handlerRef = useRef<((event: any) => void) | null>(null);
 
+  // How often to re-read the authoritative state while work is in flight.
+  // A backstop, not the mechanism: WebSocket events remain the fast path.
+  const RECONCILE_INTERVAL_MS = 20_000;
+
+  const extractionStatus = useModelsStore(
+    (state) => state.models.find((m) => m.id === modelId)?.extraction_status,
+  );
+  const inFlight =
+    extractionStatus != null &&
+    !['complete', 'completed', 'failed', 'error', 'cancelled'].includes(
+      String(extractionStatus),
+    );
+
+  // Reconcile on mount AND whenever the socket (re)connects.
+  //
+  // This used to run on mount only. WebSocket events have no replay, so
+  // everything sent while the socket was down is lost — and with nothing
+  // re-reading the server, the card kept its last heard value indefinitely. A
+  // finished extraction displayed "Extracting Activations 90.0%" for 17
+  // minutes because `status="complete"` arrived 4 seconds after a disconnect
+  // (2026-08-27). Reloading the page was the only cure, which is a workaround
+  // the user has to know to perform.
   useEffect(() => {
     if (!modelId) return;
 
-    // On mount, check for active extraction to restore state
-    const initializeExtraction = async () => {
-      console.log('[useModelExtractionProgress] Checking for active extraction on mount for model:', modelId);
+    const reconcile = async () => {
       const hasActiveExtraction = await checkActiveExtraction(modelId);
-
-      if (hasActiveExtraction) {
-        console.log('[useModelExtractionProgress] Active extraction found and restored');
-      } else {
-        console.log('[useModelExtractionProgress] No active extraction found');
-      }
+      console.log(
+        '[useModelExtractionProgress] Reconciled', modelId,
+        hasActiveExtraction ? '— extraction active' : '— nothing active',
+      );
     };
 
-    initializeExtraction();
-  }, [modelId, checkActiveExtraction]);
+    reconcile();
+  }, [modelId, isConnected, checkActiveExtraction]);
+
+  // While something is running, re-read periodically as well. A reconnect is
+  // not the only way to miss a terminal event: a backgrounded tab, a proxy
+  // timeout or a dropped frame all end the same way, and none of them fire a
+  // reconnect the moment the event is missed.
+  useEffect(() => {
+    if (!modelId || !inFlight) return;
+
+    const timer = setInterval(() => {
+      checkActiveExtraction(modelId);
+    }, RECONCILE_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [modelId, inFlight, checkActiveExtraction]);
 
   useEffect(() => {
     if (!modelId || !isConnected) return;
