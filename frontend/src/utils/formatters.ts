@@ -359,3 +359,59 @@ export function getFeatureQualityScore(frequency: number, maxActivation: number)
   if (avgScore >= 0.5) return 'poor';
   return 'bad';
 }
+
+/**
+ * Name the layers an extraction covers, not just how many.
+ *
+ * The training panel's extraction dropdown showed "2L, 10,000 samples", so two
+ * extractions of the same dataset — one at layer 45, one at layers 44 and 46 —
+ * were indistinguishable. A user could not choose the right one, and picking
+ * the wrong one failed server-side after creating a training row
+ * (2026-08-27).
+ *
+ * Consecutive runs of three or more collapse to a range, so a 16-layer sweep
+ * reads "L0–L15" rather than filling the control.
+ *
+ * @param indices Layer indices, in any order
+ * @returns e.g. "L44, L46", "L33–L37", "L0–L15", or "no layers"
+ */
+export function formatLayerIndices(indices?: number[] | null): string {
+  if (!Array.isArray(indices) || indices.length === 0) {
+    return 'no layers';
+  }
+
+  const sorted = [...new Set(indices.filter((n) => Number.isFinite(n)))].sort(
+    (a, b) => a - b,
+  );
+  if (sorted.length === 0) {
+    return 'no layers';
+  }
+
+  const parts: string[] = [];
+  let runStart = sorted[0];
+  let previous = sorted[0];
+
+  const flush = () => {
+    const runLength = previous - runStart + 1;
+    if (runLength >= 3) {
+      parts.push(`L${runStart}\u2013L${previous}`);
+    } else if (runLength === 2) {
+      parts.push(`L${runStart}`, `L${previous}`);
+    } else {
+      parts.push(`L${runStart}`);
+    }
+  };
+
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] === previous + 1) {
+      previous = sorted[i];
+      continue;
+    }
+    flush();
+    runStart = sorted[i];
+    previous = sorted[i];
+  }
+  flush();
+
+  return parts.join(', ');
+}
