@@ -1016,6 +1016,115 @@ class ActivationService:
 
         return saved_files
 
+    #: Values below this magnitude count as "near zero" for the sparsity figure.
+    NEAR_ZERO_THRESHOLD = 0.01
+
+    @staticmethod
+    def _finalise_statistics(
+        sum_raw: float,
+        sum_abs: float,
+        sum_sq: float,
+        min_val: float,
+        max_val: float,
+        count_near_zero: int,
+        total_elements: int,
+    ) -> Dict[str, Any]:
+        """Turn accumulators into statistics, or into None when they are unusable.
+
+        A statistic that could not be computed is reported as None. It used to
+        be reported as 0.0, which is indistinguishable from a real measurement:
+        a 73 GB extraction of gemma-4 layers 44 and 46 stored
+        `mean_magnitude: 0.0`, `std_activation: 0.0` beside a perfectly valid
+        `max_activation: 29.86` (2026-08-27). Zero is a plausible-looking
+        answer and therefore the worst possible way to report a failure.
+        """
+        if total_elements <= 0:
+            return {
+                "mean_magnitude": None, "std_activation": None,
+                "min_activation": None, "max_activation": None,
+                "sparsity_percent": None,
+            }
+
+        mean_raw = sum_raw / total_elements
+        mean_magnitude = sum_abs / total_elements
+
+        # Variance of the RAW values: E[x^2] - E[x]^2. This used to subtract
+        # E[|x|]^2, which is not a variance -- it mixes raw squares with mean
+        # magnitude and understates the spread of a zero-centred distribution.
+        variance = (sum_sq / total_elements) - (mean_raw ** 2)
+        std_activation = float(np.sqrt(variance)) if variance >= 0 else None
+
+        def _clean(value):
+            if value is None:
+                return None
+            value = float(value)
+            return None if (np.isinf(value) or np.isnan(value)) else value
+
+        return {
+            "mean_magnitude": _clean(mean_magnitude),
+            "std_activation": _clean(std_activation),
+            "min_activation": _clean(min_val),
+            "max_activation": _clean(max_val),
+            "sparsity_percent": _clean((count_near_zero / total_elements) * 100),
+        }
+
+    def _chunked_statistics(
+        self, activation_array: np.ndarray, chunk_size: int = 100
+    ) -> Dict[str, Any]:
+        """Statistics over an array too large to reduce in one pass.
+
+        Every accumulation is float64. Reducing a float16 array in its own
+        dtype overflows: one chunk here is 100 x 512 x 3840 = 196,608,000
+        elements, and a float16 accumulator saturates at 65,504, so
+        `abs_chunk.sum()` returned `inf` on the very first chunk.
+        """
+        sum_raw = sum_abs = sum_sq = 0.0
+        max_val = float("-inf")
+        min_val = float("inf")
+        count_near_zero = 0
+        total_elements = 0
+
+        n_samples = activation_array.shape[0]
+        for start_idx in range(0, n_samples, chunk_size):
+            chunk = activation_array[start_idx:min(start_idx + chunk_size, n_samples)]
+            flat = np.ascontiguousarray(chunk).reshape(-1)
+            abs_chunk = np.abs(chunk)
+
+            sum_raw += float(flat.sum(dtype=np.float64))
+            sum_abs += float(abs_chunk.sum(dtype=np.float64))
+            # einsum keeps the float64 accumulation without materialising a
+            # squared copy of the chunk.
+            sum_sq += float(np.einsum("i,i->", flat, flat, dtype=np.float64))
+
+            # The TRUE extremes, not the extremes of |x|. min(|x|) is 0 for any
+            # real activation tensor, so the old figure said nothing while
+            # being labelled "Min Activation".
+            max_val = max(max_val, float(flat.max()))
+            min_val = min(min_val, float(flat.min()))
+
+            count_near_zero += int((abs_chunk < self.NEAR_ZERO_THRESHOLD).sum())
+            total_elements += chunk.size
+
+        return self._finalise_statistics(
+            sum_raw, sum_abs, sum_sq, min_val, max_val,
+            count_near_zero, total_elements,
+        )
+
+    def _direct_statistics(self, activation_array: np.ndarray) -> Dict[str, Any]:
+        """Statistics over an array small enough to reduce in one pass."""
+        flat = np.ascontiguousarray(activation_array).reshape(-1)
+        abs_all = np.abs(flat)
+
+        return self._finalise_statistics(
+            sum_raw=float(flat.sum(dtype=np.float64)),
+            sum_abs=float(abs_all.sum(dtype=np.float64)),
+            sum_sq=float(np.einsum("i,i->", flat, flat, dtype=np.float64)),
+            min_val=float(flat.min()) if flat.size else float("inf"),
+            max_val=float(flat.max()) if flat.size else float("-inf"),
+            count_near_zero=int((abs_all < self.NEAR_ZERO_THRESHOLD).sum()),
+            total_elements=int(flat.size),
+        )
+
     def _calculate_statistics(
         self,
         activations: Dict[str, np.ndarray]
@@ -1040,68 +1149,16 @@ class ActivationService:
             # For large arrays (>1GB), use chunked processing to avoid memory issues
             if array_size_gb > 1.0:
                 logger.info(f"Large array detected ({array_size_gb:.2f} GB), using chunked statistics calculation")
-
-                # Use chunked processing with smaller memory footprint
-                chunk_size = 100  # Process 100 samples at a time
-                n_samples = activation_array.shape[0]
-
-                # Initialize accumulators
-                sum_abs = 0.0
-                sum_sq = 0.0
-                max_val = float('-inf')
-                min_val = float('inf')
-                count_near_zero = 0
-                total_elements = 0
-
-                # Process in chunks
-                for start_idx in range(0, n_samples, chunk_size):
-                    end_idx = min(start_idx + chunk_size, n_samples)
-                    chunk = activation_array[start_idx:end_idx]
-
-                    # Update statistics
-                    abs_chunk = np.abs(chunk)
-                    sum_abs += float(abs_chunk.sum())
-                    sum_sq += float((chunk ** 2).sum())
-                    max_val = max(max_val, float(abs_chunk.max()))
-                    min_val = min(min_val, float(abs_chunk.min()))
-
-                    # Count near-zero activations
-                    threshold = 0.01
-                    count_near_zero += int((abs_chunk < threshold).sum())
-                    total_elements += chunk.size
-
-                    # Log progress every 1000 samples
-                    if (end_idx % 1000 == 0) or (end_idx == n_samples):
-                        logger.debug(f"Processed {end_idx}/{n_samples} samples for statistics")
-
-                # Calculate final statistics
-                mean_magnitude = sum_abs / total_elements
-                variance = (sum_sq / total_elements) - (mean_magnitude ** 2)
-                std_activation = float(np.sqrt(max(0, variance)))  # Avoid negative due to numerical errors
-                sparsity = (count_near_zero / total_elements) * 100
-
-                # Handle potential inf values
-                if np.isinf(std_activation) or np.isnan(std_activation):
-                    std_activation = None
-                if np.isinf(mean_magnitude) or np.isnan(mean_magnitude):
-                    mean_magnitude = 0.0
-
-                logger.info(f"Statistics calculation complete for {layer_name}")
-
+                stats = self._chunked_statistics(activation_array)
             else:
-                # Small array, use standard numpy operations
-                mean_magnitude = float(np.abs(activation_array).mean())
-                max_val = float(np.abs(activation_array).max())
-                min_val = float(np.abs(activation_array).min())
-                std_activation = float(np.std(activation_array))
+                stats = self._direct_statistics(activation_array)
 
-                # Replace inf/-inf with None for JSON compatibility
-                if np.isinf(std_activation) or np.isnan(std_activation):
-                    std_activation = None
+            mean_magnitude = stats["mean_magnitude"]
+            max_val = stats["max_activation"]
+            min_val = stats["min_activation"]
+            std_activation = stats["std_activation"]
+            sparsity = stats["sparsity_percent"]
 
-                # Calculate sparsity
-                threshold = 0.01
-                sparsity = float((np.abs(activation_array) < threshold).mean() * 100)
 
             statistics[layer_name] = {
                 "shape": list(activation_array.shape),

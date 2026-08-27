@@ -110,7 +110,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       // Do this before processing pending subscriptions
       const existingSubscriptions = Array.from(subscriptionsRef.current);
       if (existingSubscriptions.length > 0) {
-        console.log('[WebSocket] Resubscribing to', existingSubscriptions.length, 'channels');
+        console.warn(
+          '[WebSocket] Resubscribing to', existingSubscriptions.length,
+          'channels after reconnect:', existingSubscriptions.join(', '),
+        );
         existingSubscriptions.forEach(channel => {
           socket.emit('subscribe', { channel });
           console.log('[WebSocket] Resubscribed to channel:', channel);
@@ -129,8 +132,18 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    // The lifecycle events below use console.warn/error DELIBERATELY.
+    //
+    // vite marks console.log/debug/info/trace pure and the production build
+    // drops them, so every diagnostic here was invisible in production. When a
+    // user reported extraction progress freezing mid-run (2026-08-27) there
+    // was nothing in their console to look at, and the difference between "the
+    // socket dropped" and "the subscription was refused" could not be
+    // established from the browser at all. These are the events someone is
+    // actually asked to read back, which is the bar vite.config.ts sets for
+    // keeping a log.
     socket.on('disconnect', (reason) => {
-      console.log('[WebSocket] Disconnected:', reason);
+      console.warn('[WebSocket] Disconnected:', reason, '— live updates stop until reconnect');
       setIsConnected(false);
     });
 
@@ -139,11 +152,27 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('[WebSocket] Reconnection attempt', attemptNumber);
+      console.warn('[WebSocket] Reconnection attempt', attemptNumber);
     });
 
     socket.on('reconnect', (attemptNumber) => {
-      console.log('[WebSocket] Reconnected after', attemptNumber, 'attempts');
+      console.warn(
+        '[WebSocket] Reconnected after', attemptNumber, 'attempts — resubscribing',
+        Array.from(subscriptionsRef.current),
+      );
+    });
+
+    // A REFUSED SUBSCRIPTION WAS COMPLETELY SILENT.
+    //
+    // The server emits `subscribe_error` when validate_channel rejects a
+    // channel, and nothing here listened for it. The component believed it was
+    // subscribed, received nothing forever, and looked identical to a healthy
+    // subscription on a quiet channel.
+    socket.on('subscribe_error', (data: { error?: string }) => {
+      console.error(
+        '[WebSocket] Subscription REFUSED by server:', data?.error ?? data,
+        '— no events will arrive on that channel',
+      );
     });
 
     // Listen for subscription confirmations

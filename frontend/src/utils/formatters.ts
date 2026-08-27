@@ -155,11 +155,25 @@ export function formatL0Sparsity(
  * @returns Formatted string (e.g., "~71")
  */
 export function formatL0Absolute(l0Fraction: number, totalFeatures: number): string {
+  if (!Number.isFinite(l0Fraction) || !Number.isFinite(totalFeatures)) {
+    return '—';
+  }
   if (l0Fraction === 0 || totalFeatures === 0) {
     return '0';
   }
-  const absoluteL0 = Math.round(l0Fraction * totalFeatures);
-  return `~${absoluteL0}`;
+  const absoluteL0 = l0Fraction * totalFeatures;
+
+  // Never round a live SAE down to "0". A dictionary of 30,720 latents firing
+  // 0.4 features on average is sparse, not dead, and "0" is how a usable
+  // training gets thrown away. Report below one as "<1" and keep a decimal
+  // under ten, where the difference between 7 and 7.4 is worth seeing.
+  if (absoluteL0 < 1) {
+    return '<1';
+  }
+  if (absoluteL0 < 10) {
+    return `~${absoluteL0.toFixed(1)}`;
+  }
+  return `~${Math.round(absoluteL0)}`;
 }
 
 /**

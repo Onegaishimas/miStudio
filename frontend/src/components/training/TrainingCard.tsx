@@ -44,7 +44,7 @@ import type { Training } from '../../types/training';
 import type { Model } from '../../types/model';
 import type { Dataset } from '../../types/dataset';
 import { COMPONENTS } from '../../config/brand';
-import { formatL0Absolute } from '../../utils/formatters';
+import { formatL0Absolute, formatL0Percent } from '../../utils/formatters';
 import { fetchTrainingMetrics } from '../../api/trainings';
 import { getFrameworkDisplayName, getFrameworkConfig } from '../../config/frameworkConfigs';
 
@@ -829,7 +829,11 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                         </div>
                         <div className="text-xs text-slate-600 dark:text-slate-400">
                           Loss: {cp.loss.toFixed(4)}
-                          {cp.l0_sparsity && ` • L0: ${cp.l0_sparsity.toFixed(3)}`}
+                          {cp.l0_sparsity != null && ` • L0: ${
+                            training.hyperparameters?.latent_dim
+                              ? formatL0Absolute(cp.l0_sparsity, training.hyperparameters.latent_dim)
+                              : formatL0Percent(cp.l0_sparsity)
+                          }`}
                           {' • '}
                           {new Date(cp.created_at).toLocaleTimeString()}
                         </div>
@@ -1033,7 +1037,14 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                       <span className="text-xs font-medium text-slate-600 dark:text-slate-400">L0 Sparsity</span>
                       <span className="text-xs text-blue-400 font-mono">
                         {metricsHistory.l0_sparsity.length > 0
-                          ? (metricsHistory.l0_sparsity[metricsHistory.l0_sparsity.length - 1] * 100).toFixed(1) + '%'
+                          ? training.hyperparameters?.latent_dim
+                            ? formatL0Absolute(
+                                metricsHistory.l0_sparsity[metricsHistory.l0_sparsity.length - 1],
+                                training.hyperparameters.latent_dim,
+                              )
+                            : formatL0Percent(
+                                metricsHistory.l0_sparsity[metricsHistory.l0_sparsity.length - 1],
+                              )
                           : '—'}
                       </span>
                     </div>
