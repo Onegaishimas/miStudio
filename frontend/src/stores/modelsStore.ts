@@ -355,6 +355,40 @@ export const useModelsStore = create<ModelsState>()(
           // Check if data is null (no active extraction)
           if (!result.data) {
             console.log('[ModelsStore] No active extraction found for model:', modelId);
+
+            // RECONCILE: the server is the authority. If this model still shows
+            // an unfinished extraction locally, that state is stale and must go.
+            //
+            // WebSocket events are fire-and-forget with no replay, so anything
+            // sent while the socket was down is lost for good. A card that only
+            // ever LISTENS therefore sits on its last heard value forever —
+            // observed 2026-08-27, where a completed extraction showed
+            // "Extracting Activations 90.0%" for 17 minutes because the
+            // `status="complete"` event landed 4 seconds after a disconnect.
+            // Reloading fixed it only because a fresh page starts with an empty
+            // store, which is not a fix, it is a workaround the user performs.
+            set((state) => ({
+              models: state.models.map((model) => {
+                if (model.id !== modelId) return model;
+                const status = String(model.extraction_status ?? '');
+                const settled =
+                  status === '' ||
+                  ['complete', 'completed', 'failed', 'error', 'cancelled'].includes(status);
+                if (settled) return model;
+                console.warn(
+                  '[ModelsStore] Clearing stale extraction state for', modelId,
+                  '— server reports none active, local said', status,
+                );
+                return {
+                  ...model,
+                  extraction_id: undefined,
+                  extraction_progress: undefined,
+                  extraction_status: undefined,
+                  extraction_message: undefined,
+                  extraction_started_at: undefined,
+                };
+              }),
+            }));
             return false;
           }
 
