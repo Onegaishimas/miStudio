@@ -13,6 +13,7 @@ from src.core.celery_app import celery_app
 from src.workers.base_task import DatabaseTask
 from src.models.activation_extraction import ActivationExtraction, ExtractionStatus
 from src.workers.websocket_emitter import emit_extraction_failed
+from src.workers.job_progress import progress_stalled_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,22 @@ def cleanup_stuck_activations_task(self):
                             f"task {extraction.celery_task_id}, skipping cleanup"
                         )
 
+
+                # IS THE WORK ADVANCING? A quiet row and a stalled job are not
+                # the same thing. Additive to the clock: reap only when stale
+                # AND the counter has not moved. None means "no evidence" —
+                # first sighting, or Redis unreachable — and must never read as
+                # "stalled". See workers/job_progress.py for the incident that
+                # motivated this.
+                _stalled = progress_stalled_seconds(
+                    "activation", extraction.id, getattr(extraction, "samples_processed", None)
+                )
+                if _stalled is not None and _stalled < STUCK_THRESHOLD_MINUTES * 60:
+                    logger.info(
+                        "%s advanced %.0fs ago; sparing it despite a stale row",
+                        extraction.id, _stalled,
+                    )
+                    continue
                 if not task_is_running:
                     age_minutes = (datetime.now(timezone.utc) - extraction.updated_at).total_seconds() / 60
                     logger.warning(

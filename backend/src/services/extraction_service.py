@@ -1626,8 +1626,18 @@ class ExtractionService:
                         # ~9 minutes of committing to do.
                         progress = SAMPLING_PROGRESS_SHARE * batch_end / len(dataset)
                         current_time = time.time()
-                        # Emit progress every 2 seconds OR at 5% intervals (whichever comes first)
-                        should_emit = (current_time - last_emit_time >= 2.0) or (int(progress * 20) > int((batch_start / len(dataset)) * 20))
+                        # Emit every 2 seconds OR when we cross a 5% boundary,
+                        # whichever comes first.
+                        #
+                        # Both sides must be on the SAME scale. `progress` is
+                        # already multiplied by SAMPLING_PROGRESS_SHARE, and the
+                        # right-hand side used to be the raw fraction, so
+                        # `0.9 * batch_end/N > batch_start/N` was false for
+                        # everything but the first batches: the 5% clause could
+                        # never fire and only the timer ever emitted.
+                        previous_progress = SAMPLING_PROGRESS_SHARE * batch_start / len(dataset)
+                        crossed_five_percent = int(progress * 20) > int(previous_progress * 20)
+                        should_emit = (current_time - last_emit_time >= 2.0) or crossed_five_percent
                         if should_emit:
                             last_emit_time = current_time
                             self.update_extraction_status_sync(

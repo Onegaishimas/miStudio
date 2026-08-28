@@ -50,6 +50,7 @@ from datetime import datetime, timedelta, timezone
 from src.core.celery_app import celery_app
 from src.models.extraction_job import ExtractionJob
 from src.workers.base_task import DatabaseTask
+from src.workers.job_progress import progress_stalled_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,20 @@ def cleanup_stuck_nlp_task(self):
                     continue
 
                 processed = job.nlp_processed_count or 0
+
+                # IS THE WORK ADVANCING? `nlp_processed_count` is this
+                # lifecycle's counter. Additive to the clock; None means no
+                # evidence and never reads as "stalled". This janitor's
+                # documented exemption from task-based liveness is untouched:
+                # a progress counter is not a task identifier, and nothing here
+                # consults one.
+                _stalled = progress_stalled_seconds("nlp", job.id, processed)
+                if _stalled is not None and _stalled < threshold * 60:
+                    logger.info(
+                        "NLP for %s advanced %.0fs ago; sparing it", job.id, _stalled
+                    )
+                    continue
+
                 logger.warning(
                     "Marking stuck NLP analysis for %s as failed "
                     "(nlp_status=%s, age=%.0fmin, threshold=%dmin, processed=%d)",
