@@ -118,13 +118,20 @@ def _execute_plan(db, plan, policy) -> tuple[int, int, int]:
     # Fully-qualified so the "src.workers.prune_checkpoints.*" route glob matches.
     name="src.workers.prune_checkpoints.prune_checkpoints",
 )
-def prune_checkpoints_task(self):
-    """Apply the checkpoint retention policy across all eligible trainings."""
+def prune_checkpoints_task(self, force: bool = False):
+    """Apply the checkpoint retention policy across all eligible trainings.
+
+    ``force`` is for an explicit operator request — "Run cleanup now" — which
+    should work whether or not the DAILY sweep is enabled, exactly as the
+    per-training route already does. It bypasses ONLY the enabled flag. Every
+    safety guard still applies, and ``checkpoint_prune_dry_run`` is still
+    honoured, so a report-only installation still reports.
+    """
     with self.get_db() as db:
         try:
             policy = load_policy(db)
 
-            if not policy.enabled:
+            if not policy.enabled and not force:
                 logger.debug(
                     "Checkpoint pruning disabled (checkpoint_prune_enabled=false)"
                 )

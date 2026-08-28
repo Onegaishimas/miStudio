@@ -167,6 +167,10 @@ describe('the extraction list stays current', () => {
     render(<TrainingPanel />);
 
     const refresh = await screen.findByRole('button', { name: /refresh/i });
+    // The control is disabled while a fetch is in flight, so clicking before the
+    // mount fetch settles is a no-op — which made this flake in a full run (2 of
+    // 3) while always passing in isolation.
+    await waitFor(() => expect(refresh).not.toBeDisabled());
     const before = (globalThis.fetch as never as { mock: { calls: unknown[] } }).mock.calls.length;
 
     fireEvent.click(refresh);
