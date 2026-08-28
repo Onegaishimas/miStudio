@@ -17,6 +17,8 @@ from src.core.celery_app import celery_app
 from src.models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
 from src.workers.base_task import DatabaseTask
 
+from src.workers.job_progress import progress_stalled_seconds
+
 logger = logging.getLogger(__name__)
 
 STUCK_THRESHOLD_MINUTES = 60  # no update in an hour + task not active → stuck
@@ -68,6 +70,20 @@ def _is_abandoned(run, status: str) -> bool:
     `_STARTED_STATUSES`. A "pending" row keeps the old, conservative rule.
     """
     from src.workers.task_heartbeat import looks_abandoned, seconds_since_row_update
+
+    # IS THE WORK ADVANCING? Asked before anything else, because a row whose
+    # counter is still moving is alive whatever Celery says about it. Additive
+    # and conservative: only a POSITIVE recent advance spares the row. None —
+    # no counter on this lifecycle (steering record runs have none), a first
+    # sighting, or Redis unreachable — falls through to the rule below
+    # unchanged.
+    counter = getattr(run, "progress", None)
+    if counter is not None:
+        stalled = progress_stalled_seconds(
+            f"circuit:{type(run).__name__}", getattr(run, "id", None), counter
+        )
+        if stalled is not None and stalled < STUCK_THRESHOLD_MINUTES * 60:
+            return False
 
     task_id = getattr(run, "celery_task_id", None)
     if not task_id:

@@ -279,3 +279,23 @@ def sample_training_data():
         "total_steps": 10000,
         "progress": 0.0,
     }
+
+@pytest.fixture(autouse=True)
+def _no_live_redis_for_progress_markers(monkeypatch):
+    """Unit tests never reach a real Redis for the janitor progress markers.
+
+    `job_progress.progress_stalled_seconds` is supporting evidence for the
+    stuck-job reapers. Left unstubbed it connects to whatever Redis the
+    environment points at, so markers written by one test run leak into the
+    next and a janitor test's verdict depends on run order — three NLP and
+    three tokenization tests flipped exactly that way.
+
+    Returning None means "no evidence", which is precisely the fallback the
+    gate is designed for, so every janitor test written before the gate keeps
+    its original clock-based semantics. A test that wants to exercise the gate
+    patches `progress_stalled_seconds` in its own module, as
+    test_cleanup_stuck_extractions.py does.
+    """
+    monkeypatch.setattr(
+        "src.workers.job_progress._client", lambda: None, raising=False
+    )

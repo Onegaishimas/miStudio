@@ -13,6 +13,7 @@ from src.core.celery_app import celery_app
 from src.workers.base_task import DatabaseTask
 from src.models.training import Training, TrainingStatus
 from src.workers.websocket_emitter import emit_training_progress
+from src.workers.job_progress import progress_stalled_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,22 @@ def cleanup_stuck_trainings_task(self):
                             f"{training.celery_task_id}, skipping cleanup"
                         )
 
+
+                # IS THE WORK ADVANCING? A quiet row and a stalled job are not
+                # the same thing. Additive to the clock: reap only when stale
+                # AND the counter has not moved. None means "no evidence" —
+                # first sighting, or Redis unreachable — and must never read as
+                # "stalled". See workers/job_progress.py for the incident that
+                # motivated this.
+                _stalled = progress_stalled_seconds(
+                    "training", training.id, getattr(training, "current_step", None)
+                )
+                if _stalled is not None and _stalled < 30 * 60:
+                    logger.info(
+                        "%s advanced %.0fs ago; sparing it despite a stale row",
+                        training.id, _stalled,
+                    )
+                    continue
                 if not task_is_running:
                     # Calculate how long it's been stuck
                     time_stuck = datetime.now(timezone.utc) - training.updated_at

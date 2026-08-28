@@ -14,6 +14,7 @@ from src.core.celery_app import celery_app
 from src.workers.base_task import DatabaseTask
 from src.models.enhanced_labeling_job import EnhancedLabelingJob, EnhancedLabelingStatus
 from src.workers.websocket_emitter import emit_enhanced_labeling_failed
+from src.workers.job_progress import progress_stalled_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,17 @@ def cleanup_stuck_enhanced_labeling_task(self):
                     stuck_minutes = int(
                         (datetime.now(timezone.utc) - job.updated_at).total_seconds() / 60
                     )
+                    # IS THE WORK ADVANCING? Additive to the clock — reap only
+                    # when stale AND the counter has not moved. None means "no
+                    # evidence" and must never read as "stalled".
+                    _stalled = progress_stalled_seconds("labeling", job.id, getattr(job, "examples_completed", None))
+                    if _stalled is not None and _stalled < _STUCK_THRESHOLD_MINUTES * 60:
+                        logger.info(
+                            "%s advanced %.0fs ago; sparing it despite a stale row",
+                            job.id, _stalled,
+                        )
+                        continue
+
                     logger.warning(
                         "Marking stuck enhanced labeling job %s as FAILED "
                         "(status: %s, stuck for %d min, task_id: %s)",

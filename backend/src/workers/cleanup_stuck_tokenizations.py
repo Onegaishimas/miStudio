@@ -25,6 +25,7 @@ from src.models.dataset import Dataset, DatasetStatus
 from src.models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from src.workers.base_task import DatabaseTask
 from src.workers.websocket_emitter import emit_tokenization_status
+from src.workers.job_progress import progress_stalled_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,17 @@ def cleanup_stuck_tokenizations_task(self):
                             f"{tok.celery_task_id}, skipping cleanup"
                         )
                         continue
+
+                # IS THE WORK ADVANCING? Additive to the clock — reap only
+                # when stale AND the counter has not moved. None means "no
+                # evidence" and must never read as "stalled".
+                _stalled = progress_stalled_seconds("tokenization", tok.id, getattr(tok, "progress", None))
+                if _stalled is not None and _stalled < STUCK_THRESHOLD_MINUTES * 60:
+                    logger.info(
+                        "%s advanced %.0fs ago; sparing it despite a stale row",
+                        tok.id, _stalled,
+                    )
+                    continue
 
                 logger.warning(
                     f"Marking stuck tokenization {tok.id} as ERROR "
