@@ -419,6 +419,82 @@ async def get_best_checkpoint(
 # capture "prune-preview" as a checkpoint id.
 
 
+@router.get("/checkpoints/prune-preview-all")
+async def preview_checkpoint_prune_all(db: AsyncSession = Depends(get_db)):
+    """Report what a sweep across EVERY training would delete. Read-only.
+
+    The scheduled sweep's own summary reports `bytes_freed` only for what it
+    actually deleted, so a dry-run pass reports 0 and cannot answer "how much
+    would this reclaim?". Sizing the plan is the whole point of a preview, so
+    it is computed here without touching anything.
+    """
+    from ....models.training import Training
+    from ....services.checkpoint_retention import build_plan, load_policy
+
+    def _preview(sync_db):
+        policy = load_policy(sync_db)
+        trainings = sync_db.query(Training).all()
+
+        per_training = []
+        total_checkpoints = 0
+        total_bytes = 0
+        skipped = {}
+
+        for training in trainings:
+            plan = build_plan(sync_db, training, policy)
+            if plan.skipped_reason:
+                skipped[plan.skipped_reason] = skipped.get(plan.skipped_reason, 0) + 1
+                continue
+            if not plan.checkpoint_ids:
+                continue
+            total_checkpoints += len(plan.checkpoint_ids)
+            total_bytes += plan.estimated_bytes
+            per_training.append({
+                "training_id": plan.training_id,
+                "delete_count": len(plan.checkpoint_ids),
+                "keep_steps": plan.kept_steps,
+                "estimated_bytes": plan.estimated_bytes,
+            })
+
+        per_training.sort(key=lambda r: r["estimated_bytes"], reverse=True)
+        return {
+            "policy": {
+                "enabled": policy.enabled,
+                "dry_run": policy.dry_run,
+                "keep_last": policy.keep_last,
+                "keep_best": policy.keep_best,
+                "min_age_hours": policy.min_age_hours,
+            },
+            "trainings_scanned": len(trainings),
+            "trainings_affected": len(per_training),
+            "total_checkpoints": total_checkpoints,
+            "estimated_bytes": total_bytes,
+            "skipped": skipped,
+            "per_training": per_training,
+        }
+
+    return {"data": await db.run_sync(lambda sync_db: _preview(sync_db))}
+
+
+@router.post("/checkpoints/prune-all", status_code=202)
+async def prune_all_checkpoints_now():
+    """Sweep every training's checkpoints now.
+
+    An explicit operator action, so it runs even when the DAILY sweep is
+    disabled — the same rule the per-training route follows. Every safety guard
+    still applies (never the best checkpoint, never the newest `keep_last`,
+    never a training that could still resume, never anything under the minimum
+    age), and `checkpoint_prune_dry_run` is still honoured.
+
+    Exists because the sweep was previously reachable only from the scheduler,
+    so reclaiming space meant previewing and pruning one training at a time.
+    """
+    from ....workers.prune_checkpoints import prune_checkpoints_task
+
+    task = prune_checkpoints_task.delay(force=True)
+    return {"data": {"task_id": task.id, "status": "queued", "scope": "all_trainings"}}
+
+
 @router.get("/{training_id}/checkpoints/prune-preview")
 async def preview_checkpoint_prune(
     training_id: str = Path(..., description="Training job ID"),

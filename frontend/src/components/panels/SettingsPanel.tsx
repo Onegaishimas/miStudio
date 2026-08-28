@@ -1099,7 +1099,7 @@ function DisplayTab() {
  * deliberately inert: disabled, and dry-run when first enabled. An operator
  * reviews the dry-run report before any deletion happens.
  */
-function StorageTab() {
+export function StorageTab() {
   const { settings, upsert } = useSettingsStore();
   const [toast, setToast] = useState<string | null>(null);
 
@@ -1133,6 +1133,87 @@ function StorageTab() {
   }, [settings]);
 
   const isTruthy = (v: string) => ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
+
+  // "Run cleanup now" across EVERY training.
+  //
+  // The sweep was previously reachable only from the daily scheduler, and that
+  // scheduler no-ops while `checkpoint_prune_enabled` is false — the shipped
+  // default. So 84 GB of prunable checkpoints accumulated with no way to
+  // reclaim them from the UI except previewing and pruning one training at a
+  // time (2026-08-28).
+  const [sweepBusy, setSweepBusy] = useState(false);
+  const [sweepPreview, setSweepPreview] = useState<null | {
+    trainings_affected: number;
+    total_checkpoints: number;
+    estimated_bytes: number;
+    policy: { dry_run: boolean };
+  }>(null);
+  const [sweepMsg, setSweepMsg] = useState<string | null>(null);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+
+  const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
+
+  const loadSweepPreview = async () => {
+    setSweepBusy(true);
+    setSweepError(null);
+    setSweepMsg(null);
+    try {
+      const res = await fetchAPI<{ data: any }>(
+        '/api/v1/trainings/checkpoints/prune-preview-all'
+      );
+      setSweepPreview(res.data);
+    } catch (e: any) {
+      setSweepError(e?.message || 'Failed to preview the sweep');
+    } finally {
+      setSweepBusy(false);
+    }
+  };
+
+  const runSweep = async () => {
+    setSweepBusy(true);
+    setSweepError(null);
+    setSweepMsg(null);
+    try {
+      // MIS-E2E-128 applies here too. The Celery task re-reads
+      // `checkpoint_prune_dry_run` from settings when it EXECUTES, so the local
+      // form state — which may be edited and unsaved — cannot be trusted to
+      // describe what is about to happen. Confirm against the policy the server
+      // will actually use, re-read now.
+      const live = await fetchAPI<{ data: any }>(
+        '/api/v1/trainings/checkpoints/prune-preview-all'
+      );
+      const willDelete = live.data?.policy?.dry_run === false;
+      const count = live.data?.total_checkpoints ?? 0;
+      const bytes = live.data?.estimated_bytes ?? 0;
+
+      const message = willDelete
+        ? `PERMANENTLY DELETE ${count} checkpoint file(s), reclaiming ${gb(bytes)}.\n\nThis cannot be undone. Continue?`
+        : `Dry run: this will REPORT on ${count} checkpoint file(s) (${gb(bytes)}) without deleting anything.\n\nContinue?`;
+
+      if (!window.confirm(message)) {
+        setSweepBusy(false);
+        return;
+      }
+
+      await fetchAPI('/api/v1/trainings/checkpoints/prune-all', { method: 'POST' });
+      setSweepMsg(
+        willDelete
+          ? `Sweep queued — removing ${count} checkpoint(s) in the background.`
+          : 'Sweep queued in DRY RUN — it will report without deleting.'
+      );
+      setSweepPreview(null);
+    } catch (e: any) {
+      // Fail CLOSED: if the live policy could not be read, do not run. Assuming
+      // dry-run here is how a destructive sweep gets launched behind a dialog
+      // promising a report.
+      setSweepError(
+        e?.message ||
+          'Could not confirm the live retention policy — sweep not started'
+      );
+    } finally {
+      setSweepBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1220,6 +1301,64 @@ function StorageTab() {
         <p className="text-xs text-slate-500 mt-1">
           Checkpoints younger than this are never pruned.
         </p>
+      </div>
+
+      <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+        <h4 className="text-sm font-medium text-slate-900 dark:text-white mb-1">
+          Run cleanup now (all trainings)
+        </h4>
+        <p className="text-xs text-slate-500 mb-3">
+          Applies the policy above to every training immediately, without waiting
+          for the daily sweep, and runs even while the schedule is disabled. The
+          same guards apply — the best checkpoint, the newest {keepLast || '2'},
+          anything under {minAgeHours || '24'}h, and any training that could still
+          resume are never touched.
+        </p>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={loadSweepPreview}
+            disabled={sweepBusy}
+            className="px-3 py-1.5 text-sm rounded border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            {sweepBusy ? 'Working…' : 'Preview all trainings'}
+          </button>
+          <button
+            type="button"
+            onClick={runSweep}
+            disabled={sweepBusy}
+            className={`px-4 py-1.5 text-sm rounded text-white transition-colors disabled:opacity-50 ${
+              isTruthy(dryRun)
+                ? 'bg-slate-600 hover:bg-slate-700'
+                : 'bg-red-600 hover:bg-red-700'
+            }`}
+          >
+            {isTruthy(dryRun) ? 'Run cleanup now (dry run)' : 'Run cleanup now'}
+          </button>
+          {sweepMsg && <span className="text-sm text-emerald-500">{sweepMsg}</span>}
+        </div>
+
+        {sweepPreview && (
+          <div
+            role="status"
+            className="mt-3 p-2 rounded border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300"
+          >
+            Would remove{' '}
+            <span className="font-semibold">{sweepPreview.total_checkpoints}</span>{' '}
+            checkpoint{sweepPreview.total_checkpoints === 1 ? '' : 's'} across{' '}
+            <span className="font-semibold">{sweepPreview.trainings_affected}</span>{' '}
+            training{sweepPreview.trainings_affected === 1 ? '' : 's'}, reclaiming{' '}
+            <span className="font-semibold">{gb(sweepPreview.estimated_bytes)}</span>.
+            {sweepPreview.total_checkpoints === 0 && ' Nothing is eligible right now.'}
+          </div>
+        )}
+
+        {sweepError && (
+          <div role="alert" className="mt-3 text-xs text-red-400">
+            {sweepError}
+          </div>
+        )}
       </div>
 
       <CheckpointPrunePreviewPanel />
