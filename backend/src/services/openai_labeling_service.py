@@ -1141,11 +1141,26 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
         import re
 
         try:
-            # Strip thinking tags from reasoning models (e.g. <think>...</think>)
-            # Also handle unclosed <think> tags (truncated by max_tokens)
+            # Strip thinking from reasoning models. Three shapes, not one:
+            #
+            #  a) <think>…</think>{answer}   - the model emitted both tags
+            #  b) <think>…                   - truncated by max_tokens, no close
+            #  c) …reasoning…</think>{answer} - NO OPENING TAG
+            #
+            # (c) is the one this missed, and it is not exotic: LFM2.5-2.6B's
+            # chat template appends "<|im_start|>assistant\n<think>" whenever
+            # add_generation_prompt is set, which every chat-completions server
+            # does. The opener therefore lives in the PROMPT and is never echoed,
+            # so the reply begins with bare reasoning and carries only the
+            # CLOSING tag. A pattern anchored on <think> matched nothing, the
+            # answer after </think> was discarded, and a capable model looked
+            # like it had returned prose. Take everything after the LAST closing
+            # tag when there is no opener.
             cleaned_response = response.strip()
             think_pattern = re.compile(r'<think>.*?</think>\s*', re.DOTALL)
             cleaned_response = think_pattern.sub('', cleaned_response).strip()
+            if '</think>' in cleaned_response and '<think>' not in cleaned_response:
+                cleaned_response = cleaned_response.rsplit('</think>', 1)[1].strip()
             # Handle unclosed <think> tag (response truncated before </think>)
             if cleaned_response.startswith('<think>'):
                 cleaned_response = ''  # Entire response was thinking - will fall through to fallback

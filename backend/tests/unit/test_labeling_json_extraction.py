@@ -112,3 +112,59 @@ class TestJsonOnlyDirective:
         d = JSON_ONLY_DIRECTIVE.lower()
         assert "nothing else" in d
         assert "no preamble" in d
+
+
+class TestPromptOpenedThinkBlocks:
+    """A reasoning model whose CHAT TEMPLATE opens the think tag.
+
+    LFM2.5-2.6B's chat_template.jinja ends with:
+
+        {%- if add_generation_prompt -%}
+            {{- "<|im_start|>assistant\\n<think>" -}}
+        {%- endif -%}
+
+    Every chat-completions server sets add_generation_prompt, so the OPENING tag
+    lives in the prompt and is never echoed. The reply therefore begins with bare
+    reasoning and carries only the CLOSING tag. A pattern anchored on <think>
+    matched nothing, the JSON after </think> was discarded, and the model looked
+    like it had returned prose — which is how it was diagnosed as unusable.
+
+    Mutation control:
+      C56 remove the no-opener branch -> test_reasoning_without_an_opening_tag_is_stripped
+    """
+
+    @staticmethod
+    def _strip(response: str) -> str:
+        import inspect, re
+        from src.services import openai_labeling_service as m
+        src = inspect.getsource(m)
+        assert "rsplit('</think>', 1)" in src, (
+            "the no-opening-tag branch is gone; a model whose chat template "
+            "pre-opens <think> will have its answer discarded"
+        )
+        cleaned = response.strip()
+        cleaned = re.compile(r'<think>.*?</think>\s*', re.DOTALL).sub('', cleaned).strip()
+        if '</think>' in cleaned and '<think>' not in cleaned:
+            cleaned = cleaned.rsplit('</think>', 1)[1].strip()
+        if cleaned.startswith('<think>'):
+            cleaned = ''
+        return cleaned
+
+    def test_reasoning_without_an_opening_tag_is_stripped(self):
+        """C56. The shape that was broken."""
+        raw = ('The user wants me to label one sparse autoencoder feature. '
+               'Looking at example 1, the token is nanocapsules... </think>'
+               '{"specific":"colloidal_carrier_particle","category":"semantic"}')
+        assert self._strip(raw) == (
+            '{"specific":"colloidal_carrier_particle","category":"semantic"}')
+
+    def test_a_normal_paired_think_block_still_works(self):
+        assert self._strip('<think>musing</think>{"specific":"x"}') == '{"specific":"x"}'
+
+    def test_an_unclosed_block_still_yields_nothing(self):
+        """Truncated mid-reasoning: there is no answer to salvage, and returning
+        the reasoning as if it were one would be worse than returning nothing."""
+        assert self._strip('<think>reasoning cut off by max_tokens') == ''
+
+    def test_a_plain_reply_is_untouched(self):
+        assert self._strip('{"specific":"x"}') == '{"specific":"x"}'
