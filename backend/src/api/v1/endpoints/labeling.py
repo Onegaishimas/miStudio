@@ -100,6 +100,47 @@ async def _enrich_labeling_responses(
     return responses
 
 
+class LabelingPanelRequest(LabelingConfigRequest):
+    """Apply-mode labeling scoped to an explicit panel of features.
+
+    Separate from LabelingConfigRequest, and `extra="forbid"`, for the same
+    reason LabelingTrialRequest is: the parent permits unknown keys, so a
+    typo'd `featureIds` there would be dropped in silence and the request would
+    execute as a full-extraction run over every feature — 30,712 of them on the
+    L46 extraction, roughly five days of serving time.
+
+    Unlike a trial, this DOES write labels onto the feature rows.
+
+    max_length is 2000 rather than the trial path's 200 because Celery kills a
+    task at task_time_limit=43200s (12 h) with a soft limit at 36000s (10 h).
+    At the ~16 s/feature measured on gemma-4-12B-it, 2000 features is ~8.9 h —
+    inside the soft limit with margin. Larger panels must be split into
+    several jobs.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    feature_ids: List[str] = Field(min_length=1, max_length=2000)
+
+
+@router.post(
+    "/labeling/panel",
+    response_model=LabelingStatusResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start feature labeling scoped to an explicit panel",
+)
+async def start_labeling_panel(
+    config: LabelingPanelRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Label ONLY the listed features, writing the labels to the feature rows.
+
+    Refuses with 422 if any requested id is absent from the extraction: a
+    silently-shrunken panel is not the panel that was asked for, and any rate
+    computed from it would be wrong.
+    """
+    return await start_labeling(config, db)
+
+
 @router.post(
     "/labeling",
     response_model=LabelingStatusResponse,
