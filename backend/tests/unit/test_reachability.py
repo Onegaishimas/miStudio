@@ -1298,6 +1298,15 @@ class TestTheDEPLOYMENTEnablesWhatTheCodeRegisters:
 #: gaining an `EXPECTED_CALLS` entry; the guard below then fails if it is in
 #: both, or if it names a tool that no longer exists.
 _CALLER_ASSERTION_EXEMPT: dict[str, str] = {
+    # These five ARE payload-asserted, in tests/unit/test_labeling_trials_reachable_mcp.py,
+    # which also covers the three pre-existing labeling tools. Exempt here to
+    # avoid two competing sources of truth for the same contract, NOT because
+    # the assertion is missing.
+    "list_labeling_templates": "payload-asserted in test_labeling_trials_reachable_mcp.py",
+    "run_labeling_trial": "payload-asserted in test_labeling_trials_reachable_mcp.py",
+    "get_labeling_trial": "payload-asserted in test_labeling_trials_reachable_mcp.py",
+    "list_labeling_trials": "payload-asserted in test_labeling_trials_reachable_mcp.py",
+    "compare_labeling_trials": "payload-asserted in test_labeling_trials_reachable_mcp.py",
     "acquire_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
     "annotate_jlens_feature": "no payload fixture yet — MIS-E2E-119 backlog",
     "build_circuit_from_discovery": "no payload fixture yet — MIS-E2E-119 backlog",

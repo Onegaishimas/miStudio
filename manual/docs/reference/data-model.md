@@ -91,6 +91,7 @@ In-flight marker for the Steered Transcript Recorder (records `(dial, prompt, un
 | `extraction_jobs` | Stage-2 SAE→feature extraction jobs |
 | `labeling_jobs` | Bulk labeling runs |
 | `enhanced_labeling_jobs` | Per-feature two-pass labeling runs |
+| `labeling_trial_runs` | Prompt-template A/B results over a fixed feature panel. A trial writes labels **here only** — never onto `features` — so comparing template variants cannot destroy the labels under comparison. `panel_id` is content-addressed (`sha256(extraction_job_id \| sorted feature ids)`), so equal ids prove an identical panel and a comparison can refuse a mismatch. `labeling_job_id` is `ON DELETE SET NULL`: deleting the job that produced a measurement must not delete the measurement. |
 | `neuronpedia_export_jobs` | ZIP export jobs |
 | `neuronpedia_pushes` | Direct-push jobs (`push_{sae}_{ts}`, status `queued|preparing|pushing|completed|failed`) |
 | `steering_experiments` | Saved steering results |

@@ -113,3 +113,61 @@ def label_features_task(
             )
             # Service already handles status update on error
             raise
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    # FULLY QUALIFIED on purpose. task_routes globs match the TASK NAME, not the
+    # module path, so a short name like "label_features_trial" would match no
+    # glob and land silently on the default `datasets` queue instead of
+    # `processing`. This project has been bitten by that twice.
+    name="src.workers.labeling_tasks.label_features_trial",
+    max_retries=0,
+)
+def label_features_trial_task(self, labeling_job_id: str):
+    """Run one prompt-template trial. Writes no Feature row.
+
+    max_retries=0 deliberately: a trial is a measurement. Retrying it would
+    silently spend the budget again and could interleave two runs over the same
+    panel, which is the one thing panel identity exists to prevent.
+    """
+    from src.services.labeling_trial_service import (
+        LabelingTrialService, TrialWroteToFeatures,
+    )
+    from src.models.labeling_trial_run import LabelingTrialRun
+    from src.models.labeling_job import LabelingJob, LabelingStatus
+
+    db = self.get_db()
+    try:
+        service = LabelingTrialService(db)
+        result = service.run_trial(labeling_job_id)
+        logger.info("Trial %s complete: %s", labeling_job_id, result.get("stats"))
+        return result
+    except TrialWroteToFeatures:
+        # Never swallow this one. It means the measurement path mutated the data
+        # it was measuring, and every label in the extraction is now suspect.
+        logger.critical(
+            "TRIAL WROTE TO FEATURES for job %s — labels may be corrupted",
+            labeling_job_id, exc_info=True,
+        )
+        raise
+    except Exception as exc:
+        logger.error("Trial %s failed: %s", labeling_job_id, exc, exc_info=True)
+        try:
+            job = db.query(LabelingJob).filter(
+                LabelingJob.id == labeling_job_id).first()
+            if job:
+                job.status = LabelingStatus.FAILED.value
+                job.error_message = str(exc)[:500]
+                run = db.query(LabelingTrialRun).filter(
+                    LabelingTrialRun.id == job.trial_run_id).first()
+                if run:
+                    run.status = "failed"
+                    run.error = str(exc)[:500]
+                db.commit()
+        except Exception:
+            logger.exception("could not record trial failure for %s", labeling_job_id)
+        raise
+    finally:
+        db.close()

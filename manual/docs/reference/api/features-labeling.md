@@ -91,3 +91,59 @@ Returns **503** when the labeling endpoint has no model loaded — see [troubles
 | `GET` | `/features/{id}/label/enhanced/latest` | Latest enhanced-labeling job + result for the feature |
 
 **Progress channels:** `extraction/{id}` (feature extraction), `labeling/{job_id}/progress` + `/results` (bulk), `enhanced_labeling/{job_id}` (events `enhanced_labeling:progress|completed|failed`).
+
+## Prompt-template trials
+
+A trial runs one labeling prompt template over an explicit panel of features and records the labels
+**without writing them to any feature row**. See
+[Prompt-Template Trials](../../core-workflow/labeling-trials.md) for the workflow.
+
+### `POST /api/v1/labeling/trials`
+
+Start a trial. Rejects unknown fields — a typo'd key is an error rather than a silently dropped
+option, because the same request shape misread would otherwise start a full-extraction labeling run.
+
+| field | type | notes |
+|---|---|---|
+| `extraction_job_id` | string | required |
+| `feature_ids` | string[] | required, 1–200, all must belong to that extraction |
+| `prompt_template_id` | string | optional; the default template is used when omitted |
+| `name` | string | optional label for the run, e.g. `baseline` |
+| `labeling_method` | string | `openai` \| `openai_compatible` \| `local` |
+| `openai_compatible_endpoint` | string | endpoint URL including `/v1` |
+| `openai_compatible_model` | string | model name at that endpoint |
+
+Returns `201` with `trial_run_id`, `panel_id`, and `writes_labels: false`.
+
+| status | meaning |
+|---|---|
+| `404` | extraction or template not found |
+| `409` | another trial is already in flight for this panel |
+| `422` | a feature id is not in this extraction (the ids are named), the panel is empty or over 200, or the template is a detection/scoring template |
+
+### `GET /api/v1/labeling/trials`
+
+List trials. Filters: `extraction_job_id`, `panel_id`, `prompt_template_id`, plus `limit`/`offset`.
+Filter by `panel_id` to find every variant run against one panel.
+
+### `GET /api/v1/labeling/trials/{trial_run_id}`
+
+The full record: the frozen template copy, the panel, per-feature labels, and stats.
+
+### `GET /api/v1/labeling/trials/compare/{run_a}/{run_b}`
+
+Per-feature comparison of two trials.
+
+| status | meaning |
+|---|---|
+| `409` | the two runs used different panels — comparing them would produce a number that looks like a template difference and is not one |
+| `404` | one or both trials not found |
+
+A `200` may still carry `verdict: null` when there is nothing to compare, or `inconclusive` when
+every overlapping feature errored in at least one arm. Failed labels stringify identically, so
+`inconclusive` is reported rather than `identical`.
+
+### MCP equivalents
+
+`list_labeling_templates`, `run_labeling_trial`, `get_labeling_trial`, `list_labeling_trials`,
+`compare_labeling_trials` — all in the `labeling` category.

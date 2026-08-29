@@ -45,6 +45,7 @@ const sidebars: SidebarsConfig = {
         'core-workflow/feature-groups',
         'core-workflow/auto-labeling',
         'core-workflow/enhanced-labeling',
+        'core-workflow/labeling-trials',
         'core-workflow/steering',
         'core-workflow/circuits',
         'core-workflow/jlens',

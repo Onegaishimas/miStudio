@@ -5,9 +5,9 @@ Provides REST API for independent semantic labeling of extracted SAE features.
 """
 
 import logging
-from typing import Optional
+from typing import List, Optional
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -640,3 +640,130 @@ async def fetch_openai_models(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch models"
         )
+
+
+# ── prompt-template trials ───────────────────────────────────────────────────
+#
+# A trial runs ONE template over an explicit feature panel and writes no label.
+# Kept on separate routes from /labeling rather than as a flag on it: the apply
+# endpoint's whole job is to persist, and a mode flag there would put every
+# production labeling run one boolean away from silently not persisting.
+
+class LabelingTrialRequest(BaseModel):
+    """Trial configuration.
+
+    extra="forbid" is deliberate and is the reason this is not a field on
+    LabelingConfigRequest, which permits unknown keys. A typo'd `featureIds`
+    there would be silently dropped and the request would execute as a
+    full-extraction APPLY run over every feature in the extraction.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    extraction_job_id: str
+    feature_ids: List[str] = Field(min_length=1, max_length=200)
+    prompt_template_id: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=200)
+    labeling_method: str = "openai_compatible"
+    openai_model: Optional[str] = None
+    openai_compatible_endpoint: Optional[str] = None
+    openai_compatible_model: Optional[str] = None
+    batch_size: int = Field(default=10, ge=1, le=50)
+    max_tokens: int = Field(default=300, ge=50, le=8000)
+
+
+@router.post("/labeling/trials", status_code=status.HTTP_201_CREATED,
+             summary="Start a prompt-template trial (writes no labels)")
+async def start_labeling_trial(body: LabelingTrialRequest,
+                               db: AsyncSession = Depends(get_db)):
+    from src.services.labeling_trial_service import LabelingTrialService, TrialError
+    from src.workers.labeling_tasks import label_features_trial_task
+
+    service = LabelingTrialService(db)
+    try:
+        run = await service.start_trial(
+            body.extraction_job_id, body.feature_ids, body.model_dump()
+        )
+    except TrialError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        if "in-flight" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=422, detail=msg)
+
+    label_features_trial_task.delay(run.labeling_job_id)
+    return {
+        "trial_run_id": run.id,
+        "labeling_job_id": run.labeling_job_id,
+        "panel_id": run.panel_id,
+        "status": run.status,
+        "writes_labels": False,
+    }
+
+
+@router.get("/labeling/trials", summary="List prompt-template trials")
+async def list_labeling_trials(
+    extraction_job_id: Optional[str] = None,
+    panel_id: Optional[str] = None,
+    prompt_template_id: Optional[str] = None,
+    limit: int = 50, offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    from src.models.labeling_trial_run import LabelingTrialRun
+    q = select(LabelingTrialRun)
+    if extraction_job_id:
+        q = q.where(LabelingTrialRun.extraction_job_id == extraction_job_id)
+    if panel_id:
+        q = q.where(LabelingTrialRun.panel_id == panel_id)
+    if prompt_template_id:
+        q = q.where(LabelingTrialRun.prompt_template_id == prompt_template_id)
+    q = q.order_by(LabelingTrialRun.created_at.desc()).limit(
+        min(limit, 100)).offset(offset)
+    rows = (await db.execute(q)).scalars().all()
+    return {"data": [{
+        "trial_run_id": r.id, "panel_id": r.panel_id, "name": r.name,
+        "prompt_template_id": r.prompt_template_id, "status": r.status,
+        "extraction_job_id": r.extraction_job_id,
+        "stats": (r.payload or {}).get("stats"),
+        "created_at": r.created_at, "completed_at": r.completed_at,
+    } for r in rows], "meta": {"limit": limit, "offset": offset}}
+
+
+@router.get("/labeling/trials/{trial_run_id}", summary="One trial's full result")
+async def get_labeling_trial(trial_run_id: str, db: AsyncSession = Depends(get_db)):
+    from src.models.labeling_trial_run import LabelingTrialRun
+    run = (await db.execute(select(LabelingTrialRun).where(
+        LabelingTrialRun.id == trial_run_id))).scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail=f"trial {trial_run_id} not found")
+    return {
+        "trial_run_id": run.id, "panel_id": run.panel_id, "name": run.name,
+        "status": run.status, "error": run.error,
+        "prompt_template_id": run.prompt_template_id,
+        "extraction_job_id": run.extraction_job_id,
+        "payload": run.payload,
+        "created_at": run.created_at, "completed_at": run.completed_at,
+    }
+
+
+@router.get("/labeling/trials/compare/{run_a}/{run_b}",
+            summary="Compare two trials over the same panel")
+async def compare_labeling_trials(run_a: str, run_b: str,
+                                  db: AsyncSession = Depends(get_db)):
+    from src.models.labeling_trial_run import LabelingTrialRun
+    from src.services.labeling_trial_service import LabelingTrialService
+
+    rows = (await db.execute(select(LabelingTrialRun).where(
+        LabelingTrialRun.id.in_([run_a, run_b])))).scalars().all()
+    found = {r.id: r for r in rows}
+    missing = [r for r in (run_a, run_b) if r not in found]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"trial(s) not found: {missing}")
+
+    result = LabelingTrialService.compare(
+        found[run_a].payload or {}, found[run_b].payload or {})
+    if not result.get("comparable"):
+        # Refusing is the point. Comparing across panels would produce a number
+        # that looks like a template difference and is not one.
+        raise HTTPException(status_code=409, detail=result["reason"])
+    return {"run_a": run_a, "run_b": run_b, **result}
