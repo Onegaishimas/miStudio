@@ -168,16 +168,30 @@ class LabelingService:
                 f"{active_labeling.id}"
             )
 
-        # Count features to label
-        count_result = await self.db.execute(
-            select(func.count()).select_from(Feature).where(
-                Feature.extraction_job_id == extraction_job_id
-            )
+        # Count features to label. When a panel is supplied the count MUST be
+        # scoped too: an unscoped count leaves total_features as the whole
+        # extraction, so progress crawls to 1% then jumps to 1.0 and every ETA
+        # computed from the row is wrong by an order of magnitude.
+        panel_ids = list(dict.fromkeys(config.get("feature_ids") or [])) or None
+        count_q = select(func.count()).select_from(Feature).where(
+            Feature.extraction_job_id == extraction_job_id
         )
+        if panel_ids:
+            count_q = count_q.where(Feature.id.in_(panel_ids))
+        count_result = await self.db.execute(count_q)
         total_features = count_result.scalar_one()
 
         if total_features == 0:
             raise ValueError(f"Extraction {extraction_job_id} has no features to label")
+
+        if panel_ids and total_features != len(panel_ids):
+            # A shrunken panel is not the panel that was requested. Labelling a
+            # subset silently would make two runs incomparable and any rate
+            # computed from them wrong, so refuse and name the gap.
+            raise ValueError(
+                f"panel resolved to {total_features} of {len(panel_ids)} requested "
+                f"features — the rest are absent from extraction {extraction_job_id}"
+            )
 
         # Create labeling job ID: label_{extraction_id}_{timestamp}_{rand}
         #
@@ -220,7 +234,11 @@ class LabelingService:
             statistics={
                 "max_examples": config.get("max_examples"),  # Store example count override (None = use template default)
                 "batch_size": config.get("batch_size", 10),  # Features per batch (default 10)
-            }
+            },
+            # A real column, not a statistics key: the completion write replaces
+            # `statistics` wholesale, which would erase the panel at the moment
+            # the run finished and take reproducibility with it.
+            feature_ids=panel_ids,
         )
 
         self.db.add(labeling_job)
@@ -691,9 +709,23 @@ class LabelingService:
         if not extraction_job:
             raise ValueError(f"Extraction job {labeling_job.extraction_job_id} not found")
 
-        all_features = self.db.query(Feature).filter(
+        # Chained .filter() rather than .limit()/.join(): the strict Mock in
+        # tests/unit/test_labeling_service.py stubs only filter/order_by/all,
+        # so keeping this shape means those guards keep guarding.
+        _q = self.db.query(Feature).filter(
             Feature.extraction_job_id == labeling_job.extraction_job_id
-        ).order_by(Feature.neuron_index).all()
+        )
+        # Only a real list of ids counts as a panel. A malformed column (or a
+        # test double) is treated as "no panel" rather than being handed to
+        # in_(), which raises an opaque ArgumentError deep in SQLAlchemy.
+        _panel = labeling_job.feature_ids
+        if isinstance(_panel, (list, tuple)) and _panel and all(
+            isinstance(i, str) for i in _panel
+        ):
+            # Panel run. The extraction predicate stays, so a foreign id cannot
+            # pull in a feature from a different extraction.
+            _q = _q.filter(Feature.id.in_(list(_panel)))
+        all_features = _q.order_by(Feature.neuron_index).all()
         if not all_features:
             raise ValueError(f"No features found for extraction {labeling_job.extraction_job_id}")
 

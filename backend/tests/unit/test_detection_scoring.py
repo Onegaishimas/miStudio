@@ -1132,3 +1132,62 @@ class TestRoundThreeFixes:
                              {f"f{i}": 0.9 for i in range(30)})
         assert out["verdict"] == "candidate_better"
         assert out["reason"] and "no uncertainty interval" in out["reason"]
+
+
+class TestSelfAssessmentSurvivesTheParser:
+    """`fit_count` and `confidence` were requested by every template, parsed off
+    the wire, and then dropped — so nothing downstream could tell a confident
+    label from a hedged one.
+
+    They carry real signal: measured on gemma-4-12B-it, fit_count was 0/10 on
+    incoherent features and 10/10 where all ten prime tokens were identical.
+
+    Mutation controls:
+      C63 drop fit_count/confidence from _parse_dual_label's success return
+           -> test_the_parser_returns_the_self_assessment
+      C64 drop them from the trial result rows
+           -> test_a_trial_result_row_carries_them
+    """
+
+    def _svc(self):
+        from src.services.openai_labeling_service import OpenAILabelingService
+        return OpenAILabelingService(api_key="k", model="m", base_url="http://x/v1")
+
+    def test_the_parser_returns_the_self_assessment(self):
+        out = self._svc()._parse_dual_label(
+            '{"category":"semantic","specific":"a_b","description":"d",'
+            '"fit_count":"7/10","confidence":"high"}', "fallback")
+        assert out["fit_count"] == "7/10", "fit_count was discarded by the parser"
+        assert out["confidence"] == "high"
+
+    def test_a_slash_count_is_not_mangled_into_an_identifier(self):
+        """_clean_label would turn '7/10' into '710'. It must not be applied."""
+        out = self._svc()._parse_dual_label(
+            '{"category":"c","specific":"s","description":"","fit_count":"0/10"}', "f")
+        assert out["fit_count"] == "0/10"
+
+    def test_absent_fields_are_none_not_empty_string(self):
+        """A template that does not ask for them must yield None, so 'the model
+        did not say' is distinguishable from 'the model said nothing'."""
+        out = self._svc()._parse_dual_label(
+            '{"category":"c","specific":"s","description":"d"}', "f")
+        assert out["fit_count"] is None and out["confidence"] is None
+
+    def test_the_plaintext_fallback_recovers_them_too(self):
+        """When JSON parsing fails the regex path must not silently lose them."""
+        out = self._svc()._parse_dual_label(
+            'category: semantic, specific: some_label, fit_count: "3/10", confidence: low',
+            "fallback")
+        assert out["fit_count"] == "3/10"
+        assert out["confidence"] == "low"
+
+    def test_a_trial_result_row_carries_them(self):
+        """C64. The trial payload is where a comparison reads from."""
+        import inspect
+        from src.services import labeling_trial_service as m
+        src = inspect.getsource(m)
+        assert '"fit_count": label.get("fit_count")' in src, (
+            "trial results drop the self-assessment; a comparison cannot tell a "
+            "confident label from a hedged one"
+        )
+        assert '"confidence": label.get("confidence")' in src

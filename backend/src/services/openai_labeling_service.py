@@ -44,6 +44,23 @@ def _enforce_json_only(system_message: str) -> str:
 
 
 
+
+def _clean_optional(value: Any) -> Optional[str]:
+    """Normalise a self-assessment field, or None when the template omits it.
+
+    Module-level on purpose: `_parse_dual_label` is borrowed by tests with a
+    minimal stand-in object, and an instance method here would force every such
+    caller to know about a helper that has nothing to do with the instance.
+
+    Deliberately NOT run through `_clean_label`, which lowercases and strips to
+    a snake_case identifier — that would turn "7/10" into "710".
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 class OpenAILabelingService:
     """
     Service for generating feature labels using OpenAI API.
@@ -1223,7 +1240,27 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             if description:
                 description = description.strip()
 
-            return {"category": category, "specific": specific, "description": description}
+            # Carry the model's SELF-ASSESSMENT through.
+            #
+            # Templates have long asked for `fit_count` ("N/10", how many of the
+            # ten examples the hypothesis explains) and `confidence`, and both
+            # were parsed off the wire and dropped here. They are the only signal
+            # in the pipeline for "the model refused / was unsure", which is
+            # exactly what a labelling run needs to be validated against — a
+            # confident wrong label and a hedged right one were indistinguishable
+            # downstream. Measured on gemma-4-12B-it these vary meaningfully with
+            # the evidence (0/10 on incoherent features, 10/10 where the ten
+            # prime tokens were identical), so they carry real information.
+            #
+            # Optional by design: templates that do not ask for them yield None,
+            # and no caller may assume they are present.
+            return {
+                "category": category,
+                "specific": specific,
+                "description": description,
+                "fit_count": _clean_optional(data.get("fit_count")),
+                "confidence": _clean_optional(data.get("confidence")),
+            }
 
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             logger.warning(f"Failed to parse dual label from response: {response[:100]}, error: {e}")
@@ -1238,7 +1275,16 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             specific = self._clean_label(specific_match.group(1)) if specific_match else fallback_label
             description = description_match.group(1).strip() if description_match else ""
 
-            return {"category": category, "specific": specific, "description": description}
+            fit_match = re.search(r'fit_count["\s:]+["\']?(\d+\s*/\s*\d+)', response, re.IGNORECASE)
+            conf_match = re.search(r'confidence["\s:]+["\']?(high|medium|low)', response, re.IGNORECASE)
+
+            return {
+                "category": category,
+                "specific": specific,
+                "description": description,
+                "fit_count": fit_match.group(1).replace(" ", "") if fit_match else None,
+                "confidence": conf_match.group(1).lower() if conf_match else None,
+            }
 
     def _clean_label(self, response: str) -> str:
         """

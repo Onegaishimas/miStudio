@@ -426,6 +426,7 @@ class LabelingTrialService:
                             "feature_id": f.id, "neuron_index": f.neuron_index,
                             "status": "error", "error": str(label)[:300],
                             "category": None, "specific": None, "description": None,
+                            "fit_count": None, "confidence": None,
                         })
                         continue
                     results.append({
@@ -435,6 +436,13 @@ class LabelingTrialService:
                         "category": label.get("category"),
                         "specific": label.get("specific"),
                         "description": label.get("description", ""),
+                        # The model's SELF-ASSESSMENT. Templates ask for these and
+                        # they were parsed and discarded, which left no way to tell
+                        # a confident label from a hedged one — the exact signal a
+                        # trial exists to compare. None when the template does not
+                        # ask for them.
+                        "fit_count": label.get("fit_count"),
+                        "confidence": label.get("confidence"),
                         # Recorded so a reader can see the label was protected in
                         # the apply path, without the trial skipping it — skipping
                         # would punch a hole in the panel and break comparability
