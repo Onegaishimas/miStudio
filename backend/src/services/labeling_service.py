@@ -8,6 +8,7 @@ Labeling is independent from extraction, allowing re-labeling without re-extract
 import logging
 import os
 import random
+import uuid
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,9 +179,16 @@ class LabelingService:
         if total_features == 0:
             raise ValueError(f"Extraction {extraction_job_id} has no features to label")
 
-        # Create labeling job ID: label_{extraction_id}_{timestamp}
+        # Create labeling job ID: label_{extraction_id}_{timestamp}_{rand}
+        #
+        # The timestamp is second-resolution, so two starts within the same second
+        # produced the SAME primary key and the insert below died with an opaque
+        # IntegrityError->500. The active-job 409 masked this only while the first
+        # job was still QUEUED/LABELING — a job that COMPLETED inside the same
+        # second left the collision fully exposed. Nothing parses this id, so a
+        # short random suffix is safe.
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        job_id = f"label_{extraction_job_id}_{timestamp}"
+        job_id = f"label_{extraction_job_id}_{timestamp}_{uuid.uuid4().hex[:6]}"
 
         # Create labeling job record
         labeling_job = LabelingJob(
@@ -873,6 +881,21 @@ class LabelingService:
                 f"features pass ({filter_stats['features_skipped']} skipped as junk, "
                 f"{filter_stats['skip_percentage']:.1f}%)"
             )
+
+            # A filter that removed EVERYTHING is a failure, not a completed job.
+            #
+            # total_features is 0 here, so every `range(0, total_features, ...)`
+            # label loop below is a no-op, `labels` stays empty, and the terminal
+            # write records COMPLETED / progress=1.0 / features_labeled=0 with
+            # avg_label_length=0 — a silent success that looks like a finished run
+            # and labeled nothing. Raising converts it into a FAILED job carrying
+            # the reason. The smaller the working set the likelier this is, so a
+            # scoped trial panel is the case that most needs it.
+            if total_features == 0:
+                raise ValueError(
+                    f"pre-labeling junk filter removed all "
+                    f"{filter_stats['total_features']} features; nothing to label"
+                )
 
             # Phase 2: Label Generation with progress tracking
             logger.info("Starting label generation phase")

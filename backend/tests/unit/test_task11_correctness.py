@@ -157,6 +157,11 @@ _JANITORS = [
     "src.workers.cleanup_stuck_enhanced_labeling",
     "src.workers.cleanup_stuck_circuit_runs",
     "src.workers.cleanup_stuck_tokenizations",
+    # Feature 30. `labeling_jobs` was the only long-running lifecycle here with
+    # no janitor, which is what turned its 409 lock into a trap: a job orphaned
+    # by a worker restart 409s every future labeling run on that extraction
+    # until someone deletes it by hand.
+    "src.workers.cleanup_stuck_labeling",
 ]
 
 #: Janitors that legitimately do NOT consult a Celery task id, with the reason.

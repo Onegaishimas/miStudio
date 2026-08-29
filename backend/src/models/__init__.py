@@ -15,7 +15,8 @@ from .training import Training, TrainingStatus
 from .training_metric import TrainingMetric
 from .checkpoint import Checkpoint
 from .extraction_job import ExtractionJob, ExtractionStatus
-from .labeling_job import LabelingJob, LabelingStatus, LabelingMethod
+from .labeling_job import LabelingJob, LabelingStatus, LabelingMethod, LabelingMode
+from .labeling_trial_run import LabelingTrialRun
 from .labeling_prompt_template import LabelingPromptTemplate
 from .prompt_template import PromptTemplate
 from .feature import Feature, LabelSource
@@ -69,6 +70,8 @@ __all__ = [
     "LabelingJob",
     "LabelingStatus",
     "LabelingMethod",
+    "LabelingMode",
+    "LabelingTrialRun",
     "LabelingPromptTemplate",
     "PromptTemplate",
     "Feature",

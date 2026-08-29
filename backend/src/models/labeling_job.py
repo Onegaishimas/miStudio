@@ -40,6 +40,19 @@ class ExportFormat(str, Enum):
     BOTH = "both"               # Both Postman and cURL
 
 
+class LabelingMode(str, Enum):
+    """
+    What a labeling job does with the labels it generates.
+
+    APPLY writes them onto the Feature rows (the original, and the default when
+    the column is NULL on pre-existing rows). TRIAL generates labels for a scoped
+    panel and persists them ONLY in `labeling_trial_runs` — no Feature row is
+    touched, so a prompt-template A/B cannot destroy the labels it is comparing.
+    """
+    APPLY = "apply"
+    TRIAL = "trial"
+
+
 class LabelingJob(Base):
     """
     Labeling Job database model.
@@ -93,6 +106,28 @@ class LabelingJob(Base):
     export_format = Column(String(20), nullable=False, default=ExportFormat.BOTH.value)  # Format: 'postman', 'curl', 'both'
     save_poor_quality_labels = Column(Boolean, nullable=False, default=False)  # Save poor quality labels for debugging
     poor_quality_sample_rate = Column(Float, nullable=False, default=1.0)  # Sample rate for poor quality labels (0.0-1.0)
+
+    # Trial mode (prompt-template A/B). NULL on every pre-existing row and read
+    # as APPLY, so this is additive: nothing changes for jobs created before it.
+    mode = Column(
+        String(16),
+        nullable=True,
+        comment="NULL/'apply' writes labels to features; 'trial' writes none",
+    )
+    # The panel a trial is scoped to. A real column, NOT a `statistics` key:
+    # the completion write replaces `statistics` wholesale, which would destroy
+    # the scope record and with it any hope of reproducing the run.
+    feature_ids = Column(
+        JSONB,
+        nullable=True,
+        comment="Trial mode only: the explicit feature id panel this job labels",
+    )
+    trial_run_id = Column(
+        String(36),
+        nullable=True,
+        index=True,
+        comment="Trial mode only: the labeling_trial_runs row holding the results",
+    )
 
     # Processing status
     status = Column(String(50), nullable=False, default=LabelingStatus.QUEUED.value)

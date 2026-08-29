@@ -289,6 +289,7 @@ celery_app.conf.update(
         "cleanup_stuck_trainings": {"queue": "low_priority"},
         "cleanup_stuck_activations": {"queue": "low_priority"},
         "cleanup_stuck_circuit_runs": {"queue": "low_priority"},
+        "cleanup_stuck_labeling": {"queue": "low_priority"},
         "cleanup_stuck_enhanced_labeling": {"queue": "low_priority"},
         "cleanup_task_queue": {"queue": "low_priority"},
         # SHORT NAME, explicit queue — the trap documented above. A glob on the
@@ -313,6 +314,7 @@ celery_app.conf.update(
         "src.workers.cleanup_stuck_activations.*": {
             "queue": "low_priority",
         },
+        "src.workers.cleanup_stuck_labeling.*": {"queue": "low_priority"},
         "src.workers.cleanup_stuck_enhanced_labeling.*": {
             "queue": "low_priority",
         },
@@ -487,6 +489,20 @@ celery_app.conf.update(
                 "expires": 270.0,
             },
         },
+        # Cleanup stuck BULK labeling jobs - runs every 10 minutes.
+        # 45-minute threshold, not the enhanced sibling's 10: bulk labeling
+        # legitimately runs for hours over tens of thousands of features.
+        # Without this, a job orphaned by a worker restart 409s every future
+        # labeling run on its extraction until someone deletes it by hand.
+        "cleanup-stuck-labeling": {
+            "task": "cleanup_stuck_labeling",
+            "schedule": 600.0,
+            "options": {
+                "queue": "low_priority",
+                # MIS-E2E-095: drop a tick that queued behind a long job.
+                "expires": 540.0,
+            },
+        },
         # Cleanup old task_queue entries - runs hourly
         # Deletes completed entries >7 days old and stale queued/running ghosts
         "cleanup-task-queue": {
@@ -608,6 +624,7 @@ celery_app.autodiscover_tasks(
         "src.workers.jlens_band_tasks",
         "src.workers.jlens_acquire_tasks",
         "src.workers.jlens_intervention_tasks",
+        "src.workers.cleanup_stuck_labeling",
         "src.workers.cleanup_stuck_enhanced_labeling",
         "src.workers.cleanup_task_queue",  # Old task_queue entry cleanup
         "src.workers.gpu_watchdog_task",  # GPU memory watchdog for detecting stuck processes

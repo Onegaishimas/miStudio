@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**116 tools across 14 categories.**
+**121 tools across 14 categories.**
 
 
 ## `admin` (2 tools)
@@ -110,12 +110,17 @@ require `MILLM_API_URL` and are never enabled by default.
 |---|---|---|
 | `get_task_status` | `GET /task-queue`<br>`GET /task-queue/active`<br>`GET /task-queue/{…}` | Poll background jobs. |
 
-## `labeling` (3 tools)
+## `labeling` (8 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
+| `compare_labeling_trials` | `GET /labeling/trials/compare/{…}/{…}` | Compare two trials over the SAME panel, per feature. |
 | `get_enhanced_label` | `GET /features/{…}/label/enhanced/latest` | Latest enhanced-labeling job + synthesized label for a feature. |
+| `get_labeling_trial` | `GET /labeling/trials/{…}` | One trial's full record: the frozen template, the panel, every label. |
+| `list_labeling_templates` | `GET /labeling-prompt-templates` | List labeling prompt templates — the variable a trial tests. |
+| `list_labeling_trials` | `GET /labeling/trials` | List trials. |
 | `run_enhanced_labeling` | `POST /features/{…}/label/enhanced` | Trigger two-pass enhanced LLM labeling for one feature (background job; uses the labeling backend configured in Settings). |
+| `run_labeling_trial` | `POST /labeling/trials` | Run ONE prompt template over a fixed feature panel. |
 | `update_feature_label` | `PATCH /features/{…}` | Update a feature's label. |
 
 ## `millm_circuits` (16 tools)

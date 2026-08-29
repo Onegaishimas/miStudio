@@ -1,6 +1,6 @@
 # Architecture Decision Record: MechInterp Studio (miStudio)
 
-**Version:** 3.3 (Training Finalization & Checkpoint Lifecycle — IDL-39)
+**Version:** 3.6 (Labeling Prompt-Template Optimization — IDL-48)
 **Created:** 2025-10-05
 **Updated:** 2026-07-12
 **Status:** Active
@@ -3632,6 +3632,61 @@ re-arguing the premise. The four escape classes are the standing test: a finding
 is a defect regardless of the posture, and one that does not is accepted. This IDL is also the
 thing to revisit first if any invalidating condition above becomes true.
 
+### IDL-48: Labeling prompt-template optimization — non-persisting trials, fixed panels, a pinned ruler
+
+**Date:** 2026-08-29
+
+**Context:** Feature-label quality is set almost entirely by the prompt template, and there was no
+way to change a template and learn whether the change helped. Four structural obstacles, all
+verified in the code rather than inferred:
+
+1. Labeling could not be scoped — the feature query filters on `extraction_job_id` alone, so one
+   trial on a 30k-feature extraction labels all 30k.
+2. Every labeling path writes to the `features` rows, so a trial would destroy the labels it exists
+   to compare against.
+3. The detection-scoring capability had never executed: the production call site passes keyword
+   arguments the formatter does not accept, the `{feature_explanation}` placeholder carrying the
+   label under test is substituted nowhere, and the formatter ignores that parameter anyway. Its
+   unit tests pass because they call the formatter DIRECTLY with the correct signature, while the
+   fixture that would have exercised the real dispatch is defined and never used.
+4. Example order was shuffled with an unseeded module-global RNG, so two runs over one panel saw
+   the same examples in a different order — the template was not the only variable.
+
+**Decision:**
+
+- **A trial is a measurement and writes no label.** Trial results live in `labeling_trial_runs`;
+  `features` is untouched. Non-persistence is asserted at runtime (no `Feature` may be dirty in the
+  session), not merely intended — skipping `commit()` is insufficient, because the writes are ORM
+  attribute assignments and an unrelated progress commit would flush them.
+- **Panel identity is content-addressed**, `sha256(extraction_job_id | sorted feature ids)`. A
+  comparison across unequal panels is refused rather than reconciled.
+- **The scoring prompt is a pinned, versioned constant owned by the scorer** — never a
+  `labeling_prompt_templates` row. The template under test varies; the ruler must not, or scores are
+  not comparable across trials. This is why the broken `eleutherai_detection` template type is not
+  the scoring mechanism and is not repaired into one.
+- **Trials use a dedicated table, not `ValidationManifest`.** The manifest's path guard raises on any
+  string beginning with `/data/` or `/home/` and exempts only a small key set; trial payloads are
+  corpus passages and labels, so a feature *about* filesystem paths would discard a completed, paid
+  run at write time with no recovery. Widening the exemption would weaken a guard that exists to
+  protect circuit evidence. `list_by_parent` also filters only on circuit refs, and comparison needs
+  indexed `panel_id` lookups that a JSONB payload cannot serve.
+- **Results outlive the job that produced them.** `labeling_job_id` is `ON DELETE SET NULL`;
+  deleting a user-deletable labeling job must not delete the measurement.
+- **A judge that fails a sanity gate yields `judge_unreliable`, never a low score.** Attributing a
+  weak judge's failure to the template would send a user rewriting prompts that were already good —
+  the same stance IDL-37 took for circuit calibration, for the same reason.
+- **Negatives are drawn from other features and are never called non-activating.** There is no
+  encode-on-text service, so the only defensible claim is that a passage falls below the target
+  feature's stored-example threshold. That threshold is recorded per feature; the claim is stated,
+  bounded and falsifiable.
+
+**Consequences:** Template iteration becomes an experiment with a number attached instead of a
+reading exercise. The cost is a second table and a scorer whose prompt cannot be edited from the UI
+— deliberate, since an editable ruler silently invalidates every prior score. Cross-feature
+negatives are contaminated at roughly the target feature's document frequency, which mostly cancels
+in a paired comparison but widens the interval; panels should therefore prefer low-frequency
+features, and every comparison reports the smallest difference it could have detected.
+
 ---
 
 **Revision History:**
@@ -3648,6 +3703,7 @@ thing to revisit first if any invalidating condition above becomes true.
 | 2.7 | 2026-07-15 | IDL-27: Steering UX — frequency-based auto-baseline strength (unit-norm-decoder rationale), Blended vs Compare toggle, 20-feature limit + palette — Planned |
 | 2.8 | 2026-07-15 | IDL-27 implemented & deployed; recorded backend `SelectedFeature.color` Literal widening (4→20) discovered during implementation |
 | 3.4 | 2026-07-31 | **J-Space family (BRD-MIS-JSPACE-001 v0.3).** IDL-40 J-space as a second, training-free substrate additive to SAEs, logit-lens-first with single-call-site substitution. IDL-41 model-agnostic construction through `discover_transformer_structure` — no whitelist, capture at the decoder-layer output not a normalisation module, per-layer applicability for hybrid models, construction-first over acquisition. IDL-42 synthesise-on-demand storage with a model-derived CI envelope bound. IDL-43 paired-run-with-clamping and mandatory matched controls. IDL-44 J-space rungs extending the existing ladder. IDL-45 adopt Neuronpedia's lens wire format. IDL-46 artifact mount (not upload) as the Neuronpedia integration architecture. **Also corrects a stale Document Control header:** it read 3.2 while the revision history already carried 3.3 for IDL-39 (2026-07-26) — the history was correct, the header had not been bumped with it. |
+| 3.6 | 2026-08-29 | **IDL-48: labeling prompt-template optimization.** Non-persisting trials over content-addressed panels, a pinned scoring prompt, a dedicated results table (the manifest path guard would discard a completed run on a corpus passage beginning with `/home/`), `judge_unreliable` over a false low score, and negatives that are never claimed to be non-activating. Records that the detection path had never executed — three independent breaks behind unit tests that call the formatter directly. |
 | 3.5 | 2026-08-23 | **IDL-47: the no-app-auth posture, written down.** The decision was real and deliberate and had never been recorded, so it was indistinguishable from an oversight and every review round re-derived it. States the posture, the four classes that ESCAPE it (credential disclosure, process kill/spawn, arbitrary filesystem deletion, cross-origin reach — each found live in the E2E audit), the infrastructure boundary, and the conditions that invalidate the decision. |
 | 3.0 | 2026-07-19 | Circuits arc (BRD-MIS-CIRCUITS-001 + 002 as one unit): IDL-31 (multi-SAE steering + per-layer budgets + hazard-v2 grounded in validated effect sizes), IDL-32 (position-carrying sparse capture + PMI/null/FDR/held-out statistics + feature & supernode granularities + weight-prior role change), IDL-33 (circuit-definition/v1 with rung/type/position/manifest fields pre-freeze + per-layer caps + projection), IDL-34 (directional-subtraction intervention w/ error preservation + ES-vs-null validation criterion + faithfulness + heuristic remediation), IDL-35 (evidence ladder as product-wide claims model), IDL-36 (Tier-2 attribution architecture) — Planned |
 | 2.9 | 2026-07-16 | IDL-28 (Clusters terminology UI-only + trustworthy blended labeling), IDL-29 (cluster strength budget model: freq-derived budget, sim-weighted allocation, exact resultant-norm gain, coherence gate, per-SAE config, MCP validation protocol), IDL-30 (cluster_profiles storage + mistudio.cluster-definition/v1 portable JSON contract) — Planned, from BRD-MIS-CLUSTERS-001 |

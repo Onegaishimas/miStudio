@@ -1,7 +1,7 @@
 # Project PRD: MechInterp Studio (miStudio)
 
 **Document ID:** 000_PPRD|miStudio
-**Version:** 3.12 (Features 22–29 — J-Space capability family: a training-free, model-agnostic second dictionary substrate (Jacobian lens) reading what a model is poised to say per layer and position, annotating SAE dictionaries with workspace membership, and emitting a runtime watchlist for miLLM; opened by BRD-MIS-JSPACE-001 v0.3, Planned)
+**Version:** 3.13 (Feature 30 — Labeling Prompt-Template Optimization: scoped non-persisting trials over a fixed panel, ranked by automated detection score, In Progress; Features 22–29 — J-Space capability family: a training-free, model-agnostic second dictionary substrate (Jacobian lens) reading what a model is poised to say per layer and position, annotating SAE dictionaries with workspace membership, and emitting a runtime watchlist for miLLM; opened by BRD-MIS-JSPACE-001 v0.3, Planned)
 **Last Updated:** 2026-07-26
 **Status:** Active
 
@@ -105,6 +105,7 @@ Democratize mechanistic interpretability research by providing a comprehensive, 
 | 27 | J-Space Claims Discipline | Assign J-space evidence to rungs on the existing evidence ladder and enforce that a readout is never presented in causal language; state that absence of a signal is not evidence of absence; hold framing to functional and mechanistic terms | Planned |
 | 28 | J-Space Contracts & Neuronpedia Conformance | Additive interchange kinds for the lens artifact, workspace annotation and watchlist, with projections so miLLM-as-shipped works unchanged; Track A supplies a conformant artifact to a local Neuronpedia instance by mounted directory; Track B exports workspace annotations through the existing feature upload path | Planned |
 | 29 | J-Space Runtime Handoff & Full MCP Parity | FULL MCP parity across the J-space surface — every capability reachable in the workbench is reachable by an agent, with tools shipped alongside the feature that creates them and each covered by the reachability harness; plus author, validate, version and export watchlists — named concept sets with detection thresholds that miLLM evaluates per token at the cost of an inner product — plus a validated reference evaluation-awareness watchlist, MCP surface, and cost-envelope reporting for every J-space operation class | Planned |
+| 30 | Labeling Prompt-Template Optimization | Iteratively improve feature-labeling prompt templates by running variants over a FIXED feature panel without writing any label, and ranking them by an automated detection score rather than by reading every label; panel identity is content-addressed so two runs are comparable by construction, and a comparison refuses a verdict it cannot support | In Progress |
 
 ### 2.2 Template Systems (Sub-features)
 
@@ -1020,6 +1021,53 @@ while no agent could call the feature.
 **Cross-plane:** this increment owns authoring, validation and export only. Runtime evaluation and
 streaming are `BRD-MILLM-JSPACE-001`.
 
+
+### 3.30 Labeling Prompt-Template Optimization (In Progress)
+
+**Purpose:** make feature labeling something that can be *improved on purpose*. Label quality is
+set almost entirely by the prompt template, and until now there was no way to change a template and
+find out whether the change helped — short of relabeling an entire extraction and reading the
+results by hand.
+
+**Capabilities:** scoped trial runs over an explicit feature panel; non-persisting execution, so a
+trial never overwrites the labels it is comparing against; content-addressed panel identity;
+automated detection scoring; and paired comparison of two trials with an honest verdict.
+
+**Why a trial cannot write labels.** Running five template variants over a panel would otherwise
+stomp the user's real labels five times, and the fifth variant would be scored against features the
+first four had already rewritten. The measurement has to leave the thing it measures untouched.
+
+**Why the panel is content-addressed.** `panel_id = sha256(extraction_job_id | sorted feature ids)`.
+Equal ids *prove* an identical, order-independent, extraction-bound feature set, so a comparison can
+refuse a mismatch instead of trusting that two runs happened to use the same features.
+
+**Why the template must be the only variable.** Example order was shuffled with an unseeded global
+RNG, so two runs over one panel saw the same examples in a different order — the prompt differed and
+the template was not the only thing that changed. A trial seeds the shuffle per
+`(panel_id, feature_id)` and records a fingerprint over the examples actually shown, so isolation is
+checkable rather than merely intended.
+
+**Why the ruler is not adjustable.** The detection scoring prompt is a pinned, versioned constant
+owned by the scorer — never a `labeling_prompt_templates` row. The template under test varies; the
+instrument measuring it must not, or scores across trials are not comparable.
+
+**Normative behaviour:**
+
+- A trial writes labels ONLY to `labeling_trial_runs`. No `features` row is modified, and the run
+  asserts this rather than assuming it.
+- A comparison over a different panel is REFUSED; a comparison with zero overlapping scored
+  features returns no verdict and a reason. Scoring nothing is not scoring.
+- A detection score is reported only when the judge passes a sanity gate. A judge that cannot detect
+  a literal token it was told to look for cannot grade explanations, and the result is reported as
+  `judge_unreliable` — never as a low score attributed to the label. A weak judge scoring a good
+  prompt badly would send a user off rewriting prompts that were already fine.
+- Negatives are drawn from other features and are never described as non-activating. There is no
+  encode-on-text service, so the only defensible claim is that a passage falls below the target
+  feature's stored-example threshold; that threshold is recorded per feature.
+- Panel-level differences are reported with a confidence interval and the minimum difference the
+  panel could have detected. A three-point gap over a thirty-feature panel is not a result.
+
+**Depends on:** Feature 4 (Feature Discovery & Browser) for extractions and features.
 
 ## 4. Technology Stack
 
