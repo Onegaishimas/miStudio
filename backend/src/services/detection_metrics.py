@@ -48,6 +48,16 @@ a statistical one.
 
 # 2.80 = z(0.975) + z(0.80): the two-sided 5% / 80%-power constant for a paired
 # t-style test. Used to report what a panel COULD have detected.
+_ZERO_VARIANCE_TOL = 1e-12
+"""Below this, treat the spread as zero.
+
+`sd == 0.0` is an exact float comparison against an ACCUMULATED sum, so whether
+it holds depends on the platform's rounding. Thirty identical deltas gave
+exactly 0.0 on one machine and 5.6e-17 on CI, which sent the same comparison
+down two different branches and produced a different verdict for identical
+inputs. Any real balanced-accuracy spread is many orders of magnitude above this.
+"""
+
 _MDE_Z = 2.80
 
 
@@ -245,7 +255,7 @@ def minimum_detectable_effect(deltas: Sequence[float]) -> Optional[float]:
     sd = _stdev(deltas)
     if sd is None or not deltas:
         return None
-    if sd == 0.0:
+    if sd <= _ZERO_VARIANCE_TOL:
         # Every delta identical. The arithmetic gives 0.0, which would be
         # published as "this panel can resolve a difference of 0.000" — a claim
         # of infinite resolution from a sample that showed no variation at all.

@@ -27,8 +27,10 @@ Mutation controls (each must turn a test here red):
 """
 
 import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -333,11 +335,16 @@ class TestDeterminism:
         )
         outs = set()
         for salt in ("0", "1", "random"):
+            # INHERIT the environment and override only the hash seed. Passing
+            # a bare {PATH, PYTHONHASHSEED} dict stripped VIRTUAL_ENV,
+            # PYTHONPATH and the locale, so the child could not import the
+            # package at all — green locally, a hard failure in CI, for a reason
+            # that had nothing to do with what the test measures.
+            env = {**os.environ, "PYTHONHASHSEED": salt}
             r = subprocess.run(
                 [sys.executable, "-c", code],
-                capture_output=True, text=True,
-                env={"PYTHONHASHSEED": salt, "PATH": "/usr/bin:/bin"},
-                cwd=".",
+                capture_output=True, text=True, env=env,
+                cwd=str(Path(__file__).resolve().parents[2]),
             )
             assert r.returncode == 0, r.stderr[-500:]
             outs.add(r.stdout.strip().splitlines()[-1])
