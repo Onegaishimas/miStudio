@@ -51,18 +51,26 @@ class LabelingPromptTemplateService:
         # Generate template ID
         template_id = f"lpt_{uuid4().hex[:16]}"
 
+        # Copy EVERY field the request schema accepts.
+        #
+        # This previously listed eight fields by hand and silently discarded the
+        # other twelve — template_type, max_examples, the prefix/suffix and
+        # marker settings, the logit-effect counts, the negative-example
+        # settings, is_detection_template and include_nlp_analysis. The API
+        # accepted them, returned 201, and stored column defaults instead, so a
+        # template created through the API or the UI did not behave the way it
+        # was configured and nothing said so. Deriving the field list from the
+        # schema means a new field cannot be forgotten here again.
+        _NEVER_FROM_REQUEST = {"is_system", "created_by", "id"}
+        values = {
+            k: v for k, v in template.model_dump().items()
+            if k not in _NEVER_FROM_REQUEST
+        }
         db_template = LabelingPromptTemplate(
             id=template_id,
-            name=template.name,
-            description=template.description,
-            system_message=template.system_message,
-            user_prompt_template=template.user_prompt_template,
-            temperature=template.temperature,
-            max_tokens=template.max_tokens,
-            top_p=template.top_p,
-            is_default=template.is_default,
             is_system=False,  # User-created templates are never system templates
             created_by=None,  # TODO: Add user ID when auth is implemented
+            **values,
         )
 
         db.add(db_template)
