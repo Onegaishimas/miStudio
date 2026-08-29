@@ -33,15 +33,57 @@ DB = os.environ.get(
 )
 
 
+# Enum types several models declare with create_type=False, so
+# Base.metadata.create_all will NOT make them. Mirrors tests/conftest.py; values
+# must match the model definitions exactly.
+_ENUMS = [
+    ("export_status", ["pending", "computing", "packaging", "completed", "failed", "cancelled"]),
+    ("label_source_enum", ["auto", "user", "llm", "local_llm", "openai", "enhanced_llm", "mcp_agent"]),
+    ("analysis_type_enum", ["logit_lens", "correlations", "ablation", "nlp_analysis"]),
+    ("extraction_status_enum", ["queued", "loading", "extracting", "saving", "completed", "failed", "cancelled"]),
+]
+
+
 @pytest.fixture(scope="module")
 def engine():
+    """A sync engine with the schema guaranteed present.
+
+    Three earlier versions of this fixture each failed differently, and every
+    failure was invisible locally:
+
+    1. Connecting straight to DATABASE_URL_SYNC assumed the tables already
+       existed — true of a dev database, ERRORs in CI.
+    2. Calling create_all on a hand-picked subset missed the transitive FK
+       closure (extraction_jobs -> trainings).
+    3. create_all over the full metadata still failed on
+       `type "export_status" does not exist`, because those enums are declared
+       create_type=False.
+
+    Enums first, then tables. Both are idempotent, so this is a no-op against a
+    populated database.
+
+    It SKIPS only when PostgreSQL itself is unreachable. A reachable database
+    with a missing schema is a hard failure: an earlier version turned that into
+    a skip, and five tests reported green while asserting nothing.
+    """
     try:
         eng = create_engine(DB)
         with eng.connect() as c:
             c.execute(text("SELECT 1"))
-        return eng
     except Exception as exc:  # pragma: no cover - env dependent
-        pytest.skip(f"no PostgreSQL available: {exc}")
+        pytest.skip(f"PostgreSQL is unreachable: {exc}")
+
+    from src.core.database import Base
+    from src import models  # noqa: F401 - registers every table
+
+    with eng.begin() as c:
+        for name, values in _ENUMS:
+            vals = ", ".join(f"'{v}'" for v in values)
+            c.execute(text(
+                f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); "
+                f"EXCEPTION WHEN duplicate_object THEN NULL; END $$;"))
+    Base.metadata.create_all(eng)
+    return eng
 
 
 @pytest.fixture
@@ -146,7 +188,15 @@ def panel(conn):
     sae = f"sae_negtest_{tag}"
     fgr = f"fgr_negtest_{tag}"
     conn.execute(text(
-        "INSERT INTO external_saes (id, name, source) VALUES (:sae, 't', 'local')"),
+        # EVERY NOT-NULL column without a SERVER default is supplied here.
+        # The models declare Python-side `default=` values, which the ORM
+        # applies and raw SQL does not — so relying on them worked against a
+        # dev database carrying migration-added defaults and violated NOT NULL
+        # on a freshly created schema, one column at a time.
+        "INSERT INTO external_saes "
+        "(id, name, source, status, format, progress, sae_metadata) "
+        "VALUES (:sae, 't', 'local', 'ready', 'community_standard', 1.0, "
+        "'{}'::jsonb)"),
         {"sae": sae})
     conn.execute(text(
         "INSERT INTO extraction_jobs (id, config, external_sae_id, status) "
@@ -167,9 +217,9 @@ def panel(conn):
             # check_feature_single_source: exactly one of training_id /
             # external_sae_id must be set.
             "INSERT INTO features (id, extraction_job_id, external_sae_id, "
-            "neuron_index, name, activation_frequency, interpretability_score, "
-            "max_activation) "
-            "VALUES (:f, :e, :sae, :n, :nm, 0.01, 0.5, 5.0)"),
+            "neuron_index, name, label_source, activation_frequency, "
+            "interpretability_score, max_activation, is_favorite) "
+            "VALUES (:f, :e, :sae, :n, :nm, 'auto', 0.01, 0.5, 5.0, false)"),
             {"f": fid, "e": ext, "sae": sae, "n": idx, "nm": name})
         conn.execute(text(
             "INSERT INTO feature_token_index (run_id, extraction_id, feature_id, "
