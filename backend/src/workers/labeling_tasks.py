@@ -138,36 +138,45 @@ def label_features_trial_task(self, labeling_job_id: str):
     from src.models.labeling_trial_run import LabelingTrialRun
     from src.models.labeling_job import LabelingJob, LabelingStatus
 
-    db = self.get_db()
-    try:
-        service = LabelingTrialService(db)
-        result = service.run_trial(labeling_job_id)
-        logger.info("Trial %s complete: %s", labeling_job_id, result.get("stats"))
-        return result
-    except TrialWroteToFeatures:
-        # Never swallow this one. It means the measurement path mutated the data
-        # it was measuring, and every label in the extraction is now suspect.
-        logger.critical(
-            "TRIAL WROTE TO FEATURES for job %s — labels may be corrupted",
-            labeling_job_id, exc_info=True,
-        )
-        raise
-    except Exception as exc:
-        logger.error("Trial %s failed: %s", labeling_job_id, exc, exc_info=True)
+    # `with`, not `db = self.get_db()`. get_db is a CONTEXT MANAGER, so the bare
+    # call handed the service a _GeneratorContextManager instead of a Session and
+    # every trial died before it started. It failed silently in two layers: the
+    # type guard inside run_trial fired correctly, then this function's own error
+    # handler called .query() on that object and `finally: db.close()` raised
+    # AttributeError — masking the real error behind a cleanup failure.
+    #
+    # Every other task in this file and in circuit_record/circuit_capture/
+    # cleanup_task_queue already uses the `with` form, including
+    # label_features_task 90 lines above. This one was the outlier.
+    with self.get_db() as db:
         try:
-            job = db.query(LabelingJob).filter(
-                LabelingJob.id == labeling_job_id).first()
-            if job:
-                job.status = LabelingStatus.FAILED.value
-                job.error_message = str(exc)[:500]
-                run = db.query(LabelingTrialRun).filter(
-                    LabelingTrialRun.id == job.trial_run_id).first()
-                if run:
-                    run.status = "failed"
-                    run.error = str(exc)[:500]
-                db.commit()
-        except Exception:
-            logger.exception("could not record trial failure for %s", labeling_job_id)
-        raise
-    finally:
-        db.close()
+            service = LabelingTrialService(db)
+            result = service.run_trial(labeling_job_id)
+            logger.info("Trial %s complete: %s", labeling_job_id, result.get("stats"))
+            return result
+        except TrialWroteToFeatures:
+            # Never swallow this one. It means the measurement path mutated the data
+            # it was measuring, and every label in the extraction is now suspect.
+            logger.critical(
+                "TRIAL WROTE TO FEATURES for job %s — labels may be corrupted",
+                labeling_job_id, exc_info=True,
+            )
+            raise
+        except Exception as exc:
+            logger.error("Trial %s failed: %s", labeling_job_id, exc, exc_info=True)
+            try:
+                job = db.query(LabelingJob).filter(
+                    LabelingJob.id == labeling_job_id).first()
+                if job:
+                    job.status = LabelingStatus.FAILED.value
+                    job.error_message = str(exc)[:500]
+                    run = db.query(LabelingTrialRun).filter(
+                        LabelingTrialRun.id == job.trial_run_id).first()
+                    if run:
+                        run.status = "failed"
+                        run.error = str(exc)[:500]
+                    db.commit()
+            except Exception:
+                logger.exception("could not record trial failure for %s", labeling_job_id)
+            raise
+
