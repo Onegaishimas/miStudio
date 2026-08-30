@@ -11,6 +11,7 @@ from openai import AsyncOpenAI, OpenAIError, RateLimitError, AuthenticationError
 from typing import List, Dict, Any, Optional
 import logging
 import asyncio
+import re
 from src.core.config import settings
 from src.services.nlp_analysis_service import NLPAnalysisService
 
@@ -59,6 +60,77 @@ def _clean_optional(value: Any) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+# The model's own reported evidence, made BINDING.
+#
+# `fit_count` ("N/10") and the `uninterpretable` category were both advisory:
+# the template asked the model to refuse when fewer than half its examples fit,
+# the parser read the number off the wire, and then nothing compared it to
+# anything. Self-policing failed exactly where it mattered — on a run over 390
+# features, 107 got the single label `proper_noun_entities` and 49 of 120
+# declared-uninterpretable features still carried a confident name.
+#
+# These two functions are the enforcement the prompt could only request.
+MIN_FIT_RATIO = 0.5
+REFUSAL_LABEL = "uninterpretable"
+# Values a model emits meaning "no label"; each became a literal feature name.
+_NULL_LABELS = {"none", "null", "n/a", "na", "unknown", "", "uninterpretable"}
+
+
+def _fit_ratio(fit_count: Optional[str]) -> Optional[float]:
+    """Parse "N/10" to a ratio, or None when it cannot be read.
+
+    None is NOT a refusal. Templates predating `fit_count` never emit it, and
+    forcing their every label to uninterpretable would destroy working
+    behaviour. Absent evidence leaves the model's own verdict standing; only
+    evidence that CONTRADICTS the verdict overrides it.
+    """
+    if not fit_count:
+        return None
+    m = re.search(r'(\d+)\s*/\s*(\d+)', str(fit_count))
+    if not m:
+        return None
+    num, den = int(m.group(1)), int(m.group(2))
+    if den <= 0:
+        return None
+    return num / den
+
+
+def _enforce_refusal(label: Dict[str, str]) -> Dict[str, str]:
+    """Make a declared refusal, and a self-reported poor fit, actually stick.
+
+    Two guards:
+
+    1. If the model reports that fewer than half its examples fit, the label is
+       not supported by the evidence the model itself cited. It becomes a
+       refusal whatever the model chose to call it.
+    2. If the category says uninterpretable, the NAME must say so too.
+       Downstream — search, the feature browser, detection scoring — reads
+       `specific`, not `category`. A row saying "uninterpretable /
+       proper_noun_entities" surfaces everywhere as a confident claim, which
+       launders a refusal into an assertion and is worse than either answer
+       alone. One such row's own description read "without a unifying theme".
+
+    The original verdict is preserved in `fit_count`/`confidence`, so nothing
+    is lost - only the authoritative fields are corrected.
+    """
+    ratio = _fit_ratio(label.get("fit_count"))
+    if ratio is not None and ratio < MIN_FIT_RATIO:
+        label["category"] = REFUSAL_LABEL
+        label["specific"] = REFUSAL_LABEL
+        return label
+
+    if (label.get("category") or "").strip().lower() == REFUSAL_LABEL:
+        label["specific"] = REFUSAL_LABEL
+        return label
+
+    # A model that answers the "no label" question in words rather than by
+    # category still must not have those words stored as a feature name.
+    if (label.get("specific") or "").strip().lower() in _NULL_LABELS:
+        label["category"] = REFUSAL_LABEL
+        label["specific"] = REFUSAL_LABEL
+    return label
 
 
 class BatchUnsupportedError(RuntimeError):
@@ -1266,13 +1338,13 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             #
             # Optional by design: templates that do not ask for them yield None,
             # and no caller may assume they are present.
-            return {
+            return _enforce_refusal({
                 "category": category,
                 "specific": specific,
                 "description": description,
                 "fit_count": _clean_optional(data.get("fit_count")),
                 "confidence": _clean_optional(data.get("confidence")),
-            }
+            })
 
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             logger.warning(f"Failed to parse dual label from response: {response[:100]}, error: {e}")
@@ -1290,13 +1362,13 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             fit_match = re.search(r'fit_count["\s:]+["\']?(\d+\s*/\s*\d+)', response, re.IGNORECASE)
             conf_match = re.search(r'confidence["\s:]+["\']?(high|medium|low)', response, re.IGNORECASE)
 
-            return {
+            return _enforce_refusal({
                 "category": category,
                 "specific": specific,
                 "description": description,
                 "fit_count": fit_match.group(1).replace(" ", "") if fit_match else None,
                 "confidence": conf_match.group(1).lower() if conf_match else None,
-            }
+            })
 
     def _clean_label(self, response: str) -> str:
         """
