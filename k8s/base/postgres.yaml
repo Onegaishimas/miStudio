@@ -28,6 +28,17 @@ spec:
       labels:
         app: postgres
     spec:
+      # PINNED. This volume is a hostPath, so the data exists on ONE node's disk
+      # and the pod is only correct where that disk is. Without this the
+      # scheduler is free to place it anywhere, DirectoryOrCreate silently makes
+      # an empty directory on the new node, and postgres initialises a BRAND NEW
+      # EMPTY DATABASE. Nothing errors — the app comes up healthy against an
+      # empty DB while 70.5 GB of real data sits untouched on the original node.
+      #
+      # That is not hypothetical: it happened on 2026-08-30 after a reboot moved
+      # this pod to mcs-lnxhost02, and every miStudio table read as 0 rows.
+      nodeSelector:
+        kubernetes.io/hostname: mcs-lnxgpu01
       containers:
         - name: postgres
           image: postgres:15
