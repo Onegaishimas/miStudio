@@ -311,6 +311,135 @@ class LabelingTrialService:
 
     # ── run (sync, from Celery) ──────────────────────────────────────────────
 
+    # Features whose label is a refusal carry no claim to test, so they are not
+    # scored. That makes COVERAGE part of the result rather than a footnote: a
+    # template that refuses 30 of 31 features would otherwise be scored on the
+    # one it kept and report a near-perfect number. Measured on this panel — the
+    # substitution-test candidate labelled 1 of 31 and would have reported a
+    # single-feature score against the baseline's eighteen.
+    _REFUSAL_LABELS = {"uninterpretable", "noise", "none", "unknown", ""}
+
+    def _score_detection(self, *, run, features, results, examples_by_feature,
+                         labeler) -> Dict[str, Any]:
+        """Run the judge sanity gate, then score every labelled feature.
+
+        Never raises into the trial: a scoring failure must not discard labels
+        that took real GPU time to produce. It records why instead, because
+        "no score" and "a bad score" are different facts and collapsing them
+        is how a broken judge gets read as a bad template.
+        """
+        from src.services import labeling_detection_scorer as scorer
+
+        try:
+            by_id = {f.id: f for f in features}
+            panel_id = run.panel_id
+            scorable, skipped = [], []
+
+            for r in results:
+                label = (r.get("specific") or "").strip().lower()
+                if r["status"] != "ok" or label in self._REFUSAL_LABELS:
+                    skipped.append(r["feature_id"])
+                    continue
+                positives = examples_by_feature.get(r["feature_id"]) or []
+                if not positives:
+                    skipped.append(r["feature_id"])
+                    continue
+                hard, easy = scorer.sample_negatives(
+                    self.db,
+                    feature_id=r["feature_id"],
+                    extraction_id=by_id[r["feature_id"]].extraction_job_id,
+                    exclude_samples=[p.get("sample_index") for p in positives],
+                )
+                if not (hard or easy):
+                    skipped.append(r["feature_id"])
+                    continue
+                scorable.append({
+                    "feature_id": r["feature_id"],
+                    # The label AND its description: the label alone is what a
+                    # human sees, but a two-word snake_case string is a thinner
+                    # claim than the template actually made.
+                    "explanation": f'{r["specific"]}: {r.get("description") or ""}'.strip(),
+                    "items": scorer.assemble_items(
+                        positives, hard, easy,
+                        panel_id=panel_id, feature_id=r["feature_id"],
+                    ),
+                    "negative_ceiling": scorer.negative_ceiling(positives),
+                })
+
+            if not scorable:
+                return {
+                    "scored": False,
+                    "reason": "no feature carried a testable label",
+                    "coverage": {"scored": 0, "skipped": len(skipped),
+                                 "panel_size": len(features)},
+                }
+
+            judge = self._build_judge(labeler)
+
+            # The gate runs FIRST and on a handful of calls. A judge that cannot
+            # find a token the passages literally contain cannot grade anything
+            # subtler, and scoring anyway would blame the template for the
+            # judge's incapacity.
+            controls = [{
+                "feature_id": c["feature_id"],
+                "items": c["items"],
+                "literal_explanation": (
+                    "Passages that contain the token "
+                    f'"{self._rank1_token(examples_by_feature, c["feature_id"])}".'
+                ),
+                "mismatched_explanation": (
+                    "Passages about eighteenth-century Baltic maritime insurance law."
+                ),
+            } for c in scorable[:2]]
+
+            gate = scorer.run_gate(controls, judge)
+            out = scorer.score_panel(scorable, judge, gate=gate)
+            out["coverage"] = {
+                "scored": len(scorable),
+                "skipped": len(skipped),
+                "panel_size": len(features),
+            }
+            return out
+
+        except Exception as exc:
+            logger.warning("detection scoring failed for %s: %s",
+                           run.id, exc, exc_info=True)
+            return {"scored": False, "reason": f"{type(exc).__name__}: {exc}"[:300]}
+
+    @staticmethod
+    def _rank1_token(examples_by_feature, feature_id: str) -> str:
+        rows = examples_by_feature.get(feature_id) or []
+        for r in rows:
+            t = (r.get("prime_token") or "").strip().lstrip("\u2581").strip()
+            if t:
+                return t
+        return "the"
+
+    @staticmethod
+    def _build_judge(labeler):
+        """Adapt the labeling client into the scorer's JudgeFn (str -> str).
+
+        Deliberately the SAME endpoint and model that produced the labels. A
+        judge on a different model would fold that model's competence into every
+        comparison, and two templates measured against different judges are not
+        comparable at all.
+        """
+        import asyncio as _asyncio
+
+        def _judge(prompt: str) -> str:
+            loop = _asyncio.new_event_loop()
+            try:
+                _asyncio.set_event_loop(loop)
+                resp = loop.run_until_complete(labeler._call_openai(
+                    messages=[{"role": "user", "content": prompt}]
+                ))
+                return (resp.choices[0].message.content or "") if resp.choices else ""
+            finally:
+                loop.close()
+                _asyncio.set_event_loop(None)
+
+        return _judge
+
     def _assert_wrote_nothing(self) -> None:
         """The load-bearing guard.
 
@@ -466,6 +595,14 @@ class LabelingTrialService:
             "errors": len(results) - len(ok),
             "protected": sum(1 for r in ok if r.get("protected")),
         }
+
+        # The measurement this whole apparatus exists for. Without it a trial
+        # yields labels and someone reads them, which is the method the trial
+        # was built to replace.
+        payload["detection"] = self._score_detection(
+            run=run, features=features, results=results,
+            examples_by_feature=examples_by_feature, labeler=labeler,
+        )
         run.payload = payload
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)

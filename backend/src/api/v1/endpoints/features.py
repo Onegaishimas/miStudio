@@ -203,6 +203,11 @@ async def list_features(
     search: str = Query(None, max_length=500, description="Full-text search query"),
     sort_by: str = Query("activation_freq", pattern="^(activation_freq|max_activation|feature_id|name|category)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    # Declared here because FastAPI silently DROPS query params a signature does
+    # not name. The MCP tool has always sent `category`; without this parameter
+    # it vanished and the response came back unfiltered but indistinguishable
+    # from a filtered one.
+    category: str = Query(None, max_length=100, description="Filter by label category (exact, case-insensitive)"),
     is_favorite: bool = Query(None, description="Filter by favorite status"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Page offset"),
@@ -228,6 +233,7 @@ async def list_features(
     # Build search params
     search_params = FeatureSearchRequest(
         search=search,
+        category=category,
         sort_by=sort_by,
         sort_order=sort_order,
         is_favorite=is_favorite,
@@ -248,6 +254,11 @@ async def list_extraction_features(
     search: str = Query(None, max_length=500, description="Full-text search query"),
     sort_by: str = Query("activation_freq", pattern="^(activation_freq|max_activation|feature_id|name|category)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    # Declared here because FastAPI silently DROPS query params a signature does
+    # not name. The MCP tool has always sent `category`; without this parameter
+    # it vanished and the response came back unfiltered but indistinguishable
+    # from a filtered one.
+    category: str = Query(None, max_length=100, description="Filter by label category (exact, case-insensitive)"),
     is_favorite: bool = Query(None, description="Filter by favorite status"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Page offset"),
@@ -281,6 +292,7 @@ async def list_extraction_features(
     # Build search params
     search_params = FeatureSearchRequest(
         search=search,
+        category=category,
         sort_by=sort_by,
         sort_order=sort_order,
         is_favorite=is_favorite,

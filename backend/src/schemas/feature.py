@@ -23,6 +23,14 @@ class FeatureSearchRequest(BaseModel):
         max_length=500,
         description="Full-text search query on feature name and description"
     )
+    category: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Filter to one label category (semantic, structural, language, "
+            "uninterpretable, ...). Case-insensitive exact match."
+        )
+    )
     sort_by: Literal["activation_freq", "max_activation", "feature_id", "name", "category"] = Field(
         default="activation_freq",
         description="Sort field: activation frequency, max activation, feature ID, name (label), or category"

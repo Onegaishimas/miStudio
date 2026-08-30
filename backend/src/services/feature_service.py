@@ -116,6 +116,18 @@ class FeatureService:
         if search_params.is_favorite is not None:
             query = query.where(Feature.is_favorite == search_params.is_favorite)
 
+        # Category filter. It was declared on the MCP tool and accepted by the
+        # endpoint signature nowhere, so FastAPI dropped it as an unknown query
+        # param and the call returned the ENTIRE extraction while looking
+        # filtered — 30,719 rows for category=uninterpretable. Applied to the
+        # data query and the count query alike; filtering one and not the other
+        # yields a page of N rows over a total of everything, which is the same
+        # lie in a subtler form.
+        if search_params.category:
+            query = query.where(
+                func.lower(Feature.category) == search_params.category.strip().lower()
+            )
+
         # Apply activation frequency range filter
         # Note: UI uses percentages (0-100) but DB stores decimals (0-1), so divide by 100
         if search_params.min_activation_freq is not None:
@@ -142,6 +154,11 @@ class FeatureService:
             )
         if search_params.is_favorite is not None:
             count_query = count_query.where(Feature.is_favorite == search_params.is_favorite)
+
+        if search_params.category:
+            count_query = count_query.where(
+                func.lower(Feature.category) == search_params.category.strip().lower()
+            )
 
         # Apply activation frequency range filter to count query
         # Note: UI uses percentages (0-100) but DB stores decimals (0-1), so divide by 100
@@ -326,6 +343,18 @@ class FeatureService:
         if search_params.is_favorite is not None:
             query = query.where(Feature.is_favorite == search_params.is_favorite)
 
+        # Category filter. It was declared on the MCP tool and accepted by the
+        # endpoint signature nowhere, so FastAPI dropped it as an unknown query
+        # param and the call returned the ENTIRE extraction while looking
+        # filtered — 30,719 rows for category=uninterpretable. Applied to the
+        # data query and the count query alike; filtering one and not the other
+        # yields a page of N rows over a total of everything, which is the same
+        # lie in a subtler form.
+        if search_params.category:
+            query = query.where(
+                func.lower(Feature.category) == search_params.category.strip().lower()
+            )
+
         # Apply activation frequency range filter
         # Note: UI uses percentages (0-100) but DB stores decimals (0-1), so divide by 100
         if search_params.min_activation_freq is not None:
@@ -352,6 +381,11 @@ class FeatureService:
             )
         if search_params.is_favorite is not None:
             count_query = count_query.where(Feature.is_favorite == search_params.is_favorite)
+
+        if search_params.category:
+            count_query = count_query.where(
+                func.lower(Feature.category) == search_params.category.strip().lower()
+            )
 
         # Apply activation frequency range filter to count query
         if search_params.min_activation_freq is not None:
