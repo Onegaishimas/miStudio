@@ -22,11 +22,21 @@ spec:
       labels:
         app: mistudio-backend
     spec:
-      # nodeSelector: Pin to a specific node if your cluster requires it.
-      # Replace the hostname with your node's name, or remove this section
-      # for default scheduling.
-      # nodeSelector:
-      #   kubernetes.io/hostname: your-gpu-node-hostname
+      # PINNED, and this is not optional here. This pod mounts
+      # /data/mistudio as a hostPath — 674 GB of models, datasets, activations
+      # and checkpoints that exist on mcs-lnxgpu01's disk and nowhere else. It
+      # also needs that node's GPU.
+      #
+      # Left unpinned (it was, as a commented-out placeholder), the scheduler
+      # may place it on any node, where the hostPath resolves to an empty or
+      # absent directory and the app comes up healthy with no data. On
+      # 2026-08-30 exactly that happened to the postgres pod in this namespace
+      # after a reboot: it landed on mcs-lnxhost02, initialised a new empty
+      # database, and every table read as 0 rows while the real 70.5 GB sat
+      # untouched on gpu01. This pod survived that reboot on the right node by
+      # luck, not by configuration.
+      nodeSelector:
+        kubernetes.io/hostname: mcs-lnxgpu01
 
       # hostAliases: Required if your cluster nodes cannot resolve the ingress
       # hostname via DNS. Set the IP to your ingress controller's external IP
