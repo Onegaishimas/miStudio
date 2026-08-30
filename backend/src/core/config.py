@@ -263,6 +263,25 @@ class Settings(BaseSettings):
         description="Extraction filter mode: minimal/conservative/standard/aggressive"
     )
 
+    # Batched labeling: how many features share one miLLM forward pass.
+    # 1 disables batching and restores the per-feature request path.
+    #
+    # 8 is the measured default — 5.59x aggregate throughput on gemma-4-12B-it
+    # with 4.8 GB of headroom on a 24 GB card. 12 reaches 7.31x with 1.7 GB
+    # left and 16 OOMs, so the ceiling is deliberately below what fits.
+    #
+    # Bulk labeling ONLY. Batch composition changes greedy output under int8
+    # quantisation, so a labeling TRIAL — where the template must be the only
+    # variable — has to stay serial. That separation is structural rather than
+    # a matter of setting this correctly: LabelingTrialService calls
+    # generate_label_from_examples directly and never reaches the batched path.
+    labeling_batch_size: int = Field(
+        default=8,
+        ge=1,
+        le=32,
+        description="Features per batched labeling request (1 = no batching)"
+    )
+
     # Stage 3: Pre-labeling feature filtering (aggressive, reversible)
     pre_labeling_filter_enabled: bool = Field(
         default=True,
