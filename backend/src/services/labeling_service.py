@@ -662,6 +662,68 @@ class LabelingService:
                 f"Labeling job {labeling_job_id} was cancelled"
             )
 
+    def _label_batch(
+        self,
+        labeling_service,
+        loop,
+        batch_features,
+        batch_examples,
+        batch_all_examples,
+        feature_logit_effects,
+        template_config,
+        user_prompt_template,
+        system_message,
+    ):
+        """Label one batch of features, batched through miLLM when enabled.
+
+        Returns one label per feature in order. Never raises for a single
+        feature: the batched client falls back to serial on any batch failure,
+        and the serial path returns error labels, so the caller's
+        isinstance(label, Exception) guard stays valid either way.
+
+        BULK LABELING ONLY. Batch composition changes greedy output under int8
+        quantisation, so a labeling trial must not come through here — and does
+        not: LabelingTrialService calls generate_label_from_examples directly.
+        """
+        requests = []
+        for feature, examples, all_ex in zip(
+            batch_features, batch_examples, batch_all_examples
+        ):
+            requests.append({
+                "examples": examples,
+                "template_config": template_config,
+                "user_prompt_template": user_prompt_template,
+                "system_message": system_message,
+                "feature_id": feature.id,
+                "neuron_index": feature.neuron_index,
+                "logit_effects": feature_logit_effects.get(feature.id),
+                "all_examples": all_ex,
+                "nlp_analysis": feature.nlp_analysis,
+            })
+
+        batch_size = getattr(settings, "labeling_batch_size", 1) or 1
+        can_batch = batch_size > 1 and hasattr(
+            labeling_service, "generate_labels_from_examples_batched"
+        )
+
+        if can_batch:
+            return loop.run_until_complete(
+                labeling_service.generate_labels_from_examples_batched(
+                    requests, batch_size=batch_size
+                )
+            )
+
+        # Per-feature requests, concurrent within the shared loop.
+        return loop.run_until_complete(
+            asyncio.gather(
+                *[
+                    labeling_service.generate_label_from_examples(**req)
+                    for req in requests
+                ],
+                return_exceptions=True,
+            )
+        )
+
     def label_features_for_extraction(
         self,
         labeling_job_id: str
@@ -1218,25 +1280,16 @@ class LabelingService:
                             # Generate labels for this batch using context-based examples
                             # Create concurrent tasks for all features in batch
                             # Pass all examples for NLP analysis to improve labeling
-                            label_tasks = []
-                            for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
-                                logit_effects = feature_logit_effects.get(feature.id)
-                                task = labeling_service.generate_label_from_examples(
-                                    examples=examples,
-                                    template_config=template_config,
-                                    user_prompt_template=user_prompt_template,
-                                    system_message=system_message,
-                                    feature_id=feature.id,
-                                    neuron_index=feature.neuron_index,
-                                    logit_effects=logit_effects,
-                                    all_examples=all_ex,  # Pass full 100 examples for NLP analysis
-                                    nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
-                                )
-                                label_tasks.append(task)
-
-                            # Execute all labeling tasks concurrently within the shared loop
-                            batch_labels = loop.run_until_complete(
-                                asyncio.gather(*label_tasks, return_exceptions=True)
+                            batch_labels = self._label_batch(
+                                labeling_service=labeling_service,
+                                loop=loop,
+                                batch_features=batch_features,
+                                batch_examples=batch_examples,
+                                batch_all_examples=batch_all_examples,
+                                feature_logit_effects=feature_logit_effects,
+                                template_config=template_config,
+                                user_prompt_template=user_prompt_template,
+                                system_message=system_message,
                             )
 
                             # Persist this batch immediately
@@ -1437,25 +1490,16 @@ class LabelingService:
                             # Generate labels for this batch using context-based examples
                             # Create concurrent tasks for all features in batch
                             # Pass all examples for NLP analysis to improve labeling
-                            label_tasks = []
-                            for feature, examples, all_ex in zip(batch_features, batch_examples, batch_all_examples):
-                                logit_effects = feature_logit_effects.get(feature.id)
-                                task = labeling_service.generate_label_from_examples(
-                                    examples=examples,
-                                    template_config=template_config,
-                                    user_prompt_template=user_prompt_template,
-                                    system_message=system_message,
-                                    feature_id=feature.id,
-                                    neuron_index=feature.neuron_index,
-                                    logit_effects=logit_effects,
-                                    all_examples=all_ex,  # Pass full 100 examples for NLP analysis
-                                    nlp_analysis=feature.nlp_analysis  # Use pre-computed NLP if available
-                                )
-                                label_tasks.append(task)
-
-                            # Execute all labeling tasks concurrently within the shared loop
-                            batch_labels = loop.run_until_complete(
-                                asyncio.gather(*label_tasks, return_exceptions=True)
+                            batch_labels = self._label_batch(
+                                labeling_service=labeling_service,
+                                loop=loop,
+                                batch_features=batch_features,
+                                batch_examples=batch_examples,
+                                batch_all_examples=batch_all_examples,
+                                feature_logit_effects=feature_logit_effects,
+                                template_config=template_config,
+                                user_prompt_template=user_prompt_template,
+                                system_message=system_message,
                             )
 
                             # Persist this batch immediately
