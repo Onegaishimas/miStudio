@@ -202,7 +202,13 @@ spacy>=3.7.0
 scikit-learn>=1.3.0
 
 # MCP server for agentic access (Feature 010)
-mcp>=1.9.0
+# Pinned below 2.0: mcp 2.x renames FastMCP to MCPServer
+# (mcp.server.fastmcp -> mcp.server.mcpserver) and changes other APIs.
+# backend/src/mcp_server/server.py is v1 code and fails at IMPORT under
+# 2.x, which takes the whole MCP tool surface down rather than degrading.
+# The unbounded >= let 2.x into CI on 2026-08-19; the deployed image still
+# has 1.12.4 only because it was built before the release.
+mcp>=1.9.0,<2
 
 # Debug tooling: stack-dump a wedged process (py-spy dump --pid <pid>)
 py-spy>=0.3.14
