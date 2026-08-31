@@ -148,30 +148,40 @@ class LabelingContextFormatter:
         # STEP 2: Get cleaned prime for comparison and display
         cleaned_prime = LabelingContextFormatter._clean_token(prime_token)
 
-        # STEP 3: Remove duplicates - prime_token should NOT appear in prefix or suffix
-        # Check using both exact match and cleaned match
-        original_prefix_len = len(prefix_tokens)
-        original_suffix_len = len(suffix_tokens)
-
-        # Filter prefix tokens - remove any that match prime_token
-        prefix_tokens = [
-            t for t in prefix_tokens
-            if t != prime_token and LabelingContextFormatter._clean_token(t) != cleaned_prime
-        ]
-
-        # Filter suffix tokens - remove any that match prime_token
-        suffix_tokens = [
-            t for t in suffix_tokens
-            if t != prime_token and LabelingContextFormatter._clean_token(t) != cleaned_prime
-        ]
-
-        # Log if we removed duplicates
-        if len(prefix_tokens) < original_prefix_len:
-            removed = original_prefix_len - len(prefix_tokens)
-            logger.error(f"{log_prefix} 🚨 DUPLICATE BUG: Removed {removed} prime_token duplicate(s) from prefix!")
-        if len(suffix_tokens) < original_suffix_len:
-            removed = original_suffix_len - len(suffix_tokens)
-            logger.error(f"{log_prefix} 🚨 DUPLICATE BUG: Removed {removed} prime_token duplicate(s) from suffix!")
+        # STEP 3: KEEP repeated occurrences of the prime token.
+        #
+        # This block used to DELETE every context token matching the prime, on
+        # the premise that "prime_token should NOT appear in prefix or suffix".
+        # That premise is false — a token recurring inside a ~50-token window is
+        # ordinary language — and the deletion destroyed exactly the context
+        # that identifies a feature. Measured on 4,000 real examples from
+        # extr_20260828_080834_sae_sae_39cc_002: 1.2% of examples lost tokens,
+        # and the damage was concentrated where repetition carries the most
+        # meaning:
+        #
+        #   prime "▁self"        def __init__(self, value)  ->  def __init__(, value)
+        #   prime "▁David"       us.David was one of...     ->  us. was one of...
+        #   prime "▁Flash"       the Reverse-Flash is...    ->  the Reverse- is...
+        #   prime "Description"  Job Description            ->  Job
+        #
+        # The `self` case is the point: a Python-idiom feature, whose evidence is
+        # the surrounding `self` usages, was shown mangled Python. The `Flash`
+        # case is worse in kind — "Reverse-Flash" is a DIFFERENT entity and the
+        # match was on a shared substring after BPE-marker stripping.
+        #
+        # Repetition is SIGNAL. A feature firing on a token that recurs nearby is
+        # a different thing from one that fires on an isolated occurrence, and
+        # the labeler should see that. The marker is placed positionally, so
+        # multiple occurrences are not ambiguous.
+        repeats = sum(
+            1 for t in list(prefix_tokens) + list(suffix_tokens)
+            if t == prime_token or LabelingContextFormatter._clean_token(t) == cleaned_prime
+        )
+        if repeats:
+            # Informational, not an error: worth knowing, never worth "fixing".
+            logger.debug(
+                f"{log_prefix} prime token recurs {repeats}x in context (kept)"
+            )
 
         # STEP 4: Reassemble complete word if prime_token is a fragment
         # This handles cases like "Jim L <<ites>>" → "Jim <<Lites>>"
