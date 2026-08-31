@@ -353,6 +353,25 @@ class LabelingTrialService:
                 if not (hard or easy):
                     skipped.append(r["feature_id"])
                     continue
+
+                # RENDER before assembling. score_feature reads item["text"],
+                # and the rows here — from _retrieve_top_examples_batch_sync and
+                # from the negative-sampling SQL alike — carry
+                # prefix_tokens/prime_token/suffix_tokens and no "text" at all.
+                # assemble_items copies the row through unchanged, so without
+                # this every scoring run died on KeyError('text') and the
+                # blanket except below reported it as {"scored": false} — a
+                # broken measurement that looked like an absent one.
+                #
+                # Positives and negatives MUST go through the SAME renderer:
+                # render_passage adds nothing and truncates symmetrically, so
+                # neither class can be identified by formatting or by length.
+                positives = [
+                    {**row, "text": scorer.render_passage(row)} for row in positives
+                ]
+                hard = [{**row, "text": scorer.render_passage(row)} for row in hard]
+                easy = [{**row, "text": scorer.render_passage(row)} for row in easy]
+
                 scorable.append({
                     "feature_id": r["feature_id"],
                     # The label AND its description: the label alone is what a
@@ -401,6 +420,21 @@ class LabelingTrialService:
             }
             return out
 
+        except (KeyError, AttributeError, TypeError) as exc:
+            # A SHAPE error, not a judge failure. Called out separately because
+            # the two are not the same fact and collapsing them is how a
+            # KeyError('text') spent its life being read as "the judge could not
+            # score this panel".
+            logger.error(
+                "detection scoring hit a data-shape error for %s: %s — this is a "
+                "BUG in the scoring wiring, not a judge problem",
+                run.id, exc, exc_info=True,
+            )
+            return {
+                "scored": False,
+                "reason": f"scoring wiring error: {type(exc).__name__}: {exc}"[:300],
+                "wiring_error": True,
+            }
         except Exception as exc:
             logger.warning("detection scoring failed for %s: %s",
                            run.id, exc, exc_info=True)
