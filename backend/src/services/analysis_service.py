@@ -51,6 +51,64 @@ logger = logging.getLogger(__name__)
 
 
 
+def _validated(tensor, key: str):
+    """Refuse a tensor that cannot be an unembedding.
+
+    Suffix matching is more permissive than an exact name, so it earns a shape
+    check: an unembedding is 2-D [vocab, d_model] with a vocabulary far larger
+    than the hidden size. Without this, picking the wrong tensor would surface
+    as an inscrutable matmul error deep in the caller instead of here, where the
+    key that was chosen is still in scope.
+    """
+    if tensor.ndim != 2:
+        raise ValueError(
+            f"tensor {key!r} is {tensor.ndim}-D, not a [vocab, d_model] "
+            f"unembedding matrix"
+        )
+    rows, cols = tensor.shape
+    if rows < cols:
+        raise ValueError(
+            f"tensor {key!r} has shape {tuple(tensor.shape)}; an unembedding "
+            f"should have vocab ({rows}) >= d_model ({cols})"
+        )
+    return tensor
+
+
+def _find_unembedding_key(available) -> "str | None":
+    """Locate the unembedding tensor across flat AND nested weight layouts.
+
+    The exact-name list covers ordinary text models. It does NOT cover
+    multimodal ones, which nest the text tower: gemma-4-12B-it stores its
+    unembedding at
+
+        model.language_model.embed_tokens.weight
+
+    alongside model.embed_vision.* and model.embed_audio.*, so a lookup for
+    "model.embed_tokens.weight" finds nothing and every logit-lens request on a
+    gemma-4 SAE returned 500.
+
+    Falls back to a SUFFIX match, which is what makes nesting irrelevant.
+    Matching on the full segment "embed_tokens.weight" is deliberate: the vision
+    and audio towers expose "embed_vision.embedding_projection.weight", which a
+    looser "embed" search would happily return — and that tensor is not an
+    unembedding at all.
+
+    lm_head is preferred over embed_tokens because a model that has both is
+    UNTIED, and its true output matrix is lm_head. When several candidates
+    match, the shallowest wins: a top-level tensor is the model's own, a deeper
+    one belongs to a submodule.
+    """
+    available = set(available)
+    for key in ("lm_head.weight", "model.embed_tokens.weight"):
+        if key in available:
+            return key
+    for suffix in ("lm_head.weight", "embed_tokens.weight"):
+        matches = [k for k in available if k.endswith(suffix)]
+        if matches:
+            return sorted(matches, key=lambda k: (k.count("."), len(k)))[0]
+    return None
+
+
 def load_unembedding_matrix(
     model_dir: "Path", device: str = "cpu"
 ) -> "torch.Tensor":
@@ -78,25 +136,25 @@ def load_unembedding_matrix(
     index_path = model_dir / "model.safetensors.index.json"
     if index_path.exists():
         weight_map = json.loads(index_path.read_text())["weight_map"]
-        for key in candidates:
-            shard = weight_map.get(key)
-            if shard is None:
-                continue
-            with safe_open(str(model_dir / shard), framework="pt", device=device) as f:
-                return f.get_tensor(key)
+        key = _find_unembedding_key(weight_map.keys())
+        if key is not None:
+            with safe_open(str(model_dir / weight_map[key]), framework="pt",
+                           device=device) as f:
+                return _validated(f.get_tensor(key), key)
         raise ValueError(
-            f"No unembedding tensor found in {index_path}; tried {candidates}"
+            f"No unembedding tensor found in {index_path}; tried {candidates} "
+            f"and suffix matches on lm_head.weight / embed_tokens.weight"
         )
 
     single = model_dir / "model.safetensors"
     if single.exists():
         with safe_open(str(single), framework="pt", device=device) as f:
-            available = set(f.keys())
-            for key in candidates:
-                if key in available:
-                    return f.get_tensor(key)
+            key = _find_unembedding_key(f.keys())
+            if key is not None:
+                return _validated(f.get_tensor(key), key)
         raise ValueError(
-            f"No unembedding tensor in {single}; tried {candidates}"
+            f"No unembedding tensor in {single}; tried {candidates} and suffix "
+            f"matches on lm_head.weight / embed_tokens.weight"
         )
 
     raise FileNotFoundError(f"No safetensors weights under {model_dir}")
