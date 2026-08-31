@@ -636,7 +636,42 @@ async def get_logit_lens(
     """
     analysis_service = AnalysisService(db)
 
-    result = await analysis_service.calculate_logit_lens(feature_id)
+    try:
+        result = await analysis_service.calculate_logit_lens(feature_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # THIS ENDPOINT DOES NOT RETURN 500. Ever.
+        #
+        # Logit lens is one optional tab in a feature modal. When it cannot be
+        # computed the honest outcome is "here is why", not a stack trace
+        # rendered as "HTTP error! status: 500" over the whole panel — which is
+        # what a gemma-4 SAE showed for every feature, because the unembedding
+        # lookup knew only two flat key names and gemma-4 nests its text tower.
+        #
+        # The reason travels in `interpretation`, which the view already renders
+        # prominently, and `top_tokens` is empty so the token list simply does
+        # not appear. No schema change, no frontend change.
+        #
+        # Still logged at ERROR: the user should not see a 500, but the operator
+        # must still see the failure. Silence here would trade one bad outcome
+        # for a worse one.
+        # Local import: this module has no top-level `datetime`, only a
+        # function-scoped one further down. Without this the handler that exists
+        # to prevent a 500 would itself raise NameError and produce one.
+        from datetime import datetime, timezone
+
+        logger.error(
+            "Logit lens unavailable for %s: %s", feature_id, exc, exc_info=True
+        )
+        return LogitLensResponse(
+            top_tokens=[],
+            probabilities=[],
+            interpretation=(
+                f"Logit lens is unavailable for this feature: {exc}"
+            ),
+            computed_at=datetime.now(timezone.utc),
+        )
 
     if not result:
         raise HTTPException(
