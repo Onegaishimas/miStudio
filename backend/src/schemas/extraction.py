@@ -76,8 +76,22 @@ class ExtractionConfigRequest(BaseModel):
     # Context window configuration
     # Captures tokens before and after the prime token (max activation) for better interpretability
     # Based on Anthropic/OpenAI research showing asymmetric windows improve feature understanding
-    context_prefix_tokens: int = Field(25, ge=0, le=50, description="Number of tokens before the prime token (0-50)")
-    context_suffix_tokens: int = Field(25, ge=0, le=50, description="Number of tokens after the prime token (0-50)")
+    # Ceiling raised 50 -> 100 to match extraction_template.py, which already
+    # allowed 100. The two schemas disagreed, so a template saved with 100 was
+    # rejected by the endpoint that consumes it with a bare 422.
+    #
+    # 100+100 is a deliberate target, not headroom. Measured on 25+25 windows:
+    # a summarisation pass produced compression ratios of 0.79-1.01 (at 1.01 the
+    # "summary" was LONGER than the input) because a ~50-token passage has
+    # nothing to compress; NLI models want a real premise rather than a
+    # fragment; and long-range dependencies — a feature that fires on a pronoun
+    # only after a particular antecedent, or on a token only inside a code block
+    # — are simply off-screen at 25 tokens and get labelled uninterpretable.
+    #
+    # Storage: tokens per example scale linearly, so 100+100 is ~4x the stored
+    # context of 25+25. Pair it with a lower top_k_examples to stay level.
+    context_prefix_tokens: int = Field(25, ge=0, le=100, description="Number of tokens before the prime token (0-100)")
+    context_suffix_tokens: int = Field(25, ge=0, le=100, description="Number of tokens after the prime token (0-100)")
 
     # Dead neuron filtering
     # Neurons that fire on less than this fraction of samples are considered "dead" and skipped
