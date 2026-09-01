@@ -27,7 +27,11 @@ class ExtractionTemplateCreate(ExtractionTemplateBase):
     max_samples: int = Field(10000, ge=100, le=1000000, description="Maximum number of samples to process")
     batch_size: int = Field(8, ge=1, le=256, description="Batch size for processing")
     micro_batch_size: Optional[int] = Field(None, ge=1, le=256, description="GPU micro-batch size for memory efficiency")
-    top_k_examples: int = Field(100, ge=1, le=1000, description="Number of top activating examples to save per feature")
+    # Floor is 10, matching ExtractionConfigRequest. A template is a saved
+    # extraction config, so a value the endpoint refuses must not be storable —
+    # and everything downstream (labeling max_examples, cohesion, detection
+    # positives) reads ten examples.
+    top_k_examples: int = Field(100, ge=10, le=1000, description="Number of top activating examples to save per feature (10-1,000)")
     context_prefix_tokens: int = Field(25, ge=0, le=100, description="Tokens to capture before the prime token")
     context_suffix_tokens: int = Field(25, ge=0, le=100, description="Tokens to capture after the prime token")
     is_favorite: bool = Field(False, description="Whether this template is marked as favorite")
@@ -63,7 +67,7 @@ class ExtractionTemplateUpdate(BaseModel):
     max_samples: Optional[int] = Field(None, ge=100, le=1000000, description="Maximum samples")
     batch_size: Optional[int] = Field(None, ge=1, le=256, description="Batch size")
     micro_batch_size: Optional[int] = Field(None, ge=1, le=256, description="GPU micro-batch size")
-    top_k_examples: Optional[int] = Field(None, ge=1, le=1000, description="Top K examples")
+    top_k_examples: Optional[int] = Field(None, ge=10, le=1000, description="Top K examples (10-1,000)")
     context_prefix_tokens: Optional[int] = Field(None, ge=0, le=100, description="Tokens before prime token")
     context_suffix_tokens: Optional[int] = Field(None, ge=0, le=100, description="Tokens after prime token")
     is_favorite: Optional[bool] = Field(None, description="Favorite status")
