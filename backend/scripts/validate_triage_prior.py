@@ -24,6 +24,8 @@ Usage (inside the backend pod, where the data lives):
         env PYTHONPATH=/app python3 /tmp/validate_triage_prior.py [extraction_id]
 """
 
+import json
+import os
 import sys
 from collections import defaultdict
 
@@ -34,6 +36,14 @@ from src.services.feature_triage_prior import score_signals
 
 DEFAULT_EXTRACTION = "extr_20260828_080834_sae_sae_39cc_002"
 GATE = 0.65
+# Point at a consensus set to validate against SOUND ground truth instead of the
+# stored verdict. Measured 2026-08-30/09-01: gemma-4-12B-it flips its refuse/
+# label verdict on 47% of features when the same passages are merely reordered
+# and reproduces its own stored label 30% of the time, so `features.category`
+# is a coin flip. Noisy labels ATTENUATE AUC toward 0.5, so a prior that clears
+# the gate against stored labels is genuinely good, while one that fails there
+# may still be fine against consensus — which is why both are worth running.
+CONSENSUS_IN = os.environ.get("CONSENSUS_IN", "")
 
 
 def auc(positives, negatives):
@@ -69,16 +79,37 @@ def main():
     extraction = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_EXTRACTION
     db = SyncSessionLocal()
 
-    rows = db.execute(text("""
-        SELECT category, name, nlp_analysis
-        FROM features
-        WHERE extraction_job_id = :e
-          AND labeled_at IS NOT NULL
-          AND nlp_analysis IS NOT NULL
-    """), {"e": extraction}).fetchall()
+    truth = None
+    if CONSENSUS_IN:
+        c = json.load(open(CONSENSUS_IN))
+        if c.get("extraction") != extraction:
+            print(f"REFUSING: consensus set is for {c.get('extraction')}, not "
+                  f"{extraction}. Scoring one extraction's features against "
+                  f"another's verdicts is not a result.")
+            return 1
+        truth = {f["feature_id"]: f["consensus"]
+                 for f in c["features"] if f.get("unanimous")}
+        rows = db.execute(text("""
+            SELECT id, category, name, nlp_analysis FROM features
+            WHERE extraction_job_id = :e AND nlp_analysis IS NOT NULL
+              AND id = ANY(:ids)
+        """), {"e": extraction, "ids": list(truth)}).fetchall()
+        rows = [(r[1], r[2], r[3], truth[r[0]]) for r in rows]
+        print(f"ground truth: CONSENSUS ({CONSENSUS_IN})")
+    else:
+        rows = db.execute(text("""
+            SELECT category, name, nlp_analysis
+            FROM features
+            WHERE extraction_job_id = :e
+              AND labeled_at IS NOT NULL
+              AND nlp_analysis IS NOT NULL
+        """), {"e": extraction}).fetchall()
+        rows = [(r[0], r[1], r[2], None) for r in rows]
+        print("ground truth: STORED VERDICT (unstable — 47% flip rate; treat "
+              "the AUC as a floor)")
 
     print(f"extraction : {extraction}")
-    print(f"labeled features with nlp_analysis : {len(rows):,}")
+    print(f"features with nlp_analysis : {len(rows):,}")
     if not rows:
         print("\nNOTHING TO SCORE. Either no labels yet, or the NLP worker has "
               "not run for this extraction — check nlp_status on the extraction.")
@@ -92,9 +123,12 @@ def main():
     n_ref = n_lab = 0
     missing = defaultdict(int)
 
-    for category, name, nlp in rows:
-        is_refusal = (category or "").lower() == "uninterpretable" or \
-                     (name or "").lower() in REFUSAL
+    for category, name, nlp, consensus in rows:
+        if consensus is not None:
+            is_refusal = bool(consensus)
+        else:
+            is_refusal = (category or "").lower() == "uninterpretable" or \
+                         (name or "").lower() in REFUSAL
         bucket = refused if is_refusal else labeled
         n_ref, n_lab = (n_ref + 1, n_lab) if is_refusal else (n_ref, n_lab + 1)
         for signal, value in score_signals(nlp).items():
@@ -103,8 +137,8 @@ def main():
                 continue
             bucket[signal].append(value)
 
-    print(f"  refused by the LLM : {n_ref:,}")
-    print(f"  labeled by the LLM : {n_lab:,}")
+    print(f"  refused : {n_ref:,}")
+    print(f"  labeled : {n_lab:,}")
     if n_ref == 0 or n_lab == 0:
         print("\nONLY ONE CLASS PRESENT — separation is undefined. Not a result.")
         return 1
