@@ -197,6 +197,7 @@ export interface Training {
   current_l1_alpha?: number | null;
   /** Current L0 sparsity (fraction of active features) */
   current_l0_sparsity?: number | null;
+  current_fvu?: number | null;
   /** Current dead neuron count */
   current_dead_neurons?: number | null;
   /** Current learning rate */
@@ -418,6 +419,9 @@ export interface TrainingProgressEvent {
   l1_loss?: number | null;
   l1_alpha?: number | null;
   l0_sparsity: number;
+  /** Fraction of Variance Unexplained: 0 = perfect reconstruction, 1 = mean-only.
+   *  Optional because only architectures that compute it (JumpReLU) report one. */
+  fvu?: number | null;
   dead_neurons: number;
   learning_rate: number;
 }

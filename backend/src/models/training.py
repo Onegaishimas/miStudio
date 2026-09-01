@@ -77,6 +77,12 @@ class Training(Base):
     # Current metrics (latest values for quick access)
     current_loss = Column(Float, nullable=True)
     current_l0_sparsity = Column(Float, nullable=True)
+    #: Fraction of Variance Unexplained: var(x - x_hat) / var(x).
+    #: 0.0 = perfect reconstruction, 1.0 = no better than predicting the mean.
+    #: Scale-free, unlike raw MSE, so it is comparable across layers and models
+    #: — which is why it is the metric to watch for convergence. Nullable
+    #: because only architectures that compute it (JumpReLU) report one.
+    current_fvu = Column(Float, nullable=True)
     current_dead_neurons = Column(Integer, nullable=True)
     current_learning_rate = Column(Float, nullable=True)
 

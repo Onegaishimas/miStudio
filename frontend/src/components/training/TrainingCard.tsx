@@ -98,6 +98,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
     reconstruction_loss: number[];
     l1_loss: number[];
     l0_sparsity: number[];
+    fvu: number[];           // Fraction of Variance Unexplained (convergence)
     dead_neurons: number[];  // Historical dead neuron counts
     timestamps: string[];
     steps: number[];  // Track step numbers for deduplication
@@ -106,6 +107,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
     reconstruction_loss: [],
     l1_loss: [],
     l0_sparsity: [],
+    fvu: [],
     dead_neurons: [],
     timestamps: [],
     steps: [],
@@ -123,6 +125,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
   const hasMetrics = training.progress > 10;
   const currentLoss = training.current_loss ?? 0;
   const l0Sparsity = training.current_l0_sparsity ?? 0;
+  const fvu = training.current_fvu;
   const deadNeurons = training.current_dead_neurons ?? 0;
   const learningRate = training.current_learning_rate ?? 0;
 
@@ -423,6 +426,10 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
             reconstruction_loss: dedupedMetrics.map(() => 0),  // Not available from historical data
             l1_loss: dedupedMetrics.map(() => 0),  // Not available from historical data
             l0_sparsity: dedupedMetrics.map((m) => m.l0_sparsity ?? 0),
+            // Real history — training_metrics has carried fvu all along, so a
+            // reopened card shows the full convergence curve rather than
+            // starting blank and filling in from the next live event.
+            fvu: dedupedMetrics.map((m) => m.fvu ?? NaN),
             dead_neurons: dedupedMetrics.map((m) => m.dead_neurons ?? 0),
             timestamps: dedupedMetrics.map((m) => m.timestamp),
             steps: dedupedMetrics.map((m) => m.step),
@@ -463,6 +470,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
         const newReconLoss = [...prev.reconstruction_loss, training.current_reconstruction_loss ?? 0];
         const newL1Loss = [...prev.l1_loss, training.current_l1_loss ?? 0];
         const newL0 = [...prev.l0_sparsity, training.current_l0_sparsity ?? 0];
+        // NaN, not 0: a missing FVU means "not reported by this architecture",
+        // and plotting it as 0 would draw a perfect-reconstruction line.
+        const newFvu = [...prev.fvu, training.current_fvu ?? NaN];
         const newDeadNeurons = [...prev.dead_neurons, training.current_dead_neurons ?? 0];
         const newTimestamps = [...prev.timestamps, newTimestamp];
         const newSteps = [...prev.steps, currentStep];
@@ -473,13 +483,14 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
           reconstruction_loss: newReconLoss.slice(-20),
           l1_loss: newL1Loss.slice(-20),
           l0_sparsity: newL0.slice(-20),
+          fvu: newFvu.slice(-20),
           dead_neurons: newDeadNeurons.slice(-20),
           timestamps: newTimestamps.slice(-20),
           steps: newSteps.slice(-20),
         };
       });
     }
-  }, [training.current_loss, training.current_reconstruction_loss, training.current_l1_loss, training.current_l0_sparsity, training.current_dead_neurons, training.current_step]);
+  }, [training.current_loss, training.current_reconstruction_loss, training.current_l1_loss, training.current_l0_sparsity, training.current_fvu, training.current_dead_neurons, training.current_step]);
 
 
   // Handle save checkpoint
@@ -952,6 +963,7 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                         const reconLoss = metricsHistory.reconstruction_loss[idx];
                         const l1Loss = metricsHistory.l1_loss[idx];
                         const sparsity = metricsHistory.l0_sparsity[idx];
+                        const histFvu = metricsHistory.fvu[idx];
                         const historicalDeadNeurons = metricsHistory.dead_neurons[idx] ?? deadNeurons;
                         const time = new Date(metricsHistory.timestamps[idx]).toLocaleTimeString();
                         const hasDecomposition = reconLoss > 0 || l1Loss > 0;
@@ -964,6 +976,9 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                               <span className="text-slate-500"> (recon={reconLoss?.toFixed(6)}, L1={l1Loss?.toFixed(6)})</span>
                             )},
                             L0={sparsity.toFixed(4)},
+                            {Number.isFinite(histFvu) && (
+                              <> FVU={histFvu.toFixed(4)} ({((1 - histFvu) * 100).toFixed(1)}% var),</>
+                            )}
                             dead={Math.floor(historicalDeadNeurons)}/{training.hyperparameters?.latent_dim || 'N/A'},
                             lr={learningRate.toExponential(2)},
                             step={step.toLocaleString()}
@@ -1086,6 +1101,68 @@ export const TrainingCard: React.FC<TrainingCardProps> = ({
                       ) : (
                         <div className="h-full flex items-center justify-center text-slate-500 text-xs">
                           Waiting...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* FVU Chart — the convergence signal.
+                      FVU = var(x - x_hat) / var(x): 0 is perfect reconstruction,
+                      1 is no better than predicting the mean. Scale-free, so
+                      unlike raw loss it is comparable across layers and models.
+                      L0 typically plateaus long before FVU does, which is why
+                      "has it converged?" is answered here and not by the loss
+                      chart. */}
+                  <div className="bg-slate-100 dark:bg-slate-800/30 rounded-lg p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">FVU</span>
+                      <span className="text-xs text-amber-400 font-mono">
+                        {Number.isFinite(fvu as number)
+                          ? `${(fvu as number).toFixed(4)} · ${((1 - (fvu as number)) * 100).toFixed(1)}% var`
+                          : 'n/a'}
+                      </span>
+                    </div>
+                    <div className="h-16">
+                      {metricsHistory.fvu.filter(Number.isFinite).length > 1 ? (
+                        <svg viewBox="0 0 100 40" className="w-full h-full" preserveAspectRatio="none">
+                          {/* Subtle grid lines */}
+                          <line x1="0" y1="10" x2="100" y2="10" stroke="#334155" strokeWidth="0.5" />
+                          <line x1="0" y1="20" x2="100" y2="20" stroke="#334155" strokeWidth="0.5" />
+                          <line x1="0" y1="30" x2="100" y2="30" stroke="#334155" strokeWidth="0.5" />
+                          {(() => {
+                            // Drop non-finite points rather than plotting them:
+                            // an architecture that reports no FVU must leave a
+                            // gap, not a line at zero implying perfection.
+                            const data = metricsHistory.fvu.filter(Number.isFinite);
+                            const maxVal = Math.max(...data);
+                            const minVal = Math.min(...data);
+                            const range = maxVal - minVal || 1;
+                            const points = data.map((val, i) => {
+                              const x = (i / (data.length - 1)) * 100;
+                              const y = 40 - ((val - minVal) / range) * 36 - 2;
+                              return `${x},${y}`;
+                            }).join(' ');
+                            return (
+                              <>
+                                <polyline
+                                  fill="none"
+                                  stroke="#f59e0b"
+                                  strokeWidth="1.5"
+                                  points={points}
+                                />
+                                <circle
+                                  cx={100}
+                                  cy={40 - ((data[data.length - 1] - minVal) / range) * 36 - 2}
+                                  r="2"
+                                  fill="#f59e0b"
+                                />
+                              </>
+                            );
+                          })()}
+                        </svg>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-slate-500 text-xs">
+                          {metricsHistory.fvu.some(Number.isFinite) ? 'Waiting...' : 'Not reported'}
                         </div>
                       )}
                     </div>
