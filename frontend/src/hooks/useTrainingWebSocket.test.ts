@@ -211,6 +211,60 @@ describe('useTrainingWebSocket', () => {
         current_learning_rate: 0.0001,
       });
     });
+
+    it('should carry FVU through to the training object', () => {
+      // FVU = var(x - x_hat) / var(x) — 0 is perfect reconstruction, 1 is no
+      // better than predicting the mean. It is the metric that indicates SAE
+      // convergence (L0 typically plateaus thousands of steps earlier), and it
+      // was computed every step and written to training_metrics while the
+      // WebSocket payload omitted it — so the live UI could not show it.
+      renderHook(() => useTrainingWebSocket([]));
+      const progressHandler = mockOn.mock.calls.find(
+        (call) => call[0] === 'training:progress'
+      )?.[1];
+
+      progressHandler({
+        training_id: 'training-1',
+        current_step: 8400,
+        progress: 16.8,
+        loss: 0.0236,
+        l0_sparsity: 0.00023,
+        fvu: 0.0972,
+        dead_neurons: 0,
+        learning_rate: 0.00007,
+      });
+
+      expect(mockUpdateTrainingStatus).toHaveBeenCalledWith(
+        'training-1',
+        expect.objectContaining({ current_fvu: 0.0972 })
+      );
+    });
+
+    it('should pass FVU through as undefined when the architecture reports none', () => {
+      // Not every SAE architecture computes FVU. Undefined must stay undefined
+      // rather than becoming 0, which would read as perfect reconstruction.
+      renderHook(() => useTrainingWebSocket([]));
+      const progressHandler = mockOn.mock.calls.find(
+        (call) => call[0] === 'training:progress'
+      )?.[1];
+
+      progressHandler({
+        training_id: 'training-1',
+        current_step: 100,
+        progress: 1.0,
+        loss: 0.5,
+        l0_sparsity: 20.0,
+        dead_neurons: 0,
+        learning_rate: 0.0001,
+      });
+
+      // Indexing rather than .at(-1): this project's TS lib target predates
+      // Array.prototype.at, and the test-file type-check ratchet is down-only.
+      const calls = mockUpdateTrainingStatus.mock.calls;
+      const payload = calls[calls.length - 1][1];
+      expect(payload.current_fvu).toBeUndefined();
+      expect(payload.current_fvu).not.toBe(0);
+    });
   });
 
   describe('Event Handler: training:status_changed', () => {

@@ -274,6 +274,7 @@ class TrainingUpdate(BaseModel):
     current_step: Optional[int] = Field(None, ge=0, description="Current training step")
     current_loss: Optional[float] = Field(None, description="Current reconstruction loss")
     current_l0_sparsity: Optional[float] = Field(None, description="Current L0 sparsity")
+    current_fvu: Optional[float] = Field(None, description="Fraction of Variance Unexplained (0=perfect, 1=mean-only)")
     current_dead_neurons: Optional[int] = Field(None, ge=0, description="Current dead neuron count")
     current_learning_rate: Optional[float] = Field(None, ge=0, description="Current learning rate")
     error_message: Optional[str] = Field(None, description="Error message if failed")

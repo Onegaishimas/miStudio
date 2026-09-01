@@ -58,6 +58,7 @@ class TrainingTask(DatabaseTask):
         l0_sparsity: Optional[float] = None,
         dead_neurons: Optional[int] = None,
         learning_rate: Optional[float] = None,
+        fvu: Optional[float] = None,
     ):
         """
         Update training progress in database.
@@ -80,6 +81,11 @@ class TrainingTask(DatabaseTask):
                 training.current_loss = loss
                 training.current_l0_sparsity = l0_sparsity
                 training.current_dead_neurons = dead_neurons
+                # Only overwrite when a value was reported. Architectures that
+                # do not compute FVU pass None, and writing that would erase a
+                # good reading from a multi-SAE run where one layer reports it.
+                if fvu is not None:
+                    training.current_fvu = fvu
                 training.current_learning_rate = learning_rate
                 # Guarded status write: a concurrent PAUSED/CANCELLED set by the
                 # API must not be clobbered back to RUNNING by a progress update
@@ -1542,6 +1548,7 @@ def train_sae_task(
                     l0_sparsity=avg_sparsity,
                     dead_neurons=int(avg_dead_neurons),
                     learning_rate=current_lr,
+                    fvu=avg_fvu,
                 )
 
                 # Check training quality (with race-to-zero detection)
@@ -1652,6 +1659,11 @@ def train_sae_task(
                         "l1_loss": avg_l1_loss,
                         "l1_alpha": current_l1_alpha,
                         "l0_sparsity": avg_sparsity,
+                        # FVU was computed at line ~1404 and persisted to
+                        # training_metrics, but never emitted — so the live UI
+                        # could not show the one metric that actually indicates
+                        # convergence.
+                        "fvu": avg_fvu,
                         "dead_neurons": int(avg_dead_neurons),
                         "learning_rate": current_lr,
                         "num_layers": num_layers,
