@@ -344,6 +344,7 @@ class TrainingResponse(BaseModel):
     # Current metrics
     current_loss: Optional[float] = Field(None, description="Current reconstruction loss")
     current_l0_sparsity: Optional[float] = Field(None, description="Current L0 sparsity")
+    current_fvu: Optional[float] = Field(None, description="Fraction of Variance Unexplained: var(x-x_hat)/var(x). 0=perfect reconstruction, 1=mean-only. NULL when the architecture does not report it.")
     current_dead_neurons: Optional[int] = Field(None, description="Current dead neuron count")
     current_learning_rate: Optional[float] = Field(None, description="Current learning rate")
 
