@@ -39,7 +39,7 @@ from sqlalchemy import text
 from src.core.database import SyncSessionLocal
 from src.services.openai_labeling_service import OpenAILabelingService
 
-EXTRACTION = "extr_20260828_080834_sae_sae_39cc_002"
+EXTRACTION = os.environ.get("EXTRACTION", "extr_20260828_080834_sae_sae_39cc_002")
 TEMPLATE_ID = "lpt_95fb74cb61354eb5"
 ENDPOINT = os.environ.get(
     "MILLM_ENDPOINT",
@@ -47,6 +47,13 @@ ENDPOINT = os.environ.get(
 )
 MODEL = os.environ.get("CONSENSUS_MODEL", "gemma-4-12B-it")
 OUT = os.environ.get("CONSENSUS_OUT", "/data/consensus_set.json")
+# Truncate stored context to N tokens either side. 0 = use whatever the
+# extraction captured. This exists to separate two variables that changed
+# together on 2026-09-01: expansion factor (8x -> 16x) AND context (25+25 ->
+# 100+100). Truncating the RICH extraction back to 25+25 holds the SAE fixed
+# and moves only the context, which is the only way to attribute the collapse
+# in refusal rate (42% -> 3.5%) to one of them.
+CONTEXT_TOKENS = int(os.environ.get("CONTEXT_TOKENS", "0"))
 REFUSAL = {"uninterpretable", "noise", "none", "unknown", ""}
 
 
@@ -100,9 +107,17 @@ def main():
             FROM feature_activations WHERE feature_id = :f
             ORDER BY max_activation DESC LIMIT :k
         """), {"f": p["fid"], "k": max_examples or 10}).fetchall()
+        def _cut(pre, suf):
+            if not CONTEXT_TOKENS:
+                return pre, suf
+            # Nearest tokens to the prime are the ones a short window keeps:
+            # the TAIL of the prefix and the HEAD of the suffix.
+            return ((pre or [])[-CONTEXT_TOKENS:], (suf or [])[:CONTEXT_TOKENS])
+
         examples[p["fid"]] = [
-            {"prefix_tokens": r[0], "prime_token": r[1], "suffix_tokens": r[2],
-             "max_activation": r[3]} for r in ex
+            {"prefix_tokens": _cut(r[0], r[2])[0], "prime_token": r[1],
+             "suffix_tokens": _cut(r[0], r[2])[1], "max_activation": r[3]}
+            for r in ex
         ]
     panel = [p for p in panel if examples.get(p["fid"])]
 
@@ -110,6 +125,7 @@ def main():
     print(f"extraction : {EXTRACTION} ({total:,} features, stride {stride})")
     print(f"panel      : {len(panel)} features")
     print(f"runs       : {runs} (example order AND batch composition perturbed)")
+    print(f"context    : {'%d+%d tokens (TRUNCATED)' % (CONTEXT_TOKENS, CONTEXT_TOKENS) if CONTEXT_TOKENS else 'as captured'}")
     print(f"output     : {OUT}\n", flush=True)
 
     svc = OpenAILabelingService(

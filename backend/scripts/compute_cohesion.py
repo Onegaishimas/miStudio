@@ -42,6 +42,16 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "Nemotron-3-Embed-8B-BF16")
 CONSENSUS_IN = os.environ.get("CONSENSUS_IN", "/data/consensus_set.json")
 OUT = os.environ.get("COHESION_OUT", "/data/cohesion_scores.json")
 N_PASSAGES = 10
+# Normally set to match the CONTEXT_TOKENS the consensus set was judged at, so
+# predictor and ground truth see the same evidence. Deliberately MISMATCHING it
+# is also legitimate and interesting: the label is a property of the feature,
+# estimated by short-context judging, while the predictor may use any evidence
+# it likes — so scoring rich-context cohesion against short-context truth asks
+# whether extra context helps the COMPUTED metric even though it degrades the
+# JUDGED one. What must never differ is the rendering of a feature's passages
+# versus the baseline's; both go through render(), which is why the knob is
+# applied there and not at the call sites.
+CONTEXT_TOKENS = int(os.environ.get("CONTEXT_TOKENS", "0"))
 N_BASELINE = 60
 EMBED_BATCH = 16
 
@@ -56,6 +66,8 @@ def render(row):
     def clean(t):
         return str(t).replace("▁", " ").replace("Ġ", " ").replace("##", "")
     pre, prime, suf = row[0] or [], row[1] or "", row[2] or []
+    if CONTEXT_TOKENS:
+        pre, suf = pre[-CONTEXT_TOKENS:], suf[:CONTEXT_TOKENS]
     return " ".join(
         ("".join(clean(t) for t in pre) + clean(prime) +
          "".join(clean(t) for t in suf)).split()
@@ -125,6 +137,7 @@ def main():
         feats = feats[:limit]
     print(f"embedder   : {EMBED_MODEL}")
     print(f"extraction : {EXTRACTION}")
+    print(f"context    : {'%d+%d (TRUNCATED)' % (CONTEXT_TOKENS, CONTEXT_TOKENS) if CONTEXT_TOKENS else 'as captured'}")
     if consensus:
         print(f"consensus  : {len(feats)} unanimous features "
               f"({sum(1 for f in feats if f['consensus'])} refused / "
@@ -198,8 +211,15 @@ def main():
     print("distribution of cohesion score (own - baseline):")
     print(f"  all      : {summarise(scores)}")
 
+    # A rank metric over a one-element class is arithmetic, not evidence. On
+    # 2026-09-01 the 16x/100+100 extraction produced a consensus set with 187
+    # labeled and ONE refused feature (gemma-4's refusal rate collapsed from
+    # 42% to 3.5% at long context), and the old `if not neg` guard would have
+    # printed a decisive-looking AUC computed against that single point.
+    MIN_CLASS = 10
+
     def auc(pos, neg):
-        if not pos or not neg:
+        if len(pos) < MIN_CLASS or len(neg) < MIN_CLASS:
             return None
         wins = sum(1.0 if a > b else (0.5 if a == b else 0.0)
                    for a in pos for b in neg)
@@ -210,7 +230,12 @@ def main():
     print(f"  consensus-LABELED  n={len(lab)}  mean={sum(lab)/max(len(lab),1):+.4f}")
     print(f"  consensus-REFUSED  n={len(ref)}  mean={sum(ref)/max(len(ref),1):+.4f}")
     if a is None:
-        print("  AUC: not computable (a class is empty)")
+        print(f"  AUC: NOT COMPUTABLE — a class has fewer than {MIN_CLASS} "
+              f"members (labeled={len(lab)}, refused={len(ref)}).")
+        print("  This is a degenerate ground truth, not a cohesion result. A "
+              "judge that\n  almost never refuses cannot separate anything, and "
+              "its unanimity is\n  earned by the base rate rather than by "
+              "stability.")
     else:
         print(f"  AUC = {a:.3f}   "
               f"({'USEFUL' if a >= 0.70 else 'marginal' if a >= 0.65 else 'no better than chance'})")
