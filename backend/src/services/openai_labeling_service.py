@@ -187,7 +187,8 @@ class OpenAILabelingService:
         labeling_job_id: Optional[str] = None,
         save_poor_quality_labels: bool = False,
         poor_quality_sample_rate: float = 1.0,
-        save_requests_sample_rate: float = 1.0
+        save_requests_sample_rate: float = 1.0,
+        chat_template_kwargs: Optional[dict] = None,
     ):
         """
         Initialize OpenAI labeling service.
@@ -253,6 +254,25 @@ class OpenAILabelingService:
         self.max_tokens = max_tokens
         self.top_p = top_p
 
+        # Chat-template variables forwarded to the server (miLLM extension).
+        #
+        # Defaults to disabling reasoning. Labeling wants a JSON object, not
+        # deliberation: granite-4.2-8b's template sets enable_thinking=True
+        # when undefined and its generation prompt ends with an OPEN <think>
+        # tag, so the model resumes inside a reasoning block. The opening tag
+        # is never in the completion, which means _strip_think() cannot see it
+        # and the reasoning lands in the parsed label as untagged prose.
+        #
+        # Safe to send unconditionally: a template that does not reference the
+        # variable ignores it (verified 2026-09-02 -- gemma-4-12B-it accepts it
+        # with the rendered prompt byte-identical, granite-4.2-8b acts on it).
+        # Pass {} to send nothing at all.
+        self.chat_template_kwargs = (
+            {"enable_thinking": False}
+            if chat_template_kwargs is None
+            else dict(chat_template_kwargs)
+        )
+
         # Store token filtering configuration
         self.filter_special = filter_special
         self.filter_single_char = filter_single_char
@@ -317,6 +337,10 @@ class OpenAILabelingService:
             "top_p": self.top_p,
             **kwargs,
         }
+        if self.chat_template_kwargs:
+            extra = dict(call_kwargs.get("extra_body") or {})
+            extra.setdefault("chat_template_kwargs", self.chat_template_kwargs)
+            call_kwargs["extra_body"] = extra
 
         # Ask for JSON natively when the server supports it. Generation cost is
         # linear in tokens emitted, and an unconstrained model narrates before
@@ -1759,6 +1783,10 @@ Both labels must be lowercase_with_underscores (1-3 words max each).
             "top_p": self.top_p,
             "extra_body": {"extra_messages": message_sets[1:]},
         }
+        if self.chat_template_kwargs:
+            call_kwargs["extra_body"]["chat_template_kwargs"] = (
+                self.chat_template_kwargs
+            )
         call_kwargs.setdefault("response_format", {"type": "json_object"})
 
         async with self._api_semaphore:
