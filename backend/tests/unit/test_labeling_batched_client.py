@@ -43,6 +43,9 @@ def service():
     svc.temperature = 0.0
     svc.max_tokens = 64
     svc.top_p = 1.0
+    # __init__ is patched out, so every attribute the call paths read must be
+    # set here. Default matches the constructor's: reasoning off for labeling.
+    svc.chat_template_kwargs = {"enable_thinking": False}
     svc.client = MagicMock()
     import asyncio
     svc._api_semaphore = asyncio.Semaphore(4)
