@@ -77,7 +77,7 @@
   pinned above results; lag-0 notice; "Run attribution pass" action.
 
 ### 2.9 Docs deliverables
-- `0xcc/docs/tier-2.5-attention-mediated-mining.md` — expand A.8's five points into the fast-follow
+- `0xcc/docs/Archive/tier-2.5-attention-mediated-mining.md` — expand A.8's five points into the fast-follow
   design (capture join, candidate generation, shuffled-join null, frozen-attention attribution,
   position-restricted validation, contract fields already present).
 - `manual/docs/core-workflow/circuits.md` (capture → mine → attribute loop; evidence honesty framing);

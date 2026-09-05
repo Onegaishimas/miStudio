@@ -66,7 +66,7 @@
 ## Phase 5: Empirical validation (shipping gate — BR-005)
 
 ### Task 5.1: Runbook + execution
-- [x] `0xcc/docs/cluster-strength-validation.md`: 3 clusters (N=4/15/5) + low-cohesion gate + sim-vs-uniform, 48 sweep + 9 confirmation generations via async steering API (seed 42)
+- [x] `0xcc/docs/Archive/cluster-strength-validation.md`: 3 clusters (N=4/15/5) + low-cohesion gate + sim-vs-uniform, 48 sweep + 9 confirmation generations via async steering API (seed 42)
 
 ### Task 5.2: Acceptance + constants
 - [x] Hard gate: PASSED with fitted γ=0 (Δ = +8.3% / −28.9% / −6.0%; non-degenerate at predicted B on all prompts; C4 flagged+downgraded). Round 1 (γ=1) FAILED uniformly (+~100%) — the 1/G boost overdrives; members saturate on Σ|s|
@@ -93,7 +93,7 @@
 | `frontend/src/stores/steeringStore.ts` (+test) | request/rebalance/intensity/pins |
 | `frontend/src/types/steering.ts`, `utils/steeringStrength.ts` | types; solo path untouched |
 | `frontend/src/components/steering/ClusterBudgetBar.tsx` (NEW), `SelectedFeatureCard.tsx`, `SteeringPanel.tsx`, `FeatureSelector.tsx` | UI |
-| `0xcc/docs/cluster-strength-validation.md` (NEW) | validation runbook + results |
+| `0xcc/docs/Archive/cluster-strength-validation.md` (NEW) | validation runbook + results |
 
 ## Coverage audit (instruct 007)
 - API ✅ (Ph1) · Data/config ✅ (Ph2) · State ✅ (Ph3) · UI ✅ (Ph4) · Tests ✅ (every phase + property test) ·

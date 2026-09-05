@@ -81,7 +81,7 @@ Recorded by 018 reviews R1–R3 (records in `.claude/context/sessions/review_fea
 - [ ] Capture tab (config + attention toggle → estimate → confirm; runs list w/ split + stale) · Discovery tab (granularity toggle w/ Cluster-seeded default, floors, candidate table w/ PMI/support/null-pct/attr/replicated, run-report card pinned, lag-0 notice, attribution action)
 
 ### Task 5.3: Docs deliverables
-- [x] DONE (618f14f: tier-2.5 design doc + manual circuits.md + concepts/evidence-ladder + concepts/tier-2.5; build green) `0xcc/docs/tier-2.5-attention-mediated-mining.md` (A.8 expanded — BR-023 deliverable) · manual `circuits.md` (capture→mine→attribute; honesty framing) · mcp-server.md category
+- [x] DONE (618f14f: tier-2.5 design doc + manual circuits.md + concepts/evidence-ladder + concepts/tier-2.5; build green) `0xcc/docs/Archive/tier-2.5-attention-mediated-mining.md` (A.8 expanded — BR-023 deliverable) · manual `circuits.md` (capture→mine→attribute; honesty framing) · mcp-server.md category
 
 ## Phase 6: Verification + acceptance
 
@@ -104,7 +104,7 @@ Recorded by 018 reviews R1–R3 (records in `.claude/context/sessions/review_fea
 | `backend/src/api/v1/endpoints/circuit_*.py` (NEW) | REST + WS |
 | `backend/src/mcp_server/tools/circuits.py` (NEW) + gating | MCP |
 | `frontend/src/components/panels/CircuitsPanel.tsx` (EXISTS — shipped by 018; 016 adds discovery/review affordances + store extraction per Task 0.3) | UI |
-| `0xcc/docs/tier-2.5-attention-mediated-mining.md` (NEW) · `manual/docs/**` | docs |
+| `0xcc/docs/Archive/tier-2.5-attention-mediated-mining.md` (NEW) · `manual/docs/**` | docs |
 
 ## Coverage audit (instruct 007)
 - Data ✅ (Ph1-2, migration both directions, split determinism) · API ✅ (Ph2-4) · MCP ✅ (Ph5) ·

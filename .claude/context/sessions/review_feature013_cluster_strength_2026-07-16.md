@@ -69,7 +69,7 @@ manual page (014's cluster workflow doc) should cover it. **P3.**
   dup refusal; λ once + λ-in-Compare parity; partialize; stale guard; low-cohesion gate;
   backend-parity vectors) + ClusterBudgetBar 7 tests. ✅
 - **Gap (P2, blocking full close):** empirical validation protocol not yet executed — requires deployed
-  GPU env (runbook `0xcc/docs/cluster-strength-validation.md`). This is FPRD's hard shipping gate
+  GPU env (runbook `0xcc/docs/Archive/cluster-strength-validation.md`). This is FPRD's hard shipping gate
   (±30% of empirical optimum + non-degenerate). Scheduled post-deploy.
 - **Gap (P3):** no Playwright E2E yet for budget bar/dial (also post-deploy).
 - Known noise: ~98 pre-existing vitest failures in dataset/model/training panels (fail on clean HEAD;

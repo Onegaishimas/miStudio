@@ -45,7 +45,7 @@ DEFAULT_CONSTANTS: Dict[str, float] = {
     "M": 3.0,       # budget ceiling
     "cohesion_gate": 0.5,  # below this group cohesion → recommend solo baselines
     # Gain exponent γ in B = B_dir / max(G, G_FLOOR)**γ. Empirical validation
-    # (2026-07-16, runbook 0xcc/docs/cluster-strength-validation.md, C1-C3 on
+    # (2026-07-16, runbook 0xcc/docs/Archive/cluster-strength-validation.md, C1-C3 on
     # sae_eb8374929894): the γ=1 magnitude compensation overdrives ~2× — member
     # features saturate on Σ|s| regardless of decoder-direction cancellation,
     # so the fitted default is γ=0 (B = B_dir). G is still measured, reported,

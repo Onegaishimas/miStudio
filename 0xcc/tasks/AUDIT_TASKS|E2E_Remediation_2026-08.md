@@ -65,7 +65,7 @@ running file list.*
   not exist yet in December, so these dumps predate it entirely. The dumps do contain dataset and
   prompt-template text, which is user content rather than credentials. — MIS-E2E-008, -143
 - [x] 0.6 ✅ Added a CI check that inspects the **published** tree's history against the exclusion list and fails the sync. — MIS-E2E-143
-- [x] 0.7 ✅ Deleted (21 files). Verified byte-identical to their `0xcc/` originals first; the one non-duplicate — a reading-list manifest — was **relocated** to `0xcc/docs/clustering-document-set.md` pointing at the originals, rather than destroyed. — MIS-E2E-007, -164
+- [x] 0.7 ✅ Deleted (21 files). Verified byte-identical to their `0xcc/` originals first; the one non-duplicate — a reading-list manifest — was **relocated** to `0xcc/docs/Archive/clustering-document-set.md` pointing at the originals, rather than destroyed. — MIS-E2E-007, -164
 
 **Acceptance:** the exclusion list holds for every commit reachable from the mirror's
 tip, not only the tip; the rotated credential appears nowhere in either repo.
@@ -515,7 +515,7 @@ want of it. It is filled in as tasks are completed — one line per file touched
 | `README.md` · `CLAUDE.md` | Manifest references point at `k8s/base/` |
 | `backend/tests/unit/test_infrastructure_invariants.py` | **New.** 12 tests; the ingress check is parametrised over the hosts it finds, which is how the `.net` gap surfaced |
 | `aaaa/` | **Deleted** (21 files, MIS-E2E-007) — byte-identical copies published to the mirror while their originals were withheld |
-| `0xcc/docs/clustering-document-set.md` | **New.** The one non-duplicate from `aaaa/`, relocated to index the originals |
+| `0xcc/docs/Archive/clustering-document-set.md` | **New.** The one non-duplicate from `aaaa/`, relocated to index the originals |
 | `docs/miStudio_Manual.md` | MIS-E2E-149: the sentence that cost `train_969e90af`, corrected in the second manual too |
 | `backend/src/mcp_server/server.py` | MIS-E2E-150: `MCP_ALLOW_ANONYMOUS` is stdio-only in fact, not just in prose |
 | `manual/docs/advanced/mcp-server.md` | MIS-E2E-150: the troubleshooting remedy no longer points into the hole |

@@ -116,7 +116,7 @@ INTENSITY (step 9) live client-side only — no decoder needed, budget-preservin
 3. One cluster: sim-proportional vs uniform weights at identical B (grounds the allocation choice).
 4. Acceptance (hard): empirically-best total within ±30% of predicted B on coherent clusters AND predicted-B
    output non-degenerate on all coherent clusters AND low-cohesion cluster correctly flagged.
-5. Record results in `0xcc/docs/cluster-strength-validation.md`; write fitted constants into
+5. Record results in `0xcc/docs/Archive/cluster-strength-validation.md`; write fitted constants into
    `per_sae.<sae_id>` config. Failure ⇒ adjust constants (or law) BEFORE enabling cluster mode by default.
 
 ## 6. Type changes

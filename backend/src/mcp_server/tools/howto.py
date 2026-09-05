@@ -193,7 +193,7 @@ nearest that direction — high-norm multilingual fragments, not degraded
 English. It looks like the model is broken. It is not.
 
 MEASURED ENVELOPE (2026-07-21, LFM2.5-1.2B-Instruct, 2 layers, 1 edge; see
-0xcc/docs/circuit-strength-calibration.md for the raw data):
+0xcc/docs/Archive/circuit-strength-calibration.md for the raw data):
 
     total 0.34 .. 3.07   fluent
     total 4.25           COLLAPSED to repeated determiners ("The. An. In.")

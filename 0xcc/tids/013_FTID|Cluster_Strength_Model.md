@@ -66,7 +66,7 @@
   warning banners from flags.
 - `FeatureSelector.tsx`: "Auto" preset in cluster mode re-requests allocation (not solo baselines).
 
-### 2.9 `0xcc/docs/cluster-strength-validation.md` (NEW, runbook + results)
+### 2.9 `0xcc/docs/Archive/cluster-strength-validation.md` (NEW, runbook + results)
 - Protocol per FTDD §5; table of predicted vs empirical; fitted constants; date + SAE id.
 
 ## 3. Pitfalls
