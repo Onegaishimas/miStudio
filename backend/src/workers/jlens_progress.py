@@ -118,71 +118,40 @@ def update_row(
 def request_cancel(task_id: str, reason: str = "cancelled by operator") -> bool:
     """Ask a running J-space task to stop at its next checkpoint.
 
-    COOPERATIVE BY NECESSITY, not by preference. The GPU worker runs
-    `--pool=solo` because CUDA and fork do not mix (celery_app.py), and Celery's
-    `revoke(terminate=True)` only signals a POOL CHILD — solo has none. Worse,
-    a solo worker executing a task is not reading the control queue at all, so
-    the revoke is never even delivered: it returns cleanly and does nothing, and
-    the worker does not appear in `inspect()`. Verified on hardware 2026-09-05
-    against a running gemma-4-12B fit.
-
-    So the row IS the channel. The task polls it and stops itself.
+    A SHIM over `core.cancellation.request_cancel`. The solo-pool reasoning that
+    used to be spelled out here now lives once in that module's docstring; this
+    keeps the name and the bool return that eleven call sites and two endpoints
+    already use.
     """
-    from ..core.database import get_sync_db
-    from ..models.task_queue import TaskQueue
+    from ..core.cancellation import request_cancel as _request_cancel
 
-    try:
-        with get_sync_db() as db:
-            row = db.query(TaskQueue).filter(TaskQueue.task_id == task_id).first()
-            if row is None:
-                return False
-            if row.status in TERMINAL_STATUSES:
-                return False
-            row.status = "cancelled"
-            row.error_message = reason[:2000]
-            if row.completed_at is None:
-                row.completed_at = datetime.now(timezone.utc)
-            db.commit()
-            return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not request cancel for %s: %s", task_id, exc)
-        return False
+    return _request_cancel("jlens_task", task_id, reason=reason).requested
 
 
 def cancel_checker(task_id: str, every: int = 1):
     """A callable the work loop polls; True once cancellation is requested.
 
-    Throttled like `circuit_capture_tasks._cancel_checker`, and INCLUDING the
-    first call — polling every Nth from zero would skip the opening checks, so a
-    task cancelled immediately would run to its Nth checkpoint before noticing.
+    A SHIM over `core.cancellation.cancel_checker`. `every` is retained for the
+    existing call sites and is now ignored in favour of the time throttle —
+    a count is a guess about one loop's unit cost and travels to no other.
     """
-    state = {"count": 0}
+    from ..core.cancellation import cancel_checker as _cancel_checker
 
-    def check() -> bool:
-        should_poll = state["count"] % max(every, 1) == 0
-        state["count"] += 1
-        if not should_poll:
-            return False
-        from ..core.database import get_sync_db
-        from ..models.task_queue import TaskQueue
-
-        try:
-            with get_sync_db() as db:
-                row = (
-                    db.query(TaskQueue)
-                    .filter(TaskQueue.task_id == task_id)
-                    .first()
-                )
-                return row is not None and row.status == "cancelled"
-        except Exception as exc:  # noqa: BLE001 - a failed poll must not kill the work
-            logger.warning("Cancel poll failed for %s: %s", task_id, exc)
-            return False
-
-    return check
+    return _cancel_checker("jlens_task", task_id)
 
 
-class TaskCancelled(Exception):
-    """Raised inside a J-space task when its row has been set to cancelled."""
+#: PERMANENT ALIAS. `TaskCancelled` is caught by name in the J-space tasks and
+#: asserted by name in their tests. Pointing it at `OperatorCancelled` keeps
+#: both working AND upgrades it to a BaseException, so the bare
+#: `except Exception` handlers on those paths can no longer turn an operator's
+#: stop into a crash report.
+def _task_cancelled_alias():
+    from ..core.cancellation import OperatorCancelled
+
+    return OperatorCancelled
+
+
+TaskCancelled = _task_cancelled_alias()
 
 
 def mark_running(task_id: str, progress: float = 1.0, attempts: int = 10) -> bool:

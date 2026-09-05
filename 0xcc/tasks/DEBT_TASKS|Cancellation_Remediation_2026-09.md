@@ -21,7 +21,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 2 — `extract_activations`, the GPU proof | ✅ code; hardware acceptance pending | this record |
 | 3 — the remaining compute tasks | ✅ except dataset tokenize | `fea78286` + this record |
 | 4 — the downloads + tokenization | ✅ | this record |
-| 5 — shim the five healthy conventions | ▢ | |
+| 5 — shim the five healthy conventions | ✅ | this record |
 | 6 — the missing routes | ▢ | |
 | 7 — cleanup | ▢ | |
 | R1 / R2 / R3 review rounds | ▢ | |
@@ -610,3 +610,78 @@ endpoint will no longer remove it because the row says the job had started.
 This is a deliberate trade — deleting a directory that is being written is worse
 than briefly leaking one — but it is a real gap and belongs to a janitor, not to
 the cancel path.
+
+
+---
+
+## Phase 5 — one implementation
+
+Fifteen registered scopes; the five healthy conventions now delegate.
+
+| convention | shim |
+|---|---|
+| `jlens_progress.cancel_checker` / `request_cancel` | delegate to core |
+| `jlens_progress.TaskCancelled` | **alias** of `OperatorCancelled` |
+| `circuit_capture_tasks._cancel_checker` | keeps its signature; a `_SCOPE_FOR` map resolves (model, column) to a registered scope |
+| `LabelingService._raise_if_cancelled` / `_LabelingCancelled` | delegate; alias kept |
+
+The aliases are aliases, not subclasses, so every existing `except`-by-name and
+`pytest.raises` keeps working — and both silently gain `BaseException`, which
+generalises the MIS-E2E-058 fix to the last two paths whose outer
+`except Exception` could still turn an operator's stop into a crash report.
+
+`_cancel_checker` also loses its `% 5` count throttle. Five is a number chosen
+against one loop's unit cost and true of no other: over attribution batches on a
+large model it is up to twenty minutes of latency.
+
+### Two things a "low risk" refactor got wrong
+
+**I introduced a throttle that broke a tested contract.** Caching a
+`CancelCheck` per labeling job so the 2-second budget would bite meant a fast
+batch loop ran its whole length inside one window and never re-polled;
+`test_a_batch_loop_stops_once_the_job_is_cancelled` went red. The old code
+polled every batch, and a per-batch caller is already at the right granularity.
+A fresh checker per call always polls, because the first call always does.
+
+**An existing test was pinning the defect.** `test_missing_row_does_not_raise`
+asserted a vanished row must NOT stop the job — but `delete_labeling_job`
+revokes (inert) and then DELETES THE ROW, so deletion *is* how that path stops a
+job, and returning quietly meant labelling every remaining feature against a row
+that no longer existed. The premise was checked before inverting it: the
+endpoint commits the row before `.delay()`, so a missing row can only mean
+deleted, never not-yet-created.
+
+### The fifth source-scrape guard of the arc
+
+`test_the_cancel_check_bypasses_the_identity_map` asserted `.populate_existing()`
+appeared in the *text* of `_raise_if_cancelled`. The shim moved the call one
+level down with behaviour unchanged, and the test failed. Now driven against a
+fake that models the identity map.
+
+That is five in this arc, all the same defect shape — **an assertion about
+source text or a sentinel return value, standing in for an assertion about
+behaviour**:
+
+| guard | failure |
+|---|---|
+| the progress warning string | text moved to core; hid a real observability loss |
+| `terminate=True` absent | matched the comment explaining why it is wrong |
+| `raise_if_cancelled` ordering | matched the comment explaining the ordering |
+| `rfind(...) < complete` | `-1` satisfies `<`, so it passed when absent |
+| `.populate_existing()` in one method | failed against unchanged behaviour |
+
+### Mutation controls — 9 run, 9 verified biting
+
+Two needed a second attempt for reasons worth recording. **P5-C2 was inert**:
+removing `min_interval_s=0.0` changed nothing, because a fresh checker always
+polls on its first call — so that argument was untestable redundancy and was
+deleted rather than pinned (the same call the C3 and C8 survivors got).
+**P5-C3 was a syntax error** — a duplicate keyword argument, which kills the
+whole suite and proves nothing about behaviour; rewritten to flip the existing
+value.
+
+### Pre-existing, recorded not fixed
+
+`circuit_capture_tasks` and `circuit_validation_tasks` import each other;
+importing the former first raises ImportError. Reproduces on a clean tree —
+Celery's autodiscovery happens to use the working order.

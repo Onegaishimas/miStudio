@@ -229,6 +229,16 @@ def _circuit():
     return Circuit
 
 
+def _capture_run():
+    from ..models.circuit_runs import CircuitCaptureRun
+    return CircuitCaptureRun
+
+
+def _discovery_run():
+    from ..models.circuit_runs import CircuitDiscoveryRun
+    return CircuitDiscoveryRun
+
+
 def _dataset():
     from ..models.dataset import Dataset
     return Dataset
@@ -367,6 +377,45 @@ register(CancelScope(
     cancelled_values=frozenset({"cancelled"}),
     terminal_values=frozenset({"ready", "error", "cancelled"}),
     started_at_field=None,
+))
+
+#: THE CIRCUITS ARC's THREE LIFECYCLES. All healthy already — this is the
+#: Phase-5 shim, so the behaviour is unchanged and only the implementation is
+#: shared. Their statuses are plain String(16) columns, and each stage has its
+#: OWN column on the discovery run so a failed pass never corrupts a completed
+#: earlier one.
+register(CancelScope(
+    kind="circuit_capture",
+    model=_capture_run,
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="circuit_discovery",
+    model=_discovery_run,
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="circuit_attribution",
+    model=_discovery_run,
+    status_field="attribution_status",
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="circuit_validation",
+    model=_discovery_run,
+    status_field="validation_status",
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
 ))
 
 register(CancelScope(

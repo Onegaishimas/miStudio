@@ -57,14 +57,61 @@ def test_a_realistic_capture_size_exceeds_the_32_bit_ceiling():
 
 def test_the_cancel_check_bypasses_the_identity_map():
     """`expire_on_commit=False` means a plain re-query returns the object
-    already in the session — never the cancel another connection wrote."""
+    already in the session — never the cancel another connection wrote.
+
+    DRIVEN, NOT SCRAPED. This asserted that `.populate_existing()` appeared in
+    the text of `_raise_if_cancelled` until 2026-09-05, when that method became
+    a shim over `core.cancellation` and the call moved one level down. A source
+    scrape cannot distinguish "moved" from "deleted" — it failed against code
+    whose behaviour was unchanged, and would equally have passed against a
+    version that kept the string in a comment. The fake below models the
+    identity map, so the assertion is now about what the check can SEE.
+    """
+    from types import SimpleNamespace
+
+    from src.models.labeling_job import LabelingStatus
     from src.services.labeling_service import LabelingService
 
-    src = inspect.getsource(LabelingService._raise_if_cancelled)
-    assert ".populate_existing()" in src, (
-        "the cancel check re-queries without populate_existing, so it reads the "
-        "identity-mapped row and can never see a status written elsewhere"
+    class _Query:
+        def __init__(self, session):
+            self._session = session
+            self._populate = False
+
+        def populate_existing(self):
+            self._populate = True
+            return self
+
+        def filter(self, *a, **k):
+            return self
+
+        def first(self):
+            # Without populate_existing the session hands back the row as it
+            # was first loaded — which is the whole defect.
+            if self._populate:
+                self._session.cached = self._session.db_row
+            return self._session.cached
+
+    class _Session:
+        def __init__(self, row):
+            self.cached = row
+            self.db_row = row
+
+        def query(self, _model):
+            return _Query(self)
+
+    live = SimpleNamespace(id="job_1", status=LabelingStatus.LABELING.value)
+    session = _Session(live)
+
+    svc = LabelingService.__new__(LabelingService)
+    svc.db = session
+
+    # Another connection cancels the job. The identity map still holds `live`.
+    session.db_row = SimpleNamespace(
+        id="job_1", status=LabelingStatus.CANCELLED.value
     )
+
+    with pytest.raises(LabelingService._LabelingCancelled):
+        svc._raise_if_cancelled("job_1")
 
 
 def test_the_sibling_cancel_checks_open_a_fresh_session():
