@@ -473,7 +473,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             body["revision"] = revision
         if access_token:
             body["access_token"] = access_token
-        return await client.post("/jlens/acquire/preview", json=body)
+        return await client.post("/jlens/acquire/preview", json_body=body)
 
     @mcp.tool()
     async def publish_jlens_artifact(
@@ -508,7 +508,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
         }
         if access_token:
             body["access_token"] = access_token
-        return await client.post("/jlens/publish", json=body)
+        return await client.post("/jlens/publish", json_body=body)
 
     @mcp.tool()
     async def acquire_jlens_artifact(
@@ -555,7 +555,7 @@ def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> Non
             body["revision"] = revision
         if access_token:
             body["access_token"] = access_token
-        return await client.post("/jlens/acquire", json=body)
+        return await client.post("/jlens/acquire", json_body=body)
 
     @mcp.tool()
     async def fit_jlens_artifact(
