@@ -1307,6 +1307,11 @@ _CALLER_ASSERTION_EXEMPT: dict[str, str] = {
     "get_labeling_trial": "payload-asserted in test_labeling_trials_reachable_mcp.py",
     "list_labeling_trials": "payload-asserted in test_labeling_trials_reachable_mcp.py",
     "compare_labeling_trials": "payload-asserted in test_labeling_trials_reachable_mcp.py",
+    # Payload-asserted in test_jlens_reachable_mcp.py (path AND no-body, both
+    # load-bearing: the task id is a path segment, so a fixed path would cancel
+    # nothing while looking right). Exempt here only because this harness builds
+    # a server with the jlens category disabled.
+    "cancel_jlens_task": "payload-asserted in test_jlens_reachable_mcp.py",
     "acquire_jlens_artifact": "no payload fixture yet — MIS-E2E-119 backlog",
     "annotate_jlens_feature": "no payload fixture yet — MIS-E2E-119 backlog",
     "build_circuit_from_discovery": "no payload fixture yet — MIS-E2E-119 backlog",

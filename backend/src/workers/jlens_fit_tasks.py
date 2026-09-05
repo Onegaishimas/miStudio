@@ -198,7 +198,17 @@ def _fit_and_publish(
 
     total_prompts = max(len(prompts), 1)
 
+    # The cancellation channel. `on_progress` fires once per prompt, which is
+    # the natural checkpoint: seconds on a small model, minutes on a large one,
+    # and in both cases far cheaper than the alternative of not being able to
+    # stop at all.
+    _cancelled = jlens_progress.cancel_checker(self.request.id)
+
     def on_progress(progress):
+        if _cancelled():
+            raise jlens_progress.TaskCancelled(
+                f"cancelled after {progress.prompts_seen} of {total_prompts} prompts"
+            )
         # The SAME numbers the heartbeat carries, written where Active
         # Operations and the J-Lens panel can see them. Without this a fit is
         # visible only to the browser tab that started it.
@@ -225,7 +235,22 @@ def _fit_and_publish(
             }),
         )
 
-    result = fitter.fit(prompts, layers=layers, on_progress=on_progress)
+    try:
+        result = fitter.fit(prompts, layers=layers, on_progress=on_progress)
+    except jlens_progress.TaskCancelled as cancelled:
+        # The row is ALREADY "cancelled" — the endpoint set it, which is how the
+        # task found out. Do not write status here: `update_row` now refuses to
+        # move a terminal row, and re-writing it would only add noise. Record
+        # the stopping point and let the finally-block free the GPU.
+        logger.info("J-lens fit %s stopped: %s", self.request.id, cancelled)
+        jlens_progress.update_row(
+            self.request.id, error_message=str(cancelled)
+        )
+        return {
+            "status": "cancelled",
+            "model_id": model_id,
+            "detail": str(cancelled),
+        }
 
     service = JLensArtifactService(settings.jlens_artifacts_dir)
     config_yaml = _config_yaml(

@@ -22,6 +22,30 @@ from ..config import MCPSettings
 
 def register(mcp: FastMCP, client: MiStudioClient, settings: MCPSettings) -> None:
     @mcp.tool()
+    async def cancel_jlens_task(
+        task_id: Annotated[str, Field(description="Celery task id returned by fit_jlens_artifact or acquire_jlens_artifact (NOT the tq_ row id)")],
+    ) -> Any:
+        """Stop a running or queued J-space task.
+
+        COOPERATIVE, BECAUSE REVOKE DOES NOT WORK HERE. The GPU worker runs
+        `--pool=solo` (CUDA and fork do not mix), and Celery's
+        `revoke(terminate=True)` only signals a pool child — solo has none.
+        A solo worker busy in a task is not reading the control queue either,
+        so the revoke is never delivered: it returns cleanly, changes nothing,
+        and the worker does not appear in `inspect()`. Verified on hardware
+        against a running gemma-4-12B fit, which needed a SIGKILL on the PID.
+
+        So this writes the request to the task's row and the task stops itself
+        at its next checkpoint — ONE PROMPT for a fit, which is seconds on a
+        small model and MINUTES on a large one. `was_running: false` means it
+        had not started and never will, which is immediate.
+
+        Anything already completed/failed/cancelled returns `cancelled: false`
+        with the reason, rather than pretending to act.
+        """
+        return await client.post(f"/jlens/tasks/{task_id}/cancel")
+
+    @mcp.tool()
     async def list_jlens_artifacts() -> Any:
         """List J-lens artifacts present in the mounted registry.
 
