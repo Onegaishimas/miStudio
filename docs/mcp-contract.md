@@ -22,7 +22,7 @@ Categories are gated by `MCP_TOOL_CATEGORIES`. The `millm_*` categories also
 require `MILLM_API_URL` and are never enabled by default.
 
 
-**121 tools across 14 categories.**
+**122 tools across 14 categories.**
 
 
 ## `admin` (2 tools)
@@ -80,12 +80,13 @@ require `MILLM_API_URL` and are never enabled by default.
 | `get_feature_groups` | `GET /extractions/{…}/feature-groups` | List feature groups (features sharing a top activating token with similar context). |
 | `get_grouping_status` | `GET /extractions/{…}/feature-groups/status` | State of the grouping index: none \| pending \| computing \| completed \| failed, with progress, params, and counts. |
 
-## `jlens` (19 tools)
+## `jlens` (20 tools)
 
 | Tool | Endpoint | Summary |
 |---|---|---|
 | `acquire_jlens_artifact` | `POST /jlens/acquire` | Adopt a lens someone else fitted. |
 | `annotate_jlens_feature` | `POST /jlens/annotate` | Describe an SAE feature in J-space: what it pushes TOWARD. |
+| `cancel_jlens_task` | `POST /jlens/tasks/{…}/cancel` | Stop a running or queued J-space task. |
 | `compute_jlens_band_report` | `POST /jlens/band-report` | Measure this model's band profile and derive ITS OWN boundaries. |
 | `create_jlens_watchlist` | `POST /jlens/watchlists` | Author a watchlist for miLLM to evaluate per token at inference. |
 | `fit_jlens_artifact` | `POST /jlens/fit` | Queue a J-lens fit. |

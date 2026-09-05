@@ -46,6 +46,13 @@ EXPECTED_TOOLS = {
     # the guard working, not an obstacle to route around.
     "get_jlens_interventions",
     "restore_jlens_artifact",
+    # The only way to stop a fit. Asserted here BEFORE the tool shipped, for the
+    # same reason the note above gives: the harness refusing an unasserted tool
+    # is the guard working. Cancellation is cooperative because the GPU worker
+    # is --pool=solo and Celery's revoke(terminate=True) is silently inert
+    # against it, so an unreachable cancel tool would leave a 34-hour fit with
+    # no stop at all.
+    "cancel_jlens_task",
     "list_jlens_artifacts",
     "validate_jlens_artifact",
     "jlens_readout",
@@ -577,3 +584,34 @@ class TestTheToolSAYSWhatAnAgentCannotOtherwiseKnow:
         assert "DISTINCT" in text
         assert "over_layer_budget" in text
 
+
+class TestCancelIssuesItsCall:
+    """The task id is a PATH SEGMENT, so a tool posting to a fixed path would
+    cancel nothing while looking correct. There is deliberately NO body: the
+    task_queue row is the channel, because the GPU worker is --pool=solo and
+    Celery's revoke(terminate=True) cannot reach a task running inside it."""
+
+    def _tools(self):
+        from mcp.server.fastmcp import FastMCP
+
+        from src.mcp_server.config import MCPSettings
+        from src.mcp_server.tools import jlens
+
+        mcp = FastMCP("test")
+        client = MagicMock()
+        client.get = AsyncMock(return_value={"ok": True})
+        client.post = AsyncMock(return_value={"ok": True})
+        jlens.register(mcp, client, MCPSettings(allow_anonymous=True))
+        return mcp, client, {t.name for t in asyncio.run(mcp.list_tools())}
+
+    def test_cancel_posts_the_task_id_in_the_path_with_no_body(self):
+        mcp, client, names = self._tools()
+        assert "cancel_jlens_task" in names
+
+        asyncio.run(mcp.call_tool("cancel_jlens_task", {"task_id": "1e0e2fd7-abc"}))
+
+        assert client.post.await_count == 1, "the tool made no call, or made several"
+        assert client.post.await_args.args[0] == "/jlens/tasks/1e0e2fd7-abc/cancel"
+        assert client.post.await_args.kwargs == {}, (
+            "cancel takes no body — the row carries the request"
+        )

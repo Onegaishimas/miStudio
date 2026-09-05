@@ -325,6 +325,78 @@ async def restore_superseded(slug: str) -> RestoreResponse:
     return RestoreResponse(**outcome)
 
 
+
+class CancelResponse(BaseModel):
+    task_id: str
+    cancelled: bool
+    was_running: bool
+    detail: str
+
+
+@router.post(
+    "/tasks/{task_id}/cancel",
+    response_model=CancelResponse,
+    summary="Cancel a running or queued J-space task",
+)
+async def cancel_task(task_id: str) -> CancelResponse:
+    """Stop a J-space task. Cooperative, because it has to be.
+
+    THE OBVIOUS IMPLEMENTATION DOES NOT WORK HERE, and every other cancel in
+    this codebase uses it. `celery_app.control.revoke(terminate=True)` only
+    signals a POOL CHILD, and the GPU worker runs `--pool=solo` because CUDA and
+    fork do not mix — there is no child to signal. Worse, a solo worker busy in
+    a task is not reading the control queue, so the revoke is never delivered:
+    it returns cleanly, changes nothing, and the worker does not even appear in
+    `inspect()`. Verified on hardware 2026-09-05 against a running gemma-4-12B
+    fit, which then needed a SIGKILL on the worker PID.
+
+    So this writes "cancelled" to the row and the task notices at its next
+    checkpoint — one prompt for a fit. The revoke below is still issued, for the
+    ONE case it does handle: a task that has not started yet never will.
+    """
+    from ....core.celery_app import celery_app
+    from ....core.database import get_sync_db
+    from ....models.task_queue import TaskQueue
+    from ....workers import jlens_progress
+
+    with get_sync_db() as db:
+        row = db.query(TaskQueue).filter(TaskQueue.task_id == task_id).first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No task_queue row for task {task_id!r}",
+            )
+        prior = row.status
+
+    if prior in ("completed", "failed", "cancelled"):
+        return CancelResponse(
+            task_id=task_id,
+            cancelled=False,
+            was_running=False,
+            detail=f"Task is already {prior}; nothing to cancel.",
+        )
+
+    # Stops a task that has NOT started. Harmless and useless for one that has,
+    # which is exactly why it is not the whole implementation.
+    try:
+        celery_app.control.revoke(task_id)
+    except Exception:  # noqa: BLE001 - the row is the channel that matters
+        logger.warning("revoke() failed for %s; the row still carries the request", task_id)
+
+    ok = jlens_progress.request_cancel(task_id)
+    return CancelResponse(
+        task_id=task_id,
+        cancelled=ok,
+        was_running=(prior == "running"),
+        detail=(
+            "Cancellation requested. A running fit stops at its next prompt "
+            "boundary, which is minutes on a large model."
+            if prior == "running"
+            else "Task had not started; it will not run."
+        ),
+    )
+
+
 class FitRequest(BaseModel):
     """Start a fit. The corpus is named or supplied, never chosen server-side.
 
