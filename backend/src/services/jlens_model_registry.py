@@ -249,7 +249,46 @@ def load_for_readout(model_record: Any, capture_device: str = "cpu") -> LoadedMo
         # RUN — so the right precision is whatever the checkpoint was saved in.
         # The readout's own matvec casts to fp32 separately, which is about
         # ranking stability rather than about making the model work.
+        # ...AND HONOUR THE QUANTIZATION THE MODEL ROW ASKS FOR.
+        #
+        # This loaded at native dtype unconditionally, so a row configured Q8
+        # was silently ignored for every fit and readout. On gemma-4-12B that
+        # is not a fidelity question, it is a hard stop: ~12.3B bf16 parameters
+        # are ~24.6 GB against a 23.56 GB card, and the fit OOM'd during a
+        # forward pass with the model already resident. Observed 2026-09-05.
+        #
+        # THIS IS NOT THE BUG THE COMMENT ABOVE GUARDS AGAINST. That one was
+        # FORCING fp16 onto a bf16 checkpoint, which leaves the model
+        # internally mixed. bitsandbytes is a different mechanism: it replaces
+        # the linear layers with quantized ones and leaves everything else in
+        # the checkpoint's own dtype, which `dtype="auto"` still selects. The
+        # two are compatible, and only the forcing was ever the problem.
+        #
+        # FP16/FP32 rows still get `None` here, so the native-dtype path is
+        # unchanged for every model that does not ask to be quantized.
         from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        from ..ml.model_loader import get_quantization_config
+
+        quant_name = getattr(model_record, "quantization", None)
+        quant_config = None
+        if quant_name:
+            try:
+                quant_config = get_quantization_config(
+                    QuantizationFormat(
+                        getattr(quant_name, "value", quant_name)
+                    )
+                )
+            except ValueError:
+                logger.warning(
+                    "Unrecognised quantization %r on %s; loading at native dtype",
+                    quant_name, repo_id,
+                )
+        if quant_config is not None:
+            logger.info(
+                "Loading %s with %s quantization (the model row asks for it)",
+                repo_id, getattr(quant_name, "value", quant_name),
+            )
 
         try:
             model = AutoModelForCausalLM.from_pretrained(
@@ -258,6 +297,7 @@ def load_for_readout(model_record: Any, capture_device: str = "cpu") -> LoadedMo
                 local_files_only=True,
                 dtype="auto",
                 device_map=capture_device,
+                quantization_config=quant_config,
             )
             tokenizer = AutoTokenizer.from_pretrained(
                 repo_id, cache_dir=resolved, local_files_only=True
