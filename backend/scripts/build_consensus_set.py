@@ -54,6 +54,12 @@ OUT = os.environ.get("CONSENSUS_OUT", "/data/consensus_set.json")
 # and moves only the context, which is the only way to attribute the collapse
 # in refusal rate (42% -> 3.5%) to one of them.
 CONTEXT_TOKENS = int(os.environ.get("CONTEXT_TOKENS", "0"))
+# Sampling overrides. Default to the TEMPLATE's values so a judge swap is the
+# only variable versus an earlier run; granite-4.2-8b's card mandates
+# temperature=1.0 / top_p=0.95 "across all tasks", which is worth measuring as
+# a separate arm rather than silently mixing into the comparison.
+TEMPERATURE = os.environ.get("TEMPERATURE")
+TOP_P = os.environ.get("TOP_P")
 REFUSAL = {"uninterpretable", "noise", "none", "unknown", ""}
 
 
@@ -128,10 +134,16 @@ def main():
     print(f"context    : {'%d+%d tokens (TRUNCATED)' % (CONTEXT_TOKENS, CONTEXT_TOKENS) if CONTEXT_TOKENS else 'as captured'}")
     print(f"output     : {OUT}\n", flush=True)
 
+    _temp = float(TEMPERATURE) if TEMPERATURE else temperature
+    _topp = float(TOP_P) if TOP_P else top_p
+    print(f"sampling   : temperature={_temp} top_p={_topp}"
+          f"{'  (OVERRIDDEN)' if (TEMPERATURE or TOP_P) else '  (from template)'}",
+          flush=True)
     svc = OpenAILabelingService(
         api_key="unused", base_url=ENDPOINT, model=MODEL,
-        temperature=temperature, max_tokens=max_tokens or 300, top_p=top_p,
+        temperature=_temp, max_tokens=max_tokens or 300, top_p=_topp,
     )
+    print(f"chat_template_kwargs: {svc.chat_template_kwargs}", flush=True)
 
     verdicts = defaultdict(list)
     labels = defaultdict(list)
