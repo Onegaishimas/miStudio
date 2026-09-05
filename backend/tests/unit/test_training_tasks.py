@@ -27,6 +27,9 @@ class TestTrainingTaskHelpers:
         mock_training = Mock()
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_training
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = mock_training
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db
@@ -57,6 +60,9 @@ class TestTrainingTaskHelpers:
 
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = None
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db
@@ -79,6 +85,9 @@ class TestTrainingTaskHelpers:
         mock_training = Mock()
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_training
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = mock_training
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db
@@ -104,6 +113,9 @@ class TestTrainingTaskHelpers:
         mock_training = Mock()
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_training
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = mock_training
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db
@@ -126,6 +138,9 @@ class TestTrainingTaskHelpers:
         mock_training = Mock()
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_training
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = mock_training
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db
@@ -149,6 +164,9 @@ class TestTrainingTaskHelpers:
         mock_training = Mock()
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_training
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = mock_training
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db
@@ -196,6 +214,9 @@ class TestTrainingTaskHelpers:
         mock_training = Mock()
         mock_db = Mock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = mock_training
+        # `update_training_progress` goes through record_progress, which uses
+        # .filter(...).populate_existing() — a different chain on the same fake.
+        mock_db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = mock_training
 
         with patch.object(task, 'get_db') as mock_get_db:
             mock_get_db.return_value.__enter__.return_value = mock_db

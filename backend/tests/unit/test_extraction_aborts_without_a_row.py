@@ -27,11 +27,20 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 
 
 def _task_source() -> str:
+    """`inspect.unwrap`, NOT a single `__wrapped__` hop.
+
+    A one-hop unwrap reaches celery's bound method, which was the task body
+    until `@cooperative_cancel` was added beneath the celery decorator. After
+    that, one hop lands on the CANCELLATION WRAPPER and every assertion below
+    would have been read against `core/cancellation.py` instead — passing or
+    failing for reasons having nothing to do with this task. A guard that reads
+    the wrong function is a guard that fails open. `unwrap` follows the whole
+    chain to the original.
+    """
     from src.workers.model_tasks import extract_activations
 
-    return inspect.getsource(extract_activations.__wrapped__
-                             if hasattr(extract_activations, "__wrapped__")
-                             else extract_activations)
+    fn = inspect.unwrap(extract_activations)
+    return inspect.getsource(fn)
 
 
 class TestTheGuardExistsAndRunsFirst:
@@ -109,9 +118,34 @@ class TestTheProgressWriterStillReportsHonestly:
     mid-run — but it must not be the ONLY thing standing between a phantom
     job and three hours of GPU time."""
 
-    def test_the_warning_still_exists(self):
-        text = (SRC / "services" / "extraction_db_service.py").read_text()
-        assert "not found for progress update" in text
+    def test_the_warning_still_fires(self, caplog):
+        """DRIVEN, NOT SCRAPED. This asserted the phrase was present in
+        `extraction_db_service.py` until 2026-09-05, when the writer was routed
+        through `core.cancellation.record_progress` and the phrase moved. A
+        source scrape cannot tell "moved" from "deleted", and this repo's record
+        is that such a guard fails OPEN — so it now calls the writer against a
+        missing row and requires the warning to actually reach the log."""
+        import logging
+        from unittest.mock import MagicMock
+
+        from src.models.activation_extraction import ExtractionStatus
+        from src.services.extraction_db_service import ExtractionDatabaseService
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = None
+
+        with caplog.at_level(logging.WARNING):
+            result = ExtractionDatabaseService.update_progress(
+                db=db,
+                extraction_id="ext_gone",
+                progress=42.0,
+                status=ExtractionStatus.EXTRACTING,
+                samples_processed=10,
+            )
+
+        assert result is None
+        assert "not found for progress update" in caplog.text
+        assert "ext_gone" in caplog.text
 
     def test_but_it_is_no_longer_the_only_defence(self):
         assert "PermanentExtractionError" in _task_source(), (

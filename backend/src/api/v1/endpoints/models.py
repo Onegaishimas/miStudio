@@ -32,6 +32,7 @@ from ....schemas.model import (
 )
 from ....services.model_service import ModelService
 from ....services.extraction_db_service import ExtractionDatabaseService
+from ....core.cancellation import request_cancel
 from ....core.database import get_sync_db
 from ....workers.model_tasks import download_and_load_model, extract_activations, delete_model_files
 from ....core.celery_app import celery_app
@@ -1015,28 +1016,35 @@ async def cancel_extraction(
                 detail=f"Extraction '{extraction_id}' cannot be cancelled (status: {extraction.status.value})"
             )
 
-        # Revoke Celery task if task_id is available
-        if extraction.celery_task_id:
-            try:
-                celery_app.control.revoke(
-                    extraction.celery_task_id,
-                    terminate=True,
-                    signal='SIGTERM'
-                )
-                logger.info(f"Revoked Celery task {extraction.celery_task_id} for extraction {extraction_id}")
-            except Exception as e:
-                logger.exception("Failed to revoke Celery task")
-                # Continue anyway - will update database status
-
-        # Update database to CANCELLED
-        extraction.status = ExtractionStatus.CANCELLED
-        extraction.error_message = "Extraction cancelled by user"
-        sync_db.commit()
+        # ASK THE TASK TO STOP; DO NOT PRETEND TO STOP IT.
+        #
+        # This endpoint used to `revoke(terminate=True, signal='SIGTERM')` and
+        # then report success. The extraction worker is `--pool=solo -c 1`
+        # (CUDA and fork do not mix), and `terminate` signals a POOL CHILD —
+        # solo has none. A solo worker executing a task is not reading the
+        # control queue either, so the revoke was never even delivered. It
+        # returned cleanly, the row said CANCELLED, a "cancelled" WebSocket
+        # event went out, and the GPU kept running for hours. That was the
+        # worst lie in the system.
+        #
+        # `request_cancel` writes the flag the task polls, and issues a plain
+        # `revoke()` (no terminate) centrally for the one case it genuinely
+        # handles: a task that has not started never will.
+        outcome = request_cancel(
+            "activation_extraction",
+            extraction_id,
+            reason="Extraction cancelled by user",
+            celery_task_id=extraction.celery_task_id,
+            db=sync_db,
+        )
 
         # Capture progress before the session closes (avoid detached-instance access)
         extraction_progress = extraction.progress
 
-        logger.info(f"Cancelled extraction {extraction_id} for model {model_id}")
+        logger.info(
+            "Cancellation requested for extraction %s (model %s): %s",
+            extraction_id, model_id, outcome.detail,
+        )
 
     # Emit WebSocket event
     try:
@@ -1046,16 +1054,18 @@ async def cancel_extraction(
             extraction_id=extraction_id,
             progress=extraction_progress,
             status="cancelled",
-            message="Extraction cancelled by user"
+            # The row IS cancelled — that part was always true. What was false
+            # was the implication that the GPU had stopped. Say which.
+            message=outcome.detail,
         )
     except Exception as e:
         logger.exception("Failed to emit cancellation event")
-        # Don't fail the request - cancellation was successful
+        # Don't fail the request - the request itself was recorded
 
     return ExtractionCancelResponse(
         extraction_id=extraction_id,
         status="cancelled",
-        message="Extraction cancelled successfully"
+        message=outcome.detail,
     )
 
 

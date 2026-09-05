@@ -547,6 +547,10 @@ class TestTheRowCarriesItsOwnClock:
         row.status = "queued"
 
         db = MagicMock()
+        # `update_row` is a shim over `record_progress`, which re-reads with
+        # populate_existing() to defeat the identity map. The fake must model
+        # that chain or the writer operates on a MagicMock, not on `row`.
+        db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = row
         db.query.return_value.filter.return_value.first.return_value = row
 
         @contextmanager

@@ -33,6 +33,10 @@ class _Row:
 
 def _db_with(row):
     db = MagicMock()
+    # `record_progress` re-reads with populate_existing() to defeat the
+    # identity map, so the fake must model that chain or the guard sees a
+    # MagicMock instead of the row and waves every write through.
+    db.query.return_value.filter.return_value.populate_existing.return_value.first.return_value = row
     db.query.return_value.filter.return_value.first.return_value = row
     ctx = MagicMock()
     ctx.__enter__.return_value = db

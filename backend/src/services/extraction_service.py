@@ -30,6 +30,7 @@ from src.models.checkpoint import Checkpoint
 from src.models.dataset import Dataset
 from src.models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from src.models.external_sae import ExternalSAE, SAEStatus
+from src.core.cancellation import guard_allows
 from src.core.database import get_db
 from src.workers.websocket_emitter import emit_training_progress, emit_extraction_job_progress, emit_extraction_deleted
 from src.core.config import settings
@@ -906,12 +907,33 @@ class ExtractionService:
                 partial dict if the job then failed.
         """
         result = await self.db.execute(
-            select(ExtractionJob).where(ExtractionJob.id == extraction_id)
+            select(ExtractionJob)
+            .where(ExtractionJob.id == extraction_id)
+            # DEFEAT THE IDENTITY MAP. Without this the session hands back the
+            # row as it looked when this service first loaded it, so the guard
+            # below reads a stale non-terminal status and never bites — the
+            # exact shape of MIS-E2E-057.
+            .execution_options(populate_existing=True)
         )
         extraction_job = result.scalar_one_or_none()
 
         if not extraction_job:
             logger.error(f"Extraction job {extraction_id} not found")
+            return
+
+        # THE TERMINAL GUARD. `guard_allows` rather than `record_progress`
+        # because this method is async and holds an AsyncSession; the rule is
+        # shared even though the session mechanics cannot be.
+        if not guard_allows(
+            "sae_extraction",
+            extraction_job.status,
+            status,
+            writes_progress=progress is not None or statistics is not None,
+        ):
+            logger.info(
+                "Ignoring %s update for extraction %s — row is already %s",
+                status, extraction_id, extraction_job.status,
+            )
             return
 
         extraction_job.status = status
@@ -959,10 +981,33 @@ class ExtractionService:
         """
         extraction_job = self.db.query(ExtractionJob).filter(
             ExtractionJob.id == extraction_id
-        ).first()
+        ).populate_existing().first()
 
         if not extraction_job:
             logger.error(f"Extraction job {extraction_id} not found")
+            return
+
+        # THE TERMINAL GUARD — this is the writer that used to lose the cancel.
+        # `saes.py`'s cancel endpoint writes a terminal status and this method
+        # then fires again from the still-running task; without the guard the
+        # row goes back to EXTRACTING and the operator is told nothing happened.
+        # Refusing here also suppresses the WebSocket emission below, which
+        # would otherwise announce progress on a job the UI has marked stopped.
+        if not guard_allows(
+            "sae_extraction",
+            extraction_job.status,
+            status,
+            writes_progress=(
+                progress is not None
+                or features_extracted is not None
+                or total_features is not None
+                or statistics is not None
+            ),
+        ):
+            logger.info(
+                "Ignoring %s update for extraction %s — row is already %s",
+                status, extraction_id, extraction_job.status,
+            )
             return
 
         extraction_job.status = status

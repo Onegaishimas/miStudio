@@ -95,55 +95,23 @@ def update_row(
     reads as a job that never started rather than one that failed instantly. A
     caller that can retry needs to know the difference; one that cannot is
     unaffected, since the value is simply ignored.
-    """
-    from ..core.database import get_sync_db
-    from ..models.task_queue import TaskQueue
 
-    try:
-        with get_sync_db() as db:
-            row = db.query(TaskQueue).filter(TaskQueue.task_id == task_id).first()
-            if row is None:
-                return False
-            # A TERMINAL ROW NEVER GOES BACK TO RUNNING. Cancellation is
-            # cooperative here — the endpoint writes "cancelled" and the task
-            # notices at its next checkpoint — so between those two moments the
-            # task is still reporting progress. Without this guard its next
-            # `update_row(status="running")` overwrites the cancellation and the
-            # request is silently lost, which is worse than having no cancel at
-            # all: the operator is told it worked.
-            #
-            # Also covers the janitor: `cleanup_orphaned_tasks` marks an
-            # abandoned row "failed", and a straggling heartbeat from a worker
-            # on its way out would otherwise revive it.
-            if row.status in TERMINAL_STATUSES and status not in (None,) + TERMINAL_STATUSES:
-                logger.info(
-                    "Ignoring %s update for %s: row is already %s",
-                    status, task_id, row.status,
-                )
-                return False
-            if status is not None:
-                # STAMP THE CLOCK ON THE TRANSITIONS. Both columns existed and
-                # neither was ever written for J-space work, so every J-lens row
-                # carried started_at=None and completed_at=None. Any elapsed
-                # time a reader derived had to come from `created_at`, which is
-                # QUEUE time: an LFM2 fit that waited three hours behind gemma
-                # would have reported a four-hour fit after one hour of work.
-                if status == "running" and row.started_at is None:
-                    row.started_at = datetime.now(timezone.utc)
-                if status in TERMINAL_STATUSES and row.completed_at is None:
-                    row.completed_at = datetime.now(timezone.utc)
-                row.status = status
-            if progress is not None:
-                # Clamped: a progress bar past 100% reads as a bug in the bar
-                # rather than in whatever produced the number.
-                row.progress = max(0.0, min(100.0, float(progress)))
-            if error_message is not None:
-                row.error_message = error_message[:2000]
-            db.commit()
-            return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not update task_queue row for %s: %s", task_id, exc)
-    return False
+    NOW A SHIM OVER `core.cancellation.record_progress`. The terminal guard, the
+    started_at/completed_at stamping and the clamp were all written here first
+    and then independently rediscovered in `training_tasks`; the core module is
+    where that rule now lives, and the `jlens_task` scope is the description of
+    this table. Keeping the function is deliberate — it is the name eleven call
+    sites use, and it carries the "located by celery id" contract above.
+    """
+    from ..core.cancellation import record_progress
+
+    return record_progress(
+        "jlens_task",
+        task_id,
+        status=status,
+        progress=progress,
+        error_message=error_message,
+    )
 
 
 
