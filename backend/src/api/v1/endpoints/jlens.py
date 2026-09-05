@@ -12,6 +12,7 @@ as logit data under a Jacobian label — that would breach rung discipline
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -325,15 +326,39 @@ async def restore_superseded(slug: str) -> RestoreResponse:
 
 
 class FitRequest(BaseModel):
-    """Start a fit. Prompts are supplied rather than sampled server-side.
+    """Start a fit. The corpus is named or supplied, never chosen server-side.
 
     The corpus is part of the recipe (BR-007), so it is the caller's choice and
-    is recorded in `config.yaml`. A server-chosen default corpus would produce
-    artifacts whose provenance says nothing.
+    is recorded in `config.yaml`. A server-chosen DEFAULT corpus would produce
+    artifacts whose provenance says nothing — which is why there is no default
+    here and exactly one of `prompts` or `dataset_id` is required.
+
+    NAMING A DATASET IS BETTER PROVENANCE THAN INLINING ITS TEXT, not worse.
+    `dataset_id + n_prompts + max_chars + sample_seed` re-derives the exact
+    corpus; 1200 opaque strings in a request body cannot be re-derived from the
+    artifact at all. It is also the only way to reach a reference-sized corpus
+    over MCP or HTTP: 1200 documents at the reference's 2000-char cap is 2.2 MB
+    and the body cap is 1024 KB, so the inline path 413s on the recipe it is
+    meant to reproduce.
     """
 
     model_id: str
-    prompts: List[str]
+    #: Supply the corpus inline, OR name a registered dataset below. Exactly one.
+    prompts: Optional[List[str]] = None
+    #: A registered miStudio dataset to sample the fitting corpus from.
+    dataset_id: Optional[str] = None
+    #: How many documents to sample when `dataset_id` is used.
+    n_prompts: int = Field(1200, ge=100, le=20000)
+    #: Truncate each document to this many characters. The reference recipe
+    #: passes max_chars 2000 with max_seq_len 128, so the model sees ~128 tokens
+    #: regardless; 550 chars is about that and keeps the sample honest about
+    #: what the model actually read.
+    max_chars: int = Field(550, ge=50, le=8000)
+    #: Documents shorter than this are skipped — a near-empty prompt linearises
+    #: around almost no context and drags the mean J toward the null input.
+    min_chars: int = Field(400, ge=0, le=8000)
+    #: Recorded in the recipe so the sample is reproducible.
+    sample_seed: int = 0
     layers: Optional[List[int]] = None
     #: FULL BACKWARD IS THE STANDARD RECIPE (D4); frozen Q/K is an ABLATION.
     #: Defaulting this to True made the ablation the only thing an API or
@@ -384,11 +409,97 @@ class FitRequest(BaseModel):
     #: zero by causality and a zero lens reads out as confident uniform noise.
     target_layer: Literal["final", "penultimate"] = "penultimate"
 
+    @model_validator(mode="after")
+    def _exactly_one_corpus_source(self):
+        """Neither is a server-chosen corpus; both is an ambiguous recipe."""
+        if bool(self.prompts) == bool(self.dataset_id):
+            raise ValueError(
+                "supply exactly one of `prompts` (inline corpus) or "
+                "`dataset_id` (name a registered dataset). Supplying neither "
+                "would make the server pick a corpus, which BR-007 forbids; "
+                "supplying both leaves the recipe ambiguous about which one "
+                "the artifact was fitted on."
+            )
+        return self
+
 
 class FitAccepted(BaseModel):
     task_id: str
     model_id: str
     queue: str
+
+
+async def _sample_dataset_prompts(db: AsyncSession, request: "FitRequest"):
+    """Draw a reproducible fitting corpus from a registered dataset.
+
+    Returns (prompts, corpus_name). The name records everything needed to
+    re-derive the sample, which inline prompts cannot express.
+
+    Sampling is a DETERMINISTIC STRIDE from a seeded offset, not `random`:
+    the artifact records the seed, so the same request must reproduce the same
+    corpus on any machine and after any library upgrade.
+    """
+    from datasets import load_from_disk
+
+    from ....models.dataset import Dataset
+
+    row = await db.execute(select(Dataset).where(Dataset.id == request.dataset_id))
+    dataset = row.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No dataset with id {request.dataset_id!r}",
+        )
+    if not dataset.raw_path or not os.path.isdir(dataset.raw_path):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Dataset {dataset.name!r} has no readable raw_path "
+                f"({dataset.raw_path!r}); it cannot be sampled for a fit."
+            ),
+        )
+
+    try:
+        ds = load_from_disk(dataset.raw_path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Could not open dataset {dataset.name!r}: {exc}",
+        ) from exc
+    if hasattr(ds, "keys"):
+        ds = ds[list(ds.keys())[0]]
+    field = "text" if "text" in ds.column_names else ds.column_names[0]
+
+    total = len(ds)
+    stride = max(1, total // max(request.n_prompts, 1))
+    prompts: List[str] = []
+    idx = request.sample_seed % max(stride, 1)
+    while idx < total and len(prompts) < request.n_prompts:
+        text_value = (ds[idx].get(field) or "").strip()
+        if len(text_value) >= request.min_chars:
+            prompts.append(text_value[: request.max_chars])
+        idx += stride
+
+    # REFUSE A SHORT SAMPLE rather than fit on it. The fitter's own floor is
+    # 100, but a caller who asked for 1200 and would silently get 300 has been
+    # given a different experiment under the same name.
+    if len(prompts) < request.n_prompts:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Asked for {request.n_prompts} prompts of at least "
+                f"{request.min_chars} characters but {dataset.name!r} yielded "
+                f"only {len(prompts)} at stride {stride} over {total} rows. "
+                f"Lower n_prompts or min_chars rather than fitting on a "
+                f"smaller corpus than the recipe claims."
+            ),
+        )
+
+    name = (
+        f"{dataset.name}-{len(prompts)}docs"
+        f"-{request.max_chars}chars-seed{request.sample_seed}"
+    )
+    return prompts, name
 
 
 @router.post(
@@ -414,14 +525,23 @@ async def fit(request: FitRequest, db: AsyncSession = Depends(get_db)) -> FitAcc
             detail=f"No model with id {request.model_id!r}",
         )
 
+    prompts = request.prompts
+    corpus_name = request.corpus_name
+    if request.dataset_id:
+        prompts, resolved_name = await _sample_dataset_prompts(db, request)
+        # Only fill a corpus name the caller did not give. Overwriting theirs
+        # would put a name in the recipe they never chose.
+        if corpus_name in (None, "", "unspecified"):
+            corpus_name = resolved_name
+
     from ....workers import jlens_progress
 
     task = fit_jlens_artifact.delay(
         model_id=request.model_id,
-        prompts=request.prompts,
+        prompts=prompts,
         layers=request.layers,
         freeze_qk=request.freeze_qk,
-        corpus_name=request.corpus_name,
+        corpus_name=corpus_name,
         semantic_probe=request.semantic_probe,
         allow_coverage_loss=request.allow_coverage_loss,
         allow_quality_regression=request.allow_quality_regression,

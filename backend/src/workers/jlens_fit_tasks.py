@@ -184,6 +184,18 @@ def _fit_and_publish(
     # reaped mid-flight.
     self.update_state(state="PROGRESS", meta=beat({"stage": "fitting", "prompts_seen": 0}))
 
+    # SAY IT IS RUNNING BEFORE THE FIRST PROMPT FINISHES. The row is opened as
+    # `queued` and, without this, only flips when `on_progress` first fires —
+    # which is after a whole prompt's Jacobians are accumulated. On a 12B model
+    # that is MINUTES per prompt (measured 2026-09-05: 3.4 min/prompt across 47
+    # layers), so the longest-running job in the product was the one that
+    # displayed "queued · 0%" while the GPU sat at 100%.
+    #
+    # jlens_acquire_tasks already does this in both of its entry points; the
+    # fit task was the one that did not, which is exactly backwards — acquire
+    # finishes in seconds and a fit runs for hours.
+    jlens_progress.mark_running(self.request.id, progress=0.5)
+
     total_prompts = max(len(prompts), 1)
 
     def on_progress(progress):
