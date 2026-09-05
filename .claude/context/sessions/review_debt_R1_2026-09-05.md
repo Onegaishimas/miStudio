@@ -231,6 +231,18 @@ declarations: clean; every field resolves to a real column and every vocabulary
 matches its live enum. Handler ordering: every ordering that exists is correct;
 the defects were *missing* handlers.
 
-### Noted, not fixed
-The repo has **8 alembic heads**, so `alembic upgrade head` refuses — pre-existing,
-but it now gates a load-bearing column (`cancel_requested_at`).
+### Noted, not fixed — RETRACTED 2026-09-05
+The reviewer closed with *"the repo already has 8 alembic heads, so
+`alembic upgrade head` will refuse."* **That is wrong, and it was repeated here
+without checking.**
+
+Verified: `alembic heads` returns exactly one — `f3c8a92b1e07`, the
+`cancel_requested_at` migration. The deployed database sits at its parent
+`e4a1c7b2f5d9`, one revision behind, and the container entrypoint runs
+`alembic upgrade heads` (plural), which tolerates multiple heads regardless.
+The deploy applies one additive, nullable column and proceeds.
+
+Recorded rather than deleted because the failure is mine, not the reviewer's:
+I had run `alembic heads` myself earlier in the same session and seen a single
+head, and passed the contradicting claim along anyway. **Agent output is a lead,
+not evidence** — the same rule this repo already applies to its own tests.
