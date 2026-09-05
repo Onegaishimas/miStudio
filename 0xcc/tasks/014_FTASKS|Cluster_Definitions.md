@@ -72,7 +72,7 @@
 ### Task 6.2: Acceptance (per instruct 007)
 - [x] FPRD §8 verified: recompute-survival structural (decoupled `cluster_profiles` table; soft group ref) — grouping recompute cannot touch profiles; round-trip equality unit-proven + production export→import verified; block/warn matrix unit-tested (9 rows); E2E titled run ("Round-trip import test — Blended (19 features)" + Applied features (19)); published schema sync-tested, no-secrets/no-paths validated on a real export; MCP `profiles` category live on k8s (health lists it), tools registered
 - [x] Suites green; E2E + caps `miStudio_Steering_Panel-ProfileLoaded_20260716.png`, `-BlendedProfileTitled_20260716.png`
-- [x] CLAUDE.md + PPRD v3.7 row 15 → ✅ Complete — **BRD-MIS-CLUSTERS-001 increment CLOSED**; follow-on BRD may start (HF-marketplace research ready: `0xcc/docs/hf-marketplace-cluster-definitions-research.md`)
+- [x] CLAUDE.md + PPRD v3.7 row 15 → ✅ Complete — **BRD-MIS-CLUSTERS-001 increment CLOSED**; follow-on BRD may start (HF-marketplace research ready: `0xcc/docs/Archive/hf-marketplace-cluster-definitions-research.md`)
 
 ---
 

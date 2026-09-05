@@ -1517,7 +1517,7 @@ phase rediscovers them as new. Each carries the phase that owns its verification
   2. The ghost-gradient (dead-neuron resurrection) penalty encodes **raw `x`** instead of the normalized-and-centered tensor the encoder actually receives, so the resurrection signal is computed on a different input than the one being resurrected against.
 - **Failure scenario:** Both silently degrade training quality rather than failing. (1) undermines the reason normalization was introduced; (2) makes dead-neuron recovery less effective in a way no metric surfaces.
 - **Evidence:** plausible (read-only)
-- **Doc reference:** PADR IDL-3; `0xcc/docs/SAE-training-optimization-Feb2026.md`
+- **Doc reference:** PADR IDL-3; `0xcc/docs/Archive/SAE-training-optimization-Feb2026.md`
 - **Verification (R3):** pending
 - **Proposed remediation:** Compute both terms in the same space; encode the same tensor the encoder receives.
 - **Effort:** M

@@ -98,7 +98,7 @@ whose statistics survive a null model, a held-out corpus, and the interpretabili
 17. Lag-0 limitation disclosed wherever discovery results appear (UI + MCP descriptions + run reports).
 18. The **Tier-2.5 design doc** (from Appendix A.8: attention-join candidate generation, shuffled-join
     null, frozen-attention attribution, position-restricted validation) is authored as a deliverable of
-    this feature (`0xcc/docs/tier-2.5-attention-mediated-mining.md`).
+    this feature (`0xcc/docs/Archive/tier-2.5-attention-mediated-mining.md`).
 
 ### 3.6 Run reports
 19. Every discovery run produces a **discovery report**: parameters, null-model summary (threshold

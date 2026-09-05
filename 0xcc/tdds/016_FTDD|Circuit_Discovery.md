@@ -95,7 +95,7 @@ CircuitAttributionService — pass-through wiring, backward batching by downstre
 endpoints: circuit_capture.py / circuit_discovery.py (+ /attribution sub-route); WS channels
 MCP tools/circuits.py (category "circuits"): 5 tools per FPRD §5
 frontend: CircuitsPanel (Capture + Discovery tabs), circuitStore, types
-docs deliverable: 0xcc/docs/tier-2.5-attention-mediated-mining.md (from A.8)
+docs deliverable: 0xcc/docs/Archive/tier-2.5-attention-mediated-mining.md (from A.8)
 ```
 
 ## 6. Risks
