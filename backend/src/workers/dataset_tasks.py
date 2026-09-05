@@ -11,6 +11,7 @@ from typing import List, Optional
 from uuid import UUID
 import signal
 import os
+import shutil
 import psutil
 import logging
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 import redis
 
+from ..core.cancellation import OperatorCancelled, record_progress
 from ..core.celery_app import celery_app
 from ..core.config import settings
 from ..models.dataset import DatasetStatus, Dataset
@@ -138,6 +140,35 @@ def make_tokenization_signal_handler(state, owner_pid, cleanup=None):
     return signal_handler
 
 
+
+def remove_partial_download(raw_path: str) -> bool:
+    """Delete a cancelled download's half-written directory. Returns whether it did.
+
+    MODULE LEVEL SO A TEST CAN DRIVE IT. Inline in the task's cancellation
+    handler this was unreachable, and a mutation that disabled the deletion
+    left the suite green — the only guard was a source scrape, which cannot
+    see `if False:`.
+
+    `resolve_deletable_path`, not `resolve_data_path`: `raw_path` is
+    API-writable, so it arrives stored rather than trusted, and the deletable
+    roots refuse the trusted top-level directories (MIS-E2E-071).
+    """
+    try:
+        target = settings.resolve_deletable_path(raw_path)
+    except ValueError as exc:
+        logger.error("Refusing to delete %s: %s", raw_path, exc)
+        return False
+    if not target.exists():
+        return False
+    try:
+        shutil.rmtree(target)
+        logger.info("Removed the cancelled download's partial output: %s", target)
+        return True
+    except Exception as exc:  # noqa: BLE001 - cleanup must not mask the cancel
+        logger.warning("Could not remove %s: %s", target, exc)
+        return False
+
+
 def release_redis_lock(dataset_id: str, redis_client: redis.Redis = None) -> None:
     """
     Release Redis distributed lock for a dataset operation.
@@ -242,7 +273,12 @@ def download_dataset_task(
             dataset_id=dataset_id,
             base_progress=10.0,
             progress_range=60.0,  # 10% → 70%
-            throttle_seconds=0.5  # Emit at most every 0.5 seconds
+            throttle_seconds=0.5,  # Emit at most every 0.5 seconds
+            # tqdm is the ONLY in-process callback a HuggingFace download
+            # offers, so it is the only place a download can be stopped
+            # without killing the worker.
+            cancel_scope="dataset_download",
+            cancel_target=dataset_id,
         )
 
         # Patch tqdm at multiple locations where datasets might use it
@@ -392,6 +428,28 @@ def download_dataset_task(
             "raw_path": str(raw_path),
             "num_samples": num_samples,
             "size_bytes": size_bytes,
+        }
+
+    except OperatorCancelled as cancelled:
+        # THE TASK OWNS ITS OWN PARTIAL OUTPUT.
+        #
+        # The cancel endpoint used to rmtree this directory while the download
+        # was still writing into it — `revoke(terminate=)` is inert on a solo
+        # pool, so the task was very much alive. Deletion moved here, where the
+        # writer is the deleter and there is no race to lose.
+        print(f"[CANCEL] {cancelled}")
+        remove_partial_download(str(raw_path))
+
+        record_progress(
+            "dataset_download", dataset_id,
+            status=DatasetStatus.ERROR.value,
+            error_message="Cancelled by user",
+        )
+        return {
+            "status": "cancelled",
+            "scope": cancelled.scope,
+            "target_id": cancelled.target_id,
+            "detail": cancelled.detail,
         }
 
     except Exception as e:
@@ -892,7 +950,14 @@ def tokenize_dataset_task(
             progress_range=40.0,  # 40% → 80%
             throttle_seconds=0.5,  # Emit at most every 0.5 seconds OR every 1%
             stage="tokenizing",  # Current stage
-            started_at=started_at  # Pass start timestamp
+            started_at=started_at,  # Pass start timestamp
+            # THE CANCELLATION CHECKPOINT. `Dataset.map(num_proc=N)` forks a
+            # worker pool and the mapper runs in the children, where a stop
+            # cannot be coordinated — but `update()` runs in THIS process,
+            # because datasets funnels every batch's progress back through a
+            # manager queue and ticks the bar here.
+            cancel_scope="dataset_tokenization",
+            cancel_target=tokenization_id,
         )
 
         # Patch tqdm at ALL locations including HuggingFace's internal tqdm
@@ -1213,6 +1278,33 @@ def tokenize_dataset_task(
             "statistics": stats,
         }
 
+    except OperatorCancelled as cancelled:
+        # MUST PRECEDE THE BaseException CATCH-ALL BELOW.
+        #
+        # That handler exists to catch SystemExit from the signal handler, and
+        # it catches BaseException to do it — which means it also catches
+        # OperatorCancelled. Left to it, a cancellation would be recorded as
+        # `Tokenization failed: …`, or, if the data happened to be saved
+        # already, as a SUCCESS: the operator asks a job to stop and is told it
+        # completed. This is the audit the plan called for — cleanup living in
+        # an exception handler rather than in `finally`.
+        #
+        # The child pool still has to be reaped, and the signal handlers are
+        # still restored by the `finally` below.
+        print(f"[CANCEL] {cancelled}")
+        cleanup_child_processes()
+        record_progress(
+            "dataset_tokenization", tokenization_id,
+            error_message=str(cancelled), db=None,
+        )
+        release_redis_lock(dataset_id)
+        return {
+            "status": "cancelled",
+            "scope": cancelled.scope,
+            "target_id": cancelled.target_id,
+            "detail": cancelled.detail,
+        }
+
     except BaseException as e:
         # IMPORTANT: Catch BaseException to handle SystemExit from signal handler
         # SystemExit is NOT a subclass of Exception, so "except Exception" won't catch it
@@ -1397,9 +1489,28 @@ def cancel_dataset_download(self, dataset_id: str, task_id: Optional[str] = None
                 current_app.control.revoke(task_id, terminate=True)
                 logger.info(f"Revoked Celery task {task_id} for dataset {dataset_id}")
 
-            # Clean up partial download files ONLY if dataset was downloading
-            # If dataset was processing (tokenizing), do NOT delete raw files - they're needed!
-            if dataset.status == DatasetStatus.DOWNLOADING and dataset.raw_path:
+            # DO NOT DELETE WHAT IS STILL BEING WRITTEN.
+            #
+            # `revoke(terminate=True)` above is inert on a --pool=solo worker,
+            # so when this ran the download was still going — and this branch
+            # rmtree'd the very directory it was writing into. The task then
+            # recreated parts of it, leaving a half-tree nothing could read and
+            # nothing would clean up.
+            #
+            # The request has been written by now, so the task will stop at its
+            # next tqdm tick and remove its own partial output in its `finally`.
+            # The endpoint only cleans up when the job had NOT started, which is
+            # the one case where nobody else ever will.
+            job_had_started = dataset.status == DatasetStatus.DOWNLOADING and (
+                dataset.progress or 0
+            ) > 0
+            if job_had_started:
+                logger.info(
+                    "Not deleting %s: the download is live and will remove its "
+                    "own partial output when it stops at the next checkpoint",
+                    dataset.raw_path,
+                )
+            if not job_had_started and dataset.status == DatasetStatus.DOWNLOADING and dataset.raw_path:
                 try:
                     # MIS-E2E-071: resolve_deletable_path, not resolve_data_path.
                     # raw_path is API-writable, so it arrives stored, not trusted.

@@ -229,6 +229,21 @@ def _circuit():
     return Circuit
 
 
+def _dataset():
+    from ..models.dataset import Dataset
+    return Dataset
+
+
+def _model():
+    from ..models.model import Model
+    return Model
+
+
+def _tokenization():
+    from ..models.dataset_tokenization import DatasetTokenization
+    return DatasetTokenization
+
+
 #: J-space work is tracked in `task_queue`, keyed by the CELERY id. That is one
 #: registered scope, NOT the universal channel: task_queue is populated by only
 #: three lifecycles, and its key does not exist until after `.delay()` — the
@@ -305,6 +320,53 @@ register(CancelScope(
     error_field=None,
     progress_field=None,
     completed_at_field=None,
+))
+
+#: THE THREE NATIVE-ENUM LIFECYCLES. `datasets.status`, `models.status` and
+#: `dataset_tokenizations.status` are native Postgres enums with no CANCELLED
+#: member, and `ALTER TYPE … ADD VALUE` is non-transactional. They carry
+#: `cancel_requested_at` instead (migration f3c8a92b1e07), which is also the
+#: better model: it separates "the operator asked" from "the job stopped".
+#:
+#: Their `terminal_values` are their OWN vocabularies, not the default one —
+#: `ready` is this family's success state, and `error` its failure. Using the
+#: default {completed, failed, cancelled} here would mean the guard never
+#: considered any of these rows terminal, so a straggling progress write could
+#: revive a finished download.
+#:
+#: WHAT THE STATUS ENDS UP AS. These three still finish at `error`, because the
+#: enum offers nothing better and extending it is the thing being avoided. That
+#: is not a regression — it is what they already did — and `cancel_requested_at`
+#: is precisely what makes it survivable: a row with `status = error` AND a
+#: non-null request is a stop, one without is a crash. Before this column the
+#: two were the same row and no reader could tell them apart.
+register(CancelScope(
+    kind="dataset_download",
+    model=_dataset,
+    request_field="cancel_requested_at",
+    cancelled_values=frozenset({"cancelled"}),
+    terminal_values=frozenset({"ready", "error", "cancelled"}),
+    started_at_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="model_download",
+    model=_model,
+    request_field="cancel_requested_at",
+    cancelled_values=frozenset({"cancelled"}),
+    terminal_values=frozenset({"ready", "error", "cancelled"}),
+    started_at_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="dataset_tokenization",
+    model=_tokenization,
+    request_field="cancel_requested_at",
+    cancelled_values=frozenset({"cancelled"}),
+    terminal_values=frozenset({"ready", "error", "cancelled"}),
+    started_at_field=None,
 ))
 
 register(CancelScope(

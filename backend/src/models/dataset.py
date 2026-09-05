@@ -157,6 +157,15 @@ class Dataset(Base):
         comment="Junk ratio threshold (0.0-1.0)",
     )
 
+
+    #: Set by the cancel endpoint; polled by the running job. A TIMESTAMP
+    #: rather than a status value because this table's status is a native
+    #: Postgres enum with no CANCELLED member — and because "the operator
+    #: asked" and "the job stopped" are two different facts, previously
+    #: conflated into `status = ERROR` + "Cancelled by user": a deliberate
+    #: stop recorded as a crash, indistinguishable afterwards from one.
+    cancel_requested_at = Column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     created_at = Column(
         DateTime(timezone=True),

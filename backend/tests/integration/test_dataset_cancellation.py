@@ -460,8 +460,22 @@ class TestDatasetCancellationIntegration:
             # Verify result
             assert result["status"] == "cancelled"
 
-            # Verify raw files were deleted (only happens for DOWNLOADING status)
-            assert not raw_path.exists()
+            # THE WRITER IS THE DELETER NOW.
+            #
+            # This asserted `not raw_path.exists()` until 2026-09-05. The cancel
+            # path deleted the directory the download was actively writing into
+            # — `revoke(terminate=)` is inert on a --pool=solo worker, so the
+            # task was still running — and the task then recreated parts of it,
+            # leaving a half-tree nothing could read and nothing would clean up.
+            #
+            # Deletion moved into the cancelled task's own handler, where the
+            # writer and the deleter are the same process. The endpoint still
+            # cleans up a job that had NOT started, which is the one case where
+            # nobody else ever will. This fixture has progress=50.0, so it is
+            # the started case: the files must SURVIVE the endpoint call.
+            assert raw_path.exists(), (
+                "the cancel endpoint deleted a live download's directory again"
+            )
 
             # Verify database state
             async with AsyncSessionLocal() as db:

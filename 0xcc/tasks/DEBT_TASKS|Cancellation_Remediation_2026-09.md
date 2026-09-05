@@ -20,7 +20,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 1 — the guard everywhere, still no checkers | ✅ done | this record |
 | 2 — `extract_activations`, the GPU proof | ✅ code; hardware acceptance pending | this record |
 | 3 — the remaining compute tasks | ✅ except dataset tokenize | `fea78286` + this record |
-| 4 — the downloads | ▢ | |
+| 4 — the downloads + tokenization | ✅ | this record |
 | 5 — shim the five healthy conventions | ▢ | |
 | 6 — the missing routes | ▢ | |
 | 7 — cleanup | ▢ | |
@@ -44,6 +44,10 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | `backend/tests/unit/test_sae_extraction_cancellation.py` | SAE extraction Shapes A and C |
 | `backend/tests/unit/test_export_cancellation.py` | export checkpoint + the failure writer |
 | `backend/tests/unit/test_no_undefined_names.py` | the ratcheted F821 gate |
+| `backend/alembic/versions/f3c8a92b1e07_add_cancel_requested_at.py` | the timestamp column for the three native-enum lifecycles |
+| `backend/src/workers/tqdm_websocket_bridge.py` | the only owner-process checkpoint inside a forked `Dataset.map` |
+| `backend/src/workers/dataset_tasks.py` | tokenize + download tasks, `remove_partial_download` |
+| `backend/tests/unit/test_download_tokenize_cancellation.py` | Phase 4 shapes |
 | `backend/src/services/extraction_db_service.py` | `update_progress` for activation extraction — routed through `record_progress` |
 | `backend/src/services/extraction_service.py` | `update_extraction_status{,_sync}` for the SAE lifecycle — guarded via `guard_allows` |
 | `backend/src/workers/neuronpedia_tasks.py` | `update_export_progress` — the progress-only writer |
@@ -505,3 +509,104 @@ That is the third fail-open guard in this arc (the source-scrape that could not
 tell "moved" from "deleted", the lint gate that reported a clean tree from a
 failed command, and this). The pattern is worth naming: **an assertion built on
 a sentinel return value passes when the thing is missing.**
+
+
+---
+
+## Phase 4 — the fork-pool lifecycles: downloads and tokenization
+
+Tokenization was moved here from Phase 3: it shares `Dataset.map(num_proc=N)`
+with the downloads and needs the same mechanism, so building it once is the
+point.
+
+### Where a check can even run
+
+`Dataset.map(num_proc=N)` forks a worker pool and the mapper executes in the
+children. A child cannot coordinate a stop with its siblings, and one that dies
+becomes *"One of the subprocesses has abruptly died"* — a cancellation
+indistinguishable from a crash. But `datasets` funnels every batch's progress
+back through a manager queue and ticks the progress bar in the **parent**. That
+tick is the only owner-process checkpoint that exists. For a HuggingFace
+download, tqdm is the only in-process callback of any kind.
+
+So `TqdmWebSocketCallback.update()` polls, before the parent bookkeeping and
+before any emission. The raise crosses that module's own `except Exception`
+handlers and `datasets`' internal ones — which is the BaseException decision
+earning its keep for the third time.
+
+### A timestamp instead of an enum member (migration `f3c8a92b1e07`)
+
+`datasets`, `models` and `dataset_tokenizations` are native Postgres enums with
+no CANCELLED member, and `ALTER TYPE … ADD VALUE` is non-transactional. They
+carry a nullable `cancel_requested_at` instead. It is also the better model: it
+separates *the operator asked* from *the job stopped*.
+
+Their status still ends at `error` — the enum offers nothing better, and
+extending it is the thing being avoided. **That is not a regression; it is what
+they already did.** What changes is that a row with `status = error` AND a
+non-null request is now distinguishable from a crash. Before this column they
+were the same row and no reader could tell them apart.
+
+Their `terminal_values` are their own vocabularies (`ready`/`error`), not the
+default `{completed, failed, cancelled}` — with the default the guard would
+never consider any of these rows terminal and a straggling write could revive a
+finished download.
+
+### Three hazards closed
+
+* **The `BaseException` catch-all.** `tokenize_dataset_task` catches it
+  deliberately, for `SystemExit` from its signal handler — so it also caught
+  `OperatorCancelled` and would have recorded a cancel as
+  `Tokenization failed: …`, or, if the data happened to be saved already, as a
+  **success**. An explicit handler now precedes it. The signal handler stays:
+  it is not dead code, it is what lets `Dataset.map`'s pool children die to
+  their own default handler instead of raising `SystemExit` into the owner's
+  inherited one.
+* **`rmtree` on a live directory.** The cancel path deleted the directory the
+  download was actively writing into (`revoke(terminate=)` is inert on a solo
+  pool, so the task was very much alive), and the task then recreated parts of
+  it. Deletion moved into the cancelled task's own handler — writer and deleter
+  are now the same process — with the endpoint cleaning up only a job that had
+  **not** started, the one case where nobody else ever will.
+* **SIGKILL in the tokenization endpoint.** Explicitly not a fallback here:
+  killing a solo worker mid-task crashed the pool and stranded an `acks_late`
+  message for the full 12-hour visibility timeout.
+
+### A latent bug the tests surfaced
+
+`self.desc` is **unset** when tqdm is constructed with `disable=True` — its
+`__init__` returns early — so the bridge's emission path raised `AttributeError`,
+which the surrounding `except Exception` logged as a dropped progress tick.
+HuggingFace disables bars when its env flag is set, and a Celery worker has no
+tty. Same failure shape as the seven-month `ImportError` already recorded in
+that file: the row silently freezes while the job runs to completion.
+
+### Mutation controls — 12 run, 12 verified biting (four needed a second pass)
+
+**P4-C2** survived because the ordering assertion matched `raise_if_cancelled`
+inside the **comment explaining the ordering**, which stays above
+`super().update()` however far the actual call moves. Comments are stripped now.
+That is the second time this exact trap has appeared in this arc.
+
+**P4-C3 and P4-C4** survived because nothing asserted that either task *asks*
+for a cancellable bar. The bridge was tested in isolation; a `CancellableTqdm`
+nobody passes a scope to is an ordinary progress bar. Wiring assertions added.
+
+**P4-C11** survived because the cleanup was inline in the cancellation handler
+and therefore unreachable from a test — the only guard was a source scrape,
+which cannot see `if False:`. Hoisted to `remove_partial_download`, now driven
+against a real temp directory, including the refusal path for a `raw_path`
+outside the deletable roots.
+
+**P4-C5 was a bad mutation, not a test gap** — it renamed the bound variable,
+so the clause still caught `OperatorCancelled` and behaviour was unchanged.
+Replaced with one that actually disables the handler.
+
+### Recorded debt
+
+Moving deletion out of the endpoint leaves one case uncovered: a download whose
+worker died without running its handler keeps its partial directory, and the
+endpoint will no longer remove it because the row says the job had started.
+This is a deliberate trade — deleting a directory that is being written is worse
+than briefly leaking one — but it is a real gap and belongs to a janitor, not to
+the cancel path.
