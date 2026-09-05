@@ -40,6 +40,17 @@ class RecordRunError(RuntimeError):
     """Recording failed at run time."""
 
 
+class _RecorderMisconfigured(BaseException):
+    """A programming error discovered ON THE CANCELLATION PATH.
+
+    BaseException for the same reason `OperatorCancelled` is: everything that
+    catches `Exception` between here and the task boundary would record this as
+    a failed run, which is the one outcome the cancellation work exists to stop
+    producing. It is a bug either way — but it must arrive as a bug, not as a
+    crash report about the user's job.
+    """
+
+
 class SteeringRecorderService:
     """Generate + record steered transcripts for a circuit / cluster / features."""
 
@@ -212,14 +223,15 @@ class SteeringRecorderService:
                 # target is None — reported as a cancellation of nothing, and
                 # `record_progress` writes nowhere.
                 #
-                # This was an `assert`, which is stripped under `python -O` and,
-                # worse, raises AssertionError — an ORDINARY Exception, which
-                # `run_circuit_record`'s handler turns into a FAILED run. A
-                # programming error on the cancellation path would have become
-                # the exact crash-report-instead-of-cancel bug this arc exists
-                # to remove.
+                # This was an `assert`, stripped under `python -O`. R2 made it a
+                # ValueError, which fixed the -O half and NOT the other one:
+                # ValueError is an ordinary Exception, so
+                # `run_circuit_record`'s handler still turns it into a FAILED
+                # run — the crash-report-instead-of-cancel outcome the comment
+                # claimed to have removed. It has to be a BaseException to
+                # travel the same path the cancellation itself does.
                 if run_id is None:
-                    raise ValueError(
+                    raise _RecorderMisconfigured(
                         "record_samples was given a cancel_check but no run_id; "
                         "the cancellation would name no row"
                     )

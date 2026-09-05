@@ -24,7 +24,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 5 — shim the five healthy conventions | ✅ | this record |
 | 6 — the missing routes | ✅ | this record |
 | 7 — cleanup | ✅ | this record |
-| R1 / R2 / R3 review rounds | ▢ | |
+| R1 / R2 / R3 review rounds | ✅ | `3da8f578`, `0f477da7`, + this |
 
 ---
 
@@ -796,3 +796,65 @@ tree from a command that had errored.
 
 **If an assertion can be satisfied by text that is not the thing, it will be.**
 Every one of these is now driven, or reads the AST, or reads the live registry.
+
+
+---
+
+## The three review rounds
+
+Records: `.claude/context/sessions/review_debt_R{1,2,3}_2026-09-05.md`.
+
+| round | findings | headline |
+|---|---|---|
+| R1 | 17 test + 9 correctness | Shape D's own guarantee was a **tautology**; the Phase-5 alias had **broken the J-lens fit cancel** |
+| R2 | 7 | two of R1's fixes were **worse than the bugs**; one destroyed the run's result on the SUCCESS path |
+| R3 | 9 | two of R2's fixes were worse again; one was **inert under the default config** |
+
+**A fix was worse than the bug it replaced in all three rounds.** That is four
+consecutive arcs in this repo with the same result, and it is the entire
+justification for the third round existing.
+
+### The three that mattered most
+
+**R1c-01 — the alias broke the fit cancel.** Phase 5 rebound `TaskCancelled` to
+`OperatorCancelled`, whose signature is `(scope, target_id, …)`.
+`jlens_fit_tasks` raised it with one bare message, so a cancel became a
+`TypeError` — not caught by `except TaskCancelled`, therefore caught by
+`owns_its_failure`'s `except BaseException`, which called `fail_row`. **The
+operator's cancellation was recorded as a crash**, on the one path the module
+docstring cites as hardware-verified.
+
+**R2-01 — `db.refresh` destroyed the result on every successful run.**
+`Session.refresh()` expires the instance BEFORE autoflush, so the calibration
+band, the intensity clamp, the version bump and the faithfulness scores were
+all erased and only the status was committed. Clamping the served dial to the
+measured band — the whole of Feature 20 — silently stopped happening. **And the
+same commit added the fake that hid it**: a no-op `refresh` on `_FakeSyncDB`,
+written to make the test pass.
+
+**R3-03 — retry after cancel was permanently broken.** Nothing ever cleared
+`cancel_requested_at`, which is what the tqdm poll reads. Cancel a dataset
+download once and it could never be downloaded again. Neither reviewer reached
+this; it fell out of chasing R3-02.
+
+### The arc's durable finding
+
+**Seven guards failed because they asserted about text or a sentinel rather
+than behaviour** — a scrape matching the comment that explained it; `rfind`
+returning `-1` and satisfying `<`; a lint gate reporting clean from a command
+that errored; a glob matching the asserting file; `"cancel_check="` satisfied by
+`cancel_check=None`; `index()` finding an assignment; and — inside the
+regression test written for the sixth — an assertion matching the comment
+explaining the fix.
+
+*If an assertion can be satisfied by text that is not the thing, it will be.*
+
+### Process failures, recorded
+
+Three times this session I ran the mutation harness concurrently with a reading
+agent — the exact hazard CLAUDE.md names. The R3 reviewer read three transient
+mutations out of the tree and had to pin every finding to `git show HEAD:`; one
+of my own edits landed on top of an injected mutation and had to be reverted.
+Also: a suite run once reported `exit 0` having never executed, because
+`--timeout` is not installed and pytest rejected the argument. **Green is a
+count, not an exit code.**

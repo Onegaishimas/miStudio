@@ -240,18 +240,34 @@ def execute_neuronpedia_export(self, job_id: str):
                 get_neuronpedia_export_service,
             )
 
+            from ..core.config import settings
+
             exports_dir = get_neuronpedia_export_service()._exports_dir
+            if not str(job_id):
+                # `Path("/a/b") / "" == Path("/a/b")` — an empty id collapses the
+                # target onto the exports root, i.e. every completed archive.
+                raise ValueError("refusing to clean up an export with no id")
             for partial in (
                 exports_dir / str(job_id),
                 exports_dir / f"neuronpedia_export_{job_id}.zip",
             ):
-                if partial.exists():
-                    if partial.is_dir():
-                        shutil.rmtree(partial)
+                # Through the MIS-E2E-071 guard, like every other deletion in
+                # this change. R2 closed exactly this hole in `model_tasks` and
+                # left it open here — the guard refuses the trusted roots and
+                # their top-level directories, so a collapsed target cannot
+                # take the whole exports tree with it.
+                try:
+                    target = settings.resolve_deletable_path(str(partial))
+                except ValueError as guard_exc:
+                    logger.error("Refusing to delete %s: %s", partial, guard_exc)
+                    continue
+                if target.exists():
+                    if target.is_dir():
+                        shutil.rmtree(target)
                     else:
-                        partial.unlink()
+                        target.unlink()
                     logger.info(
-                        "Removed the cancelled export's partial output: %s", partial
+                        "Removed the cancelled export's partial output: %s", target
                     )
         except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
             logger.warning("Could not remove the partial export tree: %s", cleanup_exc)

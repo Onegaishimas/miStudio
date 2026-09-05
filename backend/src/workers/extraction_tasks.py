@@ -149,19 +149,33 @@ def extract_features_from_sae_task(
             # payloads, so the UI showed a completed extraction over a
             # cancelled row. The durable state was right and the state the
             # operator saw was wrong.
-            with self.get_db() as _check_db:
-                _row = (
-                    _check_db.query(ExtractionJob)
-                    .filter(ExtractionJob.id == extraction_job.id)
-                    .populate_existing()
-                    .first()
-                )
-                if _row is not None and is_cancelled("sae_extraction", _row.status):
-                    logger.info(
-                        "SAE extraction %s finished after cancellation; not "
-                        "emitting a completion", extraction_job.id,
+            # WRAPPED, because this sits inside the try whose handler writes
+            # FAILED — so a recycled connection on this bookkeeping read would
+            # relabel a finished extraction as a failure, and terminal ->
+            # terminal is permitted by the guard so the write would stick.
+            _was_cancelled = False
+            try:
+                with self.get_db() as _check_db:
+                    _row = (
+                        _check_db.query(ExtractionJob)
+                        .filter(ExtractionJob.id == extraction_job.id)
+                        .populate_existing()
+                        .first()
                     )
-                    return statistics
+                    _was_cancelled = _row is not None and is_cancelled(
+                        "sae_extraction", _row.status
+                    )
+            except Exception:  # noqa: BLE001 - a bookkeeping read must not fail the run
+                logger.warning(
+                    "Could not re-read extraction %s before emitting; assuming "
+                    "it completed", extraction_job.id,
+                )
+            if _was_cancelled:
+                logger.info(
+                    "SAE extraction %s finished after cancellation; not "
+                    "emitting a completion", extraction_job.id,
+                )
+                return {"status": "cancelled", "extraction_id": extraction_job.id}
 
             logger.info(f"Feature extraction completed for SAE {sae_id}")
             logger.info(f"Statistics: {statistics}")

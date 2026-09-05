@@ -26,6 +26,7 @@ import redis
 
 from ..core.cancellation import (
     OperatorCancelled,
+    clear_cancel_request,
     record_progress,
     request_cancel,
 )
@@ -254,6 +255,12 @@ def download_dataset_task(
             },
         )
 
+        # A RETRY MUST NOT INHERIT THE PREVIOUS CANCEL. `cancel_requested_at`
+        # is what the tqdm poll reads, and nothing cleared it — so a
+        # re-download of a previously cancelled dataset abandoned on its first
+        # tick, permanently.
+        clear_cancel_request("dataset_download", str(dataset_id))
+
         # Prepare download directory using settings
         data_dir = settings.datasets_dir
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -277,10 +284,18 @@ def download_dataset_task(
             data_dir / repo_id.replace("/", "___"),
             raw_path,
         ]
-        if settings.auto_cleanup_after_download:
-            # Only when the operator has already opted into clearing the shared
-            # transfer cache after a successful download.
-            _cleanup_paths.append(data_dir / "downloads")
+        # AND NOT `downloads/` AT ALL, UNDER ANY SETTING.
+        #
+        # R2 made this conditional on `auto_cleanup_after_download` and called
+        # that "only when the operator has opted in" — but that setting
+        # DEFAULTS TO TRUE (`core/config.py`), so on a stock deployment the
+        # guard was inert and the shared cache was still deleted on every
+        # cancel. The comment described an opt-in; the code read an opt-out.
+        #
+        # The setting governs cleanup after a job that OWNED the transfer —
+        # a successful download. A cancelled one cannot know whether the
+        # chunks in there are its own or another dataset's, so it leaves them.
+        # The success path clears them under the setting, as it always did.
 
         # Download dataset from HuggingFace
         emit_dataset_progress(
@@ -1357,11 +1372,21 @@ def tokenize_dataset_task(
                     .populate_existing()
                     .first()
                 )
-                # DON'T RESURRECT A CANCELLED DOWNLOAD. This was the one status
-                # write in the change that went around the registry: if the
-                # DOWNLOAD had also been cancelled (status=error with
-                # cancel_requested_at set), restoring READY here undid it.
-                if dataset_obj and dataset_obj.cancel_requested_at is None:
+                # UNDO ONLY WHAT THIS TASK DID.
+                #
+                # R2 gated this on `dataset_obj.cancel_requested_at is None`,
+                # which was wrong twice over: a TOKENIZATION cancel writes that
+                # column on the `dataset_tokenizations` row, never on the
+                # dataset — so the guard was always true and purely decorative
+                # — and nothing in the codebase ever CLEARS it, so once a
+                # download cancel had set it, every later tokenization cancel
+                # took the else branch and stranded the dataset in PROCESSING
+                # forever. That is the exact defect the restore exists to fix.
+                #
+                # The precise question is "did this task put the row in
+                # PROCESSING?", which the status answers directly and without
+                # depending on a flag nobody resets.
+                if dataset_obj and dataset_obj.status == DatasetStatus.PROCESSING:
                     dataset_obj.status = DatasetStatus.READY
                     dataset_obj.progress = 0.0
                     # Cleared, not left set: a READY row carrying an error

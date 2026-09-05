@@ -929,6 +929,56 @@ def request_cancel(
     return outcome
 
 
+def clear_cancel_request(kind: str, target_id: Any, *, db: Any = None) -> bool:
+    """Clear a stale request so a RETRY of this job can run.
+
+    THE MISSING HALF OF `request_field`. The three native-enum lifecycles record
+    the operator's request in `cancel_requested_at`, and nothing ever cleared
+    it — so once a download had been cancelled, every retry of it read the old
+    timestamp on its first tqdm tick and abandoned immediately. Cancel a
+    download once and it could never be downloaded again.
+
+    Verified before fixing: a checker over a row whose `cancel_requested_at` is
+    a leftover returns True on tick one.
+
+    Called at task START, not at cancel time: the flag must survive until the
+    task that is running has seen it.
+    """
+    scope = get_scope(kind)
+    if scope.request_field is None:
+        return False
+
+    def _apply(session: Any) -> bool:
+        model = scope.model()
+        column = getattr(model, scope.id_field)
+        row = (
+            session.query(model)
+            .filter(column == target_id)
+            .populate_existing()
+            .first()
+        )
+        if row is None or getattr(row, scope.request_field, None) is None:
+            return False
+        setattr(row, scope.request_field, None)
+        session.commit()
+        logger.info(
+            "Cleared a stale cancellation request on %s:%s before starting",
+            kind, target_id,
+        )
+        return True
+
+    try:
+        if db is not None:
+            return _apply(db)
+        from .database import get_sync_db
+        with get_sync_db() as session:
+            return _apply(session)
+    except Exception as exc:  # noqa: BLE001 - must not block the work
+        logger.warning("Could not clear the cancel request for %s:%s: %s",
+                       kind, target_id, exc)
+        return False
+
+
 def cooperative_cancel(kind: str):
     """Task-boundary decorator: turn OperatorCancelled into a canonical result.
 

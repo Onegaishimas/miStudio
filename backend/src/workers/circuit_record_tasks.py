@@ -62,7 +62,6 @@ def run_circuit_record(self, record_run_id: str,
                        config: Dict[str, Any]) -> Dict[str, Any]:
     """Generate + record steered transcripts. WS on the "steering-record"
     channel (run_id = record_run_id)."""
-    from ..models.steering_record_run import SteeringRecordRun
     from ..services.steering_recorder_service import SteeringRecorderService
 
     with self.get_db() as db:
@@ -88,10 +87,12 @@ def run_circuit_record(self, record_run_id: str,
             # `_complete` returns without setting "completed" when the run was
             # cancelled during its tail; emitting a completion anyway shows the
             # operator a finished job over a cancelled row.
-            _complete(db, record_run_id, result.get("manifest_ref"))
-            _row = db.query(SteeringRecordRun).filter(
-                SteeringRecordRun.id == record_run_id).populate_existing().first()
-            if _row is not None and is_cancelled("steering_record", _row.status):
+            # `_complete` ALREADY performed this read, inside its own
+            # try/except. Repeating it here put an unprotected query inside the
+            # outer try whose handler writes FAILED — so a recycled connection
+            # on the duplicate read would relabel a run `_complete` had just
+            # committed as completed. It returns the answer now.
+            if not _complete(db, record_run_id, result.get("manifest_ref")):
                 return {"status": "cancelled", "id": record_run_id}
             emit_circuit_run_completed("steering-record", record_run_id,
                                        summary=result)
@@ -133,7 +134,9 @@ def _set_status(db, record_run_id, status, error=None):
         logger.exception("Could not set record status for %s", record_run_id)
 
 
-def _complete(db, record_run_id, manifest_ref):
+def _complete(db, record_run_id, manifest_ref) -> bool:
+    """Write the completion. Returns False when the run was cancelled in its
+    tail, so the caller can skip announcing a completion the row refused."""
     from ..models.steering_record_run import SteeringRecordRun
     # record_samples committed the manifest, so the session is clean here — but
     # roll back defensively so a lingering aborted state can't block the status
@@ -150,6 +153,7 @@ def _complete(db, record_run_id, manifest_ref):
         # the check below reads a stale status and can never see a cancel.
         row = db.query(SteeringRecordRun).filter(
             SteeringRecordRun.id == record_run_id).populate_existing().first()
+        completed = False
         if row is not None and is_cancelled("steering_record", row.status):
             # The last checkpoint is the top of the prompt loop, so a cancel
             # arriving during the final prompt's generations, or during manifest
@@ -161,10 +165,12 @@ def _complete(db, record_run_id, manifest_ref):
             )
             row.manifest_ref = manifest_ref
             db.commit()
-            return
+            return False
         if row is not None:
             row.status = "completed"
             row.manifest_ref = manifest_ref
             db.commit()
+            completed = True
     except Exception:
         logger.exception("Could not complete record run %s", record_run_id)
+    return completed

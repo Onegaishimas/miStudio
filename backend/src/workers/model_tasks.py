@@ -6,6 +6,7 @@ language models from HuggingFace, as well as extracting activations from models.
 """
 
 import logging
+from datetime import datetime, timezone
 import os
 import shutil
 import threading
@@ -16,6 +17,7 @@ from typing import Optional, List
 from ..core.cancellation import (
     OperatorCancelled,
     cancel_checker,
+    clear_cancel_request,
     cooperative_cancel,
     record_progress,
     request_cancel,
@@ -348,6 +350,7 @@ def download_and_load_model(
         )
         # BEFORE THE DOWNLOAD. A model cancelled while queued must not pull
         # 15 GB first.
+        clear_cancel_request("model_download", model_id)
         _model_cancel = cancel_checker("model_download", model_id)
         _model_cancel.raise_if_cancelled("stopped before the download began")
 
@@ -514,18 +517,30 @@ def download_and_load_model(
             except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
                 logger.warning("Could not remove %s: %s", target, cleanup_exc)
 
-        # Close the task_queue row, or a cancelled download shows in Active
-        # Operations as still running until the janitor reclaims it.
+        # Close the task_queue row as CANCELLED, not completed.
+        #
+        # `mark_task_queue_entries_completed` writes status="completed",
+        # progress=100.0 — so R2 traded "shows as still running" for "shows as
+        # finished successfully", the same durable-right/visible-wrong shape it
+        # had just fixed two hunks earlier. TaskQueue documents a `cancelled`
+        # value; this uses it.
         try:
-            from .base_task import mark_task_queue_entries_completed
+            from ..models.task_queue import TaskQueue
 
             with get_sync_db() as _queue_db:
                 # The same (entity_type, task_type) pair the success path uses
                 # at the end of this task — a different one would silently
                 # match nothing and leave the ghost entry in place.
-                mark_task_queue_entries_completed(
-                    _queue_db, model_id, "model", "download"
-                )
+                for _entry in (
+                    _queue_db.query(TaskQueue)
+                    .filter_by(entity_id=model_id, entity_type="model",
+                               task_type="download")
+                    .filter(TaskQueue.status.in_(("queued", "running")))
+                    .all()
+                ):
+                    _entry.status = "cancelled"
+                    _entry.completed_at = datetime.now(timezone.utc)
+                _queue_db.commit()
         except Exception:  # noqa: BLE001 - bookkeeping must not mask the cancel
             logger.debug("Could not close the task_queue row for %s", model_id)
 
