@@ -7,6 +7,7 @@ language models from HuggingFace, as well as extracting activations from models.
 
 import logging
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from ..core.cancellation import (
     OperatorCancelled,
     cancel_checker,
     cooperative_cancel,
+    request_cancel,
 )
 from ..core.celery_app import celery_app
 from ..core.config import settings
@@ -116,6 +118,12 @@ class DownloadProgressMonitor:
         self.model_id = model_id
         self.estimated_size_bytes = int(estimated_size_gb * 1024 * 1024 * 1024)
         self.initial_size = 0
+        self.cancel_seen = False
+        self._cancel = None
+        if model_id:
+            from ..core.cancellation import cancel_checker
+
+            self._cancel = cancel_checker("model_download", model_id)
         self._stop_event = threading.Event()
         self._stop_event.set()  # Not running until start()
         self.thread = None
@@ -162,6 +170,23 @@ class DownloadProgressMonitor:
                 # Re-check stop AFTER the (potentially slow) directory walk so a
                 # stale "downloading" update can't land after the task marks READY
                 if self._stop_event.is_set():
+                    break
+
+                # THE CANCEL OBSERVER. This thread is the only thing running
+                # while `snapshot_download` blocks the task, so it is where the
+                # request is first SEEN — but seeing is all it can do: raising
+                # here would die in a worker thread, and HuggingFace exposes no
+                # abort hook. It records the fact and stops narrating; the task
+                # acts on it at its next real boundary. See the note on
+                # `download_and_load_model` for what that costs.
+                if self._cancel is not None and self._cancel():
+                    logger.info(
+                        "[ProgressMonitor] %s: cancellation requested; the "
+                        "download will stop at the next phase boundary",
+                        self.model_id,
+                    )
+                    self.cancel_seen = True
+                    self._stop_event.set()
                     break
 
                 # Only send update if progress increased by at least 1%
@@ -320,6 +345,11 @@ def download_and_load_model(
             model_id=model_id,
             estimated_size_gb=estimated_size_gb
         )
+        # BEFORE THE DOWNLOAD. A model cancelled while queued must not pull
+        # 15 GB first.
+        _model_cancel = cancel_checker("model_download", model_id)
+        _model_cancel.raise_if_cancelled("stopped before the download began")
+
         progress_monitor.start()
 
         # Load model from HuggingFace (this handles download + quantization)
@@ -338,6 +368,14 @@ def download_and_load_model(
 
             # Stop progress monitor
             progress_monitor.stop()
+            # AFTER THE DOWNLOAD, BEFORE ANYTHING ELSE. If the monitor saw the
+            # request mid-transfer this is the first point the task can act on
+            # it, and it is also the boundary before quantization and the
+            # architecture pass — the expensive work that follows.
+            if progress_monitor.cancel_seen:
+                _model_cancel.poll_now()
+            _model_cancel.raise_if_cancelled(
+                "stopped after the download, before loading")
 
             # Model loaded successfully
             send_progress_update(
@@ -1280,17 +1318,36 @@ def cancel_download(self, model_id: str, task_id: Optional[str] = None):
                 current_app.control.revoke(task_id, terminate=True)
                 logger.info(f"Revoked Celery task {task_id} for model {model_id}")
 
-            # Clean up partial download files
+            # WRITE THE REQUEST FIRST, so a running download can see it. The
+            # revoke above is inert on a --pool=solo worker; the flag is the
+            # channel.
+            request_cancel(
+                "model_download", model_id, reason="Cancelled by user",
+            )
+
+            # DO NOT DELETE WHAT IS STILL BEING WRITTEN. This rmtree'd the
+            # cache directory `snapshot_download` was actively filling, and the
+            # task then recreated parts of it — a half-tree nothing could read
+            # and nothing would clean up. Only a job that had NOT started is
+            # cleaned up here; a started one removes its own partial output at
+            # its next phase boundary.
+            job_had_started = (model.progress or 0) > 0
             cache_dir = settings.models_dir / "raw" / model_id
-            if cache_dir.exists():
-                import shutil
+            if job_had_started:
+                logger.info(
+                    "Not deleting %s: the download is live and removes its own "
+                    "partial output when it stops", cache_dir,
+                )
+            elif cache_dir.exists():
                 try:
                     shutil.rmtree(cache_dir)
                     logger.info(f"Cleaned up cache directory: {cache_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to clean up cache directory {cache_dir}: {e}")
 
-            # Update model status
+            # Update model status. The enum has no CANCELLED member (native PG
+            # type), so ERROR remains — but `cancel_requested_at` is now set,
+            # which is what distinguishes this from a crash.
             model.status = ModelStatus.ERROR
             model.error_message = "Cancelled by user"
             model.progress = 0.0

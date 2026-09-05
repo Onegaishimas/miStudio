@@ -22,7 +22,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 3 — the remaining compute tasks | ✅ except dataset tokenize | `fea78286` + this record |
 | 4 — the downloads + tokenization | ✅ | this record |
 | 5 — shim the five healthy conventions | ✅ | this record |
-| 6 — the missing routes | ▢ | |
+| 6 — the missing routes | ✅ | this record |
 | 7 — cleanup | ▢ | |
 | R1 / R2 / R3 review rounds | ▢ | |
 
@@ -685,3 +685,65 @@ value.
 `circuit_capture_tasks` and `circuit_validation_tasks` import each other;
 importing the former first raises ImportError. Reproduces on a clean tree —
 Celery's autodiscovery happens to use the working order.
+
+
+---
+
+## Phase 6 — the missing routes, and Shape D turns on
+
+Five lifecycles were **startable and not stoppable**: faithfulness,
+calibration, the steering recorder, enhanced labeling and feature grouping each
+had a launch route, a status column, and no way for an operator to reach a
+running job short of restarting the pod — which on a `--pool=solo` worker also
+strands the in-flight `acks_late` message for the full 12-hour visibility
+timeout. Nineteen scopes are now registered.
+
+`EnhancedLabelingStatus` and `GroupingRunStatus` gained a `CANCELLED` member.
+Both columns are plain `String`, not native Postgres enums, so this is an
+addition with no migration — and without it an operator's stop had to be
+written as FAILED, the conflation this whole arc exists to remove.
+
+### Shape D found four real gaps the phase would otherwise have shipped
+
+The registry-completeness harness asserts four independent properties per
+scope, because each is invisible from the others: every declared column exists
+on its table; the cancelled values are a subset of the terminal ones; an
+operator route reaches it; and something actually polls it.
+
+| gap | what it meant |
+|---|---|
+| `dataset_download` had no `request_cancel` | the worker wrote `status = ERROR` directly, so the tqdm poll added in Phase 4 had **no flag to read** |
+| `neuronpedia_export` had no `request_cancel` | the service wrote CANCELLED inline; correct only by coincidence of spelling |
+| `model_download` registered, polled by nothing | Phase 4 wired the dataset half and left the model half a scope with no callers |
+| `labeling` wrote its own status | worked only because both sides happened to spell it the same way — which is exactly what `saes.py` did **not** |
+
+### `app.routes` is not the assembled surface
+
+The route half of Shape D first read `app.routes`, which in this FastAPI
+version holds lazy `_IncludedRouter` objects that carry no `.path` until the app
+is built — ten framework paths and none of the real surface. It failed closed
+here, but the mechanism was wrong: `app.openapi()` forces the resolution and is
+what the harness uses.
+
+### The model download's honest limit
+
+`snapshot_download` offers no abort hook, and the progress monitor runs on a
+separate thread where a raise would die. So the monitor **observes** the request
+and stops narrating, and the task acts on it at the boundaries it owns: before
+the download begins, and after it completes but before quantization and
+profiling. Mid-transfer interruption is **not implemented** — recorded here
+rather than implied by the presence of a scope.
+
+### Mutation controls — 14 run, 14 verified biting
+
+Three survived first, all for the same reason: the "something writes the
+request" check was a **substring match**, so the scope name appearing anywhere
+— its own registration comment, a `cancel_scope=` on a tqdm bar, a
+`guard_allows` call — satisfied it while the actual `request_cancel(...)` had
+been deleted. It now reads the AST for real calls in three shapes: a direct
+call, `run_in_threadpool(request_cancel, "scope", …)`, and the one shared
+dispatch helper the three circuit routes use.
+
+That is the sixth substring-or-sentinel guard in this arc to fail, and the
+lesson is now unambiguous: **if an assertion can be satisfied by text that is
+not the thing, it will be.**

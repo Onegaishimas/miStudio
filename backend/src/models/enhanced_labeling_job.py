@@ -22,6 +22,11 @@ class EnhancedLabelingStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    #: Added 2026-09-05 with the cancel route. SAFE AS A PLAIN ADDITION: the
+    #: column is String(50), not a native Postgres enum, so no ALTER TYPE and
+    #: no migration. Without it an operator's stop had to be written as FAILED,
+    #: which is the conflation this arc exists to remove.
+    CANCELLED = "cancelled"
 
 
 class EnhancedLabelingPhase(str, Enum):

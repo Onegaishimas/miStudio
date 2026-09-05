@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from src.core.cancellation import OperatorCancelled, cancel_checker
 from src.core.celery_app import celery_app
 from src.utils.millm_utils import ensure_model_loaded
 from src.workers.base_task import DatabaseTask
@@ -133,8 +134,18 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                 api_key=api_key,
             )
 
-            # Progress callback for pass 1
+            # Progress callback for pass 1 — AND the job's cancel checkpoint.
+            #
+            # Pass 1 fans out one LLM call per example; this fires as each
+            # returns, which is the finest boundary at which the remaining
+            # calls can be abandoned. On a slow endpoint that is the difference
+            # between stopping now and paying for every remaining example.
+            _cancelled = cancel_checker("enhanced_labeling", job_id, db=db)
+
             def _progress_cb(n_completed: int, total: int) -> None:
+                _cancelled.raise_if_cancelled(
+                    f"stopped after {n_completed} of {total} examples"
+                )
                 job.examples_completed = n_completed
                 job.updated_at = datetime.now(timezone.utc)
                 db.commit()
@@ -156,6 +167,11 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                 )
             finally:
                 service.close()
+
+            # POLL BETWEEN THE PASSES. Pass 2 is a single synthesis call with
+            # no checkpoint of its own, so this is the last chance to stop
+            # before paying for it.
+            _cancelled.raise_if_cancelled("stopped between pass 1 and pass 2")
 
             # Pass 2 in-progress notification
             job.phase = EnhancedLabelingPhase.PASS2.value
@@ -212,6 +228,17 @@ def enhanced_label_feature_task(self, job_id: str) -> Dict[str, Any]:
                 "category": result["category"],
                 "description": result["description"],
             }
+
+        except OperatorCancelled as cancelled:
+            # BaseException, so the handler below cannot reach it — which is
+            # the point: that one writes FAILED.
+            job.status = EnhancedLabelingStatus.CANCELLED.value
+            job.error_message = cancelled.detail[:500]
+            job.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            logger.info("Enhanced labeling %s cancelled: %s", job_id, cancelled.detail)
+            return {"status": "cancelled", "job_id": job_id,
+                    "detail": cancelled.detail}
 
         except Exception as exc:
             # Distinguish a retryable failure (Celery will autoretry via

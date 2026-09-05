@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 import redis
 
-from ..core.cancellation import OperatorCancelled, record_progress
+from ..core.cancellation import (
+    OperatorCancelled,
+    record_progress,
+    request_cancel,
+)
 from ..core.celery_app import celery_app
 from ..core.config import settings
 from ..models.dataset import DatasetStatus, Dataset
@@ -1566,6 +1570,14 @@ def cancel_dataset_download(self, dataset_id: str, task_id: Optional[str] = None
                                 logger.warning(f"Failed to clean up tokenized files {tokenized_path}: {e}")
 
             # Update dataset status
+            # WRITE THE REQUEST, NOT JUST THE OUTCOME. This set ERROR and
+            # nothing else, so the running download's tqdm poll had no flag to
+            # read and the task carried on to completion. `request_cancel`
+            # writes `cancel_requested_at`, which is what the bridge reads.
+            request_cancel(
+                "dataset_download", str(dataset_id),
+                reason="Cancelled by user",
+            )
             dataset.status = DatasetStatus.ERROR
             dataset.error_message = "Cancelled by user"
             dataset.progress = 0.0

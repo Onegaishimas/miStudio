@@ -239,6 +239,21 @@ def _discovery_run():
     return CircuitDiscoveryRun
 
 
+def _record_run():
+    from ..models.steering_record_run import SteeringRecordRun
+    return SteeringRecordRun
+
+
+def _enhanced_labeling_job():
+    from ..models.enhanced_labeling_job import EnhancedLabelingJob
+    return EnhancedLabelingJob
+
+
+def _grouping_run():
+    from ..models.feature_grouping import FeatureGroupingRun
+    return FeatureGroupingRun
+
+
 def _dataset():
     from ..models.dataset import Dataset
     return Dataset
@@ -416,6 +431,42 @@ register(CancelScope(
     error_field=None,
     progress_field=None,
     completed_at_field=None,
+))
+
+#: PHASE 6 — the five lifecycles that had no cancel route at all. Their jobs
+#: were startable and not stoppable: an operator could launch a faithfulness
+#: pass or a feature-grouping run and then had no way to reach it short of
+#: restarting the pod.
+register(CancelScope(
+    kind="circuit_calibration",
+    model=_circuit,
+    status_field="calibration_status",
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="steering_record",
+    model=_record_run,
+    #: This table spells it `error`, not `error_message`. Declared rather than
+    #: defaulted, because a wrong name here fails silently: `setattr` would
+    #: happily create the attribute on the instance and never persist it.
+    error_field="error",
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="enhanced_labeling",
+    model=_enhanced_labeling_job,
+    progress_field=None,
+))
+
+register(CancelScope(
+    kind="feature_grouping",
+    model=_grouping_run,
+    progress_field=None,
 ))
 
 register(CancelScope(

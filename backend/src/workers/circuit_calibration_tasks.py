@@ -13,6 +13,7 @@ guard is asserted at the endpoint (advisory lock) before dispatch.
 import logging
 from typing import Any, Dict, Optional
 
+from ..core.cancellation import OperatorCancelled, cancel_checker
 from ..core.celery_app import celery_app
 from .base_task import DatabaseTask
 from .websocket_emitter import (
@@ -22,6 +23,23 @@ from .websocket_emitter import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _calibration_progress(db, circuit_id):
+    """Progress callback that is ALSO the calibration's cancel checkpoint.
+
+    Calibration has no loop this task can see — the bisection lives inside the
+    service — but it reports progress at every bisection step, and a callback
+    is the one hook already threaded through. Raising from it stops the search
+    at the next step rather than at the next full sweep.
+    """
+    check = cancel_checker("circuit_calibration", circuit_id, db=db)
+
+    def _cb(pct):
+        check.raise_if_cancelled(f"stopped at {pct}% of the band search")
+        emit_circuit_run_progress("calibration", circuit_id, pct)
+
+    return _cb
 
 
 @celery_app.task(bind=True, base=DatabaseTask,
@@ -38,10 +56,14 @@ def run_circuit_calibration(self, circuit_id: str,
         try:
             result = CircuitCalibrationService.run(
                 db, circuit_id, config,
-                progress_cb=lambda pct: emit_circuit_run_progress(
-                    "calibration", circuit_id, pct))
+                progress_cb=_calibration_progress(db, circuit_id))
             emit_circuit_run_completed("calibration", circuit_id, summary=result)
             return result
+        except OperatorCancelled as cancelled:
+            _set_status(db, circuit_id, "cancelled")
+            emit_circuit_run_failed("calibration", circuit_id, "cancelled")
+            return {"status": "cancelled", "circuit_id": circuit_id,
+                    "detail": cancelled.detail}
         except Exception as e:
             logger.exception("Circuit calibration %s failed", circuit_id)
             # Clear the in-flight marker so the single-GPU guard isn't wedged.

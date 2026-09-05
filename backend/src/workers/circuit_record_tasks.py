@@ -9,6 +9,7 @@ single GPU like calibration; its in-flight marker is a `steering_record_runs` ro
 import logging
 from typing import Any, Dict
 
+from ..core.cancellation import OperatorCancelled, cancel_checker
 from ..core.celery_app import celery_app
 from .base_task import DatabaseTask
 from .websocket_emitter import (
@@ -35,11 +36,22 @@ def run_circuit_record(self, record_run_id: str,
             result = SteeringRecorderService.record_samples(
                 db, config,
                 progress_cb=lambda pct: emit_circuit_run_progress(
-                    "steering-record", record_run_id, pct))
+                    "steering-record", record_run_id, pct),
+                cancel_check=cancel_checker(
+                    "steering_record", record_run_id, db=db),
+                run_id=record_run_id)
             _complete(db, record_run_id, result.get("manifest_ref"))
             emit_circuit_run_completed("steering-record", record_run_id,
                                        summary=result)
             return result
+        except OperatorCancelled as cancelled:
+            # The row is already CANCELLED — the endpoint set it, which is how
+            # this task found out. Returning (not raising) is what acks the
+            # acks_late message.
+            _set_status(db, record_run_id, "cancelled", error=cancelled.detail[:500])
+            emit_circuit_run_failed("steering-record", record_run_id, "cancelled")
+            return {"status": "cancelled", "id": record_run_id,
+                    "detail": cancelled.detail}
         except Exception as e:
             logger.exception("Steering record %s failed", record_run_id)
             _set_status(db, record_run_id, "failed", error=str(e)[:500])

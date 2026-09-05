@@ -1789,9 +1789,21 @@ class LabelingService:
                 labeling_job.openai_compatible_model
             )
 
-        labeling_job.status = LabelingStatus.CANCELLED.value
-        labeling_job.updated_at = datetime.now(timezone.utc)
-        await self.db.commit()
+        # THROUGH THE REGISTRY, so the word written here is by construction the
+        # word `_raise_if_cancelled` reads. Writing the status inline worked
+        # only because both sides happened to spell it the same way — which is
+        # exactly what `saes.py` did not, where the endpoint wrote FAILED and a
+        # checker looking for "cancelled" could never have seen it.
+        from starlette.concurrency import run_in_threadpool
+
+        from ..core.cancellation import request_cancel
+
+        await run_in_threadpool(
+            request_cancel, "labeling", labeling_job_id,
+            reason="Cancelled by user",
+            celery_task_id=getattr(labeling_job, "celery_task_id", None),
+        )
+        await self.db.refresh(labeling_job)
 
         logger.info(f"Cancelled labeling job {labeling_job_id}")
         return True

@@ -742,9 +742,18 @@ sae = SAE.load_from_pretrained(
         ):
             return False
 
-        job.status = ExportStatus.CANCELLED.value
-        job.completed_at = utc_now()
-        await db.commit()
+        # Through the registry, so the scope's vocabulary is the one written
+        # and the running export's `_cancel_point` is guaranteed to recognise
+        # it. Sync, so off-thread.
+        from starlette.concurrency import run_in_threadpool
+
+        from ..core.cancellation import request_cancel
+
+        await run_in_threadpool(
+            request_cancel, "neuronpedia_export", str(job_id),
+            reason="cancelled by operator",
+        )
+        await db.refresh(job)
 
         return True
 
