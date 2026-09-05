@@ -490,13 +490,44 @@ def download_and_load_model(
         # false and a cancelled 40 GB download was orphaned forever — invisible
         # to `delete_model_files`, which resolves `model.file_path`, a column
         # that is not written until after the checkpoint.
+        # BOUND BEFORE THE try, and resolved against the deletable roots.
+        #
+        # Computing it inside the try meant a failure on that very line would
+        # leave `cache_dir` unbound for the logger in the except — an error
+        # raised inside an error handler, which nothing catches, reproducing
+        # the unacked-acks_late strand this handler exists to prevent.
+        #
+        # `resolve_deletable_path` is the MIS-E2E-071 guard every other
+        # deletion in this change already goes through: it refuses the trusted
+        # roots and their top-level directories, so an empty model_id cannot
+        # collapse the target onto `models_dir/raw` — every downloaded model.
+        cache_dir = settings.models_dir / "raw" / model_id
         try:
-            cache_dir = settings.models_dir / "raw" / model_id
-            if cache_dir.exists():
-                shutil.rmtree(cache_dir)
-                logger.info("Removed the cancelled download's partial output: %s", cache_dir)
-        except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
-            logger.warning("Could not remove %s: %s", cache_dir, cleanup_exc)
+            target = settings.resolve_deletable_path(str(cache_dir))
+        except ValueError as guard_exc:
+            logger.error("Refusing to delete %s: %s", cache_dir, guard_exc)
+            target = None
+        if target is not None and target.exists():
+            try:
+                shutil.rmtree(target)
+                logger.info("Removed the cancelled download's partial output: %s", target)
+            except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
+                logger.warning("Could not remove %s: %s", target, cleanup_exc)
+
+        # Close the task_queue row, or a cancelled download shows in Active
+        # Operations as still running until the janitor reclaims it.
+        try:
+            from .base_task import mark_task_queue_entries_completed
+
+            with get_sync_db() as _queue_db:
+                # The same (entity_type, task_type) pair the success path uses
+                # at the end of this task — a different one would silently
+                # match nothing and leave the ghost entry in place.
+                mark_task_queue_entries_completed(
+                    _queue_db, model_id, "model", "download"
+                )
+        except Exception:  # noqa: BLE001 - bookkeeping must not mask the cancel
+            logger.debug("Could not close the task_queue row for %s", model_id)
 
         record_progress(
             "model_download", model_id,

@@ -42,6 +42,13 @@ def _refuse_if_cancelled(db, target_id) -> bool:
             .first()
         )
     except Exception:  # noqa: BLE001 - a failed check must not block the work
+        # LOUD, even though it fails open. Returning True silently is how a
+        # guard becomes decorative: a rename of `get_scope` or a scope's model
+        # would make this permanently inert with nothing in the log to say so.
+        logger.exception(
+            "Could not check whether %s was already cancelled; starting anyway",
+            target_id,
+        )
         return True
     if row is None:
         return True
@@ -55,6 +62,7 @@ def run_circuit_record(self, record_run_id: str,
                        config: Dict[str, Any]) -> Dict[str, Any]:
     """Generate + record steered transcripts. WS on the "steering-record"
     channel (run_id = record_run_id)."""
+    from ..models.steering_record_run import SteeringRecordRun
     from ..services.steering_recorder_service import SteeringRecorderService
 
     with self.get_db() as db:
@@ -77,7 +85,14 @@ def run_circuit_record(self, record_run_id: str,
                 cancel_check=cancel_checker(
                     "steering_record", record_run_id, db=db),
                 run_id=record_run_id)
+            # `_complete` returns without setting "completed" when the run was
+            # cancelled during its tail; emitting a completion anyway shows the
+            # operator a finished job over a cancelled row.
             _complete(db, record_run_id, result.get("manifest_ref"))
+            _row = db.query(SteeringRecordRun).filter(
+                SteeringRecordRun.id == record_run_id).populate_existing().first()
+            if _row is not None and is_cancelled("steering_record", _row.status):
+                return {"status": "cancelled", "id": record_run_id}
             emit_circuit_run_completed("steering-record", record_run_id,
                                        summary=result)
             return result

@@ -294,10 +294,39 @@ class TestTheCancelledDownloadCleansUpAfterItself:
 
         from src.workers.dataset_tasks import download_dataset_task
 
+        import inspect
+
         body = A.handler_body(download_dataset_task, "OperatorCancelled")
-        assert "downloads" in body, (
-            "the transfer cache is not cleaned up; only raw_path is, and at "
-            "cancel time raw_path does not exist"
+        assert "_cleanup_paths" in body, (
+            "the handler no longer cleans up the paths the task recorded"
+        )
+        # The list itself is built next to the assignments it depends on, so
+        # the handler cannot reference a name that was never bound. Assert what
+        # goes INTO it — the transfer cache, not just raw_path, which does not
+        # exist at cancel time.
+        src = inspect.getsource(inspect.unwrap(download_dataset_task))
+        built = src[src.index("_cleanup_paths = ["):]
+        built = built[: built.index("]")]
+
+        # THIS JOB'S OUTPUT, not the shared cache. R1 cleaned `downloads/`
+        # unconditionally — but `data_dir` is `settings.datasets_dir`, the
+        # cache_dir every dataset shares, so that threw away other jobs'
+        # resumable chunks and ignored the operator's auto_cleanup setting.
+        # What is genuinely this job's is keyed on repo_id.
+        assert "___" in built, (
+            "the per-repo arrow tree is not cleaned up, so the cancelled "
+            "download's real output leaks — raw_path alone does not exist at "
+            "cancel time, which made the cleanup a no-op"
+        )
+        assert "raw_path" in built
+
+        after = src[src.index("_cleanup_paths = ["):]
+        assert "auto_cleanup_after_download" in after, (
+            "the shared downloads/ cache is cleaned unconditionally again; it "
+            "holds other datasets' resumable chunks"
+        )
+        assert '"downloads"' not in built, (
+            "the shared transfer cache is in the unconditional list"
         )
 
     def test_the_cancellation_handler_calls_it(self):

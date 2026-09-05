@@ -389,15 +389,26 @@ class CircuitCalibrationService:
         circuit.budget = defn.budget.model_dump(mode="json")
         circuit.calibration = defn.calibration.model_dump(mode="json")
         circuit.version = (circuit.version or 1) + 1
-        # REFUSE TO OVERWRITE A CANCELLATION. The tail of this pass has no
-        # checkpoint, so a stop arriving during it lands on this write — and
-        # terminal -> terminal is permitted by the guard (the janitors need
-        # it), so "completed" would win and the operator would be told their
-        # cancel did nothing.
+        # REFUSE TO OVERWRITE A CANCELLATION — WITHOUT DESTROYING THE RESULT.
+        #
+        # R1 used `db.refresh(circuit)` here. `Session.refresh()` EXPIRES the
+        # instance BEFORE autoflush, so every un-flushed attribute set just
+        # above — the band, the clamp, the version bump — was erased and the
+        # commit wrote only the status. On EVERY SUCCESSFUL RUN the feature
+        # silently produced nothing while reporting "completed". Verified
+        # against this repo's SQLAlchemy; the test fake's no-op `refresh`
+        # is what hid it.
+        #
+        # A scalar column select reads the committed status without touching
+        # the identity map or the pending writes.
+        from sqlalchemy import select as _select
+        
         from ..core.cancellation import is_cancelled as _is_cancelled
         
-        db.refresh(circuit)
-        if not _is_cancelled("circuit_calibration", circuit.calibration_status):
+        _fresh = db.execute(
+            _select(Circuit.calibration_status).where(Circuit.id == circuit.id)
+        ).scalar()
+        if not _is_cancelled("circuit_calibration", _fresh):
             circuit.calibration_status = "completed"
         db.commit()
 

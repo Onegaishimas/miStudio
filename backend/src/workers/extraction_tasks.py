@@ -11,6 +11,7 @@ from typing import Dict, Any
 from src.core.cancellation import (
     cancel_checker,
     cooperative_cancel,
+    is_cancelled,
     record_progress,
 )
 from src.core.celery_app import celery_app
@@ -140,6 +141,27 @@ def extract_features_from_sae_task(
                     "sae_extraction", extraction_job.id, db=db
                 ),
             )
+
+            # DON'T ANNOUNCE A COMPLETION THE ROW REFUSED. The service returns
+            # normally when it finished after a cancellation — the row stays
+            # CANCELLED — but this path went on to emit progress=100
+            # status="completed", and the frontend store spread-merges those
+            # payloads, so the UI showed a completed extraction over a
+            # cancelled row. The durable state was right and the state the
+            # operator saw was wrong.
+            with self.get_db() as _check_db:
+                _row = (
+                    _check_db.query(ExtractionJob)
+                    .filter(ExtractionJob.id == extraction_job.id)
+                    .populate_existing()
+                    .first()
+                )
+                if _row is not None and is_cancelled("sae_extraction", _row.status):
+                    logger.info(
+                        "SAE extraction %s finished after cancellation; not "
+                        "emitting a completion", extraction_job.id,
+                    )
+                    return statistics
 
             logger.info(f"Feature extraction completed for SAE {sae_id}")
             logger.info(f"Statistics: {statistics}")

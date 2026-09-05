@@ -256,15 +256,21 @@ class NeuronpediaExportService:
             await self._generate_readme(sae, output_dir, config, model_name)
 
             # Stage 7: Create archive
-            # FLUSH BEFORE THE CHECKPOINT. `_update_stage` re-selects this row
-            # with populate_existing, which overwrites loaded attributes from
-            # the database — including this pending, unflushed status. The
-            # export therefore never reported "packaging" at all; it went
-            # straight from computing to completed. A behaviour change
-            # introduced by putting the checkpoint inside _update_stage.
-            job.status = ExportStatus.PACKAGING.value
-            await db.flush()
-            await self._update_stage(db, job, "Creating archive", 95)
+            # DO NOT FLUSH THIS BEFORE THE CHECKPOINT.
+            #
+            # R1 added `await db.flush()` here to stop `populate_existing` from
+            # discarding the pending PACKAGING write. That traded a cosmetic
+            # reporting gap for a DESTROYED CANCELLATION: `_cancel_point`
+            # re-reads on this same transaction, so after a flush it reads back
+            # its own uncommitted 'packaging' and can never see the API
+            # process's committed 'cancelled' — and `_update_stage` then commits
+            # the clobber. The export finished COMPLETED over the operator's
+            # stop.
+            #
+            # The stage is display-only, so it is carried on `current_stage`,
+            # which `_update_stage` writes AFTER the checkpoint has passed.
+            # `status` stays untouched until completion.
+            await self._update_stage(db, job, "Packaging: creating archive", 95)
             archive_path = await self._create_archive(output_dir, job_id)
 
             # A CANCELLED EXPORT IS NOT COMPLETED. Same rule as the extraction

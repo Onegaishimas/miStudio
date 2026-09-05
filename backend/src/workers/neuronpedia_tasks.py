@@ -231,12 +231,28 @@ def execute_neuronpedia_export(self, job_id: str):
         # and SAELens output with nothing left to clean them.
         logger.info("Neuronpedia export %s cancelled: %s", job_id, cancelled.detail)
         try:
-            from ..core.config import settings
+            # THE PATH THE SERVICE ACTUALLY WRITES TO. R1 invented
+            # `data_dir/"neuronpedia_exports"`, which appears nowhere else in
+            # the repo — so `exists()` was always False, the rmtree never ran,
+            # and the tree leaked exactly as before. Taken from the service so
+            # the two cannot drift again.
+            from ..services.neuronpedia_export_service import (
+                get_neuronpedia_export_service,
+            )
 
-            partial = settings.data_dir / "neuronpedia_exports" / str(job_id)
-            if partial.exists():
-                shutil.rmtree(partial)
-                logger.info("Removed the cancelled export's partial tree: %s", partial)
+            exports_dir = get_neuronpedia_export_service()._exports_dir
+            for partial in (
+                exports_dir / str(job_id),
+                exports_dir / f"neuronpedia_export_{job_id}.zip",
+            ):
+                if partial.exists():
+                    if partial.is_dir():
+                        shutil.rmtree(partial)
+                    else:
+                        partial.unlink()
+                    logger.info(
+                        "Removed the cancelled export's partial output: %s", partial
+                    )
         except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
             logger.warning("Could not remove the partial export tree: %s", cleanup_exc)
         return {"status": "cancelled", "job_id": job_id, "detail": cancelled.detail}

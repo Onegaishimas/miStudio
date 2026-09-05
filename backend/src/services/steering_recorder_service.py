@@ -205,16 +205,24 @@ class SteeringRecorderService:
             if cancel_check is not None and cancel_check():
                 from ..core.cancellation import OperatorCancelled
 
-                # PAIRED, NOT MERELY CONVENTIONAL. `run_id` defaults to None so
-                # the signature stays additive, but a checker without an id
-                # would raise an OperatorCancelled whose target is None — which
-                # `@cooperative_cancel` then reports as a cancellation of
-                # nothing, and `record_progress` writes nowhere. One caller
-                # passes both today; this is what stops the second one not.
-                assert run_id is not None, (
-                    "record_samples was given a cancel_check but no run_id; "
-                    "the cancellation would name no row"
-                )
+                # PAIRED, NOT MERELY CONVENTIONAL, AND NOT AN `assert`.
+                #
+                # `run_id` defaults to None so the signature stays additive, but
+                # a checker without an id raises an OperatorCancelled whose
+                # target is None — reported as a cancellation of nothing, and
+                # `record_progress` writes nowhere.
+                #
+                # This was an `assert`, which is stripped under `python -O` and,
+                # worse, raises AssertionError — an ORDINARY Exception, which
+                # `run_circuit_record`'s handler turns into a FAILED run. A
+                # programming error on the cancellation path would have become
+                # the exact crash-report-instead-of-cancel bug this arc exists
+                # to remove.
+                if run_id is None:
+                    raise ValueError(
+                        "record_samples was given a cancel_check but no run_id; "
+                        "the cancellation would name no row"
+                    )
                 raise OperatorCancelled(
                     "steering_record", run_id,
                     detail=f"stopped at prompt {pi} of {len(cfg['prompts'])}",

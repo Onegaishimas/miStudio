@@ -230,16 +230,30 @@ def owns_its_failure(fn):
 
         try:
             return fn(self, *args, **kwargs)
-        except OperatorCancelled:
+        except OperatorCancelled as cancelled:
             # A CANCELLATION IS NOT A FAILURE, AND MUST NOT BE RECORDED AS ONE.
             #
-            # This handler catches BaseException, so without this branch it
-            # reached `fail_row` and relabelled a row the operator had just
-            # CANCELLED as FAILED — the last write wins, and the last write was
-            # the crash report. Re-raised untouched so the task's own
-            # `except TaskCancelled` can return the canonical cancelled result,
-            # which is what acks the `acks_late` message.
-            raise
+            # This handler catches BaseException, so without this branch a
+            # cancellation reached `fail_row` and relabelled a row the operator
+            # had just CANCELLED as FAILED — last write wins, and the last write
+            # was the crash report.
+            #
+            # A task's OWN `except TaskCancelled` sits inside the decorated
+            # function, so it runs before this decorator ever sees anything;
+            # reaching here means the task has no local handler. Returning the
+            # canonical cancelled result is what ACKS the acks_late message —
+            # re-raising a BaseException would let it escape celery unacked,
+            # which is the 12-hour strand this design exists to avoid.
+            logger.info(
+                "%s cancelled with no task-local handler; returning the "
+                "canonical result", cancelled,
+            )
+            return {
+                "status": "cancelled",
+                "scope": cancelled.scope,
+                "target_id": cancelled.target_id,
+                "detail": cancelled.detail,
+            }
         except BaseException as exc:  # noqa: BLE001 - recorded, then re-raised
             request_id = getattr(getattr(self, "request", None), "id", None)
             if request_id:

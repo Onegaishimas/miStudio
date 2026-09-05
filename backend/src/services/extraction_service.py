@@ -1984,7 +1984,10 @@ class ExtractionService:
             # The window is always open: the per-feature checker throttles at
             # 2 s, so the final iterations of the latent_dim loop usually do not
             # poll at all.
-            self.db.expire_all()
+            # No expire_all(): `populate_existing()` already re-reads, and
+            # expiring the whole session makes the next attribute access on a
+            # deleted row raise ObjectDeletedError — turning a clean finish
+            # into a logged failure.
             _row = self.db.query(ExtractionJob).filter(
                 ExtractionJob.id == extraction_job.id
             ).populate_existing().first()

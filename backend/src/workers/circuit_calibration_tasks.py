@@ -59,6 +59,13 @@ def _refuse_if_cancelled(db, target_id) -> bool:
             .first()
         )
     except Exception:  # noqa: BLE001 - a failed check must not block the work
+        # LOUD, even though it fails open. Returning True silently is how a
+        # guard becomes decorative: a rename of `get_scope` or a scope's model
+        # would make this permanently inert with nothing in the log to say so.
+        logger.exception(
+            "Could not check whether %s was already cancelled; starting anyway",
+            target_id,
+        )
         return True
     if row is None:
         return True

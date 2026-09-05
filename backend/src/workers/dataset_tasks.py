@@ -258,6 +258,29 @@ def download_dataset_task(
         data_dir = settings.datasets_dir
         data_dir.mkdir(parents=True, exist_ok=True)
         raw_path = data_dir / repo_id.replace("/", "_")
+        # Published to the enclosing scope so the cancellation handler can clean
+        # up whichever of these exist. They are assigned inside the try, so a
+        # checkpoint added ANYWHERE above this line would make the handler
+        # itself raise UnboundLocalError — an error inside an error handler,
+        # caught by nothing. Bound defensively rather than by construction.
+        # NOT `downloads/`. `data_dir` is `settings.datasets_dir`, the cache_dir
+        # shared by EVERY dataset — so `downloads/` holds other jobs' resumable
+        # chunks, and the success path only clears it when the operator has set
+        # `auto_cleanup_after_download`. R1 deleted it unconditionally on any
+        # cancel, which throws away an unrelated interrupted download.
+        #
+        # What IS this job's: the per-repo arrow tree and, on a re-download, the
+        # saved dataset directory. Both are keyed on repo_id, and one Dataset
+        # row per repo_id is enforced at `datasets.py`'s 409 — which is what
+        # makes deleting them safe, and is worth naming at the deletion site.
+        _cleanup_paths = [
+            data_dir / repo_id.replace("/", "___"),
+            raw_path,
+        ]
+        if settings.auto_cleanup_after_download:
+            # Only when the operator has already opted into clearing the shared
+            # transfer cache after a successful download.
+            _cleanup_paths.append(data_dir / "downloads")
 
         # Download dataset from HuggingFace
         emit_dataset_progress(
@@ -454,11 +477,7 @@ def download_dataset_task(
         # Getting this wrong replaced the endpoint's cleanup with a no-op, so
         # the multi-gigabyte cache leaked with nothing left to remove it — a
         # worse outcome than the live-directory delete the move was meant to fix.
-        for partial in (
-            data_dir / "downloads",
-            data_dir / repo_id.replace("/", "___"),
-            raw_path,
-        ):
+        for partial in locals().get("_cleanup_paths") or ():
             remove_partial_download(str(partial))
 
         record_progress(
@@ -1332,11 +1351,22 @@ def tokenize_dataset_task(
         # is the shape this repo keeps finding in its own fixes.
         try:
             with self.get_db() as db:
-                dataset_obj = db.query(Dataset).filter_by(id=dataset_uuid).first()
-                if dataset_obj:
+                dataset_obj = (
+                    db.query(Dataset)
+                    .filter_by(id=dataset_uuid)
+                    .populate_existing()
+                    .first()
+                )
+                # DON'T RESURRECT A CANCELLED DOWNLOAD. This was the one status
+                # write in the change that went around the registry: if the
+                # DOWNLOAD had also been cancelled (status=error with
+                # cancel_requested_at set), restoring READY here undid it.
+                if dataset_obj and dataset_obj.cancel_requested_at is None:
                     dataset_obj.status = DatasetStatus.READY
                     dataset_obj.progress = 0.0
-                    dataset_obj.error_message = "Tokenization cancelled by user"
+                    # Cleared, not left set: a READY row carrying an error
+                    # message reads as a dataset that failed and works anyway.
+                    dataset_obj.error_message = None
                     db.commit()
         except Exception as restore_exc:  # noqa: BLE001 - must not mask the cancel
             logger.warning(
