@@ -9,6 +9,7 @@ corrupts the completed discovery). Cancellation via DB-status polling.
 import logging
 from typing import Any, Dict
 
+from ..core.cancellation import cancel_checker
 from ..core.celery_app import celery_app
 from .base_task import DatabaseTask
 from .circuit_capture_tasks import _cancel_checker
@@ -68,7 +69,17 @@ def run_circuit_faithfulness(self, circuit_id: str,
         try:
             result = CircuitFaithfulnessService.run(
                 db, circuit_id, config,
-                cancel_check=None,
+                # WAS `cancel_check=None`. The entire cancellation path in
+                # `circuit_faithfulness_service` — the poll, the raise, and the
+                # `_FaithfulnessCancelled` handler five lines below — was
+                # written, tested and DEAD, because the one caller passed None.
+                # Nothing else had to change to bring it back.
+                #
+                # `db=db` deliberately: this service holds one long-lived task
+                # session and the checker re-reads with populate_existing, so
+                # it sees the API process's write rather than the row as it
+                # looked when the run started.
+                cancel_check=cancel_checker("circuit_faithfulness", circuit_id, db=db),
                 progress_cb=lambda pct: emit_circuit_run_progress(
                     "faithfulness", circuit_id, pct))
             emit_circuit_run_completed("faithfulness", circuit_id,

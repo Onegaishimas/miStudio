@@ -26,6 +26,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from ..core.clock import utc_now, utc_now_iso
 from ..core.config import settings
 from ..models.external_sae import ExternalSAE, SAEStatus
 from ..models.feature import Feature
@@ -618,7 +619,6 @@ sparse autoencoder training and analysis tool.
 
 ```python
 from sae_lens import SAE
-from ..core.clock import utc_now, utc_now_iso
 
 sae = SAE.load_from_pretrained(
     path="./saelens/",

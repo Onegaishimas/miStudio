@@ -224,6 +224,11 @@ def _export_job():
     return NeuronpediaExportJob
 
 
+def _circuit():
+    from ..models.circuit import Circuit
+    return Circuit
+
+
 #: J-space work is tracked in `task_queue`, keyed by the CELERY id. That is one
 #: registered scope, NOT the universal channel: task_queue is populated by only
 #: three lifecycles, and its key does not exist until after `.delay()` — the
@@ -279,6 +284,22 @@ register(CancelScope(
     kind="neuronpedia_export",
     model=_export_job,
     terminal_values=frozenset({"completed", "failed", "cancelled"}),
+))
+
+#: Faithfulness (rung 3) runs on a CIRCUIT, not on a discovery run — its own
+#: lifecycle with its own status column. `pending|running|completed|failed`
+#: were the documented values; `cancelled` was already written by the task's
+#: `_FaithfulnessCancelled` handler, which until now could never fire because
+#: the task passed `cancel_check=None`.
+register(CancelScope(
+    kind="circuit_faithfulness",
+    model=_circuit,
+    status_field="faithfulness_status",
+    #: The circuit row long outlives any one faithfulness run, and `error_message`
+    #: on a Circuit is not about the run. The manifest is the record.
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
 ))
 
 register(CancelScope(

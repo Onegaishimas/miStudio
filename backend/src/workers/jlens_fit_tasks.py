@@ -155,6 +155,7 @@ def _fit_and_publish(
     from ..ml.jlens_fitter import DEFAULT_CONVERGENCE_DELTA, JacobianFitter
     from ..services.jlens_artifact_service import (
         ArtifactCoverageLoss,
+        ArtifactQualityRegression,
         JLensArtifactService,
     )
     from ..services.jlens_validation import defer_consumer_checks
