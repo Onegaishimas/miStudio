@@ -283,6 +283,11 @@ register(CancelScope(
 register(CancelScope(
     kind="neuronpedia_export",
     model=_export_job,
+    #: `DELETE /export/{job_id}` removes the row outright, so a vanished row is
+    #: a stop signal here exactly as it is for labeling — there is nothing left
+    #: to write results to and nobody waiting for them. With the default
+    #: "continue" the export would run to completion against a deleted row.
+    missing_row="cancelled",
     terminal_values=frozenset({"completed", "failed", "cancelled"}),
 ))
 

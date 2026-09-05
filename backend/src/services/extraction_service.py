@@ -11,7 +11,7 @@ import time
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Callable, Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -30,7 +30,7 @@ from src.models.checkpoint import Checkpoint
 from src.models.dataset import Dataset
 from src.models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from src.models.external_sae import ExternalSAE, SAEStatus
-from src.core.cancellation import guard_allows
+from src.core.cancellation import OperatorCancelled, guard_allows
 from src.core.database import get_db
 from src.workers.websocket_emitter import emit_training_progress, emit_extraction_job_progress, emit_extraction_deleted
 from src.core.config import settings
@@ -1139,7 +1139,8 @@ class ExtractionService:
     def extract_features_for_sae(
         self,
         sae_id: str,
-        config: Dict[str, Any]
+        config: Dict[str, Any],
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """
         Core feature extraction logic for external SAEs (called by Celery task with sync Session).
@@ -1350,6 +1351,14 @@ class ExtractionService:
 
             # Load base model
             logger.info(f"Loading base model: {model_record.repo_id}")
+            # POLL BEFORE THE INDIVISIBLE STEP. Loading the base model is
+            # minutes on a large model and offers no checkpoint of its own.
+            if cancel_check is not None and cancel_check():
+                raise OperatorCancelled(
+                    "sae_extraction", extraction_job.id,
+                    detail="stopped before the base model was loaded",
+                )
+
             resolved_model_path = settings.resolve_data_path(model_record.file_path) if model_record.file_path else None
             model_is_downloaded = resolved_model_path and resolved_model_path.exists()
             base_model, tokenizer, model_config, metadata = load_model_from_hf(
@@ -1526,6 +1535,18 @@ class ExtractionService:
                     total_batches = (len(dataset) + batch_size - 1) // batch_size
                     
                     for batch_start in range(0, len(dataset), batch_size):
+                        # THE SAMPLING CHECKPOINT. Phase 1 commits nothing —
+                        # the heaps and activation counts are in memory — so
+                        # abandoning at the top of a batch leaves the database
+                        # exactly as it was.
+                        if cancel_check is not None and cancel_check():
+                            raise OperatorCancelled(
+                                "sae_extraction", extraction_job.id,
+                                detail=(
+                                    f"stopped while sampling, at "
+                                    f"{batch_start} of {len(dataset)}"
+                                ),
+                            )
                         batch_end = min(batch_start + batch_size, len(dataset))
                         batch = dataset[batch_start:batch_end]
 
@@ -1819,6 +1840,19 @@ class ExtractionService:
                 logger.info(f"Deleted {existing_count} stale features for re-extraction")
 
             for neuron_idx in range(latent_dim):
+                # THE WRITE CHECKPOINT. Phase 2 does commit, in
+                # `db_commit_batch` chunks, so abandoning here leaves the
+                # features written so far — which is why the row must end up
+                # CANCELLED rather than COMPLETED: a partial feature set that
+                # claimed success would be read as a finished extraction.
+                if cancel_check is not None and cancel_check():
+                    raise OperatorCancelled(
+                        "sae_extraction", extraction_job.id,
+                        detail=(
+                            f"stopped while writing features, at "
+                            f"{neuron_idx} of {latent_dim}"
+                        ),
+                    )
                 heap_items = feature_activations[neuron_idx]
                 if not heap_items:
                     dead_neurons_filtered += 1

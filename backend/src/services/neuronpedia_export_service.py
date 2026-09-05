@@ -26,6 +26,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from ..core.cancellation import OperatorCancelled, is_cancelled
 from ..core.clock import utc_now, utc_now_iso
 from ..core.config import settings
 from ..models.external_sae import ExternalSAE, SAEStatus
@@ -259,6 +260,12 @@ class NeuronpediaExportService:
             await self._update_stage(db, job, "Creating archive", 95)
             archive_path = await self._create_archive(output_dir, job_id)
 
+            # A CANCELLED EXPORT IS NOT COMPLETED. Same rule as the extraction
+            # path: terminal -> terminal is allowed by the guard because the
+            # janitors need it, so a finished run would otherwise overwrite the
+            # operator's cancellation with COMPLETED at the very last write.
+            await self._cancel_point(db, str(job.id))
+
             # Complete job
             job.status = ExportStatus.COMPLETED.value
             job.output_path = str(archive_path)
@@ -294,6 +301,37 @@ class NeuronpediaExportService:
             include_explanations=config_dict.get("include_explanations", True),
         )
 
+    async def _cancel_point(self, db: AsyncSession, job_id: str):
+        """Stop here if the operator asked. Raises `OperatorCancelled`.
+
+        A FRESH READ, never `job.status`. `execute_export` loads the row once
+        with `db.get(...)`, which returns the identity-mapped instance without
+        emitting SQL, and both session factories are `expire_on_commit=False`
+        — so the in-memory `job.status` is frozen at what it was when the
+        export began and can NEVER show the API process's write. A checkpoint
+        reading it would be inert (MIS-E2E-057).
+
+        A VANISHED ROW IS ALSO A STOP. `DELETE /export/{job_id}` removes the
+        row outright; there is then nothing to write results to and no one
+        waiting for them.
+        """
+        result = await db.execute(
+            select(NeuronpediaExportJob)
+            .where(NeuronpediaExportJob.id == job_id)
+            .execution_options(populate_existing=True)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise OperatorCancelled(
+                "neuronpedia_export", job_id, "deleted",
+                "the export job row was deleted while it was running",
+            )
+        if is_cancelled("neuronpedia_export", row.status):
+            raise OperatorCancelled(
+                "neuronpedia_export", job_id,
+                detail=f"stopped during {row.current_stage or 'export'}",
+            )
+
     async def _update_stage(
         self,
         db: AsyncSession,
@@ -301,7 +339,14 @@ class NeuronpediaExportService:
         stage: str,
         progress: float,
     ):
-        """Update job stage and progress."""
+        """Update job stage and progress — and the export's cancel checkpoint.
+
+        The stage boundaries are the only checkpoints `execute_export` has of
+        its own; the per-feature loops live one level down in three services
+        that each swallow exceptions with `except Exception`, which is why
+        `OperatorCancelled` derives from BaseException.
+        """
+        await self._cancel_point(db, str(job.id))
         job.current_stage = stage
         job.progress = progress
         await db.commit()
@@ -686,7 +731,15 @@ sae = SAE.load_from_pretrained(
         if not job:
             raise ValueError(f"Export job not found: {job_id}")
 
-        if job.status in (ExportStatus.COMPLETED.value, ExportStatus.FAILED.value):
+        # ALREADY-CANCELLED IS NOT CANCELLABLE EITHER. This tested only
+        # COMPLETED and FAILED, so re-cancelling a cancelled job re-stamped
+        # `completed_at` and returned True — reporting a fresh cancellation of
+        # something that had already stopped.
+        if job.status in (
+            ExportStatus.COMPLETED.value,
+            ExportStatus.FAILED.value,
+            ExportStatus.CANCELLED.value,
+        ):
             return False
 
         job.status = ExportStatus.CANCELLED.value

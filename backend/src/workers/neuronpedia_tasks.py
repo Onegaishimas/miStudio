@@ -18,7 +18,7 @@ from ..services.neuronpedia_export_service import (
     ExportConfig,
 )
 from .websocket_emitter import emit_export_progress
-from ..core.cancellation import guard_allows
+from ..core.cancellation import guard_allows, is_cancelled
 from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
@@ -97,8 +97,23 @@ class NeuronpediaTask(DatabaseTask):
             job_id: Export job ID
             error_message: Error message to store
         """
+        # THROUGH THE GUARD. This wrote FAILED unconditionally, so the bare
+        # `except Exception` that calls it would relabel a row the operator had
+        # just CANCELLED. terminal -> terminal is still permitted, so a genuine
+        # failure after a cancel is recorded; what is refused is dragging a live
+        # cancellation into a crash report.
         with self.get_db() as db:
-            job = db.query(NeuronpediaExportJob).filter_by(id=job_id).first()
+            job = (
+                db.query(NeuronpediaExportJob)
+                .filter_by(id=job_id)
+                .populate_existing()
+                .first()
+            )
+            if job and is_cancelled("neuronpedia_export", job.status):
+                logger.info(
+                    "Export %s was cancelled; not relabelling it failed", job_id
+                )
+                return
             if job:
                 job.status = ExportStatus.FAILED.value
                 job.error_message = error_message

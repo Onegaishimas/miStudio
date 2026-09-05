@@ -17,6 +17,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
+from starlette.concurrency import run_in_threadpool
+
+from ....core.cancellation import request_cancel
 from ....core.config import settings
 from ....core.database import get_db
 from ....models.dataset import Dataset, DatasetStatus
@@ -725,28 +728,27 @@ async def cancel_sae_extraction(
             f"Cannot cancel extraction in status: {extraction_job.status}"
         )
 
-    # Revoke Celery task if task_id is available
-    if extraction_job.celery_task_id:
-        try:
-            from ....core.celery_app import celery_app
-            celery_app.control.revoke(
-                extraction_job.celery_task_id,
-                terminate=True,
-                signal='SIGTERM'
-            )
-            logger.info(f"Revoked Celery task {extraction_job.celery_task_id} for extraction {extraction_job.id}")
-        except Exception as e:
-            logger.exception("Failed to revoke Celery task")
-            # Continue anyway - will update database status
+    # CANCELLED, NOT FAILED. This wrote `status = FAILED` with the message
+    # "Cancelled by user" while the sibling lifecycle (`models.py`) wrote
+    # CANCELLED for the same operator action. `ExtractionStatus.CANCELLED` has
+    # existed the whole time. Two consequences, both real: the UI showed a
+    # deliberate stop as a failure, and — once a worker polls this row — a
+    # checker looking for "cancelled" could never see a cancel expressed as
+    # "failed". That vocabulary split is what Shape C tests for.
+    #
+    # `request_cancel` also issues a plain `revoke()` centrally, for the one
+    # case it genuinely handles: a task that has not started never will.
+    # `terminate=True, signal='SIGTERM'` is gone — it signals a POOL CHILD and
+    # this worker is `--pool=solo`, so it returned cleanly and did nothing.
+    outcome = await run_in_threadpool(
+        request_cancel,
+        "sae_extraction",
+        extraction_job.id,
+        reason="Cancelled by user",
+        celery_task_id=extraction_job.celery_task_id,
+    )
 
-    # Update status to FAILED with cancellation message
-    extraction_job.status = ExtractionStatus.FAILED.value
-    extraction_job.error_message = "Cancelled by user"
-    extraction_job.updated_at = datetime.now(timezone.utc)
-
-    await db.commit()
-
-    return {"message": f"Extraction {extraction_job.id} cancelled"}
+    return {"message": outcome.detail, "extraction_id": extraction_job.id}
 
 
 @router.post("/batch-extract-features", response_model=BatchExtractionResponse)

@@ -19,7 +19,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 1.0 — the module, no callers | ✅ done | `efc576a3` |
 | 1 — the guard everywhere, still no checkers | ✅ done | this record |
 | 2 — `extract_activations`, the GPU proof | ✅ code; hardware acceptance pending | this record |
-| 3 — the remaining compute tasks | ▢ | |
+| 3 — the remaining compute tasks | ✅ except dataset tokenize | `fea78286` + this record |
 | 4 — the downloads | ▢ | |
 | 5 — shim the five healthy conventions | ▢ | |
 | 6 — the missing routes | ▢ | |
@@ -38,6 +38,12 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | `backend/tests/unit/test_extraction_cancellation.py` | Phase 2 Shapes A and C: the extraction actually stops, and the endpoint's write is what the worker reads |
 | `backend/src/workers/model_tasks.py` | `extract_activations` + `build_extraction_progress_callback` — the checkpoint |
 | `backend/src/api/v1/endpoints/models.py` | `cancel_extraction` — now asks, rather than pretending to terminate |
+| `backend/src/api/v1/endpoints/saes.py` | `cancel_sae_extraction` — wrote FAILED for a cancel; now CANCELLED |
+| `backend/src/services/neuronpedia_export_service.py` | `_cancel_point`, the export's only real checkpoint; also the `utc_now` NameError |
+| `backend/tests/unit/test_faithfulness_cancellation.py` | the resurrected faithfulness path |
+| `backend/tests/unit/test_sae_extraction_cancellation.py` | SAE extraction Shapes A and C |
+| `backend/tests/unit/test_export_cancellation.py` | export checkpoint + the failure writer |
+| `backend/tests/unit/test_no_undefined_names.py` | the ratcheted F821 gate |
 | `backend/src/services/extraction_db_service.py` | `update_progress` for activation extraction — routed through `record_progress` |
 | `backend/src/services/extraction_service.py` | `update_extraction_status{,_sync}` for the SAE lifecycle — guarded via `guard_allows` |
 | `backend/src/workers/neuronpedia_tasks.py` | `update_export_progress` — the progress-only writer |
@@ -386,3 +392,116 @@ write, and the worker picking up the next queued job. Both `finally:` blocks
 that release the GPU (`model_tasks.py` and `activation_service.py`) do run on a
 propagating `BaseException`, which is necessary but not sufficient — the repo's
 record is explicit that GPU bugs are found only on GPUs.
+
+
+---
+
+## Phase 3 — the remaining compute tasks
+
+Three of four done. **Dataset tokenization is deferred to Phase 4**, because it
+shares the `Dataset.map(num_proc=N)` fork-pool problem with the downloads and
+its only owner-process checkpoint is the same tqdm bridge.
+
+### The one-liner, and a correction to the plan
+
+`circuit_validation_tasks.py` passed `cancel_check=None`, so the poll, the
+`_FaithfulnessCancelled` raise and the handler that turns it into a cancelled
+status were all unreachable. Passing a real checker was the whole fix.
+
+**The plan said that path was "written, tested and dead". It was written and
+NEVER TESTED** — nothing in the suite had ever constructed
+`_FaithfulnessCancelled`, so deleting it outright would have gone unnoticed. It
+has eight tests now, one driving the real `_behavior` loop to prove a cancelled
+run costs **zero forward passes** rather than one more prompt.
+
+Not yet operator-reachable: no cancel ROUTE exists for faithfulness. Phase 6
+adds it. Until then the capability is real but only a janitor or a direct write
+can trigger it, and by the reachability rule it is not shipped.
+
+### Three latent NameErrors, found by chasing the class
+
+`execute_export` called `utc_now()` as its first statement while the file's only
+`from ..core.clock import utc_now` sat **inside a README template's f-string** —
+a python code block in text the export writes for its users. **Every export died
+with NameError** before reaching its own `try:`, so even the FAILED write never
+ran and the row stranded in COMPUTING. Verified by AST: zero clock imports in
+that module.
+
+Running the linter over the whole tree found two more:
+
+* `steering.py` called `signal.SIGKILL` in the orphan-worker reaper without
+  importing `signal`. That reaper is the **sanctioned** replacement for
+  `pkill -f steering@`, which is forbidden here — so the supported path raised
+  NameError and the forbidden one was the only thing that worked.
+* `jlens_fit_tasks.py` had `except ArtifactQualityRegression` with the name
+  unimported in that function. Evaluating an except clause resolves the name,
+  so **any** exception from the publish call became a NameError masking it.
+
+Three further hits are false positives, verified by reading and listed with
+reasons behind a ratchet that fails if one stops being reported.
+
+**The gate had the bug it hunts.** Its first version passed an
+`--output-format` ruff 0.1.15 rejects; the command errored, the parse found
+nothing, and it reported a clean tree — **a lint guard failing OPEN**. It now
+refuses any exit code that is not "clean" or "findings", with a negative control.
+
+### `extract_features_from_sae`
+
+The service had **no injection point at all** — no `cancel_check`, no callback.
+It gained one, plus three checkpoints: before the multi-minute base-model load;
+at the top of the phase-1 sampling batch loop (which commits nothing, so
+abandoning leaves the database untouched); and per-feature in the phase-2 write
+loop (which does commit, which is why the row must end CANCELLED — a partial
+feature set claiming success would read as a finished extraction).
+
+**Three guard bypasses fixed.** The task wrote `status = FAILED` straight onto
+the ORM row in its failure handler and in two validation branches, so an
+exception arriving after an operator cancelled relabelled the row FAILED and
+lost the cancellation at the last possible moment.
+
+**The endpoint wrote the wrong word.** `saes.py` set `FAILED` + "Cancelled by
+user" while the sibling lifecycle wrote `CANCELLED` for the identical action;
+`ExtractionStatus.CANCELLED` existed the whole time. The UI showed a deliberate
+stop as a crash, and a checker looking for "cancelled" could never see a cancel
+spelled "failed". That is what Shape C is for.
+
+### The export path — two assumptions in the plan were wrong
+
+* **The Celery task is dead code.** Nothing dispatches
+  `neuronpedia.execute_export`; the live path is a FastAPI `BackgroundTasks`
+  call running `execute_export` **inside the API process**. A checkpoint added
+  to the Celery task would have fired on nothing. It went into the service,
+  which both paths share.
+* **A checkpoint reading `job.status` would have been inert.** `execute_export`
+  loads the row once with `db.get(...)`, which returns the identity-mapped
+  instance without emitting SQL, and both session factories are
+  `expire_on_commit=False` — so the in-memory status is frozen at whatever it
+  was when the export began. `_cancel_point` does a fresh `populate_existing`
+  read.
+
+Also closed here: a **deleted** row now stops the run (`DELETE /export/{id}`
+removes it outright, and the default `missing_row="continue"` would have run
+the export to completion against nothing); `mark_export_failed` no longer
+relabels a cancellation as a crash; and re-cancelling an already-cancelled job
+no longer reports a fresh cancellation.
+
+### Mutation controls — 13 run, 13 verified biting
+
+P3-C1…C13 cover: the one-liner reverted, the faithfulness scope pointed at the
+wrong column, the service loop's poll deleted, the SAE checker removed, the
+sampling poll deleted, the endpoint writing FAILED again, the task's failure
+path bypassing the guard, the export checkpoint trusting the identity map, a
+deleted row no longer stopping, `_update_stage` no longer a checkpoint, the
+completion write unguarded, `mark_export_failed` relabelling again, and the
+F821 gate narrowed.
+
+**P3-C11 survived first, and it was a fail-open assertion of exactly the kind
+this arc keeps finding.** The test located the checkpoint with `str.rfind`,
+which returns **-1** when it is absent — and `-1 < complete` is true, so the
+assertion passed precisely in the case it existed to catch. Fixed to require
+presence before ordering; the control then bit.
+
+That is the third fail-open guard in this arc (the source-scrape that could not
+tell "moved" from "deleted", the lint gate that reported a clean tree from a
+failed command, and this). The pattern is worth naming: **an assertion built on
+a sentinel return value passes when the thing is missing.**
