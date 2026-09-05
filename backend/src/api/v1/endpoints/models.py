@@ -625,7 +625,26 @@ async def extract_model_activations(
         )
 
     try:
-        # Generate extraction ID (same format as in extract_activations task)
+        # THE ID IS AUTHORITATIVE, NOT A GUESS.
+        #
+        # This generated the id from `datetime.now()` and then did NOT pass it
+        # to the task, which generated its own from a second `datetime.now()`.
+        # The comment "same format as in extract_activations task" is the whole
+        # defect: the two agree only when both calls land inside the same
+        # second. Observed straddling one on 2026-09-05 — the endpoint returned
+        # `..._185140` and the row was created as `..._185141`.
+        #
+        # Three consequences, all silent:
+        #   * the client holds an id that does not exist
+        #   * the "starting" WebSocket event is emitted on a channel nothing
+        #     will ever publish to, so the UI never sees the job begin
+        #   * CANCEL KEYS ON THIS ID, so an operator cancelling with the id
+        #     they were handed gets a 404 and the extraction runs on — the
+        #     exact shape of failure the cancellation work exists to remove
+        #
+        # The task already takes `extraction_id` and only invents one when it
+        # is None (it is passed on retries), so handing it over is the whole
+        # fix.
         import datetime
         extraction_id = f"ext_{model_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -639,6 +658,7 @@ async def extract_model_activations(
             batch_size=request.batch_size or 8,
             micro_batch_size=request.micro_batch_size,
             gpu_id=request.gpu_id or 0,
+            extraction_id=extraction_id,
         )
 
         # Emit immediate progress update to show job has started
