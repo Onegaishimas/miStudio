@@ -105,11 +105,18 @@ class TestRequestCancel:
 class TestCancelChecker:
     def test_polls_on_the_very_first_call(self):
         """Throttling from zero would skip the opening checks, so a task
-        cancelled immediately would run to its Nth checkpoint before noticing."""
+        cancelled immediately would run to its Nth checkpoint before noticing.
+
+        The `every=5` count throttle this used to pass is gone (Phase 7): a
+        count is a guess about one loop's unit cost and travels to no other —
+        `% 5` over attribution batches on a large model is up to twenty minutes
+        of latency. The first-call rule it was testing is unchanged and is now
+        the ONLY mechanism guaranteeing it, which is what makes it mutable.
+        """
         row = _Row("cancelled")
         ctx, _ = _db_with(row)
         with patch("src.core.database.get_sync_db", return_value=ctx):
-            check = jlens_progress.cancel_checker("t1", every=5)
+            check = jlens_progress.cancel_checker("t1")
             assert check() is True
 
     def test_false_while_the_row_is_running(self):

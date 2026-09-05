@@ -128,12 +128,12 @@ def request_cancel(task_id: str, reason: str = "cancelled by operator") -> bool:
     return _request_cancel("jlens_task", task_id, reason=reason).requested
 
 
-def cancel_checker(task_id: str, every: int = 1):
+def cancel_checker(task_id: str):
     """A callable the work loop polls; True once cancellation is requested.
 
-    A SHIM over `core.cancellation.cancel_checker`. `every` is retained for the
-    existing call sites and is now ignored in favour of the time throttle —
-    a count is a guess about one loop's unit cost and travels to no other.
+    A SHIM over `core.cancellation.cancel_checker`. The old `every=` count
+    throttle is gone: a count is a guess about one loop's unit cost and travels
+    to no other loop. See that module for why the budget is time.
     """
     from ..core.cancellation import cancel_checker as _cancel_checker
 

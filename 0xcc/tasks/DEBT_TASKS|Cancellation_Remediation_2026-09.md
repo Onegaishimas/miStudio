@@ -23,7 +23,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 4 — the downloads + tokenization | ✅ | this record |
 | 5 — shim the five healthy conventions | ✅ | this record |
 | 6 — the missing routes | ✅ | this record |
-| 7 — cleanup | ▢ | |
+| 7 — cleanup | ✅ | this record |
 | R1 / R2 / R3 review rounds | ▢ | |
 
 ---
@@ -747,3 +747,52 @@ dispatch helper the three circuit routes use.
 That is the sixth substring-or-sentinel guard in this arc to fail, and the
 lesson is now unambiguous: **if an assertion can be satisfied by text that is
 not the thing, it will be.**
+
+
+---
+
+## Phase 7 — cleanup
+
+* **`every=` is gone.** It existed only so the circuit and J-lens shims could
+  keep their count semantics through the migration. Nothing passes it, and the
+  first-call rule is now the sole mechanism guaranteeing that a job cancelled
+  before it starts is noticed — which is what makes it mutable.
+* **`test_dataset_cancel_scope.py`'s revoke test is rewritten.** It asserted
+  the worker's source still contained the word `revoke`, which pinned the
+  *illusion*: `revoke(terminate=)` is inert on a solo pool, so that test would
+  have stayed green through the entire period when cancelling a dataset
+  download did nothing at all. It now asserts, via AST, that the worker writes
+  the flag the running download polls — a substring check is satisfied by the
+  tqdm bar's `cancel_scope=` in the same file.
+* **One home for the solo-pool explanation.** It was duplicated with drift
+  across seven files: every copy correct, none authoritative, each an
+  invitation to rediscover the same finding a ninth time.
+* **The PID-kill escape hatch is documented as an OPERATOR PROCEDURE**, in that
+  same docstring, and explicitly not as a code path — including the
+  `/proc/<pid>/cmdline` rule (a `pgrep -f` pattern that appears in its own
+  command line matches the caller's shell, and a wait loop written that way
+  never exits — twice-observed here), SIGTERM before SIGKILL, and the 12-hour
+  `acks_late` cost of getting it wrong.
+
+---
+
+## The arc's durable finding
+
+**Six guards in this remediation failed because they asserted about text or a
+sentinel rather than about behaviour.** Each either failed against correct code
+or passed against broken code:
+
+| guard | how it failed |
+|---|---|
+| the progress-warning string | text moved to core; hid a real observability loss |
+| `terminate=True` absent | matched the comment explaining why it is wrong |
+| `raise_if_cancelled` ordering | matched the comment explaining the ordering |
+| `rfind(...) < complete` | `-1` satisfies `<`, so it passed when absent |
+| `.populate_existing()` in one method | failed against unchanged behaviour |
+| the scope name in worker source | satisfied by a `cancel_scope=` while the real call was deleted |
+
+Plus one of the same family in the tooling: the F821 lint gate reported a clean
+tree from a command that had errored.
+
+**If an assertion can be satisfied by text that is not the thing, it will be.**
+Every one of these is now driven, or reads the AST, or reads the live registry.

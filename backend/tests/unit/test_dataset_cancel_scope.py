@@ -132,10 +132,46 @@ def test_both_dispatch_sites_still_store_the_task_id():
     )
 
 
-def test_worker_accepts_the_task_id_and_revokes():
-    """The worker's signature and revoke branch must both still be there."""
+def test_the_worker_writes_the_request_the_download_polls():
+    """REWRITTEN 2026-09-05. This asserted the worker's source still contained
+    the word "revoke".
+
+    That was the wrong thing to protect. `revoke(terminate=)` is INERT on this
+    deployment's `--pool=solo -c 1` workers: terminate signals a pool child and
+    solo has none, and a busy solo worker never reads the control queue, so the
+    revoke is not even delivered. Pinning its presence pinned the illusion —
+    the test would have stayed green through the entire period when cancelling
+    a dataset download did nothing at all.
+
+    What matters is that the worker writes the flag the RUNNING download polls
+    at its next tqdm tick. `revoke()` without terminate is still issued
+    centrally by `request_cancel`, for the one case it genuinely handles: a
+    task that has not started never will.
+    """
+    import ast
+
     from src.workers.dataset_tasks import cancel_dataset_download
 
     sig = inspect.signature(cancel_dataset_download)
-    assert "task_id" in sig.parameters
-    assert "revoke" in _cancel_source()
+    assert "task_id" in sig.parameters, (
+        "the endpoint passes the celery id so a not-yet-started task can be "
+        "revoked; dropping it silently loses that case"
+    )
+
+    # AST, not a substring: the scope name also appears in this module as the
+    # tqdm bar's `cancel_scope=`, so `'"dataset_download"' in source` is
+    # satisfied even with the request write deleted.
+    tree = ast.parse(_cancel_source())
+    wrote = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (getattr(node.func, "id", None) == "request_cancel")
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "dataset_download"
+    ]
+    assert wrote, (
+        "the worker no longer writes cancel_requested_at, so the running "
+        "download's tqdm poll has no flag to read and the task runs to "
+        "completion"
+    )

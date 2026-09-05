@@ -21,6 +21,38 @@ checkpoint it chooses. This module is the one implementation of that, and
 `SCOPES` below is the one place the project's several terminal vocabularies are
 written down.
 
+THIS DOCSTRING IS THE SINGLE HOME FOR THE ABOVE. The solo-pool explanation was
+duplicated, with drift, across seven files — every copy correct, none
+authoritative, and each one an invitation to rediscover the same finding a
+ninth time. Modules that need it now point here rather than restating it.
+
+────────────────────────────────────────────────────────────────────────────
+OPERATOR PROCEDURE — killing a wedged worker. NOT A CODE PATH.
+
+Cooperative cancellation cannot help with a task that is stuck below its
+finest checkpoint: a single `from_pretrained` on a 70B model, an NCCL collective
+that never returns. For those the only recourse is a signal, and it is an
+OPERATOR action taken deliberately, never something the product does on a
+timer.
+
+  1. Find the worker:  `ps -o pid,etime,cmd -C python | grep celery`
+     Match on `/proc/<pid>/cmdline`, NOT on a `pgrep -f` pattern — a pattern
+     that appears in your own command line matches your own shell, and a wait
+     loop written that way never exits. That has cost real time here twice.
+  2. Prefer SIGTERM first. Dataset tokenization installs an owner-bound handler
+     that reaps its `Dataset.map` child pool and saves completed work.
+  3. SIGKILL only if SIGTERM does nothing after a minute, and EXPECT THE COST:
+     the pool dies with celery's "cannot unpack non-iterable ExceptionInfo",
+     and the in-flight `acks_late` message is redelivered only after the full
+     12-hour `visibility_timeout`. Clear the stranded row by hand.
+  4. Never `pkill -f`. Use the tracked PIDs — for steering,
+     `api/v1/endpoints/steering.py` keeps them precisely so a pattern kill is
+     never needed.
+
+If you find yourself doing this routinely for one task, that task is missing a
+checkpoint. Add one here instead.
+────────────────────────────────────────────────────────────────────────────
+
 THE GUARD IS NOT OPTIONAL. Between the endpoint writing "cancelled" and the task
 noticing, the task is still reporting progress. Without `record_progress`'s
 terminal guard its next status write overwrites the cancellation — which is
@@ -499,7 +531,6 @@ class CancelCheck:
         target_id: Any,
         db: Any = None,
         min_interval_s: Optional[float] = None,
-        every: Optional[int] = None,
     ) -> None:
         self._scope = scope
         self._target_id = target_id
@@ -507,7 +538,6 @@ class CancelCheck:
         self._min_interval_s = (
             scope.min_interval_s if min_interval_s is None else min_interval_s
         )
-        self._every = every
         self._calls = 0
         # SEEDED TO NOW, not 0.0. With a zero sentinel the elapsed-time test is
         # trivially true on the first call, which duplicates the explicit
@@ -529,8 +559,6 @@ class CancelCheck:
         # checkpoint before noticing.
         n = self._calls
         self._calls += 1
-        if self._every is not None:
-            return n % max(self._every, 1) == 0
         if n == 0:
             return True
         return (time.monotonic() - self._last_poll) >= self._min_interval_s
@@ -615,7 +643,6 @@ def cancel_checker(
     *,
     db: Any = None,
     min_interval_s: Optional[float] = None,
-    every: Optional[int] = None,
 ) -> CancelCheck:
     """A checker for the work loop.
 
@@ -631,12 +658,11 @@ def cancel_checker(
     poll is ~0.05% overhead at any loop rate, and latency is bounded by
     `min_interval_s` plus one indivisible unit of work.
 
-    `every` is a count throttle retained ONLY so the circuit and J-lens shims
-    keep their current semantics during migration. It is removed afterwards.
+    THE COUNT THROTTLE IS GONE. `every=` existed only so the circuit and J-lens
+    shims could keep their old semantics through the migration; both now use
+    the time budget and nothing passes it.
     """
-    return CancelCheck(
-        get_scope(kind), target_id, db=db, min_interval_s=min_interval_s, every=every
-    )
+    return CancelCheck(get_scope(kind), target_id, db=db, min_interval_s=min_interval_s)
 
 
 # --------------------------------------------------------------------------
