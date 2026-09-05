@@ -18,7 +18,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 0 — repair the hand-edited quantization rows | ✅ done | (pre-`efc576a3`) |
 | 1.0 — the module, no callers | ✅ done | `efc576a3` |
 | 1 — the guard everywhere, still no checkers | ✅ done | this record |
-| 2 — `extract_activations`, the GPU proof | ✅ code; hardware acceptance pending | this record |
+| 2 — `extract_activations`, the GPU proof | ✅ **including hardware acceptance** | this record |
 | 3 — the remaining compute tasks | ✅ except dataset tokenize | `fea78286` + this record |
 | 4 — the downloads + tokenization | ✅ | this record |
 | 5 — shim the five healthy conventions | ✅ | this record |
@@ -858,3 +858,63 @@ of my own edits landed on top of an injected mutation and had to be reverted.
 Also: a suite run once reported `exit 0` having never executed, because
 `--timeout` is not installed and pytest rejected the argument. **Green is a
 count, not an exit code.**
+
+
+---
+
+## Phase 2 hardware acceptance — PASS (2026-09-05, RTX 3090)
+
+LFM2.5-1.2B-Instruct at Q4, Bloomberg_Financial_News, layer 8, 8000 samples,
+cancelled mid-run through `POST /models/{id}/extractions/{id}/cancel`.
+
+| criterion | result |
+|---|---|
+| stops at the next boundary | **PASS** — 3356 → 3388, **+32 samples** |
+| VRAM freed | **PASS** — 1.03 → 2.62 peak → 1.03 GB |
+| row stays CANCELLED | **PASS** — 7 observations over 43 s, samples frozen at 3388 |
+| worker takes the next job | **PASS** — the queued job ran and completed |
+
+Criterion 3 is the one no unit test can reach: it is a race between the
+endpoint's write and the worker's next `update_progress`, on a real solo-pool
+worker. The Phase 1 guard held — every in-flight progress write after the
+cancel was refused, and the row never left `cancelled`.
+
+The endpoint's response is now honest too: *"A running job stops at its next
+checkpoint, which is bounded by one indivisible unit of work"*, in place of
+the "Extraction cancelled successfully" it used to return while the GPU ran on.
+
+### What the hardware round found that four static rounds did not
+
+**The returned `extraction_id` was a guess.** The endpoint generated
+`ext_{model}_{now}` and never passed it to the task, which generated its own
+from a second `datetime.now()`. They agree only inside one second — observed
+straddling one, `..._185140` returned against a row created as `..._185141`.
+Since **cancel keys on that id**, an operator cancelling with the id they were
+handed got a 404 and the extraction ran on. Fixed by passing it; the task
+already accepted one.
+
+Recorded, not fixed: the id is second-granular, so two extractions started for
+one model in the same second still collide. A test pins the note.
+
+### Three harness defects, each of which produced a verdict about nothing
+
+The first three runs reported FAIL against a working feature:
+
+1. **The pod name was captured once.** ArgoCD replaced the pod mid-run, every
+   later `kubectl exec` addressed a dead name, and empty responses read as
+   `None` statuses and a `-1` GPU. *A test that cannot tell "the thing is
+   broken" from "I lost my connection to it" is not a test.*
+2. **Criterion 1 measured from a 5-second-old poll** while the job advanced
+   ~450 samples per tick, attributing a tick of ordinary progress to the
+   cancellation (+132 → +32 once read immediately before the POST).
+3. **Criterion 4 looked for the queued job's row too early.** Rows are created
+   by the *task* when the worker starts it, not by the endpoint — so a queued
+   job has no row at all until the one ahead finishes.
+
+### And one self-inflicted outage
+
+I ran a manual `kubectl rollout restart` while ArgoCD's Image Updater was about
+to roll the same deployment for the new digest. It rolled twice; the second
+roll killed a running extraction and orphaned its row at 4404/8000. CLAUDE.md
+says deploys here are GitOps and `k8s_deploy` is break-glass only — this is
+what that rule is for.
