@@ -40,6 +40,17 @@ class RecordRunError(RuntimeError):
     """Recording failed at run time."""
 
 
+class _RecorderMisconfigured(BaseException):
+    """A programming error discovered ON THE CANCELLATION PATH.
+
+    BaseException for the same reason `OperatorCancelled` is: everything that
+    catches `Exception` between here and the task boundary would record this as
+    a failed run, which is the one outcome the cancellation work exists to stop
+    producing. It is a bug either way — but it must arrive as a bug, not as a
+    crash report about the user's job.
+    """
+
+
 class SteeringRecorderService:
     """Generate + record steered transcripts for a circuit / cluster / features."""
 
@@ -161,7 +172,9 @@ class SteeringRecorderService:
 
     @classmethod
     def record_samples(cls, db, config: Dict[str, Any], *,
-                       progress_cb: Optional[Callable[[int], None]] = None
+                       progress_cb: Optional[Callable[[int], None]] = None,
+                       cancel_check: Optional[Callable[[], bool]] = None,
+                       run_id: Optional[str] = None,
                        ) -> Dict[str, Any]:
         """GPU orchestrator (sync, called from the Celery task). Loads the model
         once, resolves the artifact's members, generates the baseline + each dial
@@ -196,6 +209,36 @@ class SteeringRecorderService:
         total = len(cfg["prompts"]) * (1 + len(cfg["dials"]))
         done = 0
         for pi, prompt in enumerate(cfg["prompts"]):
+            # THE CHECKPOINT. One prompt is 1 + len(dials) generations, each of
+            # which is indivisible; the transcripts are accumulated in memory
+            # and persisted as one manifest at the end, so abandoning here
+            # writes nothing partial.
+            if cancel_check is not None and cancel_check():
+                from ..core.cancellation import OperatorCancelled
+
+                # PAIRED, NOT MERELY CONVENTIONAL, AND NOT AN `assert`.
+                #
+                # `run_id` defaults to None so the signature stays additive, but
+                # a checker without an id raises an OperatorCancelled whose
+                # target is None — reported as a cancellation of nothing, and
+                # `record_progress` writes nowhere.
+                #
+                # This was an `assert`, stripped under `python -O`. R2 made it a
+                # ValueError, which fixed the -O half and NOT the other one:
+                # ValueError is an ordinary Exception, so
+                # `run_circuit_record`'s handler still turns it into a FAILED
+                # run — the crash-report-instead-of-cancel outcome the comment
+                # claimed to have removed. It has to be a BaseException to
+                # travel the same path the cancellation itself does.
+                if run_id is None:
+                    raise _RecorderMisconfigured(
+                        "record_samples was given a cancel_check but no run_id; "
+                        "the cancellation would name no row"
+                    )
+                raise OperatorCancelled(
+                    "steering_record", run_id,
+                    detail=f"stopped at prompt {pi} of {len(cfg['prompts'])}",
+                )
             unsteered = baseline_at(prompt, cfg["seed"])
             done += 1
             if progress_cb:

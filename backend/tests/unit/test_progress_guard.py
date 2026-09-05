@@ -19,38 +19,53 @@ from src.core import cancellation as C
 
 
 class _Query:
-    """Records populate_existing() — WITHOUT IT THE GUARD CANNOT SEE THE CANCEL.
+    """Models the IDENTITY MAP, so dropping populate_existing is detectable.
 
-    Every one of these writers runs on a long-lived Celery task session. The
-    endpoint's write happens in the API process, so the task's identity map
-    still holds the row as it looked when the task started: the guard reads a
-    stale non-terminal status and waves the write through. That is MIS-E2E-057,
-    and a fake that quietly satisfies `populate_existing` would let a mutation
-    removing it survive — so it is asserted, not assumed.
+    R1-06: this returned the same row whether or not `populate_existing()` was
+    called, so the guard could be reading stale state and every test still
+    passed. On a real SQLAlchemy Query `populate_existing()` returns a NEW
+    Query — `q.populate_existing()` with the result discarded reads the row as
+    the session first loaded it, which is MIS-E2E-057 exactly.
     """
 
-    def __init__(self, row, log):
-        self._row = row
+    def __init__(self, session, log):
+        self._session = session
         self._log = log
+        self._populate = False
 
     def filter(self, *a, **k):
         return self
 
     filter_by = filter
 
-    def populate_existing(self):
-        self._log.append("populate_existing")
+    def order_by(self, *a, **k):
         return self
 
+    def populate_existing(self):
+        self._log.append("populate_existing")
+        fresh = _Query(self._session, self._log)
+        fresh._populate = True
+        return fresh
+
     def first(self):
-        return self._row
+        if self._populate:
+            self._session.cached = self._session.db_row
+        return self._session.cached
+
+
+class _Sess:
+    def __init__(self, row):
+        self.cached = row
+        self.db_row = row
 
 
 def _session(row, log=None):
     log = [] if log is None else log
+    state = _Sess(row)
     db = MagicMock()
-    db.query.side_effect = lambda model: _Query(row, log)
+    db.query.side_effect = lambda model: _Query(state, log)
     db._log = log
+    db._state = state
     return db
 
 
@@ -361,6 +376,55 @@ class TestTheGuardCanActuallySeeTheCancel:
         assert row.status == "cancelled"
         assert row.progress == 0.2
         service.db.commit.assert_not_awaited()
+
+
+class TestTheGuardSeesWhatAnotherConnectionWrote:
+    """MIS-E2E-057, driven. The one shape that matters and was never exercised.
+
+    R1-06: `assert "populate_existing" in db._log` is a CALL-HAPPENED check.
+    On a real SQLAlchemy Query `populate_existing()` returns a NEW Query, so
+    `q.populate_existing()` with the result discarded reads the row the session
+    first loaded — the call is in the log and the guard is blind. These tests
+    diverge the identity map from the database, which is the only way to tell
+    the two apart.
+    """
+
+    def _diverged(self, loaded_status, db_status):
+        """A session holding `loaded_status` while the database says otherwise."""
+        row_loaded = _ExtractionRow(loaded_status)
+        row_db = _ExtractionRow(db_status)
+        db = _session(row_loaded)
+        db._state.db_row = row_db
+        return db, row_loaded, row_db
+
+    def test_a_cancel_written_elsewhere_stops_the_progress_write(self):
+        from src.models.activation_extraction import ExtractionStatus
+        from src.services.extraction_db_service import ExtractionDatabaseService
+
+        # The task loaded the row while it was EXTRACTING; the API has since
+        # written CANCELLED on another connection.
+        db, _loaded, row_db = self._diverged("extracting", "cancelled")
+
+        result = ExtractionDatabaseService.update_progress(
+            db=db, extraction_id="ext_1", progress=90.0,
+            status=ExtractionStatus.EXTRACTING, samples_processed=900,
+        )
+        assert result is None, (
+            "the writer accepted a progress update onto a row another "
+            "connection had already cancelled — it is reading the identity map"
+        )
+        assert row_db.progress == 12.0, "the refused write still moved the row"
+
+    def test_a_live_row_still_updates_when_the_database_agrees(self):
+        from src.models.activation_extraction import ExtractionStatus
+        from src.services.extraction_db_service import ExtractionDatabaseService
+
+        db, _loaded, row_db = self._diverged("extracting", "extracting")
+        ExtractionDatabaseService.update_progress(
+            db=db, extraction_id="ext_1", progress=90.0,
+            status=ExtractionStatus.EXTRACTING, samples_processed=900,
+        )
+        assert row_db.progress == 90.0
 
 
 class TestJlensShim:

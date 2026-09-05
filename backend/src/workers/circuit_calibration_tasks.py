@@ -13,6 +13,7 @@ guard is asserted at the endpoint (advisory lock) before dispatch.
 import logging
 from typing import Any, Dict, Optional
 
+from ..core.cancellation import OperatorCancelled, cancel_checker
 from ..core.celery_app import celery_app
 from .base_task import DatabaseTask
 from .websocket_emitter import (
@@ -22,6 +23,53 @@ from .websocket_emitter import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _calibration_progress(db, circuit_id):
+    """Progress callback that is ALSO the calibration's cancel checkpoint.
+
+    Calibration has no loop this task can see — the bisection lives inside the
+    service — but it reports progress at every bisection step, and a callback
+    is the one hook already threaded through. Raising from it stops the search
+    at the next step rather than at the next full sweep.
+    """
+    check = cancel_checker("circuit_calibration", circuit_id, db=db)
+
+    def _cb(pct):
+        check.raise_if_cancelled(f"stopped at {pct}% of the band search")
+        emit_circuit_run_progress("calibration", circuit_id, pct)
+
+    return _cb
+
+
+def _refuse_if_cancelled(db, target_id) -> bool:
+    """False when the row is already cancelled, so the caller should not start."""
+    from ..core.cancellation import is_cancelled
+
+    scope = "circuit_calibration"
+    try:
+        from ..core.cancellation import get_scope
+
+        sc = get_scope(scope)
+        model = sc.model()
+        row = (
+            db.query(model)
+            .filter(getattr(model, sc.id_field) == target_id)
+            .populate_existing()
+            .first()
+        )
+    except Exception:  # noqa: BLE001 - a failed check must not block the work
+        # LOUD, even though it fails open. Returning True silently is how a
+        # guard becomes decorative: a rename of `get_scope` or a scope's model
+        # would make this permanently inert with nothing in the log to say so.
+        logger.exception(
+            "Could not check whether %s was already cancelled; starting anyway",
+            target_id,
+        )
+        return True
+    if row is None:
+        return True
+    return not is_cancelled(scope, getattr(row, sc.status_field, None))
 
 
 @celery_app.task(bind=True, base=DatabaseTask,
@@ -34,14 +82,28 @@ def run_circuit_calibration(self, circuit_id: str,
     from ..services.circuit_calibration_service import CircuitCalibrationService
 
     with self.get_db() as db:
+        # A CANCEL-WHILE-QUEUED MUST NOT BE STAMPED OVER.
+        #
+        # `request_cancel` writes "cancelled" and issues a plain revoke(), but a
+        # solo worker busy on another job is not reading the control queue — so
+        # the revoke can land late or not at all, this task starts anyway, and
+        # this write turns "cancelled" back into "running". Every subsequent
+        # poll then reads running and the cancellation is simply gone, while
+        # the endpoint has already told the operator "it will not run".
+        if not _refuse_if_cancelled(db, circuit_id):
+            return {"status": "cancelled", "id": circuit_id}
         _set_status(db, circuit_id, "running")
         try:
             result = CircuitCalibrationService.run(
                 db, circuit_id, config,
-                progress_cb=lambda pct: emit_circuit_run_progress(
-                    "calibration", circuit_id, pct))
+                progress_cb=_calibration_progress(db, circuit_id))
             emit_circuit_run_completed("calibration", circuit_id, summary=result)
             return result
+        except OperatorCancelled as cancelled:
+            _set_status(db, circuit_id, "cancelled")
+            emit_circuit_run_failed("calibration", circuit_id, "cancelled")
+            return {"status": "cancelled", "circuit_id": circuit_id,
+                    "detail": cancelled.detail}
         except Exception as e:
             logger.exception("Circuit calibration %s failed", circuit_id)
             # Clear the in-flight marker so the single-GPU guard isn't wedged.

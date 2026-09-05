@@ -85,6 +85,8 @@ class TqdmWebSocketCallback(tqdm_original):
         throttle_seconds: float = 0.5,
         stage: str = "processing",
         started_at: Optional[str] = None,
+        cancel_scope: Optional[str] = None,
+        cancel_target: Optional[str] = None,
         **kwargs
     ):
         """
@@ -116,6 +118,24 @@ class TqdmWebSocketCallback(tqdm_original):
         self.last_emitted_progress = -1.0
         self.start_time = None  # Track when update() was first called
 
+        # THE ONLY OWNER-PROCESS CHECKPOINT DURING A FORKED MAP.
+        #
+        # `Dataset.map(num_proc=N)` forks a worker pool, and the mapper runs in
+        # the children — a child cannot cleanly stop its siblings, and one that
+        # dies turns into "One of the subprocesses has abruptly died", a cancel
+        # indistinguishable from a crash. But `update()` runs in the PARENT:
+        # datasets funnels every batch's progress back through a manager queue
+        # and calls `pbar.update(...)` there. So this is where a cancellation
+        # can be both observed and acted on.
+        #
+        # The same applies to a HuggingFace download, where tqdm is the only
+        # in-process callback `snapshot_download` offers at all.
+        self._cancel = None
+        if cancel_scope and cancel_target:
+            from ..core.cancellation import cancel_checker
+
+            self._cancel = cancel_checker(cancel_scope, cancel_target)
+
     def update(self, n=1):
         """
         Override tqdm's update method to emit WebSocket progress.
@@ -123,6 +143,19 @@ class TqdmWebSocketCallback(tqdm_original):
         Args:
             n: Number of items to increment progress by
         """
+        # POLL FIRST, before the parent bookkeeping and before any emission.
+        # `raise_if_cancelled` throttles itself, so this costs one monotonic
+        # comparison on the overwhelming majority of ticks.
+        #
+        # The raise crosses this module's own `except Exception` handlers below
+        # AND `datasets`' internal ones. `OperatorCancelled` derives from
+        # BaseException for exactly that reason; an Exception here would be
+        # logged as a dropped progress tick and the job would run to completion.
+        if self._cancel is not None:
+            self._cancel.raise_if_cancelled(
+                f"stopped at {self.n} of {self.total or '?'}"
+            )
+
         # Call parent update to maintain tqdm functionality
         result = super().update(n)
 
@@ -152,7 +185,16 @@ class TqdmWebSocketCallback(tqdm_original):
                     self.start_time = current_time
 
                 # Extract description if available
-                desc = self.desc or ("Tokenizing" if self.tokenization_id else "Downloading")
+                # getattr, not attribute access: tqdm's __init__ RETURNS EARLY
+                # when the bar is constructed with disable=True and never sets
+                # `desc`. HuggingFace disables bars whenever its progress-bar
+                # env flag is set — and a Celery worker has no tty. The
+                # AttributeError was then caught by the handler below and
+                # logged as a dropped progress tick, so the row silently
+                # stopped moving while the job ran on.
+                desc = getattr(self, "desc", None) or (
+                    "Tokenizing" if self.tokenization_id else "Downloading"
+                )
 
                 # Format progress message
                 if self.total:
@@ -311,6 +353,8 @@ def create_tqdm_websocket_callback(
     throttle_seconds: float = 0.5,
     stage: str = "processing",
     started_at: Optional[str] = None,
+    cancel_scope: Optional[str] = None,
+    cancel_target: Optional[str] = None,
 ) -> type:
     """
     Factory function to create a tqdm class with WebSocket callback configured.
@@ -326,6 +370,11 @@ def create_tqdm_websocket_callback(
         throttle_seconds: Minimum seconds between WebSocket emissions
         stage: Current processing stage (for tokenization)
         started_at: ISO timestamp when processing started
+        cancel_scope: A `core.cancellation` scope name. When given with
+            `cancel_target`, every `update()` becomes a cancellation
+            checkpoint — the only one that exists inside a forked
+            `Dataset.map` or a HuggingFace `snapshot_download`.
+        cancel_target: The row id to poll within that scope.
 
     Returns:
         A tqdm class with the callback parameters baked in
@@ -369,6 +418,8 @@ def create_tqdm_websocket_callback(
             kwargs.setdefault('throttle_seconds', throttle_seconds)
             kwargs.setdefault('stage', stage)
             kwargs.setdefault('started_at', started_at)
+            kwargs.setdefault('cancel_scope', cancel_scope)
+            kwargs.setdefault('cancel_target', cancel_target)
             super().__init__(*args, **kwargs)
 
     return ConfiguredTqdmWebSocket

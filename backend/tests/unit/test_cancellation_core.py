@@ -308,3 +308,107 @@ class TestCooperativeCancelDecorator:
             return None
 
         assert task.__cooperative_cancel_scope__ == "labeling"
+
+
+class TestThePermanentAliases:
+    """Phase 5 kept two names alive as ALIASES, not subclasses.
+
+    Both are caught by name in worker code and asserted by name in existing
+    behavioural tests, so the names had to survive the shim. Pointing them at
+    `OperatorCancelled` also upgrades both from `Exception` to `BaseException`
+    — which is the MIS-E2E-058 fix generalised to the two remaining paths whose
+    outer `except Exception` could still turn an operator's stop into a crash.
+
+    Mutation controls P5-C4 and P5-C5 restore them as plain Exceptions.
+    """
+
+    def test_jlens_TaskCancelled_is_the_core_exception(self):
+        from src.workers.jlens_progress import TaskCancelled
+
+        assert TaskCancelled is C.OperatorCancelled
+        assert not issubclass(TaskCancelled, Exception), (
+            "a J-space cancel raised inside a task whose handler catches "
+            "Exception would be recorded as a crash"
+        )
+
+    def test_labeling_cancelled_is_the_core_exception(self):
+        from src.services.labeling_service import LabelingService
+
+        assert LabelingService._LabelingCancelled is C.OperatorCancelled
+        assert not issubclass(LabelingService._LabelingCancelled, Exception), (
+            "MIS-E2E-058: labeling's outer except Exception caught its own "
+            "cancellation and wrote FAILED"
+        )
+
+
+class TestTheCircuitShim:
+    """`circuit_capture_tasks._cancel_checker` keeps its signature and four
+    call sites, but the vocabulary now lives in the registry."""
+
+    def _row(self, **kw):
+        row = _Row(kw.pop("status", "running"))
+        for k, v in kw.items():
+            setattr(row, k, v)
+        return row
+
+    def test_each_model_and_column_pair_resolves_to_its_own_scope(self):
+        from src.models.circuit_runs import CircuitCaptureRun, CircuitDiscoveryRun
+        from src.workers.circuit_capture_tasks import _SCOPE_FOR
+
+        assert _SCOPE_FOR[(CircuitCaptureRun.__name__, "status")] == "circuit_capture"
+        assert _SCOPE_FOR[(CircuitDiscoveryRun.__name__, "status")] == "circuit_discovery"
+        assert _SCOPE_FOR[
+            (CircuitDiscoveryRun.__name__, "attribution_status")
+        ] == "circuit_attribution"
+        assert _SCOPE_FOR[
+            (CircuitDiscoveryRun.__name__, "validation_status")
+        ] == "circuit_validation"
+
+    def test_the_attribution_checker_reads_attribution_status(self):
+        """A checker pointed at the run's main `status` would satisfy a
+        "returns a callable" test and never fire for an attribution cancel."""
+        from src.models.circuit_runs import CircuitDiscoveryRun
+        from src.workers.circuit_capture_tasks import _cancel_checker
+
+        row = self._row(status="running", attribution_status="cancelled")
+        check = _cancel_checker(
+            _session(row), CircuitDiscoveryRun, "run_1",
+            status_field="attribution_status",
+        )
+        assert check() is True
+
+    def test_it_does_not_fire_on_an_unrelated_column(self):
+        from src.models.circuit_runs import CircuitDiscoveryRun
+        from src.workers.circuit_capture_tasks import _cancel_checker
+
+        row = self._row(status="cancelled", attribution_status="running")
+        check = _cancel_checker(
+            _session(row), CircuitDiscoveryRun, "run_1",
+            status_field="attribution_status",
+        )
+        assert check() is False, (
+            "the attribution checker fired on the discovery run's own status, "
+            "so cancelling a discovery would abort an unrelated attribution"
+        )
+
+    def test_it_really_delegates(self):
+        """A stub returning False would pass every test above that asserts
+        False. This one requires a real poll."""
+        from src.models.circuit_runs import CircuitCaptureRun
+        from src.workers.circuit_capture_tasks import _cancel_checker
+
+        row = self._row(status="cancelled")
+        check = _cancel_checker(_session(row), CircuitCaptureRun, "run_1")
+        assert check() is True
+
+    def test_an_unregistered_pair_fails_loudly(self):
+        """Silently returning a never-firing checker is how a new lifecycle
+        ships with cancellation that does nothing."""
+        from src.models.circuit_runs import CircuitCaptureRun
+        from src.workers.circuit_capture_tasks import _cancel_checker
+
+        with pytest.raises(KeyError, match="no cancel scope"):
+            _cancel_checker(
+                _session(self._row()), CircuitCaptureRun, "run_1",
+                status_field="not_a_column",
+            )

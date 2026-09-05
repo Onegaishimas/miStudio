@@ -155,6 +155,7 @@ def _fit_and_publish(
     from ..ml.jlens_fitter import DEFAULT_CONVERGENCE_DELTA, JacobianFitter
     from ..services.jlens_artifact_service import (
         ArtifactCoverageLoss,
+        ArtifactQualityRegression,
         JLensArtifactService,
     )
     from ..services.jlens_validation import defer_consumer_checks
@@ -206,8 +207,19 @@ def _fit_and_publish(
 
     def on_progress(progress):
         if _cancelled():
+            # SCOPE AND TARGET, NOT A BARE MESSAGE. `TaskCancelled` is now an
+            # alias of `OperatorCancelled`, whose signature is
+            # (scope, target_id, reason, detail). Passing one argument raised
+            # TypeError here — which `except TaskCancelled` below does NOT
+            # catch, so it reached `owns_its_failure`, which marks the row
+            # FAILED. The operator's cancellation became a crash report, on
+            # the one path the module docstring cites as hardware-verified.
             raise jlens_progress.TaskCancelled(
-                f"cancelled after {progress.prompts_seen} of {total_prompts} prompts"
+                "jlens_task", self.request.id,
+                detail=(
+                    f"cancelled after {progress.prompts_seen} of "
+                    f"{total_prompts} prompts"
+                ),
             )
         # The SAME numbers the heartbeat carries, written where Active
         # Operations and the J-Lens panel can see them. Without this a fit is

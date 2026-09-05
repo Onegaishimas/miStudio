@@ -11,6 +11,7 @@ from typing import List, Optional
 from uuid import UUID
 import signal
 import os
+import shutil
 import psutil
 import logging
 
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 import redis
 
+from ..core.cancellation import (
+    OperatorCancelled,
+    clear_cancel_request,
+    record_progress,
+    request_cancel,
+)
 from ..core.celery_app import celery_app
 from ..core.config import settings
 from ..models.dataset import DatasetStatus, Dataset
@@ -138,6 +145,35 @@ def make_tokenization_signal_handler(state, owner_pid, cleanup=None):
     return signal_handler
 
 
+
+def remove_partial_download(raw_path: str) -> bool:
+    """Delete a cancelled download's half-written directory. Returns whether it did.
+
+    MODULE LEVEL SO A TEST CAN DRIVE IT. Inline in the task's cancellation
+    handler this was unreachable, and a mutation that disabled the deletion
+    left the suite green — the only guard was a source scrape, which cannot
+    see `if False:`.
+
+    `resolve_deletable_path`, not `resolve_data_path`: `raw_path` is
+    API-writable, so it arrives stored rather than trusted, and the deletable
+    roots refuse the trusted top-level directories (MIS-E2E-071).
+    """
+    try:
+        target = settings.resolve_deletable_path(raw_path)
+    except ValueError as exc:
+        logger.error("Refusing to delete %s: %s", raw_path, exc)
+        return False
+    if not target.exists():
+        return False
+    try:
+        shutil.rmtree(target)
+        logger.info("Removed the cancelled download's partial output: %s", target)
+        return True
+    except Exception as exc:  # noqa: BLE001 - cleanup must not mask the cancel
+        logger.warning("Could not remove %s: %s", target, exc)
+        return False
+
+
 def release_redis_lock(dataset_id: str, redis_client: redis.Redis = None) -> None:
     """
     Release Redis distributed lock for a dataset operation.
@@ -219,10 +255,47 @@ def download_dataset_task(
             },
         )
 
+        # A RETRY MUST NOT INHERIT THE PREVIOUS CANCEL. `cancel_requested_at`
+        # is what the tqdm poll reads, and nothing cleared it — so a
+        # re-download of a previously cancelled dataset abandoned on its first
+        # tick, permanently.
+        clear_cancel_request("dataset_download", str(dataset_id))
+
         # Prepare download directory using settings
         data_dir = settings.datasets_dir
         data_dir.mkdir(parents=True, exist_ok=True)
         raw_path = data_dir / repo_id.replace("/", "_")
+        # Published to the enclosing scope so the cancellation handler can clean
+        # up whichever of these exist. They are assigned inside the try, so a
+        # checkpoint added ANYWHERE above this line would make the handler
+        # itself raise UnboundLocalError — an error inside an error handler,
+        # caught by nothing. Bound defensively rather than by construction.
+        # NOT `downloads/`. `data_dir` is `settings.datasets_dir`, the cache_dir
+        # shared by EVERY dataset — so `downloads/` holds other jobs' resumable
+        # chunks, and the success path only clears it when the operator has set
+        # `auto_cleanup_after_download`. R1 deleted it unconditionally on any
+        # cancel, which throws away an unrelated interrupted download.
+        #
+        # What IS this job's: the per-repo arrow tree and, on a re-download, the
+        # saved dataset directory. Both are keyed on repo_id, and one Dataset
+        # row per repo_id is enforced at `datasets.py`'s 409 — which is what
+        # makes deleting them safe, and is worth naming at the deletion site.
+        _cleanup_paths = [
+            data_dir / repo_id.replace("/", "___"),
+            raw_path,
+        ]
+        # AND NOT `downloads/` AT ALL, UNDER ANY SETTING.
+        #
+        # R2 made this conditional on `auto_cleanup_after_download` and called
+        # that "only when the operator has opted in" — but that setting
+        # DEFAULTS TO TRUE (`core/config.py`), so on a stock deployment the
+        # guard was inert and the shared cache was still deleted on every
+        # cancel. The comment described an opt-in; the code read an opt-out.
+        #
+        # The setting governs cleanup after a job that OWNED the transfer —
+        # a successful download. A cancelled one cannot know whether the
+        # chunks in there are its own or another dataset's, so it leaves them.
+        # The success path clears them under the setting, as it always did.
 
         # Download dataset from HuggingFace
         emit_dataset_progress(
@@ -242,7 +315,12 @@ def download_dataset_task(
             dataset_id=dataset_id,
             base_progress=10.0,
             progress_range=60.0,  # 10% → 70%
-            throttle_seconds=0.5  # Emit at most every 0.5 seconds
+            throttle_seconds=0.5,  # Emit at most every 0.5 seconds
+            # tqdm is the ONLY in-process callback a HuggingFace download
+            # offers, so it is the only place a download can be stopped
+            # without killing the worker.
+            cancel_scope="dataset_download",
+            cancel_target=dataset_id,
         )
 
         # Patch tqdm at multiple locations where datasets might use it
@@ -392,6 +470,41 @@ def download_dataset_task(
             "raw_path": str(raw_path),
             "num_samples": num_samples,
             "size_bytes": size_bytes,
+        }
+
+    except OperatorCancelled as cancelled:
+        # THE TASK OWNS ITS OWN PARTIAL OUTPUT.
+        #
+        # The cancel endpoint used to rmtree this directory while the download
+        # was still writing into it — `revoke(terminate=)` is inert on a solo
+        # pool, so the task was very much alive. Deletion moved here, where the
+        # writer is the deleter and there is no race to lose.
+        print(f"[CANCEL] {cancelled}")
+
+        # THE PARTIAL OUTPUT IS NOT `raw_path`. The tqdm checkpoint fires during
+        # `load_dataset`, and `raw_path` is not created until
+        # `dataset.save_to_disk(raw_path)` AFTER that returns — so a cancelled
+        # download's `raw_path` does not exist and deleting it removes nothing.
+        # What is actually on disk is HuggingFace's own cache under `data_dir`:
+        # `downloads/` (the transfer chunks) and the `repo___id` arrow tree,
+        # which the SUCCESS path already cleans up at the end of this task.
+        #
+        # Getting this wrong replaced the endpoint's cleanup with a no-op, so
+        # the multi-gigabyte cache leaked with nothing left to remove it — a
+        # worse outcome than the live-directory delete the move was meant to fix.
+        for partial in locals().get("_cleanup_paths") or ():
+            remove_partial_download(str(partial))
+
+        record_progress(
+            "dataset_download", dataset_id,
+            status=DatasetStatus.ERROR.value,
+            error_message="Cancelled by user",
+        )
+        return {
+            "status": "cancelled",
+            "scope": cancelled.scope,
+            "target_id": cancelled.target_id,
+            "detail": cancelled.detail,
         }
 
     except Exception as e:
@@ -892,7 +1005,14 @@ def tokenize_dataset_task(
             progress_range=40.0,  # 40% → 80%
             throttle_seconds=0.5,  # Emit at most every 0.5 seconds OR every 1%
             stage="tokenizing",  # Current stage
-            started_at=started_at  # Pass start timestamp
+            started_at=started_at,  # Pass start timestamp
+            # THE CANCELLATION CHECKPOINT. `Dataset.map(num_proc=N)` forks a
+            # worker pool and the mapper runs in the children, where a stop
+            # cannot be coordinated — but `update()` runs in THIS process,
+            # because datasets funnels every batch's progress back through a
+            # manager queue and ticks the bar here.
+            cancel_scope="dataset_tokenization",
+            cancel_target=tokenization_id,
         )
 
         # Patch tqdm at ALL locations including HuggingFace's internal tqdm
@@ -1213,6 +1333,80 @@ def tokenize_dataset_task(
             "statistics": stats,
         }
 
+    except OperatorCancelled as cancelled:
+        # MUST PRECEDE THE BaseException CATCH-ALL BELOW.
+        #
+        # That handler exists to catch SystemExit from the signal handler, and
+        # it catches BaseException to do it — which means it also catches
+        # OperatorCancelled. Left to it, a cancellation would be recorded as
+        # `Tokenization failed: …`, or, if the data happened to be saved
+        # already, as a SUCCESS: the operator asks a job to stop and is told it
+        # completed. This is the audit the plan called for — cleanup living in
+        # an exception handler rather than in `finally`.
+        #
+        # The child pool still has to be reaped, and the signal handlers are
+        # still restored by the `finally` below.
+        print(f"[CANCEL] {cancelled}")
+        cleanup_child_processes()
+        record_progress(
+            "dataset_tokenization", tokenization_id,
+            error_message=str(cancelled), db=None,
+        )
+
+        # RESTORE THE PARENT DATASET. `tokenize_dataset_task` sets the Dataset
+        # row to PROCESSING when it starts, and the BaseException handler this
+        # branch now pre-empts was the thing that put it back to READY.
+        # Without this, cancelling a tokenization left the dataset PROCESSING
+        # FOREVER — which blocks re-tokenizing it and makes the download-cancel
+        # path believe it is still in flight.
+        #
+        # Strictly worse than before the handler existed: the cancel used to be
+        # inert, so the task ran to completion and the dataset ended up READY.
+        # A handler that fixes the reported state and breaks an unreported one
+        # is the shape this repo keeps finding in its own fixes.
+        try:
+            with self.get_db() as db:
+                dataset_obj = (
+                    db.query(Dataset)
+                    .filter_by(id=dataset_uuid)
+                    .populate_existing()
+                    .first()
+                )
+                # UNDO ONLY WHAT THIS TASK DID.
+                #
+                # R2 gated this on `dataset_obj.cancel_requested_at is None`,
+                # which was wrong twice over: a TOKENIZATION cancel writes that
+                # column on the `dataset_tokenizations` row, never on the
+                # dataset — so the guard was always true and purely decorative
+                # — and nothing in the codebase ever CLEARS it, so once a
+                # download cancel had set it, every later tokenization cancel
+                # took the else branch and stranded the dataset in PROCESSING
+                # forever. That is the exact defect the restore exists to fix.
+                #
+                # The precise question is "did this task put the row in
+                # PROCESSING?", which the status answers directly and without
+                # depending on a flag nobody resets.
+                if dataset_obj and dataset_obj.status == DatasetStatus.PROCESSING:
+                    dataset_obj.status = DatasetStatus.READY
+                    dataset_obj.progress = 0.0
+                    # Cleared, not left set: a READY row carrying an error
+                    # message reads as a dataset that failed and works anyway.
+                    dataset_obj.error_message = None
+                    db.commit()
+        except Exception as restore_exc:  # noqa: BLE001 - must not mask the cancel
+            logger.warning(
+                "Could not restore dataset %s after a cancelled tokenization: %s",
+                dataset_id, restore_exc,
+            )
+
+        release_redis_lock(dataset_id)
+        return {
+            "status": "cancelled",
+            "scope": cancelled.scope,
+            "target_id": cancelled.target_id,
+            "detail": cancelled.detail,
+        }
+
     except BaseException as e:
         # IMPORTANT: Catch BaseException to handle SystemExit from signal handler
         # SystemExit is NOT a subclass of Exception, so "except Exception" won't catch it
@@ -1397,9 +1591,28 @@ def cancel_dataset_download(self, dataset_id: str, task_id: Optional[str] = None
                 current_app.control.revoke(task_id, terminate=True)
                 logger.info(f"Revoked Celery task {task_id} for dataset {dataset_id}")
 
-            # Clean up partial download files ONLY if dataset was downloading
-            # If dataset was processing (tokenizing), do NOT delete raw files - they're needed!
-            if dataset.status == DatasetStatus.DOWNLOADING and dataset.raw_path:
+            # DO NOT DELETE WHAT IS STILL BEING WRITTEN.
+            #
+            # `revoke(terminate=True)` above is inert on a --pool=solo worker,
+            # so when this ran the download was still going — and this branch
+            # rmtree'd the very directory it was writing into. The task then
+            # recreated parts of it, leaving a half-tree nothing could read and
+            # nothing would clean up.
+            #
+            # The request has been written by now, so the task will stop at its
+            # next tqdm tick and remove its own partial output in its `finally`.
+            # The endpoint only cleans up when the job had NOT started, which is
+            # the one case where nobody else ever will.
+            job_had_started = dataset.status == DatasetStatus.DOWNLOADING and (
+                dataset.progress or 0
+            ) > 0
+            if job_had_started:
+                logger.info(
+                    "Not deleting %s: the download is live and will remove its "
+                    "own partial output when it stops at the next checkpoint",
+                    dataset.raw_path,
+                )
+            if not job_had_started and dataset.status == DatasetStatus.DOWNLOADING and dataset.raw_path:
                 try:
                     # MIS-E2E-071: resolve_deletable_path, not resolve_data_path.
                     # raw_path is API-writable, so it arrives stored, not trusted.
@@ -1455,6 +1668,14 @@ def cancel_dataset_download(self, dataset_id: str, task_id: Optional[str] = None
                                 logger.warning(f"Failed to clean up tokenized files {tokenized_path}: {e}")
 
             # Update dataset status
+            # WRITE THE REQUEST, NOT JUST THE OUTCOME. This set ERROR and
+            # nothing else, so the running download's tqdm poll had no flag to
+            # read and the task carried on to completion. `request_cancel`
+            # writes `cancel_requested_at`, which is what the bridge reads.
+            request_cancel(
+                "dataset_download", str(dataset_id),
+                reason="Cancelled by user",
+            )
             dataset.status = DatasetStatus.ERROR
             dataset.error_message = "Cancelled by user"
             dataset.progress = 0.0

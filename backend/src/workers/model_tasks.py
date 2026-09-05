@@ -6,7 +6,9 @@ language models from HuggingFace, as well as extracting activations from models.
 """
 
 import logging
+from datetime import datetime, timezone
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -15,7 +17,10 @@ from typing import Optional, List
 from ..core.cancellation import (
     OperatorCancelled,
     cancel_checker,
+    clear_cancel_request,
     cooperative_cancel,
+    record_progress,
+    request_cancel,
 )
 from ..core.celery_app import celery_app
 from ..core.config import settings
@@ -116,6 +121,12 @@ class DownloadProgressMonitor:
         self.model_id = model_id
         self.estimated_size_bytes = int(estimated_size_gb * 1024 * 1024 * 1024)
         self.initial_size = 0
+        self.cancel_seen = False
+        self._cancel = None
+        if model_id:
+            from ..core.cancellation import cancel_checker
+
+            self._cancel = cancel_checker("model_download", model_id)
         self._stop_event = threading.Event()
         self._stop_event.set()  # Not running until start()
         self.thread = None
@@ -162,6 +173,23 @@ class DownloadProgressMonitor:
                 # Re-check stop AFTER the (potentially slow) directory walk so a
                 # stale "downloading" update can't land after the task marks READY
                 if self._stop_event.is_set():
+                    break
+
+                # THE CANCEL OBSERVER. This thread is the only thing running
+                # while `snapshot_download` blocks the task, so it is where the
+                # request is first SEEN — but seeing is all it can do: raising
+                # here would die in a worker thread, and HuggingFace exposes no
+                # abort hook. It records the fact and stops narrating; the task
+                # acts on it at its next real boundary. See the note on
+                # `download_and_load_model` for what that costs.
+                if self._cancel is not None and self._cancel():
+                    logger.info(
+                        "[ProgressMonitor] %s: cancellation requested; the "
+                        "download will stop at the next phase boundary",
+                        self.model_id,
+                    )
+                    self.cancel_seen = True
+                    self._stop_event.set()
                     break
 
                 # Only send update if progress increased by at least 1%
@@ -320,6 +348,12 @@ def download_and_load_model(
             model_id=model_id,
             estimated_size_gb=estimated_size_gb
         )
+        # BEFORE THE DOWNLOAD. A model cancelled while queued must not pull
+        # 15 GB first.
+        clear_cancel_request("model_download", model_id)
+        _model_cancel = cancel_checker("model_download", model_id)
+        _model_cancel.raise_if_cancelled("stopped before the download began")
+
         progress_monitor.start()
 
         # Load model from HuggingFace (this handles download + quantization)
@@ -338,6 +372,14 @@ def download_and_load_model(
 
             # Stop progress monitor
             progress_monitor.stop()
+            # AFTER THE DOWNLOAD, BEFORE ANYTHING ELSE. If the monitor saw the
+            # request mid-transfer this is the first point the task can act on
+            # it, and it is also the boundary before quantization and the
+            # architecture pass — the expensive work that follows.
+            if progress_monitor.cancel_seen:
+                _model_cancel.poll_now()
+            _model_cancel.raise_if_cancelled(
+                "stopped after the download, before loading")
 
             # Model loaded successfully
             send_progress_update(
@@ -433,6 +475,84 @@ def download_and_load_model(
             "params_count": metadata["params_count"],
             "quantization": metadata["quantization"],
             "status": "ready",
+        }
+
+    except OperatorCancelled as cancelled:
+        # NO HANDLER EXISTED. The raise escaped the task entirely: `except
+        # Exception` below cannot catch a BaseException, and celery re-raises
+        # rather than recording FAILURE — so the acks_late message was not
+        # acked and would have been redelivered only after the full 12-hour
+        # visibility timeout. That is the precise outcome this whole design
+        # exists to avoid, reintroduced by adding a checkpoint without a
+        # handler to receive it.
+        logger.info("Model download %s cancelled: %s", model_id, cancelled.detail)
+
+        # AND THE TASK OWNS ITS PARTIAL OUTPUT. `cancel_download` deliberately
+        # stops deleting the cache directory once the job has started, on the
+        # promise that the task removes it here. Without this the promise was
+        # false and a cancelled 40 GB download was orphaned forever — invisible
+        # to `delete_model_files`, which resolves `model.file_path`, a column
+        # that is not written until after the checkpoint.
+        # BOUND BEFORE THE try, and resolved against the deletable roots.
+        #
+        # Computing it inside the try meant a failure on that very line would
+        # leave `cache_dir` unbound for the logger in the except — an error
+        # raised inside an error handler, which nothing catches, reproducing
+        # the unacked-acks_late strand this handler exists to prevent.
+        #
+        # `resolve_deletable_path` is the MIS-E2E-071 guard every other
+        # deletion in this change already goes through: it refuses the trusted
+        # roots and their top-level directories, so an empty model_id cannot
+        # collapse the target onto `models_dir/raw` — every downloaded model.
+        cache_dir = settings.models_dir / "raw" / model_id
+        try:
+            target = settings.resolve_deletable_path(str(cache_dir))
+        except ValueError as guard_exc:
+            logger.error("Refusing to delete %s: %s", cache_dir, guard_exc)
+            target = None
+        if target is not None and target.exists():
+            try:
+                shutil.rmtree(target)
+                logger.info("Removed the cancelled download's partial output: %s", target)
+            except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
+                logger.warning("Could not remove %s: %s", target, cleanup_exc)
+
+        # Close the task_queue row as CANCELLED, not completed.
+        #
+        # `mark_task_queue_entries_completed` writes status="completed",
+        # progress=100.0 — so R2 traded "shows as still running" for "shows as
+        # finished successfully", the same durable-right/visible-wrong shape it
+        # had just fixed two hunks earlier. TaskQueue documents a `cancelled`
+        # value; this uses it.
+        try:
+            from ..models.task_queue import TaskQueue
+
+            with get_sync_db() as _queue_db:
+                # The same (entity_type, task_type) pair the success path uses
+                # at the end of this task — a different one would silently
+                # match nothing and leave the ghost entry in place.
+                for _entry in (
+                    _queue_db.query(TaskQueue)
+                    .filter_by(entity_id=model_id, entity_type="model",
+                               task_type="download")
+                    .filter(TaskQueue.status.in_(("queued", "running")))
+                    .all()
+                ):
+                    _entry.status = "cancelled"
+                    _entry.completed_at = datetime.now(timezone.utc)
+                _queue_db.commit()
+        except Exception:  # noqa: BLE001 - bookkeeping must not mask the cancel
+            logger.debug("Could not close the task_queue row for %s", model_id)
+
+        record_progress(
+            "model_download", model_id,
+            status=ModelStatus.ERROR.value,
+            error_message="Cancelled by user",
+        )
+        return {
+            "status": "cancelled",
+            "model_id": model_id,
+            "detail": cancelled.detail,
         }
 
     except Exception as exc:
@@ -1280,17 +1400,36 @@ def cancel_download(self, model_id: str, task_id: Optional[str] = None):
                 current_app.control.revoke(task_id, terminate=True)
                 logger.info(f"Revoked Celery task {task_id} for model {model_id}")
 
-            # Clean up partial download files
+            # WRITE THE REQUEST FIRST, so a running download can see it. The
+            # revoke above is inert on a --pool=solo worker; the flag is the
+            # channel.
+            request_cancel(
+                "model_download", model_id, reason="Cancelled by user",
+            )
+
+            # DO NOT DELETE WHAT IS STILL BEING WRITTEN. This rmtree'd the
+            # cache directory `snapshot_download` was actively filling, and the
+            # task then recreated parts of it — a half-tree nothing could read
+            # and nothing would clean up. Only a job that had NOT started is
+            # cleaned up here; a started one removes its own partial output at
+            # its next phase boundary.
+            job_had_started = (model.progress or 0) > 0
             cache_dir = settings.models_dir / "raw" / model_id
-            if cache_dir.exists():
-                import shutil
+            if job_had_started:
+                logger.info(
+                    "Not deleting %s: the download is live and removes its own "
+                    "partial output when it stops", cache_dir,
+                )
+            elif cache_dir.exists():
                 try:
                     shutil.rmtree(cache_dir)
                     logger.info(f"Cleaned up cache directory: {cache_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to clean up cache directory {cache_dir}: {e}")
 
-            # Update model status
+            # Update model status. The enum has no CANCELLED member (native PG
+            # type), so ERROR remains — but `cancel_requested_at` is now set,
+            # which is what distinguishes this from a crash.
             model.status = ModelStatus.ERROR
             model.error_message = "Cancelled by user"
             model.progress = 0.0

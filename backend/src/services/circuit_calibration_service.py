@@ -389,6 +389,50 @@ class CircuitCalibrationService:
         circuit.budget = defn.budget.model_dump(mode="json")
         circuit.calibration = defn.calibration.model_dump(mode="json")
         circuit.version = (circuit.version or 1) + 1
+        # REFUSE TO OVERWRITE A CANCELLATION — WITHOUT DESTROYING THE RESULT.
+        #
+        # R1 used `db.refresh(circuit)` here. `Session.refresh()` EXPIRES the
+        # instance BEFORE autoflush, so every un-flushed attribute set just
+        # above — the band, the clamp, the version bump — was erased and the
+        # commit wrote only the status. On EVERY SUCCESSFUL RUN the feature
+        # silently produced nothing while reporting "completed". Verified
+        # against this repo's SQLAlchemy; the test fake's no-op `refresh`
+        # is what hid it.
+        #
+        # A scalar column select reads the committed status without touching
+        # the identity map or the pending writes.
+        from sqlalchemy import select as _select
+        
+        from ..core.cancellation import is_cancelled as _is_cancelled
+        
+        _fresh = db.execute(
+            _select(Circuit.calibration_status).where(Circuit.id == circuit.id)
+        ).scalar()
+        if _fresh is None:
+            # The circuit was deleted mid-run. Writing "completed"
+            # here flushes an UPDATE matching zero rows, which is a
+            # StaleDataError out of a clean finish — the same shape
+            # as the ObjectDeletedError removed from the extraction
+            # path. There is nothing left to record to.
+            logger.info("Circuit %s was deleted mid-run", circuit.id)
+            return
+        if _is_cancelled("circuit_calibration", _fresh):
+            # A CANCELLED RUN MUST NOT MUTATE THE PRODUCTION CIRCUIT.
+            #
+            # The result fields above were assigned before this check
+            # and the commit below is unconditional, so a cancel during
+            # the tail left the row cancelled WITH the new band applied
+            # and the version bumped — which is what export and
+            # millm_import then ship. R1's refresh() hid this by
+            # wiping everything; R2 fixed the success path and inverted
+            # the cancel path.
+            logger.info(
+                "Circuit %s was cancelled during the tail of this run; "
+                "discarding the result rather than applying it",
+                circuit.id,
+            )
+            db.rollback()
+            return
         circuit.calibration_status = "completed"
         db.commit()
 

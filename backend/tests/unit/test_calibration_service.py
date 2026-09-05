@@ -116,6 +116,24 @@ class _FakeCircuit:
 
 
 class _FakeSyncDB:
+
+    #: R2. A no-op `refresh` was added here in R1 so the completion write would
+    #: not raise — and that is precisely what hid the fact that the write it
+    #: was smoothing over DISCARDED THE WHOLE RESULT. A fake that makes the
+    #: dangerous call harmless is the "fixtures agree by construction" trap in
+    #: its purest form. Removed; the code now reads a scalar instead.
+
+    def execute(self, statement, *a, **k):
+        """Serve the scalar status read the completion guard performs."""
+        class _R:
+            def __init__(self, value):
+                self._value = value
+
+            def scalar(self):
+                return self._value
+
+        return _R(getattr(self._c, "calibration_status", None))
+
     def __init__(self, circuit):
         self._c = circuit
         self.committed = False
@@ -257,3 +275,105 @@ class TestDivergence:
         div = cosine_text_divergence(embed=None)
         assert div("the cat sat", "the cat sat") == pytest.approx(0.0)
         assert div("cat", "dog") == pytest.approx(1.0)
+
+
+
+def _code_only(source: str) -> str:
+    """Source with full-line comments removed.
+
+    Six guards in this remediation were satisfied by text inside the comment
+    that explained them. Any assertion about the ABSENCE of a construct has to
+    ignore the prose describing why it is absent.
+    """
+    return "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+class TestTheCompletionGuardDoesNotEatTheResult:
+    """R2/SEV-1. The guard that refuses to overwrite a cancellation must not
+    destroy the run it is completing.
+
+    R1 wrote `db.refresh(circuit)` before the status check. `Session.refresh()`
+    EXPIRES the instance BEFORE autoflush, so every un-flushed attribute set
+    just above it — the band, the intensity clamp, the version bump — was
+    erased and the commit persisted only the status. On EVERY SUCCESSFUL RUN
+    the feature silently produced nothing while reporting "completed".
+
+    Nothing caught it because R1 also added a no-op `refresh` to the fake in
+    this file, so the test asserted the pre-fix behaviour.
+    """
+
+    def test_a_scalar_read_is_used_rather_than_refresh(self):
+        """`refresh` on the object being mutated can never be safe here.
+
+        Asserted structurally as well as behaviourally, because the behavioural
+        test below depends on a fake and this one does not.
+        """
+        import inspect
+
+        from src.services.circuit_calibration_service import CircuitCalibrationService
+
+        # Comments stripped — the FIRST version of this assertion matched the
+        # comment explaining the fix, so it failed against correct code. That
+        # is the seventh instance of this exact trap in this arc, and it
+        # appeared inside the test written to catch the trap.
+        src = _code_only(inspect.getsource(CircuitCalibrationService))
+        assert "db.refresh(circuit)" not in src, (
+            "refresh() expires the instance before autoflush, discarding the "
+            "band and the clamp this run just computed"
+        )
+
+    def test_the_faithfulness_writer_likewise(self):
+        import inspect
+
+        from src.services import circuit_faithfulness_service as m
+
+        assert "db.refresh(circuit)" not in _code_only(inspect.getsource(m)), (
+            "the faithfulness scores are discarded by refresh() the same way"
+        )
+
+    def test_sqlalchemy_really_behaves_this_way(self):
+        """The premise, executed rather than asserted — if `refresh` did NOT
+        discard pending writes the fix above would be unnecessary."""
+        from sqlalchemy import Column, Integer, String, create_engine, select
+        from sqlalchemy.orm import declarative_base, sessionmaker
+
+        Base = declarative_base()
+
+        class _T(Base):
+            __tablename__ = "t_refresh_probe"
+            id = Column(Integer, primary_key=True)
+            payload = Column(String)
+            status = Column(String)
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+        session = Session()
+        session.add(_T(id=1, payload="old", status="running"))
+        session.commit()
+
+        # The R1 shape: refresh discards the pending result.
+        row = session.get(_T, 1)
+        row.payload = "the band"
+        session.refresh(row)
+        row.status = "completed"
+        session.commit()
+        assert session.get(_T, 1).payload == "old", (
+            "refresh no longer discards pending writes; re-read the fix, it may "
+            "no longer be needed"
+        )
+
+        # The replacement: a scalar select leaves them alone.
+        session.execute(_T.__table__.delete())
+        session.add(_T(id=2, payload="old", status="running"))
+        session.commit()
+        row = session.get(_T, 2)
+        row.payload = "the band"
+        fresh = session.execute(select(_T.status).where(_T.id == 2)).scalar()
+        if fresh != "cancelled":
+            row.status = "completed"
+        session.commit()
+        assert session.get(_T, 2).payload == "the band"
+        assert session.get(_T, 2).status == "completed"

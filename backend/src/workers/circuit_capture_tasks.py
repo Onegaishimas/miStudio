@@ -21,27 +21,45 @@ from .websocket_emitter import (
 logger = logging.getLogger(__name__)
 
 
+#: Which registered scope each (model, status_field) pair corresponds to. The
+#: shim keeps `_cancel_checker`'s signature so its four call sites are
+#: untouched, but the vocabulary now lives in ONE place.
+_SCOPE_FOR = {
+    ("CircuitCaptureRun", "status"): "circuit_capture",
+    ("CircuitDiscoveryRun", "status"): "circuit_discovery",
+    ("CircuitDiscoveryRun", "attribution_status"): "circuit_attribution",
+    ("CircuitDiscoveryRun", "validation_status"): "circuit_validation",
+}
+
+
 def _cancel_checker(db, model_cls, run_id, status_field="status"):
     """Throttled DB-status poll — returns a callable for the service loop.
 
-    Polls every 5th call but INCLUDING the first (R1 CR#8 — the old `% 5`
-    skipped the first four, so short runs never checked). `status_field`
-    lets attribution poll its own `attribution_status` (R1 QA-P2)."""
-    state = {"count": 0}
+    NOW A SHIM OVER `core.cancellation.cancel_checker`. This convention was
+    already healthy; what it was not was shared. Three near-identical copies of
+    the same poll existed, each with its own guess at a throttle.
 
-    def check() -> bool:
-        # 1, 6, 11, … — first call polls, then every 5th.
-        should_poll = state["count"] % 5 == 0
-        state["count"] += 1
-        if not should_poll:
-            return False
-        row = db.query(model_cls).filter(model_cls.id == run_id).first()
-        if row is not None:
-            db.refresh(row)
-            return getattr(row, status_field) == "cancelled"
-        return False
+    THE THROTTLE IS NOW TIME, NOT COUNT. This polled every 5th call, which is a
+    number chosen against one loop's unit cost and true of no other: over
+    attribution batches on a large model `% 5` is up to twenty minutes of
+    latency. A 2-second budget makes the caller's rule simply "call me at the
+    finest boundary you can cleanly abandon work at".
 
-    return check
+    `db` is still accepted and still passed through — these services poll on the
+    caller's task session by design, and `CancelCheck` re-reads with
+    `populate_existing()` so that remains safe.
+    """
+    from ..core.cancellation import cancel_checker
+
+    try:
+        kind = _SCOPE_FOR[(model_cls.__name__, status_field)]
+    except KeyError:
+        raise KeyError(
+            f"no cancel scope for {model_cls.__name__}.{status_field}; add one "
+            f"in src/core/cancellation.py rather than inventing a second "
+            f"convention"
+        ) from None
+    return cancel_checker(kind, run_id, db=db)
 
 
 def _failure_detail(exc: BaseException) -> str:

@@ -8,6 +8,12 @@ from Sparse Autoencoders without blocking the API.
 import logging
 from typing import Dict, Any
 
+from src.core.cancellation import (
+    cancel_checker,
+    cooperative_cancel,
+    is_cancelled,
+    record_progress,
+)
 from src.core.celery_app import celery_app
 from src.core.config import settings
 from src.services.extraction_service import ExtractionService
@@ -25,6 +31,7 @@ logger = logging.getLogger(__name__)
     default_retry_delay=60,  # 1-minute back-off between retries
     autoretry_for=(ConnectionError, TimeoutError, OSError),
 )
+@cooperative_cancel("sae_extraction")
 def extract_features_from_sae_task(
     self,
     sae_id: str,
@@ -91,16 +98,24 @@ def extract_features_from_sae_task(
             # Validate SAE local path exists
             from pathlib import Path
             if not external_sae.local_path:
-                extraction_job.status = ExtractionStatus.FAILED.value
-                extraction_job.error_message = f"External SAE {sae_id} has no local path"
-                db.commit()
+                # Through the guard, like every other status write here:
+                # a job cancelled while QUEUED must not be relabelled
+                # FAILED by a validation error the operator pre-empted.
+                record_progress(
+                    "sae_extraction", extraction_job.id,
+                    status="failed", error_message=f"External SAE {sae_id} has no local path", db=db,
+                )
                 raise ValueError(f"External SAE {sae_id} has no local path")
 
             sae_path = settings.resolve_data_path(external_sae.local_path)
             if not sae_path.exists():
-                extraction_job.status = ExtractionStatus.FAILED.value
-                extraction_job.error_message = f"SAE local path does not exist: {external_sae.local_path}"
-                db.commit()
+                # Through the guard, like every other status write here:
+                # a job cancelled while QUEUED must not be relabelled
+                # FAILED by a validation error the operator pre-empted.
+                record_progress(
+                    "sae_extraction", extraction_job.id,
+                    status="failed", error_message=f"SAE local path does not exist: {external_sae.local_path}", db=db,
+                )
                 raise ValueError(f"SAE local path does not exist: {external_sae.local_path}")
 
             logger.info(f"SAE path validated: {sae_path}")
@@ -116,7 +131,51 @@ def extract_features_from_sae_task(
 
             # Delegate to service
             extraction_service = ExtractionService(db)
-            statistics = extraction_service.extract_features_for_sae(sae_id, config)
+            # `db=db` deliberately: the service holds this one long-lived task
+            # session, and the checker re-reads with populate_existing so it
+            # observes the API process's write rather than the row as it looked
+            # when the task started.
+            statistics = extraction_service.extract_features_for_sae(
+                sae_id, config,
+                cancel_check=cancel_checker(
+                    "sae_extraction", extraction_job.id, db=db
+                ),
+            )
+
+            # DON'T ANNOUNCE A COMPLETION THE ROW REFUSED. The service returns
+            # normally when it finished after a cancellation — the row stays
+            # CANCELLED — but this path went on to emit progress=100
+            # status="completed", and the frontend store spread-merges those
+            # payloads, so the UI showed a completed extraction over a
+            # cancelled row. The durable state was right and the state the
+            # operator saw was wrong.
+            # WRAPPED, because this sits inside the try whose handler writes
+            # FAILED — so a recycled connection on this bookkeeping read would
+            # relabel a finished extraction as a failure, and terminal ->
+            # terminal is permitted by the guard so the write would stick.
+            _was_cancelled = False
+            try:
+                with self.get_db() as _check_db:
+                    _row = (
+                        _check_db.query(ExtractionJob)
+                        .filter(ExtractionJob.id == extraction_job.id)
+                        .populate_existing()
+                        .first()
+                    )
+                    _was_cancelled = _row is not None and is_cancelled(
+                        "sae_extraction", _row.status
+                    )
+            except Exception:  # noqa: BLE001 - a bookkeeping read must not fail the run
+                logger.warning(
+                    "Could not re-read extraction %s before emitting; assuming "
+                    "it completed", extraction_job.id,
+                )
+            if _was_cancelled:
+                logger.info(
+                    "SAE extraction %s finished after cancellation; not "
+                    "emitting a completion", extraction_job.id,
+                )
+                return {"status": "cancelled", "extraction_id": extraction_job.id}
 
             logger.info(f"Feature extraction completed for SAE {sae_id}")
             logger.info(f"Statistics: {statistics}")
@@ -143,11 +202,16 @@ def extract_features_from_sae_task(
             # stuck-extraction cleanup task catches it (up to 10 minutes later)
             if extraction_job is not None:
                 try:
-                    from src.models.extraction_job import ExtractionStatus
                     db.rollback()
-                    extraction_job.status = ExtractionStatus.FAILED.value
-                    extraction_job.error_message = str(e)
-                    db.commit()
+                    # THROUGH THE GUARD. This wrote `status = FAILED` straight
+                    # onto the ORM row, bypassing `guard_allows` entirely — so a
+                    # row the operator had just CANCELLED was relabelled FAILED
+                    # by whatever exception followed, and the cancellation was
+                    # lost at the last possible moment.
+                    record_progress(
+                        "sae_extraction", extraction_job.id,
+                        status="failed", error_message=str(e), db=db,
+                    )
                 except Exception as db_exc:
                     logger.error(f"Failed to persist FAILED status for extraction: {db_exc}")
                     db.rollback()

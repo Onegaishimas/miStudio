@@ -443,3 +443,36 @@ async def find_related_features(
             )
         )
     return RelatedFeaturesResponse(seed_feature_id=feature_id, related=related)
+
+
+@router.post("/feature-groups/runs/{run_id}/cancel")
+async def cancel_feature_grouping(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop a running feature-grouping precompute at its next feature.
+
+    STARTABLE AND NOT STOPPABLE UNTIL NOW. The TF-IDF pass runs over every
+    feature in an extraction, which on a wide dictionary is a long CPU job
+    holding the single worker, and its only end was the pod restarting.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from sqlalchemy import select
+
+    from ....core.cancellation import request_cancel
+    from ....models.feature_grouping import FeatureGroupingRun
+
+    result = await db.execute(
+        select(FeatureGroupingRun).where(FeatureGroupingRun.id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    outcome = await run_in_threadpool(
+        request_cancel, "feature_grouping", run_id,
+        reason="cancelled by operator",
+    )
+    if not outcome.requested:
+        raise HTTPException(status_code=409, detail=outcome.detail)
+    return {"id": run_id, "status": "cancelled", "message": outcome.detail}

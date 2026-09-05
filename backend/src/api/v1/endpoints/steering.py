@@ -15,6 +15,7 @@ Resilience features:
 import asyncio
 import logging
 import os
+import signal
 import subprocess
 import time
 from collections import defaultdict

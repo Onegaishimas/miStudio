@@ -41,6 +41,8 @@ class GroupingRunStatus(str, Enum):
     COMPUTING = "computing"
     COMPLETED = "completed"
     FAILED = "failed"
+    #: See EnhancedLabelingStatus.CANCELLED — String(20) column, plain addition.
+    CANCELLED = "cancelled"
 
 
 class FeatureGroupingRun(Base):

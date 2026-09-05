@@ -115,11 +115,28 @@ class TestCooperativeCancellation:
         svc, _ = _service(status)
         svc._raise_if_cancelled("job_1")  # must not raise
 
-    def test_missing_row_does_not_raise(self):
-        """A vanished row must not turn into a spurious cancellation."""
+    def test_a_deleted_row_stops_the_job(self):
+        """INVERTED 2026-09-05. This asserted that a vanished row must NOT
+        raise, on the reasoning that it would be a spurious cancellation.
+
+        It was pinning the defect. `delete_labeling_job` REVOKES (inert on a
+        solo pool) and then DELETES THE ROW — deletion is how that path stops a
+        job. Returning quietly meant the loop labelled every remaining feature
+        against a row that no longer existed, writing results nobody could read
+        and holding the single worker for the duration.
+
+        The "spurious cancellation" it guarded against cannot happen here: the
+        endpoint commits the row before `.delay()` (`endpoints/labeling.py`),
+        so by the time a worker polls, a missing row means deleted, not
+        not-yet-created. The `labeling` scope carries `missing_row="cancelled"`
+        for exactly this, and reports the reason as "deleted" rather than
+        flattening it into "cancelled".
+        """
         svc, _ = _service(LabelingStatus.LABELING.value)
         svc.db.row = None
-        svc._raise_if_cancelled("job_1")
+        with pytest.raises(LabelingService._LabelingCancelled) as exc:
+            svc._raise_if_cancelled("job_1")
+        assert exc.value.reason == "deleted"
 
     def test_a_db_error_never_breaks_the_job(self):
         """The check is a safety net, not a new failure mode."""

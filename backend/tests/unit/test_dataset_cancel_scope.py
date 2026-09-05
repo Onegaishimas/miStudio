@@ -49,7 +49,16 @@ def test_cancel_skips_tokenizations_that_are_not_in_flight():
     """
     src = _cancel_source()
     loop_start = src.index("for tokenization in dataset.tokenizations")
-    loop_body = src[loop_start:loop_start + 900]
+    # R1-14: a fixed-size window is the pattern another file in this same
+    # change explicitly calls out as a bug. Bound it by the next dedent.
+    rest = src[loop_start:]
+    _lines, _out = rest.splitlines(True), []
+    _indent = len(_lines[0]) - len(_lines[0].lstrip())
+    for _i, _l in enumerate(_lines):
+        if _i and _l.strip() and (len(_l) - len(_l.lstrip())) <= _indent:
+            break
+        _out.append(_l)
+    loop_body = "".join(_out)
     assert "tokenization.status" in loop_body, (
         "the tokenization cleanup loop deletes without consulting status — it "
         "will destroy completed tokenizations belonging to other models"
@@ -103,9 +112,23 @@ def test_cancel_endpoint_passes_a_task_id():
                 target = body
                 break
     assert target, "no caller of cancel_task found"
-    assert "task_id=" in target, (
-        "cancel_task is called without task_id — the worker's revoke branch is "
-        "dead and the job runs to completion after a successful-looking cancel"
+    # R1-14: `"task_id=" in target` is satisfied by `cancel_task(…,
+    # task_id=None)`, which restores the dead-revoke defect this test exists to
+    # prevent. Require a real value.
+    import ast as _ast
+
+    _passes_real = False
+    for _node in _ast.walk(_ast.parse(_ast.unparse(_ast.parse(target)))):
+        if isinstance(_node, _ast.Call):
+            for _kw in _node.keywords:
+                if _kw.arg == "task_id" and not (
+                    isinstance(_kw.value, _ast.Constant) and _kw.value.value is None
+                ):
+                    _passes_real = True
+    assert _passes_real, (
+        "cancel_task is called without a real task_id — the worker's revoke "
+        "branch is dead and the job runs to completion after a "
+        "successful-looking cancel"
     )
     assert 'extra_metadata' in target, (
         "task_id must come from where the dispatch sites actually store it"
@@ -132,10 +155,46 @@ def test_both_dispatch_sites_still_store_the_task_id():
     )
 
 
-def test_worker_accepts_the_task_id_and_revokes():
-    """The worker's signature and revoke branch must both still be there."""
+def test_the_worker_writes_the_request_the_download_polls():
+    """REWRITTEN 2026-09-05. This asserted the worker's source still contained
+    the word "revoke".
+
+    That was the wrong thing to protect. `revoke(terminate=)` is INERT on this
+    deployment's `--pool=solo -c 1` workers: terminate signals a pool child and
+    solo has none, and a busy solo worker never reads the control queue, so the
+    revoke is not even delivered. Pinning its presence pinned the illusion —
+    the test would have stayed green through the entire period when cancelling
+    a dataset download did nothing at all.
+
+    What matters is that the worker writes the flag the RUNNING download polls
+    at its next tqdm tick. `revoke()` without terminate is still issued
+    centrally by `request_cancel`, for the one case it genuinely handles: a
+    task that has not started never will.
+    """
+    import ast
+
     from src.workers.dataset_tasks import cancel_dataset_download
 
     sig = inspect.signature(cancel_dataset_download)
-    assert "task_id" in sig.parameters
-    assert "revoke" in _cancel_source()
+    assert "task_id" in sig.parameters, (
+        "the endpoint passes the celery id so a not-yet-started task can be "
+        "revoked; dropping it silently loses that case"
+    )
+
+    # AST, not a substring: the scope name also appears in this module as the
+    # tqdm bar's `cancel_scope=`, so `'"dataset_download"' in source` is
+    # satisfied even with the request write deleted.
+    tree = ast.parse(_cancel_source())
+    wrote = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (getattr(node.func, "id", None) == "request_cancel")
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "dataset_download"
+    ]
+    assert wrote, (
+        "the worker no longer writes cancel_requested_at, so the running "
+        "download's tqdm poll has no flag to read and the task runs to "
+        "completion"
+    )

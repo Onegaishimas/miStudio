@@ -73,6 +73,7 @@ class FeatureGroupingService:
         extraction_id: str,
         params: Optional[Dict[str, Any]] = None,
         progress_cb: Optional[Callable[[float, str], None]] = None,
+        cancel_check_for: Optional[Callable[[str], Callable[[], bool]]] = None,
     ) -> FeatureGroupingRun:
         """Run the full pipeline; returns the completed run."""
         merged = {**DEFAULT_PARAMS, **(params or {})}
@@ -105,7 +106,15 @@ class FeatureGroupingService:
                 return run
 
             report(0.0, "indexing")
-            index_rows = self._build_index(db, run, features, merged, report)
+            # A FACTORY, NOT A CHECKER. The run id does not exist until the
+            # row above is created, so the caller cannot build a checker in
+            # advance — and passing the scope NAME into this service instead
+            # would put cancellation vocabulary somewhere with no business
+            # knowing it.
+            index_rows = self._build_index(
+                db, run, features, merged, report,
+                cancel_check=cancel_check_for(run.id) if cancel_check_for else None,
+            )
 
             report(0.85, "grouping")
             group_count = self._build_groups(db, run, index_rows, merged)
@@ -135,6 +144,7 @@ class FeatureGroupingService:
         features: List[Tuple[str, int]],
         params: Dict[str, Any],
         report: Callable[[float, str], None],
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> List[FeatureTokenIndex]:
         """Build and persist the inverted index; returns rank-1 rows in memory."""
         window = params["context_window"]
@@ -143,6 +153,17 @@ class FeatureGroupingService:
         total = len(features)
 
         for batch_start in range(0, total, FEATURE_BATCH_SIZE):
+            # THE CHECKPOINT. One batch of features is the finest boundary this
+            # pass can abandon at: the rank-1 index is accumulated in memory
+            # and written once at the end, so stopping here leaves nothing
+            # half-written.
+            if cancel_check is not None and cancel_check():
+                from ..core.cancellation import OperatorCancelled
+
+                raise OperatorCancelled(
+                    "feature_grouping", run.id,
+                    detail=f"stopped at feature {batch_start} of {total}",
+                )
             batch = features[batch_start : batch_start + FEATURE_BATCH_SIZE]
             batch_ids = [f.id for f in batch]
             neuron_by_id = {f.id: f.neuron_index for f in batch}

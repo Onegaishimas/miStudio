@@ -294,11 +294,29 @@ class TestCancelLabelingJob:
         mock_result.scalar_one_or_none.return_value = mock_job
         mock_async_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await labeling_service.cancel_labeling_job("label_test_123")
+        # The cancel now goes through `core.cancellation.request_cancel`, which
+        # deliberately opens its OWN sync session: the point of the registry is
+        # that the word written is the word the worker's checker reads, and a
+        # fresh session is what lets it see and be seen across processes. This
+        # mock async session therefore cannot observe the write — so the
+        # assertion moved from "the mock's attribute changed" to "the request
+        # was made, for the right scope and row".
+        with patch(
+            "src.core.cancellation.request_cancel", return_value=Mock(requested=True)
+        ) as request_cancel:
+            result = await labeling_service.cancel_labeling_job("label_test_123")
 
         assert result is True
-        assert mock_job.status == LabelingStatus.CANCELLED.value
-        mock_async_session.commit.assert_awaited_once()
+        request_cancel.assert_called_once()
+        args, kwargs = request_cancel.call_args
+        assert args[0] == "labeling"
+        assert args[1] == "label_test_123"
+        # R1-15: the celery id is the ONE case a plain revoke() genuinely
+        # handles — a task that has not started. The fixture left it None, so
+        # nothing checked it was forwarded at all.
+        assert "celery_task_id" in kwargs, (
+            "the celery id is not forwarded, so a queued job is never revoked"
+        )
 
     @pytest.mark.asyncio
     async def test_cancel_labeling_job_not_found(self, labeling_service, mock_async_session):

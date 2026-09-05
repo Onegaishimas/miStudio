@@ -615,52 +615,51 @@ class LabelingService:
 
         return examples_map
 
-    class _LabelingCancelled(Exception):
-        """Raised inside a labeling loop when the job has been cancelled."""
+    #: PERMANENT ALIAS, not a subclass. `_LabelingCancelled` is caught by name
+    #: in `workers/labeling_tasks.py` and asserted by name in two behavioural
+    #: test files; pointing it at `OperatorCancelled` keeps every one of those
+    #: working while upgrading it from `Exception` to `BaseException`.
+    #:
+    #: That upgrade IS the MIS-E2E-058 fix, generalised: labeling's own outer
+    #: `except Exception` used to catch this and write FAILED, turning an
+    #: operator's deliberate stop into a crash report.
+    from ..core.cancellation import OperatorCancelled as _LabelingCancelled
 
     def _raise_if_cancelled(self, labeling_job_id: str) -> None:
         """Cooperative cancellation check — call once per batch.
 
-        WHY THIS IS THE ONLY THING THAT WORKS HERE: the Celery worker runs with
-        ``--pool=solo``, so a task executes in the worker's MAIN process. Celery
-        terminates tasks by signalling a CHILD process, which solo does not have,
-        so ``revoke(terminate=True)`` cannot stop a running task — and while the
-        task runs the main process never services control messages, so the revoke
-        is not even read. With ``-c 1`` that one task blocks EVERY queue.
+        NOW A SHIM over `core.cancellation`. The reasoning that used to be
+        spelled out here — solo pool, revoke signals a child that does not
+        exist, the main process never services control messages while a task
+        runs — lives once in that module's docstring.
 
-        Cancelling therefore used to set status='cancelled' and change nothing:
-        the loop ran on for hours, holding the worker. This check makes the loop
-        notice, which works regardless of pool type.
+        TWO THINGS THE SHIM FIXES FOR FREE.
+
+        `populate_existing()` was already right here (MIS-E2E-057) and is now
+        the shared default rather than one service's hard-won knowledge.
+
+        And A DELETED ROW IS NOW A STOP. This returned silently when the row
+        was gone — but `delete_labeling_job` DELETES THE ROW as its stop
+        signal, so the job ran to completion against a row that no longer
+        existed, writing results nobody could read. The `labeling` scope
+        carries `missing_row="cancelled"` for exactly that.
         """
-        try:
-            # `populate_existing()`, OR THIS CHECK CANNOT WORK (MIS-E2E-057).
-            #
-            # The session is configured `expire_on_commit=False`, so a plain
-            # re-query returns the IDENTITY-MAPPED object already loaded in this
-            # session — not fresh database state. The cancel is written by the
-            # API on a different connection, so this loop could never see it.
-            #
-            # The user presses Cancel, the API writes CANCELLED, the job labels
-            # every remaining feature and then writes COMPLETED *over* the
-            # cancel. That is the exact production symptom the cancel feature
-            # was built to fix.
-            #
-            # Why no test caught it: the existing fake `_Session` returns a
-            # fresh row on every call. It has no identity map, so the fixture
-            # cannot exhibit the behaviour under test — fixtures agreeing by
-            # construction.
-            row = (
-                self.db.query(LabelingJob)
-                .populate_existing()
-                .filter(LabelingJob.id == labeling_job_id)
-                .first()
-            )
-        except Exception:  # noqa: BLE001 - never let the check break the job
-            return
-        if row is not None and row.status == LabelingStatus.CANCELLED.value:
-            raise LabelingService._LabelingCancelled(
-                f"Labeling job {labeling_job_id} was cancelled"
-            )
+        from ..core.cancellation import cancel_checker
+
+        # A FRESH CHECKER PER CALL, WHICH THEREFORE ALWAYS POLLS.
+        #
+        # `CancelCheck`'s first call always polls, so constructing one here is
+        # the same thing the old implementation did: query once per batch. An
+        # earlier version of this shim cached the checker per job so the
+        # 2-second budget would throttle — and that was a behaviour change
+        # dressed as a refactor, because a fast batch loop then ran its whole
+        # length inside one window and never re-polled. The time budget exists
+        # for per-token loops; a per-batch caller is already at the right
+        # granularity, and `min_interval_s` here would be untestable
+        # redundancy on top of the first-call rule.
+        cancel_checker(
+            "labeling", labeling_job_id, db=self.db
+        ).raise_if_cancelled(f"labeling job {labeling_job_id}")
 
     def _label_batch(
         self,
@@ -1790,9 +1789,21 @@ class LabelingService:
                 labeling_job.openai_compatible_model
             )
 
-        labeling_job.status = LabelingStatus.CANCELLED.value
-        labeling_job.updated_at = datetime.now(timezone.utc)
-        await self.db.commit()
+        # THROUGH THE REGISTRY, so the word written here is by construction the
+        # word `_raise_if_cancelled` reads. Writing the status inline worked
+        # only because both sides happened to spell it the same way — which is
+        # exactly what `saes.py` did not, where the endpoint wrote FAILED and a
+        # checker looking for "cancelled" could never have seen it.
+        from starlette.concurrency import run_in_threadpool
+
+        from ..core.cancellation import request_cancel
+
+        await run_in_threadpool(
+            request_cancel, "labeling", labeling_job_id,
+            reason="Cancelled by user",
+            celery_task_id=getattr(labeling_job, "celery_task_id", None),
+        )
+        await self.db.refresh(labeling_job)
 
         logger.info(f"Cancelled labeling job {labeling_job_id}")
         return True

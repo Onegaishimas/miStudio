@@ -556,3 +556,82 @@ async def export_circuit_slices(circuit_id: str, db: AsyncSession = Depends(get_
         "parent_rung_language": rung_language(parent_rung),
         "slices": [s.model_dump(mode="json") for s in slices],
     }
+
+
+# ── cancellation ─────────────────────────────────────────────────────────
+#
+# THREE LIFECYCLES THAT WERE STARTABLE AND NOT STOPPABLE. Faithfulness,
+# calibration and the steering recorder each had a launch route, a status
+# column and (for faithfulness) a complete cancellation path in the service —
+# and no way for an operator to reach any of it. The only stop was restarting
+# the pod, which on a `--pool=solo` worker also strands the in-flight
+# `acks_late` message for the full 12-hour visibility timeout.
+
+async def _cancel_circuit_stage(circuit_id: str, kind: str, status_field: str,
+                                task_field: str, db: AsyncSession):
+    """Shared body for the three circuit-scoped stages."""
+    from starlette.concurrency import run_in_threadpool
+
+    from ....core.cancellation import request_cancel
+
+    circuit = await _get_or_404(db, circuit_id)
+    current = getattr(circuit, status_field, None)
+    if current not in ("pending", "running"):
+        raise HTTPException(
+            409, f"{kind.replace('_', ' ')} is {current or 'not running'} — "
+                 f"nothing to cancel")
+
+    outcome = await run_in_threadpool(
+        request_cancel, kind, circuit_id,
+        reason="cancelled by operator",
+        celery_task_id=getattr(circuit, task_field, None),
+    )
+    return {
+        "circuit_id": circuit_id,
+        status_field: "cancelled",
+        "was_running": outcome.was_running,
+        "message": outcome.detail,
+    }
+
+
+@router.post("/{circuit_id}/faithfulness/cancel")
+async def cancel_faithfulness(circuit_id: str, db: AsyncSession = Depends(get_db)):
+    """Stop a running faithfulness pass at its next prompt boundary."""
+    return await _cancel_circuit_stage(
+        circuit_id, "circuit_faithfulness", "faithfulness_status",
+        "faithfulness_task_id", db)
+
+
+@router.post("/{circuit_id}/calibration/cancel")
+async def cancel_calibration(circuit_id: str, db: AsyncSession = Depends(get_db)):
+    """Stop a running strength calibration at its next bisection step."""
+    return await _cancel_circuit_stage(
+        circuit_id, "circuit_calibration", "calibration_status",
+        "calibration_task_id", db)
+
+
+@router.post("/steering-samples/{run_id}/cancel")
+async def cancel_steering_record(run_id: str, db: AsyncSession = Depends(get_db)):
+    """Stop a running transcript recording at its next sample."""
+    from starlette.concurrency import run_in_threadpool
+    from sqlalchemy import select
+
+    from ....core.cancellation import request_cancel
+    from ....models.steering_record_run import SteeringRecordRun
+
+    result = await db.execute(
+        select(SteeringRecordRun).where(SteeringRecordRun.id == run_id)
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(404, f"Record run {run_id} not found")
+    if run.status not in ("pending", "running"):
+        raise HTTPException(
+            409, f"Recording is {run.status} — nothing to cancel")
+
+    outcome = await run_in_threadpool(
+        request_cancel, "steering_record", run_id,
+        reason="cancelled by operator", celery_task_id=run.task_id,
+    )
+    return {"id": run_id, "status": "cancelled",
+            "was_running": outcome.was_running, "message": outcome.detail}

@@ -26,6 +26,8 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from ..core.cancellation import OperatorCancelled, is_cancelled
+from ..core.clock import utc_now, utc_now_iso
 from ..core.config import settings
 from ..models.external_sae import ExternalSAE, SAEStatus
 from ..models.feature import Feature
@@ -254,9 +256,28 @@ class NeuronpediaExportService:
             await self._generate_readme(sae, output_dir, config, model_name)
 
             # Stage 7: Create archive
-            job.status = ExportStatus.PACKAGING.value
-            await self._update_stage(db, job, "Creating archive", 95)
+            # DO NOT FLUSH THIS BEFORE THE CHECKPOINT.
+            #
+            # R1 added `await db.flush()` here to stop `populate_existing` from
+            # discarding the pending PACKAGING write. That traded a cosmetic
+            # reporting gap for a DESTROYED CANCELLATION: `_cancel_point`
+            # re-reads on this same transaction, so after a flush it reads back
+            # its own uncommitted 'packaging' and can never see the API
+            # process's committed 'cancelled' — and `_update_stage` then commits
+            # the clobber. The export finished COMPLETED over the operator's
+            # stop.
+            #
+            # The stage is display-only, so it is carried on `current_stage`,
+            # which `_update_stage` writes AFTER the checkpoint has passed.
+            # `status` stays untouched until completion.
+            await self._update_stage(db, job, "Packaging: creating archive", 95)
             archive_path = await self._create_archive(output_dir, job_id)
+
+            # A CANCELLED EXPORT IS NOT COMPLETED. Same rule as the extraction
+            # path: terminal -> terminal is allowed by the guard because the
+            # janitors need it, so a finished run would otherwise overwrite the
+            # operator's cancellation with COMPLETED at the very last write.
+            await self._cancel_point(db, str(job.id))
 
             # Complete job
             job.status = ExportStatus.COMPLETED.value
@@ -293,6 +314,37 @@ class NeuronpediaExportService:
             include_explanations=config_dict.get("include_explanations", True),
         )
 
+    async def _cancel_point(self, db: AsyncSession, job_id: str):
+        """Stop here if the operator asked. Raises `OperatorCancelled`.
+
+        A FRESH READ, never `job.status`. `execute_export` loads the row once
+        with `db.get(...)`, which returns the identity-mapped instance without
+        emitting SQL, and both session factories are `expire_on_commit=False`
+        — so the in-memory `job.status` is frozen at what it was when the
+        export began and can NEVER show the API process's write. A checkpoint
+        reading it would be inert (MIS-E2E-057).
+
+        A VANISHED ROW IS ALSO A STOP. `DELETE /export/{job_id}` removes the
+        row outright; there is then nothing to write results to and no one
+        waiting for them.
+        """
+        result = await db.execute(
+            select(NeuronpediaExportJob)
+            .where(NeuronpediaExportJob.id == job_id)
+            .execution_options(populate_existing=True)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise OperatorCancelled(
+                "neuronpedia_export", job_id, "deleted",
+                "the export job row was deleted while it was running",
+            )
+        if is_cancelled("neuronpedia_export", row.status):
+            raise OperatorCancelled(
+                "neuronpedia_export", job_id,
+                detail=f"stopped during {row.current_stage or 'export'}",
+            )
+
     async def _update_stage(
         self,
         db: AsyncSession,
@@ -300,7 +352,14 @@ class NeuronpediaExportService:
         stage: str,
         progress: float,
     ):
-        """Update job stage and progress."""
+        """Update job stage and progress — and the export's cancel checkpoint.
+
+        The stage boundaries are the only checkpoints `execute_export` has of
+        its own; the per-feature loops live one level down in three services
+        that each swallow exceptions with `except Exception`, which is why
+        `OperatorCancelled` derives from BaseException.
+        """
+        await self._cancel_point(db, str(job.id))
         job.current_stage = stage
         job.progress = progress
         await db.commit()
@@ -618,7 +677,6 @@ sparse autoencoder training and analysis tool.
 
 ```python
 from sae_lens import SAE
-from ..core.clock import utc_now, utc_now_iso
 
 sae = SAE.load_from_pretrained(
     path="./saelens/",
@@ -686,12 +744,29 @@ sae = SAE.load_from_pretrained(
         if not job:
             raise ValueError(f"Export job not found: {job_id}")
 
-        if job.status in (ExportStatus.COMPLETED.value, ExportStatus.FAILED.value):
+        # ALREADY-CANCELLED IS NOT CANCELLABLE EITHER. This tested only
+        # COMPLETED and FAILED, so re-cancelling a cancelled job re-stamped
+        # `completed_at` and returned True — reporting a fresh cancellation of
+        # something that had already stopped.
+        if job.status in (
+            ExportStatus.COMPLETED.value,
+            ExportStatus.FAILED.value,
+            ExportStatus.CANCELLED.value,
+        ):
             return False
 
-        job.status = ExportStatus.CANCELLED.value
-        job.completed_at = utc_now()
-        await db.commit()
+        # Through the registry, so the scope's vocabulary is the one written
+        # and the running export's `_cancel_point` is guaranteed to recognise
+        # it. Sync, so off-thread.
+        from starlette.concurrency import run_in_threadpool
+
+        from ..core.cancellation import request_cancel
+
+        await run_in_threadpool(
+            request_cancel, "neuronpedia_export", str(job_id),
+            reason="cancelled by operator",
+        )
+        await db.refresh(job)
 
         return True
 

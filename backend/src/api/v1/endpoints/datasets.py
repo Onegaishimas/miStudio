@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from transformers import AutoTokenizer
 import redis
 
+from starlette.concurrency import run_in_threadpool
+
+from ....core.cancellation import request_cancel
 from ....core.deps import get_db
 from ....core.celery_app import celery_app
 from ....core.config import settings
@@ -1409,15 +1412,27 @@ async def cancel_dataset_tokenization(
             detail=f"Cannot cancel tokenization with status '{tokenization.status.value}'. Only PROCESSING or QUEUED jobs can be cancelled."
         )
 
-    # Revoke the Celery task if task_id exists
-    if tokenization.celery_task_id:
-        try:
-            current_app.control.revoke(tokenization.celery_task_id, terminate=True, signal='SIGKILL')
-            logger.info(f"Revoked Celery task {tokenization.celery_task_id} for tokenization {tokenization.id}")
-        except Exception as e:
-            logger.exception(f"Failed to revoke Celery task {tokenization.celery_task_id}")
+    # ASK, THEN RECORD. `revoke(terminate=True, signal='SIGKILL')` did two
+    # wrong things at once: `terminate` signals a POOL CHILD and this worker is
+    # `--pool=solo`, so it was inert; and SIGKILL is explicitly not a fallback
+    # here — killing a solo worker mid-task crashed the pool with celery's
+    # "cannot unpack non-iterable ExceptionInfo" and stranded the in-flight
+    # acks_late message for the full 12-hour visibility timeout.
+    #
+    # `request_cancel` writes `cancel_requested_at`, which the tokenization's
+    # tqdm bridge polls on every batch tick in the OWNER process — the only
+    # checkpoint that exists inside a forked `Dataset.map`.
+    outcome = await run_in_threadpool(
+        request_cancel,
+        "dataset_tokenization",
+        tokenization.id,
+        reason="Cancelled by user",
+        celery_task_id=tokenization.celery_task_id,
+    )
 
-    # Update tokenization status to ERROR
+    # The status column is a native Postgres enum with no CANCELLED member, so
+    # ERROR remains where it ends up — but `cancel_requested_at` is now set,
+    # which is what tells a later reader this was a stop and not a crash.
     tokenization.status = TokenizationStatus.ERROR
     tokenization.error_message = "Cancelled by user"
     tokenization.progress = None

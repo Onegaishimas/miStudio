@@ -264,7 +264,14 @@ class TestTheTaskIsWiredForCancellation:
         from src.api.v1.endpoints import models as models_endpoint
 
         src = inspect.getsource(models_endpoint.cancel_extraction)
-        assert "request_cancel(" in src
+        # The endpoint dispatches through `run_in_threadpool` now, so
+        # `"request_cancel(" in src` is false while the behaviour is unchanged —
+        # the moved-not-deleted trap again. Assert the CALL.
+        import _cancel_ast as A
+
+        assert "activation_extraction" in A.scopes_passed_to(
+            models_endpoint.cancel_extraction, "run_in_threadpool"
+        ), "the endpoint no longer asks the registry to cancel anything"
 
         # COMMENTS STRIPPED FIRST. The first version of this assertion matched
         # the comment that EXPLAINS why terminate is wrong, so it failed against

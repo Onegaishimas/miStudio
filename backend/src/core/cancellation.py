@@ -21,6 +21,38 @@ checkpoint it chooses. This module is the one implementation of that, and
 `SCOPES` below is the one place the project's several terminal vocabularies are
 written down.
 
+THIS DOCSTRING IS THE SINGLE HOME FOR THE ABOVE. The solo-pool explanation was
+duplicated, with drift, across seven files — every copy correct, none
+authoritative, and each one an invitation to rediscover the same finding a
+ninth time. Modules that need it now point here rather than restating it.
+
+────────────────────────────────────────────────────────────────────────────
+OPERATOR PROCEDURE — killing a wedged worker. NOT A CODE PATH.
+
+Cooperative cancellation cannot help with a task that is stuck below its
+finest checkpoint: a single `from_pretrained` on a 70B model, an NCCL collective
+that never returns. For those the only recourse is a signal, and it is an
+OPERATOR action taken deliberately, never something the product does on a
+timer.
+
+  1. Find the worker:  `ps -o pid,etime,cmd -C python | grep celery`
+     Match on `/proc/<pid>/cmdline`, NOT on a `pgrep -f` pattern — a pattern
+     that appears in your own command line matches your own shell, and a wait
+     loop written that way never exits. That has cost real time here twice.
+  2. Prefer SIGTERM first. Dataset tokenization installs an owner-bound handler
+     that reaps its `Dataset.map` child pool and saves completed work.
+  3. SIGKILL only if SIGTERM does nothing after a minute, and EXPECT THE COST:
+     the pool dies with celery's "cannot unpack non-iterable ExceptionInfo",
+     and the in-flight `acks_late` message is redelivered only after the full
+     12-hour `visibility_timeout`. Clear the stranded row by hand.
+  4. Never `pkill -f`. Use the tracked PIDs — for steering,
+     `api/v1/endpoints/steering.py` keeps them precisely so a pattern kill is
+     never needed.
+
+If you find yourself doing this routinely for one task, that task is missing a
+checkpoint. Add one here instead.
+────────────────────────────────────────────────────────────────────────────
+
 THE GUARD IS NOT OPTIONAL. Between the endpoint writing "cancelled" and the task
 noticing, the task is still reporting progress. Without `record_progress`'s
 terminal guard its next status write overwrites the cancellation — which is
@@ -224,6 +256,51 @@ def _export_job():
     return NeuronpediaExportJob
 
 
+def _circuit():
+    from ..models.circuit import Circuit
+    return Circuit
+
+
+def _capture_run():
+    from ..models.circuit_runs import CircuitCaptureRun
+    return CircuitCaptureRun
+
+
+def _discovery_run():
+    from ..models.circuit_runs import CircuitDiscoveryRun
+    return CircuitDiscoveryRun
+
+
+def _record_run():
+    from ..models.steering_record_run import SteeringRecordRun
+    return SteeringRecordRun
+
+
+def _enhanced_labeling_job():
+    from ..models.enhanced_labeling_job import EnhancedLabelingJob
+    return EnhancedLabelingJob
+
+
+def _grouping_run():
+    from ..models.feature_grouping import FeatureGroupingRun
+    return FeatureGroupingRun
+
+
+def _dataset():
+    from ..models.dataset import Dataset
+    return Dataset
+
+
+def _model():
+    from ..models.model import Model
+    return Model
+
+
+def _tokenization():
+    from ..models.dataset_tokenization import DatasetTokenization
+    return DatasetTokenization
+
+
 #: J-space work is tracked in `task_queue`, keyed by the CELERY id. That is one
 #: registered scope, NOT the universal channel: task_queue is populated by only
 #: three lifecycles, and its key does not exist until after `.delay()` — the
@@ -278,7 +355,150 @@ register(CancelScope(
 register(CancelScope(
     kind="neuronpedia_export",
     model=_export_job,
+    #: `DELETE /export/{job_id}` removes the row outright, so a vanished row is
+    #: a stop signal here exactly as it is for labeling — there is nothing left
+    #: to write results to and nobody waiting for them. With the default
+    #: "continue" the export would run to completion against a deleted row.
+    missing_row="cancelled",
     terminal_values=frozenset({"completed", "failed", "cancelled"}),
+))
+
+#: Faithfulness (rung 3) runs on a CIRCUIT, not on a discovery run — its own
+#: lifecycle with its own status column. `pending|running|completed|failed`
+#: were the documented values; `cancelled` was already written by the task's
+#: `_FaithfulnessCancelled` handler, which until now could never fire because
+#: the task passed `cancel_check=None`.
+register(CancelScope(
+    kind="circuit_faithfulness",
+    model=_circuit,
+    status_field="faithfulness_status",
+    #: The circuit row long outlives any one faithfulness run, and `error_message`
+    #: on a Circuit is not about the run. The manifest is the record.
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+#: THE THREE NATIVE-ENUM LIFECYCLES. `datasets.status`, `models.status` and
+#: `dataset_tokenizations.status` are native Postgres enums with no CANCELLED
+#: member, and `ALTER TYPE … ADD VALUE` is non-transactional. They carry
+#: `cancel_requested_at` instead (migration f3c8a92b1e07), which is also the
+#: better model: it separates "the operator asked" from "the job stopped".
+#:
+#: Their `terminal_values` are their OWN vocabularies, not the default one —
+#: `ready` is this family's success state, and `error` its failure. Using the
+#: default {completed, failed, cancelled} here would mean the guard never
+#: considered any of these rows terminal, so a straggling progress write could
+#: revive a finished download.
+#:
+#: WHAT THE STATUS ENDS UP AS. These three still finish at `error`, because the
+#: enum offers nothing better and extending it is the thing being avoided. That
+#: is not a regression — it is what they already did — and `cancel_requested_at`
+#: is precisely what makes it survivable: a row with `status = error` AND a
+#: non-null request is a stop, one without is a crash. Before this column the
+#: two were the same row and no reader could tell them apart.
+register(CancelScope(
+    kind="dataset_download",
+    model=_dataset,
+    request_field="cancel_requested_at",
+    cancelled_values=frozenset({"cancelled"}),
+    terminal_values=frozenset({"ready", "error", "cancelled"}),
+    started_at_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="model_download",
+    model=_model,
+    request_field="cancel_requested_at",
+    cancelled_values=frozenset({"cancelled"}),
+    terminal_values=frozenset({"ready", "error", "cancelled"}),
+    started_at_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="dataset_tokenization",
+    model=_tokenization,
+    request_field="cancel_requested_at",
+    cancelled_values=frozenset({"cancelled"}),
+    terminal_values=frozenset({"ready", "error", "cancelled"}),
+    started_at_field=None,
+))
+
+#: THE CIRCUITS ARC's THREE LIFECYCLES. All healthy already — this is the
+#: Phase-5 shim, so the behaviour is unchanged and only the implementation is
+#: shared. Their statuses are plain String(16) columns, and each stage has its
+#: OWN column on the discovery run so a failed pass never corrupts a completed
+#: earlier one.
+register(CancelScope(
+    kind="circuit_capture",
+    model=_capture_run,
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="circuit_discovery",
+    model=_discovery_run,
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="circuit_attribution",
+    model=_discovery_run,
+    status_field="attribution_status",
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="circuit_validation",
+    model=_discovery_run,
+    status_field="validation_status",
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+#: PHASE 6 — the five lifecycles that had no cancel route at all. Their jobs
+#: were startable and not stoppable: an operator could launch a faithfulness
+#: pass or a feature-grouping run and then had no way to reach it short of
+#: restarting the pod.
+register(CancelScope(
+    kind="circuit_calibration",
+    model=_circuit,
+    status_field="calibration_status",
+    error_field=None,
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="steering_record",
+    model=_record_run,
+    #: This table spells it `error`, not `error_message`. Declared rather than
+    #: defaulted, because a wrong name here fails silently: `setattr` would
+    #: happily create the attribute on the instance and never persist it.
+    error_field="error",
+    progress_field=None,
+    completed_at_field=None,
+))
+
+register(CancelScope(
+    kind="enhanced_labeling",
+    model=_enhanced_labeling_job,
+    progress_field=None,
+))
+
+register(CancelScope(
+    kind="feature_grouping",
+    model=_grouping_run,
+    progress_field=None,
 ))
 
 register(CancelScope(
@@ -311,7 +531,6 @@ class CancelCheck:
         target_id: Any,
         db: Any = None,
         min_interval_s: Optional[float] = None,
-        every: Optional[int] = None,
     ) -> None:
         self._scope = scope
         self._target_id = target_id
@@ -319,7 +538,6 @@ class CancelCheck:
         self._min_interval_s = (
             scope.min_interval_s if min_interval_s is None else min_interval_s
         )
-        self._every = every
         self._calls = 0
         # SEEDED TO NOW, not 0.0. With a zero sentinel the elapsed-time test is
         # trivially true on the first call, which duplicates the explicit
@@ -341,8 +559,6 @@ class CancelCheck:
         # checkpoint before noticing.
         n = self._calls
         self._calls += 1
-        if self._every is not None:
-            return n % max(self._every, 1) == 0
         if n == 0:
             return True
         return (time.monotonic() - self._last_poll) >= self._min_interval_s
@@ -427,7 +643,6 @@ def cancel_checker(
     *,
     db: Any = None,
     min_interval_s: Optional[float] = None,
-    every: Optional[int] = None,
 ) -> CancelCheck:
     """A checker for the work loop.
 
@@ -443,12 +658,11 @@ def cancel_checker(
     poll is ~0.05% overhead at any loop rate, and latency is bounded by
     `min_interval_s` plus one indivisible unit of work.
 
-    `every` is a count throttle retained ONLY so the circuit and J-lens shims
-    keep their current semantics during migration. It is removed afterwards.
+    THE COUNT THROTTLE IS GONE. `every=` existed only so the circuit and J-lens
+    shims could keep their old semantics through the migration; both now use
+    the time budget and nothing passes it.
     """
-    return CancelCheck(
-        get_scope(kind), target_id, db=db, min_interval_s=min_interval_s, every=every
-    )
+    return CancelCheck(get_scope(kind), target_id, db=db, min_interval_s=min_interval_s)
 
 
 # --------------------------------------------------------------------------
@@ -713,6 +927,56 @@ def request_cancel(
                 celery_task_id,
             )
     return outcome
+
+
+def clear_cancel_request(kind: str, target_id: Any, *, db: Any = None) -> bool:
+    """Clear a stale request so a RETRY of this job can run.
+
+    THE MISSING HALF OF `request_field`. The three native-enum lifecycles record
+    the operator's request in `cancel_requested_at`, and nothing ever cleared
+    it — so once a download had been cancelled, every retry of it read the old
+    timestamp on its first tqdm tick and abandoned immediately. Cancel a
+    download once and it could never be downloaded again.
+
+    Verified before fixing: a checker over a row whose `cancel_requested_at` is
+    a leftover returns True on tick one.
+
+    Called at task START, not at cancel time: the flag must survive until the
+    task that is running has seen it.
+    """
+    scope = get_scope(kind)
+    if scope.request_field is None:
+        return False
+
+    def _apply(session: Any) -> bool:
+        model = scope.model()
+        column = getattr(model, scope.id_field)
+        row = (
+            session.query(model)
+            .filter(column == target_id)
+            .populate_existing()
+            .first()
+        )
+        if row is None or getattr(row, scope.request_field, None) is None:
+            return False
+        setattr(row, scope.request_field, None)
+        session.commit()
+        logger.info(
+            "Cleared a stale cancellation request on %s:%s before starting",
+            kind, target_id,
+        )
+        return True
+
+    try:
+        if db is not None:
+            return _apply(db)
+        from .database import get_sync_db
+        with get_sync_db() as session:
+            return _apply(session)
+    except Exception as exc:  # noqa: BLE001 - must not block the work
+        logger.warning("Could not clear the cancel request for %s:%s: %s",
+                       kind, target_id, exc)
+        return False
 
 
 def cooperative_cancel(kind: str):

@@ -329,7 +329,13 @@ class EnhancedLabelingService:
         logger.info("Enhanced labeling pass 1: summarizing %d examples (%d workers)", total, self.workers)
         results: dict[int, tuple[dict, str]] = {}
 
-        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+        # NOT a `with` block. `Executor.__exit__` calls `shutdown(wait=True)`
+        # WITHOUT `cancel_futures`, so raising out of the progress callback
+        # still waits for every already-queued example to finish — on a slow
+        # endpoint that is the entire remaining bill, which is precisely the
+        # cost the cancel route claims to avoid.
+        pool = ThreadPoolExecutor(max_workers=self.workers)
+        try:
             future_to_idx = {
                 pool.submit(self._summarize_example, row): i
                 for i, row in enumerate(top_rows)
@@ -344,6 +350,13 @@ class EnhancedLabelingService:
                 results[idx] = (top_rows[idx], note)
                 if progress_cb:
                     progress_cb(len(results), total)
+        finally:
+            # cancel_futures=True is the whole point. Without it — and
+            # `with ThreadPoolExecutor(...)` gives exactly that — a cancellation
+            # raised from `progress_cb` still waits for every example already
+            # submitted, so a 100-example job on a slow endpoint pays for all
+            # 100 and only then reports "cancelled".
+            pool.shutdown(wait=False, cancel_futures=True)
 
         summaries = [results[i] for i in range(total)]
         pass1_summaries = [

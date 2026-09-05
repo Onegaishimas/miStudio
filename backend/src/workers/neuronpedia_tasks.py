@@ -7,6 +7,7 @@ and archive generation.
 """
 
 import logging
+import shutil
 import traceback
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -18,7 +19,11 @@ from ..services.neuronpedia_export_service import (
     ExportConfig,
 )
 from .websocket_emitter import emit_export_progress
-from ..core.cancellation import guard_allows
+from ..core.cancellation import (
+    OperatorCancelled,
+    guard_allows,
+    is_cancelled,
+)
 from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
@@ -97,8 +102,23 @@ class NeuronpediaTask(DatabaseTask):
             job_id: Export job ID
             error_message: Error message to store
         """
+        # THROUGH THE GUARD. This wrote FAILED unconditionally, so the bare
+        # `except Exception` that calls it would relabel a row the operator had
+        # just CANCELLED. terminal -> terminal is still permitted, so a genuine
+        # failure after a cancel is recorded; what is refused is dragging a live
+        # cancellation into a crash report.
         with self.get_db() as db:
-            job = db.query(NeuronpediaExportJob).filter_by(id=job_id).first()
+            job = (
+                db.query(NeuronpediaExportJob)
+                .filter_by(id=job_id)
+                .populate_existing()
+                .first()
+            )
+            if job and is_cancelled("neuronpedia_export", job.status):
+                logger.info(
+                    "Export %s was cancelled; not relabelling it failed", job_id
+                )
+                return
             if job:
                 job.status = ExportStatus.FAILED.value
                 job.error_message = error_message
@@ -202,6 +222,56 @@ def execute_neuronpedia_export(self, job_id: str):
                 "output_path": job.output_path,
                 "feature_count": job.feature_count,
             }
+
+    except OperatorCancelled as cancelled:
+        # NO HANDLER EXISTED, so the raise from `_cancel_point` escaped the task
+        # and the acks_late message was never acked. `mark_export_failed` is
+        # correctly NOT called — the row is already cancelled — but the export's
+        # half-built tree has to go, or a cancelled export leaks its JSON files
+        # and SAELens output with nothing left to clean them.
+        logger.info("Neuronpedia export %s cancelled: %s", job_id, cancelled.detail)
+        try:
+            # THE PATH THE SERVICE ACTUALLY WRITES TO. R1 invented
+            # `data_dir/"neuronpedia_exports"`, which appears nowhere else in
+            # the repo — so `exists()` was always False, the rmtree never ran,
+            # and the tree leaked exactly as before. Taken from the service so
+            # the two cannot drift again.
+            from ..services.neuronpedia_export_service import (
+                get_neuronpedia_export_service,
+            )
+
+            from ..core.config import settings
+
+            exports_dir = get_neuronpedia_export_service()._exports_dir
+            if not str(job_id):
+                # `Path("/a/b") / "" == Path("/a/b")` — an empty id collapses the
+                # target onto the exports root, i.e. every completed archive.
+                raise ValueError("refusing to clean up an export with no id")
+            for partial in (
+                exports_dir / str(job_id),
+                exports_dir / f"neuronpedia_export_{job_id}.zip",
+            ):
+                # Through the MIS-E2E-071 guard, like every other deletion in
+                # this change. R2 closed exactly this hole in `model_tasks` and
+                # left it open here — the guard refuses the trusted roots and
+                # their top-level directories, so a collapsed target cannot
+                # take the whole exports tree with it.
+                try:
+                    target = settings.resolve_deletable_path(str(partial))
+                except ValueError as guard_exc:
+                    logger.error("Refusing to delete %s: %s", partial, guard_exc)
+                    continue
+                if target.exists():
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink()
+                    logger.info(
+                        "Removed the cancelled export's partial output: %s", target
+                    )
+        except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
+            logger.warning("Could not remove the partial export tree: %s", cleanup_exc)
+        return {"status": "cancelled", "job_id": job_id, "detail": cancelled.detail}
 
     except Exception as e:
         logger.exception(f"Neuronpedia export job {job_id} failed: {e}")

@@ -32,6 +32,8 @@ from ....schemas.model import (
 )
 from ....services.model_service import ModelService
 from ....services.extraction_db_service import ExtractionDatabaseService
+from starlette.concurrency import run_in_threadpool
+
 from ....core.cancellation import request_cancel
 from ....core.database import get_sync_db
 from ....workers.model_tasks import download_and_load_model, extract_activations, delete_model_files
@@ -1030,7 +1032,13 @@ async def cancel_extraction(
         # `request_cancel` writes the flag the task polls, and issues a plain
         # `revoke()` (no terminate) centrally for the one case it genuinely
         # handles: a task that has not started never will.
-        outcome = request_cancel(
+        # OFF-THREAD. `request_cancel` is synchronous — a query, a commit and a
+        # `celery_app.control.revoke()` broadcast — and this is an async route,
+        # so calling it inline blocks the event loop for every other request.
+        # Every other new cancel route uses run_in_threadpool; these two were
+        # the inconsistency.
+        outcome = await run_in_threadpool(
+            request_cancel,
             "activation_extraction",
             extraction_id,
             reason="Extraction cancelled by user",

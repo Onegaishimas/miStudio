@@ -190,3 +190,41 @@ async def get_latest_enhanced_labeling_job(
     if not job:
         return None
     return EnhancedLabelingJobResponse.model_validate(job)
+
+
+@router.post(
+    "/enhanced-labeling/{job_id}/cancel",
+    summary="Stop a running enhanced labeling job",
+    tags=["enhanced-labeling"],
+)
+async def cancel_enhanced_labeling(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop a two-pass enhanced labeling job at its next example.
+
+    STARTABLE AND NOT STOPPABLE UNTIL NOW. Pass 1 fans out one LLM call per
+    example and pass 2 synthesises them; on a slow endpoint that is minutes of
+    billed calls with no way to reach it. The worker is `--pool=solo -c 1`, so
+    the job also blocked every other queue for its whole duration.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from sqlalchemy import select
+
+    from ....core.cancellation import request_cancel
+    from ....models.enhanced_labeling_job import EnhancedLabelingJob
+
+    result = await db.execute(
+        select(EnhancedLabelingJob).where(EnhancedLabelingJob.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    outcome = await run_in_threadpool(
+        request_cancel, "enhanced_labeling", job_id,
+        reason="cancelled by operator", celery_task_id=job.celery_task_id,
+    )
+    if not outcome.requested:
+        raise HTTPException(status_code=409, detail=outcome.detail)
+    return {"id": job_id, "status": "cancelled", "message": outcome.detail}

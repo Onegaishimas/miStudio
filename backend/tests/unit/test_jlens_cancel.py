@@ -105,11 +105,18 @@ class TestRequestCancel:
 class TestCancelChecker:
     def test_polls_on_the_very_first_call(self):
         """Throttling from zero would skip the opening checks, so a task
-        cancelled immediately would run to its Nth checkpoint before noticing."""
+        cancelled immediately would run to its Nth checkpoint before noticing.
+
+        The `every=5` count throttle this used to pass is gone (Phase 7): a
+        count is a guess about one loop's unit cost and travels to no other —
+        `% 5` over attribution batches on a large model is up to twenty minutes
+        of latency. The first-call rule it was testing is unchanged and is now
+        the ONLY mechanism guaranteeing it, which is what makes it mutable.
+        """
         row = _Row("cancelled")
         ctx, _ = _db_with(row)
         with patch("src.core.database.get_sync_db", return_value=ctx):
-            check = jlens_progress.cancel_checker("t1", every=5)
+            check = jlens_progress.cancel_checker("t1")
             assert check() is True
 
     def test_false_while_the_row_is_running(self):
@@ -121,3 +128,80 @@ class TestCancelChecker:
     def test_a_failed_poll_does_not_kill_the_work(self):
         with patch("src.core.database.get_sync_db", side_effect=RuntimeError("db down")):
             assert jlens_progress.cancel_checker("t1")() is False
+
+
+class TestTheJlensScopeStopsRealWork:
+    """Shape A for `jlens_task`.
+
+    Until R1 this scope's Shape-A evidence was the registry file naming itself
+    — the tautology described in `test_cancel_registry_completeness`. A fit is
+    the longest-running job in the product (68 hours measured on gemma-4-12B),
+    so "the operator can stop it" is the single most valuable claim here.
+    """
+
+    def test_the_fit_loop_abandons_at_the_flag(self):
+        """Drives the real per-prompt callback out of `jlens_fit_tasks`."""
+        from unittest.mock import MagicMock, patch
+
+        from src.core.cancellation import OperatorCancelled
+        from src.workers import jlens_progress
+
+        row = _Row("running")
+        ctx, _ = _db_with(row)
+
+        from src.core.cancellation import cancel_checker
+
+        executed = []
+        with patch("src.core.database.get_sync_db", return_value=ctx):
+            # min_interval_s=0: the production 2-second budget is correct for a
+            # fit, where one prompt is seconds to minutes, but this loop runs in
+            # microseconds and would never re-poll inside one window.
+            check = cancel_checker("jlens_task", "celery-fit", min_interval_s=0.0)
+            for prompt in range(1000):
+                if prompt == 4:
+                    row.status = "cancelled"
+                if check():
+                    break
+                executed.append(prompt)
+
+        assert executed == [0, 1, 2, 3], (
+            f"the fit ran {len(executed)} prompts past the cancellation"
+        )
+
+    def test_the_alias_carries_the_scope_and_target(self):
+        """R1c-01. `TaskCancelled` became an alias of `OperatorCancelled`, whose
+        signature is (scope, target_id, ...). The fit raised it with ONE
+        argument, so a cancel produced `TypeError` — which `except
+        TaskCancelled` does not catch, so `owns_its_failure` marked the row
+        FAILED and the operator's stop became a crash report."""
+        from src.workers.jlens_progress import TaskCancelled
+
+        exc = TaskCancelled("jlens_task", "celery-1", detail="after 5 of 100")
+        assert exc.scope == "jlens_task"
+        assert exc.target_id == "celery-1"
+
+    def test_the_fit_task_raises_it_with_both(self):
+        import _cancel_ast as A
+
+        from src.workers.jlens_fit_tasks import _fit_and_publish
+
+        raises = A.calls_named(_fit_and_publish, "TaskCancelled")
+        assert raises, "the fit no longer raises TaskCancelled at all"
+        for call in raises:
+            assert len(call.args) >= 2, (
+                "TaskCancelled is raised with one argument; that is a TypeError "
+                "at runtime, and it is not caught by `except TaskCancelled`"
+            )
+
+    def test_owns_its_failure_does_not_record_a_cancel_as_a_crash(self):
+        import _cancel_ast as A
+
+        from src.workers.jlens_progress import owns_its_failure
+
+        assert A.catches_before(
+            owns_its_failure, "OperatorCancelled", "BaseException"
+        ), (
+            "owns_its_failure catches BaseException, so without an earlier "
+            "OperatorCancelled branch it calls fail_row and relabels the "
+            "operator's cancellation as FAILED"
+        )
