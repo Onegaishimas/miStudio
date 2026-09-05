@@ -27,6 +27,7 @@ from ..models.model import Model
 from ..models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from ..services.training_service import TrainingService
 from ..services.checkpoint_service import CheckpointService
+from ..core.cancellation import record_progress
 from ..core.config import settings
 from ..utils.resource_estimation import (
     estimate_training_memory,
@@ -72,31 +73,40 @@ class TrainingTask(DatabaseTask):
             dead_neurons: Current dead neuron count
             learning_rate: Current learning rate
         """
+        # THE GUARDED WRITE NOW LIVES IN `core.cancellation`. This method had
+        # independently rediscovered the same rule as `jlens_progress.update_row`
+        # — a concurrent PAUSED/CANCELLED set by the API must not be clobbered
+        # back to RUNNING — and the `training` scope is where that four-status
+        # terminal set is now written down once. Training keeps its own
+        # dict-return cancellation convention (Feature 21: stopping must run
+        # finalize, not unwind); it adopts the registry and the guard only.
+        #
+        # STRONGER THAN BEFORE IN ONE RESPECT: the whole write is refused on a
+        # terminal row, not just the status. Previously a paused run went on
+        # accruing steps and losses for up to `status_check_interval` steps
+        # after the operator paused it, so the row it was resumed from disagreed
+        # with the checkpoint it was resumed at.
         with self.get_db() as db:
-            training = db.query(Training).filter_by(id=training_id).first()
-            if training:
-                progress = (step / total_steps) * 100.0
-                training.progress = progress
-                training.current_step = step
-                training.current_loss = loss
-                training.current_l0_sparsity = l0_sparsity
-                training.current_dead_neurons = dead_neurons
-                # Only overwrite when a value was reported. Architectures that
-                # do not compute FVU pass None, and writing that would erase a
-                # good reading from a multi-SAE run where one layer reports it.
-                if fvu is not None:
-                    training.current_fvu = fvu
-                training.current_learning_rate = learning_rate
-                # Guarded status write: a concurrent PAUSED/CANCELLED set by the
-                # API must not be clobbered back to RUNNING by a progress update
-                if training.status not in (
-                    TrainingStatus.PAUSED.value,
-                    TrainingStatus.CANCELLED.value,
-                    TrainingStatus.FAILED.value,
-                    TrainingStatus.COMPLETED.value,
-                ):
-                    training.status = TrainingStatus.RUNNING.value
-                db.commit()
+            fields = {
+                "current_step": step,
+                "current_loss": loss,
+                "current_l0_sparsity": l0_sparsity,
+                "current_dead_neurons": dead_neurons,
+                "current_learning_rate": learning_rate,
+            }
+            # Only overwrite when a value was reported. Architectures that do
+            # not compute FVU pass None, and writing that would erase a good
+            # reading from a multi-SAE run where one layer reports it.
+            if fvu is not None:
+                fields["current_fvu"] = fvu
+            record_progress(
+                "training",
+                training_id,
+                status=TrainingStatus.RUNNING.value,
+                progress=(step / total_steps) * 100.0,
+                db=db,
+                **fields,
+            )
 
     def log_metric(
         self,

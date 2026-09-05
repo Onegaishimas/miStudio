@@ -18,6 +18,7 @@ from ..services.neuronpedia_export_service import (
     ExportConfig,
 )
 from .websocket_emitter import emit_export_progress
+from ..core.cancellation import guard_allows
 from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
@@ -47,9 +48,29 @@ class NeuronpediaTask(DatabaseTask):
             progress: Progress percentage (0-100)
             stage: Current processing stage
             message: Optional status message
+
+        WRITES NOTHING ONTO A TERMINAL ROW. This writer never sets `status`, so
+        it cannot lose a cancellation by overwriting it — it loses it by
+        contradicting it: a cancelled export that goes on reporting
+        "packaging, 60%" reads to the operator as a cancel that did not take.
+        `guard_allows` refuses a progress move on a terminal row for exactly
+        this shape.
         """
         with self.get_db() as db:
-            job = db.query(NeuronpediaExportJob).filter_by(id=job_id).first()
+            job = (
+                db.query(NeuronpediaExportJob)
+                .filter_by(id=job_id)
+                .populate_existing()
+                .first()
+            )
+            if job and not guard_allows(
+                "neuronpedia_export", job.status, writes_progress=True
+            ):
+                logger.info(
+                    "Ignoring progress update for export %s — row is already %s",
+                    job_id, job.status,
+                )
+                return
             if job:
                 job.progress = progress
                 job.current_stage = stage

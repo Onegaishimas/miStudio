@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from ..models.activation_extraction import ActivationExtraction, ExtractionStatus
+from ..core.cancellation import record_progress
 from ..core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -104,22 +105,28 @@ class ExtractionDatabaseService:
             message: Optional status message
 
         Returns:
-            Updated ActivationExtraction record or None if not found
-        """
-        extraction = db.query(ActivationExtraction).filter_by(id=extraction_id).first()
+            Updated ActivationExtraction record, or None if the row is gone OR
+            the write was refused because the row is already terminal.
 
-        if not extraction:
-            logger.warning(f"Extraction {extraction_id} not found for progress update")
+        GOES THROUGH `record_progress` BECAUSE IT USED TO ASSIGN STATUS
+        UNCONDITIONALLY. `on_extraction_progress` (`workers/model_tasks.py`)
+        calls this roughly every ten samples, so the endpoint's CANCELLED write
+        was overwritten with EXTRACTING within seconds — the operator was told
+        the extraction had stopped while the GPU ran on for hours. A cancel
+        checker on this task is worthless without this guard in front of it.
+        """
+        wrote = record_progress(
+            "activation_extraction",
+            extraction_id,
+            status=status,
+            progress=progress,
+            db=db,
+            samples_processed=samples_processed,
+        )
+        if not wrote:
             return None
 
-        extraction.progress = progress
-        extraction.status = status
-        extraction.samples_processed = samples_processed
-
-        db.commit()
-        db.refresh(extraction)
-
-        return extraction
+        return db.query(ActivationExtraction).filter_by(id=extraction_id).first()
 
     @staticmethod
     def update_statistics(

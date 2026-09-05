@@ -119,6 +119,42 @@ class CancelScope:
     min_interval_s: float = DEFAULT_MIN_INTERVAL_S
 
 
+def _coerce_status(model: type, field: str, value: Any) -> Any:
+    """Translate the registry's lowercase vocabulary into the column's own type.
+
+    Scopes are written in plain lowercase strings because that is the only
+    vocabulary all fifteen lifecycles share. Half the status columns are bare
+    `String`, and the string goes straight in. The other half are `SQLEnum(...)`
+    — and `activation_extractions.status` is declared WITHOUT `values_callable`,
+    so SQLAlchemy persists the member NAME ("CANCELLED"), not the value. A raw
+    "cancelled" assigned there is not a key SQLAlchemy can look up, and it fails
+    at flush, inside a write nobody is watching, on the cancellation path.
+
+    Unknown values pass through untouched: an invalid status must fail at the
+    column, loudly, rather than be silently dropped here.
+    """
+    if value is None or not isinstance(value, str):
+        return value
+    try:
+        enum_class = getattr(model.__table__.columns[field].type, "enum_class", None)
+    except Exception:  # noqa: BLE001 - a fake row in a test has no __table__
+        return value
+    if enum_class is None:
+        return value
+    # MATCHED ON THE VALUE ONLY. A second branch matching `member.name` was here
+    # and was pure redundancy — every status enum in this project spells its
+    # value as the lowercase of its name, so the two branches always agree and
+    # neither could be mutation-tested; a control that disabled one passed
+    # silently on the other. Values are the vocabulary the scopes are written
+    # in, so that is the one thing translated here. A member whose value does
+    # not match falls through to the column, which rejects it loudly.
+    wanted = value.lower()
+    for member in enum_class:
+        if str(getattr(member, "value", member)).lower() == wanted:
+            return member
+    return value
+
+
 def _norm(value: Any) -> Optional[str]:
     """Compare statuses as plain lowercase strings.
 
@@ -183,6 +219,11 @@ def _training():
     return Training
 
 
+def _export_job():
+    from ..models.neuronpedia_export import NeuronpediaExportJob
+    return NeuronpediaExportJob
+
+
 #: J-space work is tracked in `task_queue`, keyed by the CELERY id. That is one
 #: registered scope, NOT the universal channel: task_queue is populated by only
 #: three lifecycles, and its key does not exist until after `.delay()` — the
@@ -229,6 +270,15 @@ register(CancelScope(
     #: (inert) and deletes the row, so `_raise_if_cancelled` finds nothing and
     #: returns — the job then runs to completion against a deleted row.
     missing_row="cancelled",
+))
+
+#: PENDING/COMPUTING/PACKAGING are all live. The export writer reports
+#: progress and a stage and NEVER a status, so this scope is only guarded at
+#: all because a terminal row refuses a progress move as well as a status one.
+register(CancelScope(
+    kind="neuronpedia_export",
+    model=_export_job,
+    terminal_values=frozenset({"completed", "failed", "cancelled"}),
 ))
 
 register(CancelScope(
@@ -405,6 +455,45 @@ def cancel_checker(
 # Writing: the guard, and the request
 # --------------------------------------------------------------------------
 
+def guard_allows(
+    kind: str,
+    current_status: Any,
+    incoming_status: Any = None,
+    *,
+    writes_progress: bool = False,
+) -> bool:
+    """Would a write of this shape be accepted onto a row in this state?
+
+    THE ONE STATEMENT OF THE RULE, so that the writers which cannot borrow
+    `record_progress`'s session mechanics still share its semantics rather than
+    growing a fourth nearly-identical guard. Two such writers exist and neither
+    is going away: `ExtractionService.update_extraction_status` is async and
+    holds an `AsyncSession`, and `NeuronpediaTask.update_export_progress`
+    already has the row open in a context manager it also emits from.
+
+    THE RULE: a terminal row accepts only an error message, or a deliberate
+    terminal -> terminal transition.
+
+      * live row                            -> anything
+      * terminal + non-terminal status      -> refused entirely; this is the
+        case that loses a cancellation
+      * terminal + terminal status          -> allowed, so `cleanup_orphaned_*`
+        can still fail an abandoned row
+      * terminal + no status, but progress  -> refused; a cancelled export must
+        not go on announcing "packaging, 60%"
+      * terminal + error_message only       -> allowed, so a stopping task can
+        record WHERE it stopped
+    """
+    scope = get_scope(kind)
+    current = _norm(current_status)
+    if current not in scope.terminal_values:
+        return True
+    incoming = _norm(incoming_status)
+    if incoming is not None:
+        return incoming in scope.terminal_values
+    return not writes_progress
+
+
 def record_progress(
     kind: str,
     target_id: Any,
@@ -451,18 +540,28 @@ def record_progress(
             .first()
         )
         if row is None:
+            # LOUD, NOT SILENT. A progress write against a row that is gone
+            # means the job is narrating into nothing — a deleted extraction
+            # whose task is still holding the GPU. That warning was ignored 300
+            # times in production once, which is why the task-start guard
+            # exists too, but removing it entirely would take away the only
+            # signal that the phantom job is running at all.
+            logger.warning(
+                "%s %s not found for progress update", scope.kind, target_id
+            )
             return False
 
         current = _norm(getattr(row, scope.status_field, None))
         incoming = _norm(status)
-        if (
-            current in scope.terminal_values
-            and incoming is not None
-            and incoming not in scope.terminal_values
+        if not guard_allows(
+            kind,
+            current,
+            status,
+            writes_progress=progress is not None or bool(fields),
         ):
             logger.info(
                 "Ignoring %s update for %s:%s — row is already %s",
-                incoming, scope.kind, target_id, current,
+                incoming or "progress", scope.kind, target_id, current,
             )
             return False
 
@@ -480,7 +579,11 @@ def record_progress(
                 and getattr(row, scope.completed_at_field, None) is None
             ):
                 setattr(row, scope.completed_at_field, now)
-            setattr(row, scope.status_field, status)
+            setattr(
+                row,
+                scope.status_field,
+                _coerce_status(model, scope.status_field, status),
+            )
         if progress is not None and scope.progress_field:
             # Clamped: a bar past 100% reads as a bug in the bar rather than in
             # whatever produced the number.
@@ -554,7 +657,11 @@ def request_cancel(
         if scope.request_field is not None:
             setattr(row, scope.request_field, now)
         else:
-            setattr(row, scope.status_field, "cancelled")
+            setattr(
+                row,
+                scope.status_field,
+                _coerce_status(model, scope.status_field, "cancelled"),
+            )
             if scope.completed_at_field and getattr(row, scope.completed_at_field, None) is None:
                 setattr(row, scope.completed_at_field, now)
         if scope.error_field:
