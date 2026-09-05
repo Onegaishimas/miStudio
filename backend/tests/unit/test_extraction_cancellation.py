@@ -318,3 +318,64 @@ class TestAFinishedRunDoesNotOverwriteTheCancellation:
         )
         assert row.status is ExtractionStatus.COMPLETED
         assert row.progress == 100.0
+
+
+class TestTheReturnedIdIsTheRowsId:
+    """Found on hardware, 2026-09-05. The endpoint GUESSED the id.
+
+    It generated `ext_{model}_{now}` and did NOT pass it to the task, which
+    generated its own from a second `datetime.now()`. They agree only when both
+    land inside the same second — observed straddling one: the endpoint
+    returned `..._185140` and the row was created as `..._185141`.
+
+    CANCEL KEYS ON THIS ID. So an operator cancelling with the id they were
+    handed got `404 Extraction not found` and the extraction ran on — the exact
+    class of silent failure this whole arc exists to remove, sitting in the
+    endpoint that Phase 2 rewired. Four static review rounds did not find it;
+    the first real GPU run did, which is the repo's own recorded pattern.
+    """
+
+    def test_the_endpoint_hands_its_id_to_the_task(self):
+        import _cancel_ast as A
+
+        from src.api.v1.endpoints import models as models_endpoint
+
+        calls = A.calls_named(models_endpoint.extract_model_activations, "delay")
+        assert calls, "the endpoint no longer dispatches the task"
+        passed = [A.keyword_of(c, "extraction_id") for c in calls]
+        assert any(v is not None for v in passed), (
+            "the endpoint returns an extraction_id it never passes to the "
+            "task, so the task invents a different one and the id the caller "
+            "holds — and cancels with — does not exist"
+        )
+
+    def test_the_task_only_invents_an_id_when_it_is_given_none(self):
+        """The other half: if the task ignored the argument the fix is void."""
+        import inspect
+
+        from src.workers.model_tasks import extract_activations
+
+        src = inspect.getsource(inspect.unwrap(extract_activations))
+        assert "if extraction_id is None:" in src, (
+            "the task no longer honours a caller-supplied id"
+        )
+
+    def test_two_dispatches_in_one_second_would_still_collide(self):
+        """HONEST LIMIT, recorded rather than hidden.
+
+        Passing the id fixes the endpoint/task disagreement. It does NOT make
+        the id unique: the format is second-granular, so two extractions
+        started for the same model inside one second still collide. That was
+        also observed on 2026-09-05 (both jobs came back as `..._184829`).
+        Fixing it means changing the id format, which is a wider change than
+        this arc — recorded here so the next reader knows it is known.
+        """
+        import inspect
+
+        from src.api.v1.endpoints import models as models_endpoint
+
+        src = inspect.getsource(models_endpoint.extract_model_activations)
+        assert "%Y%m%d_%H%M%S" in src, (
+            "the id format changed — if it now carries sub-second precision or "
+            "a uuid, this collision note is obsolete and should be deleted"
+        )

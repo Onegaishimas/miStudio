@@ -46,21 +46,31 @@ def _sh(cmd: str, timeout: int = 120) -> str:
 
 
 def pod() -> str:
-    return _sh(
-        f"kubectl get pods -n {NS} -l app=mistudio-backend "
-        f"-o jsonpath='{{.items[0].metadata.name}}'"
-    ) or _sh(
-        f"kubectl get pods -n {NS} --no-headers | awk '/mistudio-backend/{{print $1}}'"
-    ).split()[0]
+    """Resolve the pod name ON EVERY CALL.
+
+    Captured once, this invalidated an entire acceptance run: ArgoCD replaced
+    the pod mid-run (its Image Updater rolled the deployment for a new digest),
+    every later `kubectl exec` addressed a name that no longer existed, and the
+    script read empty responses as `None` statuses and a -1 GPU. The run
+    reported FAIL for four criteria while the feature underneath was working.
+
+    A test that cannot tell "the thing is broken" from "I lost my connection to
+    it" produces a verdict about nothing.
+    """
+    name = _sh(
+        f"kubectl get pods -n {NS} --no-headers "
+        f"| awk '/mistudio-backend/ && / Running /{{print $1}}'"
+    )
+    return name.split()[0] if name.split() else ""
 
 
-def api(p: str, method: str, path: str, body: dict | None = None) -> dict:
+def api(_p, method: str, path: str, body: dict | None = None) -> dict:
     if body is None:
-        cmd = (f"kubectl exec -n {NS} {p} -c backend -- "
+        cmd = (f"kubectl exec -n {NS} {pod()} -c backend -- "
                f"curl -s -X {method} http://localhost:8000{path}")
     else:
         payload = shlex.quote(json.dumps(body))
-        cmd = (f"kubectl exec -n {NS} {p} -c backend -- "
+        cmd = (f"kubectl exec -n {NS} {pod()} -c backend -- "
                f"curl -s -X {method} -H 'Content-Type: application/json' "
                f"-d {payload} http://localhost:8000{path}")
     raw = _sh(cmd)
@@ -70,10 +80,10 @@ def api(p: str, method: str, path: str, body: dict | None = None) -> dict:
         return {"_raw": raw[:400]}
 
 
-def gpu_used_gb(p: str) -> float:
+def gpu_used_gb(_p=None) -> float:
     """Used VRAM, read from the container that actually holds the card."""
     raw = _sh(
-        f"kubectl exec -n {NS} {p} -c celery-worker -- python3 -c "
+        f"kubectl exec -n {NS} {pod()} -c celery-worker -- python3 -c "
         f"\"import torch;f,t=torch.cuda.mem_get_info();print(round((t-f)/1024**3,2))\" "
         f"2>/dev/null | tail -1"
     )
@@ -119,6 +129,11 @@ def main() -> int:
     print(f"[started] {ext_id}")
 
     # A SECOND job, queued behind it — criterion 4 needs something to pick up.
+    # SLEEP FIRST: the extraction id is `ext_{model}_{YYYYmmdd_HHMMSS}`, so two
+    # POSTs inside the same second collide and the "second" job is the first
+    # one under another name. That made criterion 4 report on the row it was
+    # supposed to be independent of.
+    time.sleep(2)
     second = api(p, "POST", f"/api/v1/models/{args.model}/extract-activations", {
         "dataset_id": args.dataset,
         "layer_indices": [args.layer],
@@ -139,7 +154,17 @@ def main() -> int:
         print(f"  status={e.get('status')} samples={samples_at_cancel} "
               f"gpu={gpu_used_gb(p)} GB")
 
-    print(f"[cancel] at ~{samples_at_cancel} samples")
+    # READ THE COUNT IMMEDIATELY BEFORE THE POST. The polling loop above is on
+    # a 5-second tick and this job advances ~450 samples per tick, so measuring
+    # from the last poll attributes up to a tick of ORDINARY PROGRESS to the
+    # cancellation. The first run of this script failed criterion 1 at +132
+    # samples for exactly that reason — the number was real, the attribution
+    # was not.
+    samples_at_cancel = (
+        extraction(p, args.model, ext_id).get("samples_processed")
+        or samples_at_cancel
+    )
+    print(f"[cancel] at {samples_at_cancel} samples")
     t0 = time.time()
     resp = api(p, "POST",
                f"/api/v1/models/{args.model}/extractions/{ext_id}/cancel")
@@ -189,7 +214,11 @@ def main() -> int:
           f"cancelled)")
     ok &= c3
 
-    c4 = str(second_row.get("status", "")).lower() not in ("", "queued")
+    if second_id == ext_id:
+        print("4. WORKER TAKES THE NEXT JOB : INVALID (the two jobs share an id)")
+        c4 = False
+    else:
+        c4 = str(second_row.get("status", "")).lower() not in ("", "queued")
     print(f"4. WORKER TAKES THE NEXT JOB  : {'PASS' if c4 else 'FAIL'}  "
           f"(second job status={second_row.get('status')})")
     ok &= c4
