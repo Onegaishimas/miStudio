@@ -18,7 +18,7 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | 0 — repair the hand-edited quantization rows | ✅ done | (pre-`efc576a3`) |
 | 1.0 — the module, no callers | ✅ done | `efc576a3` |
 | 1 — the guard everywhere, still no checkers | ✅ done | this record |
-| 2 — `extract_activations`, the GPU proof | ▢ | |
+| 2 — `extract_activations`, the GPU proof | ✅ code; hardware acceptance pending | this record |
 | 3 — the remaining compute tasks | ▢ | |
 | 4 — the downloads | ▢ | |
 | 5 — shim the five healthy conventions | ▢ | |
@@ -35,6 +35,9 @@ stranded an `acks_late` message for the full 12-hour visibility timeout.
 | `backend/src/core/cancellation.py` | The one cooperative-cancellation mechanism: `OperatorCancelled`, `CancelScope`, the `SCOPES` registry, `cancel_checker`, `request_cancel`, `record_progress`, `guard_allows`, `@cooperative_cancel` |
 | `backend/tests/unit/test_cancellation_core.py` | The rule in isolation — throttle, identity-map defeat, `missing_row` policies, the guard matrix |
 | `backend/tests/unit/test_progress_guard.py` | Shape B against the REAL writers: a cancellation is not overwritten by the next progress write |
+| `backend/tests/unit/test_extraction_cancellation.py` | Phase 2 Shapes A and C: the extraction actually stops, and the endpoint's write is what the worker reads |
+| `backend/src/workers/model_tasks.py` | `extract_activations` + `build_extraction_progress_callback` — the checkpoint |
+| `backend/src/api/v1/endpoints/models.py` | `cancel_extraction` — now asks, rather than pretending to terminate |
 | `backend/src/services/extraction_db_service.py` | `update_progress` for activation extraction — routed through `record_progress` |
 | `backend/src/services/extraction_service.py` | `update_extraction_status{,_sync}` for the SAE lifecycle — guarded via `guard_allows` |
 | `backend/src/workers/neuronpedia_tasks.py` | `update_export_progress` — the progress-only writer |
@@ -274,3 +277,112 @@ Shape-D registry test it was written for, ever reads it. It is removed before
 the first caller passes it, on the same reasoning that killed C3 and C8: an
 argument nothing depends on cannot be mutation-tested, and entrenching it across
 a dozen task decorators makes it permanent.
+
+
+---
+
+## Phase 2 — `extract_activations`, the proof on a real GPU task
+
+Chosen first for four reasons, all of which held up: the checkpoint already
+existed as `on_extraction_progress`; it was **the worst lie in the system**; its
+service swallows callback `Exception`s, so it tests the `BaseException` decision
+empirically rather than by argument; and it runs for hours, so the hardware
+acceptance is unambiguous.
+
+### What the endpoint used to do
+
+`POST /models/{id}/extractions/{id}/cancel` called
+`revoke(terminate=True, signal='SIGTERM')`, wrote CANCELLED, emitted a
+"cancelled" WebSocket event and returned **"Extraction cancelled
+successfully"**. The extraction worker is `--pool=solo -c 1`, `terminate`
+signals a pool child, and solo has none — and a busy solo worker is not reading
+the control queue, so the revoke was never delivered. Every layer of the
+response was true except the one the operator cared about: the GPU ran on for
+hours. It now calls `request_cancel`, and the response and WebSocket message
+both carry `outcome.detail` — *"A running job stops at its next checkpoint,
+which is bounded by one indivisible unit of work"* — instead of a success
+claim.
+
+### Three checkpoints, not one
+
+| where | why |
+|---|---|
+| the progress callback (~every 10 samples) | the finest boundary at which a partially written batch can be abandoned |
+| `poll_now()` immediately before `extract_activations` | everything past it is one indivisible call whose first checkpoint is not reached until the model is on the GPU — minutes for a large model |
+| `@cooperative_cancel` at the task boundary | turns the raise into the canonical `{"status": "cancelled", …}` **return**, which is what ACKS the `acks_late` message; raising would redeliver it against a 12-hour visibility timeout |
+
+### A decision that had to be made, not defaulted
+
+An operator who cancels during the **SAVING** phase gets no further checkpoints:
+the task runs to the end and reaches `mark_completed`. `record_progress` would
+allow that write — terminal → terminal is deliberately permitted so the janitors
+can fail an abandoned row — and the row would read COMPLETED, telling the
+operator their cancel did nothing.
+
+Both facts are true, so both are recorded: **the row stays CANCELLED**, and the
+artifact that does exist keeps its `statistics` and `saved_files` and is named
+in `error_message`, so it is not silently orphaned. Reporting "failed" would
+have been a lie about a complete artifact; reporting "completed" a lie about the
+operator's request.
+
+### The reachability rule bit, and it was worth it
+
+The first Shape-A test drove a hand-written **reconstruction** of the callback,
+because the real one was a closure inside the task and unreachable. Mutation
+control P2-C1 — delete the `raise_if_cancelled` from production — then turned
+exactly **one** test red, and it was a source scrape. By the rule (*a capability
+is not shipped until a test FAILS when its wiring is removed*), the checkpoint
+was not shipped: the only thing standing behind it was a guard of the kind this
+repo has twice watched fail open.
+
+The callback was hoisted to `build_extraction_progress_callback` at module
+level so the test drives the thing production drives. P2-C1 now turns **three**
+behavioural tests red, and a new P2-C9 (the task builds its own callback,
+bypassing the factory) covers the wiring.
+
+### Mutation controls — 9 run, 9 verified biting
+
+| id | mutation | result |
+|---|---|---|
+| P2-C1 | the callback no longer polls — the only checkpoint removed | KILLED (3 red) |
+| P2-C2 | the task loses `@cooperative_cancel` | KILLED |
+| P2-C3 | nothing polls before the model load | KILLED |
+| P2-C4 | the endpoint goes back to `revoke(terminate=True)` | KILLED |
+| P2-C5 | `mark_completed` overwrites a cancellation again | KILLED |
+| P2-C6 | `is_cancelled` never recognises a cancelled row | KILLED |
+| P2-C7 | `OperatorCancelled` becomes an ordinary `Exception` | KILLED (5 red) |
+| P2-C8 | the checker's first call is throttled away | KILLED (9 red) |
+| P2-C9 | the task builds its own callback, bypassing the checkpoint | KILLED |
+
+### Two of my own test bugs, recorded because both are the standard traps
+
+* The Shape-A test asserted against a list it never populated — the value was
+  returned from a function that raises, so it was always `[]`. It reported
+  "0 units executed" as a *failure of the code* when it was a failure of the
+  test.
+* The "endpoint no longer pretends terminate works" assertion matched the
+  **comment explaining why terminate is wrong**. It failed against correct code,
+  and would equally have passed against a re-added call under a comment that did
+  not mention it. Comments are now stripped before the check.
+
+### Two prerequisites cleared first
+
+* `@cooperative_cancel(kind, target)`'s `target` was dead — stored on the
+  wrapper and never read, including by the Shape-D test it was written for.
+  Removed before the first caller entrenched it.
+* `_task_source()` in `test_extraction_aborts_without_a_row.py` used a single
+  `__wrapped__` hop. With the decorator in place that lands on the
+  **cancellation wrapper**, so six assertions about the task body would have
+  been read against `core/cancellation.py` — passing or failing for unrelated
+  reasons. Switched to `inspect.unwrap`, verified against the live Celery
+  `PromiseProxy`.
+
+### Outstanding
+
+**Hardware acceptance on k8s is not done.** The unit suite cannot show the
+properties that matter: work stopping at the next 10-sample boundary, **VRAM
+actually freed**, the row still CANCELLED after the last in-flight progress
+write, and the worker picking up the next queued job. Both `finally:` blocks
+that release the GPU (`model_tasks.py` and `activation_service.py`) do run on a
+propagating `BaseException`, which is necessary but not sufficient — the repo's
+record is explicit that GPU bugs are found only on GPUs.

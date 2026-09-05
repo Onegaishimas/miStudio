@@ -12,6 +12,11 @@ import time
 from pathlib import Path
 from typing import Optional, List
 
+from ..core.cancellation import (
+    OperatorCancelled,
+    cancel_checker,
+    cooperative_cancel,
+)
 from ..core.celery_app import celery_app
 from ..core.config import settings
 from ..core.database import get_sync_db
@@ -674,6 +679,52 @@ class PermanentExtractionError(Exception):
     """
 
 
+def build_extraction_progress_callback(task, model_id: str, extraction_id: str, cancelled):
+    """The extraction's progress callback — and its ONLY cancellation checkpoint.
+
+    MODULE LEVEL SO A TEST CAN DRIVE THE REAL ONE. This was a closure inside
+    `extract_activations`, unreachable from any test, so the Shape-A test drove
+    a hand-written reconstruction instead. Deleting the `raise_if_cancelled`
+    from the production copy then turned exactly ONE test red — a source scrape
+    — and this repo's record is that a source-scraping guard fails open. The
+    capability was, by the reachability rule, not shipped.
+
+    `task` is the bound Celery task, for its `get_db()`.
+    """
+    def on_extraction_progress(samples_processed: int, total_samples: int):
+        """Update database and emit WebSocket progress during extraction."""
+        cancelled.raise_if_cancelled(
+            f"stopped after {samples_processed} of {total_samples} samples"
+        )
+
+        # Calculate progress (10% for loading, 10-90% for extraction, 90-100% for saving)
+        extraction_progress = 10.0 + (samples_processed / total_samples) * 80.0
+
+        # Update database
+        try:
+            with task.get_db() as db:
+                ExtractionDatabaseService.update_progress(
+                    db=db,
+                    extraction_id=extraction_id,
+                    progress=extraction_progress,
+                    status=ExtractionStatus.EXTRACTING,
+                    samples_processed=samples_processed,
+                )
+        except Exception as db_e:
+            logger.warning(f"Failed to update extraction progress in database: {db_e}")
+
+        # Emit WebSocket update
+        emit_extraction_progress(
+            model_id=model_id,
+            extraction_id=extraction_id,
+            progress=extraction_progress,
+            status="extracting",
+            message=f"Processing samples: {samples_processed}/{total_samples}"
+        )
+
+    return on_extraction_progress
+
+
 @celery_app.task(
     bind=True,
     base=DatabaseTask,
@@ -682,6 +733,7 @@ class PermanentExtractionError(Exception):
     default_retry_delay=60,
     queue="extraction",
 )
+@cooperative_cancel("activation_extraction")
 def extract_activations(
     self,
     model_id: str,
@@ -915,32 +967,34 @@ def extract_activations(
                 message="Loading model and dataset"
             )
 
-            # Define progress callback to update database and WebSocket
-            def on_extraction_progress(samples_processed: int, total_samples: int):
-                """Update database and emit WebSocket progress during extraction."""
-                # Calculate progress (10% for loading, 10-90% for extraction, 90-100% for saving)
-                extraction_progress = 10.0 + (samples_processed / total_samples) * 80.0
+            # THE CANCELLATION CHECKPOINT.
+            #
+            # This callback already fires every ~10 samples, which is the finest
+            # boundary at which this task can cleanly abandon work — a partially
+            # written batch is not something to resume from. The checker's own
+            # 2-second throttle decides whether the call reaches the database,
+            # so calling it here costs nothing at any sample rate.
+            #
+            # The raise crosses `activation_service`'s
+            # `except Exception: logger.warning("Progress callback failed")`,
+            # which sits directly around this call. That is precisely why
+            # `OperatorCancelled` derives from BaseException: an
+            # Exception-derived cancel raised here would be logged at WARNING
+            # and the extraction would carry on for hours.
+            cancelled = cancel_checker("activation_extraction", extraction_id)
+            on_extraction_progress = build_extraction_progress_callback(
+                self, model_id, extraction_id, cancelled
+            )
 
-                # Update database
-                try:
-                    with self.get_db() as db:
-                        ExtractionDatabaseService.update_progress(
-                            db=db,
-                            extraction_id=extraction_id,
-                            progress=extraction_progress,
-                            status=ExtractionStatus.EXTRACTING,
-                            samples_processed=samples_processed,
-                        )
-                except Exception as db_e:
-                    logger.warning(f"Failed to update extraction progress in database: {db_e}")
-
-                # Emit WebSocket update
-                emit_extraction_progress(
-                    model_id=model_id,
-                    extraction_id=extraction_id,
-                    progress=extraction_progress,
-                    status="extracting",
-                    message=f"Processing samples: {samples_processed}/{total_samples}"
+            # POLL BEFORE THE INDIVISIBLE STEP. Everything past this line is one
+            # `extract_activations` call, and the first checkpoint inside it is
+            # not reached until the model is loaded onto the GPU — minutes for a
+            # large model. `poll_now` ignores the throttle because being two
+            # seconds stale is the wrong trade immediately before that.
+            if cancelled.poll_now():
+                raise OperatorCancelled(
+                    "activation_extraction", extraction_id, cancelled.reason or "cancelled",
+                    "stopped before the extraction pass began",
                 )
 
             # Run extraction with progress callback

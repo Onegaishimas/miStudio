@@ -273,7 +273,7 @@ class TestRequestCancel:
 
 class TestCooperativeCancelDecorator:
     def test_it_converts_the_exception_into_the_canonical_result(self):
-        @C.cooperative_cancel("labeling", target=lambda *a, **k: "j1")
+        @C.cooperative_cancel("labeling")
         def task():
             raise C.OperatorCancelled("labeling", "j1", detail="at 4 of 1000")
 
@@ -286,7 +286,7 @@ class TestCooperativeCancelDecorator:
         rec.assert_called_once()
 
     def test_it_does_not_swallow_a_real_error(self):
-        @C.cooperative_cancel("labeling", target=lambda *a, **k: "j1")
+        @C.cooperative_cancel("labeling")
         def task():
             raise ValueError("a genuine bug")
 
@@ -294,7 +294,7 @@ class TestCooperativeCancelDecorator:
             task()
 
     def test_a_normal_return_is_untouched(self):
-        @C.cooperative_cancel("labeling", target=lambda *a, **k: "j1")
+        @C.cooperative_cancel("labeling")
         def task():
             return {"status": "completed"}
 
@@ -303,7 +303,7 @@ class TestCooperativeCancelDecorator:
     def test_the_scope_is_discoverable_for_the_registry_test(self):
         """Shape D must find tasks via the imported object, never a source
         regex — a source-scraping guard fails open, twice-observed here."""
-        @C.cooperative_cancel("labeling", target=lambda *a, **k: "j1")
+        @C.cooperative_cancel("labeling")
         def task():
             return None
 

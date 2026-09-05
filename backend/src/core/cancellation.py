@@ -455,6 +455,18 @@ def cancel_checker(
 # Writing: the guard, and the request
 # --------------------------------------------------------------------------
 
+def is_cancelled(kind: str, status: Any) -> bool:
+    """Does this status mean the operator stopped it, in this scope's terms?
+
+    For the handful of callers that must distinguish "cancelled" from the other
+    terminal states — `mark_completed` is the one that matters, since a finished
+    run must not overwrite a cancellation with COMPLETED. Goes through the
+    registry rather than comparing to a literal, so the vocabulary stays in the
+    one place it is written down.
+    """
+    return _norm(status) in get_scope(kind).cancelled_values
+
+
 def guard_allows(
     kind: str,
     current_status: Any,
@@ -703,7 +715,7 @@ def request_cancel(
     return outcome
 
 
-def cooperative_cancel(kind: str, target: Callable[..., Any]):
+def cooperative_cancel(kind: str):
     """Task-boundary decorator: turn OperatorCancelled into a canonical result.
 
     ONE return shape replaces the four in use today, so a caller never has to
@@ -741,8 +753,10 @@ def cooperative_cancel(kind: str, target: Callable[..., Any]):
                     "detail": cancelled.detail,
                 }
 
-        wrapper.__cooperative_cancel_scope__ = kind  # read by the registry test
-        wrapper.__cooperative_cancel_target__ = target
+        # Read by the Shape-D registry test, which must locate tasks through the
+        # imported object rather than a regex over source — a source-scraping
+        # guard fails open, twice observed in this repo.
+        wrapper.__cooperative_cancel_scope__ = kind
         return wrapper
 
     return decorate

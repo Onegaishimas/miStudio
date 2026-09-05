@@ -27,11 +27,20 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 
 
 def _task_source() -> str:
+    """`inspect.unwrap`, NOT a single `__wrapped__` hop.
+
+    A one-hop unwrap reaches celery's bound method, which was the task body
+    until `@cooperative_cancel` was added beneath the celery decorator. After
+    that, one hop lands on the CANCELLATION WRAPPER and every assertion below
+    would have been read against `core/cancellation.py` instead — passing or
+    failing for reasons having nothing to do with this task. A guard that reads
+    the wrong function is a guard that fails open. `unwrap` follows the whole
+    chain to the original.
+    """
     from src.workers.model_tasks import extract_activations
 
-    return inspect.getsource(extract_activations.__wrapped__
-                             if hasattr(extract_activations, "__wrapped__")
-                             else extract_activations)
+    fn = inspect.unwrap(extract_activations)
+    return inspect.getsource(fn)
 
 
 class TestTheGuardExistsAndRunsFirst:
