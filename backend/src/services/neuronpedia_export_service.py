@@ -256,7 +256,14 @@ class NeuronpediaExportService:
             await self._generate_readme(sae, output_dir, config, model_name)
 
             # Stage 7: Create archive
+            # FLUSH BEFORE THE CHECKPOINT. `_update_stage` re-selects this row
+            # with populate_existing, which overwrites loaded attributes from
+            # the database — including this pending, unflushed status. The
+            # export therefore never reported "packaging" at all; it went
+            # straight from computing to completed. A behaviour change
+            # introduced by putting the checkpoint inside _update_stage.
             job.status = ExportStatus.PACKAGING.value
+            await db.flush()
             await self._update_stage(db, job, "Creating archive", 95)
             archive_path = await self._create_archive(output_dir, job_id)
 

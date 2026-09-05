@@ -17,6 +17,7 @@ from ..core.cancellation import (
     OperatorCancelled,
     cancel_checker,
     cooperative_cancel,
+    record_progress,
     request_cancel,
 )
 from ..core.celery_app import celery_app
@@ -471,6 +472,41 @@ def download_and_load_model(
             "params_count": metadata["params_count"],
             "quantization": metadata["quantization"],
             "status": "ready",
+        }
+
+    except OperatorCancelled as cancelled:
+        # NO HANDLER EXISTED. The raise escaped the task entirely: `except
+        # Exception` below cannot catch a BaseException, and celery re-raises
+        # rather than recording FAILURE — so the acks_late message was not
+        # acked and would have been redelivered only after the full 12-hour
+        # visibility timeout. That is the precise outcome this whole design
+        # exists to avoid, reintroduced by adding a checkpoint without a
+        # handler to receive it.
+        logger.info("Model download %s cancelled: %s", model_id, cancelled.detail)
+
+        # AND THE TASK OWNS ITS PARTIAL OUTPUT. `cancel_download` deliberately
+        # stops deleting the cache directory once the job has started, on the
+        # promise that the task removes it here. Without this the promise was
+        # false and a cancelled 40 GB download was orphaned forever — invisible
+        # to `delete_model_files`, which resolves `model.file_path`, a column
+        # that is not written until after the checkpoint.
+        try:
+            cache_dir = settings.models_dir / "raw" / model_id
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+                logger.info("Removed the cancelled download's partial output: %s", cache_dir)
+        except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
+            logger.warning("Could not remove %s: %s", cache_dir, cleanup_exc)
+
+        record_progress(
+            "model_download", model_id,
+            status=ModelStatus.ERROR.value,
+            error_message="Cancelled by user",
+        )
+        return {
+            "status": "cancelled",
+            "model_id": model_id,
+            "detail": cancelled.detail,
         }
 
     except Exception as exc:

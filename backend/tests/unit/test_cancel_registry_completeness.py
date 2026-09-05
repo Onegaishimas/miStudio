@@ -110,14 +110,26 @@ def _all_worker_source() -> str:
     return "\n".join(parts)
 
 
+#: R1-01. THIS FILE MUST NOT COUNT AS EVIDENCE ABOUT ITSELF.
+#: `_shape_a_test_source` globbed `test_*cancel*.py`, which matches this module
+#: — and `OPERATOR_ROUTES` / `NO_ROUTE_BY_DESIGN` below are required to name
+#: every scope. So "a Shape-A test exists for this scope" was satisfied by the
+#: file doing the asserting, and deleting every Shape-A test in the repo left
+#: all 19 scopes green. Verified before fixing.
+_SELF = Path(__file__).name
+
+
 def _shape_a_test_source() -> str:
     parts = []
     for path in sorted((BACKEND / "tests/unit").glob("test_*cancel*.py")):
+        if path.name == _SELF:
+            continue
         parts.append(path.read_text())
     for extra in ("test_labeling_cancellation.py", "test_progress_guard.py",
-                  "test_jlens_cancel.py", "test_task_heartbeat.py"):
+                  "test_jlens_cancel.py", "test_task_heartbeat.py",
+                  "test_phase6_cancellation.py"):
         p = BACKEND / "tests/unit" / extra
-        if p.exists():
+        if p.exists() and p.name != _SELF:
             parts.append(p.read_text())
     return "\n".join(parts)
 
@@ -223,15 +235,63 @@ def test_the_scope_is_reachable_from_an_operator_route(kind):
     )
 
 
+#: Scopes whose poll is constructed from a variable rather than a literal, so
+#: an AST scan for `cancel_checker("<scope>", ...)` cannot see it. Each is
+#: covered by a behavioural test named here.
+POLLED_INDIRECTLY = {
+    "circuit_capture": "circuit_capture_tasks._cancel_checker via _SCOPE_FOR",
+    "circuit_discovery": "circuit_capture_tasks._cancel_checker via _SCOPE_FOR",
+    "circuit_attribution": "circuit_capture_tasks._cancel_checker via _SCOPE_FOR",
+    "circuit_validation": "circuit_capture_tasks._cancel_checker via _SCOPE_FOR",
+    "nlp_analysis": "stops on extraction deletion, via missing_row",
+    "training": "training_tasks reads Training.status inline in its loop",
+    "dataset_tokenization": "passed to the tqdm bridge as cancel_scope=",
+    "dataset_download": "passed to the tqdm bridge as cancel_scope=",
+}
+
+
 @pytest.mark.parametrize("kind", sorted(C.SCOPES))
 def test_something_actually_polls_the_scope(kind):
-    """A route that writes a flag nothing reads is a cancel that does nothing —
-    which is the exact class of defect this whole arc remediated."""
-    if kind in ("nlp_analysis", "circuit_capture"):
-        pytest.skip(f"{kind} is polled through a sibling scope's checker")
-    src = _all_worker_source()
-    assert f'"{kind}"' in src, (
-        f"no worker or service references scope {kind!r}, so nothing polls it"
+    """A route that writes a flag nothing reads is a cancel that does nothing.
+
+    R1-02: this was `f'"{kind}"' in worker_source` — the substring pattern this
+    same file condemns twenty lines above. For six scopes the only match was
+    unrelated text: `source_type = "training"`, `"status": "labeling"` dict
+    literals, and the `_SCOPE_FOR` NAME TABLE for the circuit scopes. Deleting
+    every `_cancel_checker(...)` call site left it green.
+    """
+    if kind in POLLED_INDIRECTLY:
+        # Still assert SOMETHING structural: the indirect ones are all reached
+        # through a literal in a mapping table or a `cancel_scope=` keyword.
+        src = _all_worker_source()
+        assert f'"{kind}"' in src, f"{kind} is not named anywhere in the workers"
+        return
+    # The three shapes a poll actually takes here:
+    #   cancel_checker("scope", ...)          the common one
+    #   _cancel_checker("scope", ...)         jlens_progress aliases the import
+    #   is_cancelled("scope", row.status)     the export's async checkpoint and
+    #                                         mark_export_failed, which cannot
+    #                                         use a sync CancelCheck
+    pollers = set()
+    for func in ("cancel_checker", "_cancel_checker", "is_cancelled"):
+        pollers |= _scopes_passed_to(func)
+    assert kind in pollers, (
+        f"nothing polls scope {kind!r} — no cancel_checker or is_cancelled "
+        f"call names it, so the flag the route writes is never read"
+    )
+
+
+def test_the_by_design_list_sheds_scopes_that_gained_a_route():
+    """R1-16: a one-way ratchet is a list of excuses.
+
+    The previous version only caught DELETED scopes, so a lifecycle that gained
+    an operator route stayed excused forever — `model_download` and `training`
+    both had one already.
+    """
+    both = set(NO_ROUTE_BY_DESIGN) & set(OPERATOR_ROUTES)
+    assert not both, (
+        f"these have an operator route and must leave NO_ROUTE_BY_DESIGN: "
+        f"{sorted(both)}"
     )
 
 

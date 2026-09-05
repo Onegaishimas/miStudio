@@ -553,7 +553,16 @@ class CircuitFaithfulnessService:
             return
         circuit.faithfulness = defn.faithfulness.model_dump(mode="json")
         circuit.version = (circuit.version or 1) + 1
-        circuit.faithfulness_status = "completed"  # clears the in-flight marker (R2 B-5)
+        # REFUSE TO OVERWRITE A CANCELLATION. The tail of this pass has no
+        # checkpoint, so a stop arriving during it lands on this write — and
+        # terminal -> terminal is permitted by the guard (the janitors need
+        # it), so "completed" would win and the operator would be told their
+        # cancel did nothing.
+        from ..core.cancellation import is_cancelled as _is_cancelled
+        
+        db.refresh(circuit)
+        if not _is_cancelled("circuit_faithfulness", circuit.faithfulness_status):
+            circuit.faithfulness_status = "completed"  # clears the in-flight marker (R2 B-5)
         db.commit()
 
 

@@ -7,6 +7,7 @@ and archive generation.
 """
 
 import logging
+import shutil
 import traceback
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -18,7 +19,11 @@ from ..services.neuronpedia_export_service import (
     ExportConfig,
 )
 from .websocket_emitter import emit_export_progress
-from ..core.cancellation import guard_allows, is_cancelled
+from ..core.cancellation import (
+    OperatorCancelled,
+    guard_allows,
+    is_cancelled,
+)
 from ..core.clock import utc_now
 
 logger = logging.getLogger(__name__)
@@ -217,6 +222,24 @@ def execute_neuronpedia_export(self, job_id: str):
                 "output_path": job.output_path,
                 "feature_count": job.feature_count,
             }
+
+    except OperatorCancelled as cancelled:
+        # NO HANDLER EXISTED, so the raise from `_cancel_point` escaped the task
+        # and the acks_late message was never acked. `mark_export_failed` is
+        # correctly NOT called — the row is already cancelled — but the export's
+        # half-built tree has to go, or a cancelled export leaks its JSON files
+        # and SAELens output with nothing left to clean them.
+        logger.info("Neuronpedia export %s cancelled: %s", job_id, cancelled.detail)
+        try:
+            from ..core.config import settings
+
+            partial = settings.data_dir / "neuronpedia_exports" / str(job_id)
+            if partial.exists():
+                shutil.rmtree(partial)
+                logger.info("Removed the cancelled export's partial tree: %s", partial)
+        except Exception as cleanup_exc:  # noqa: BLE001 - must not mask the cancel
+            logger.warning("Could not remove the partial export tree: %s", cleanup_exc)
+        return {"status": "cancelled", "job_id": job_id, "detail": cancelled.detail}
 
     except Exception as e:
         logger.exception(f"Neuronpedia export job {job_id} failed: {e}")

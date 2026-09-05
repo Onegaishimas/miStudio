@@ -226,8 +226,20 @@ def owns_its_failure(fn):
 
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
+        from ..core.cancellation import OperatorCancelled
+
         try:
             return fn(self, *args, **kwargs)
+        except OperatorCancelled:
+            # A CANCELLATION IS NOT A FAILURE, AND MUST NOT BE RECORDED AS ONE.
+            #
+            # This handler catches BaseException, so without this branch it
+            # reached `fail_row` and relabelled a row the operator had just
+            # CANCELLED as FAILED — the last write wins, and the last write was
+            # the crash report. Re-raised untouched so the task's own
+            # `except TaskCancelled` can return the canonical cancelled result,
+            # which is what acks the `acks_late` message.
+            raise
         except BaseException as exc:  # noqa: BLE001 - recorded, then re-raised
             request_id = getattr(getattr(self, "request", None), "id", None)
             if request_id:

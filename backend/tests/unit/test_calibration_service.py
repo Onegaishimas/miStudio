@@ -116,6 +116,11 @@ class _FakeCircuit:
 
 
 class _FakeSyncDB:
+
+    def refresh(self, obj, *a, **k):
+        """The completion write re-reads before refusing to overwrite a
+        cancellation; a fake without this raises AttributeError there."""
+        return None
     def __init__(self, circuit):
         self._c = circuit
         self.committed = False

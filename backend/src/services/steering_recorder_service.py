@@ -205,6 +205,16 @@ class SteeringRecorderService:
             if cancel_check is not None and cancel_check():
                 from ..core.cancellation import OperatorCancelled
 
+                # PAIRED, NOT MERELY CONVENTIONAL. `run_id` defaults to None so
+                # the signature stays additive, but a checker without an id
+                # would raise an OperatorCancelled whose target is None — which
+                # `@cooperative_cancel` then reports as a cancellation of
+                # nothing, and `record_progress` writes nowhere. One caller
+                # passes both today; this is what stops the second one not.
+                assert run_id is not None, (
+                    "record_samples was given a cancel_check but no run_id; "
+                    "the cancellation would name no row"
+                )
                 raise OperatorCancelled(
                     "steering_record", run_id,
                     detail=f"stopped at prompt {pi} of {len(cfg['prompts'])}",

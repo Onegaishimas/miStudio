@@ -477,6 +477,24 @@ class TestDatasetCancellationIntegration:
                 "the cancel endpoint deleted a live download's directory again"
             )
 
+            # R1-13: THE REQUEST ITSELF. Every assertion in this file was about
+            # the OUTCOME (`status == ERROR`, `error_message == "Cancelled by
+            # user"`) — the conflation `cancel_requested_at` exists to replace.
+            # Deleting the `request_cancel(...)` call left all of them green
+            # while the running download's tqdm poll had nothing to read.
+            async with AsyncSessionLocal() as check_db:
+                from sqlalchemy import select as _select
+
+                found = await check_db.execute(
+                    _select(Dataset).filter_by(id=dataset_id)
+                )
+                row = found.scalar_one_or_none()
+                assert row is not None
+                assert row.cancel_requested_at is not None, (
+                    "the operator's request was never written, so a running "
+                    "download has no flag to poll and runs to completion"
+                )
+
             # Verify database state
             async with AsyncSessionLocal() as db:
                 from sqlalchemy import select

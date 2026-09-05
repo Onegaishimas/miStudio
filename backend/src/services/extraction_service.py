@@ -30,7 +30,11 @@ from src.models.checkpoint import Checkpoint
 from src.models.dataset import Dataset
 from src.models.dataset_tokenization import DatasetTokenization, TokenizationStatus
 from src.models.external_sae import ExternalSAE, SAEStatus
-from src.core.cancellation import OperatorCancelled, guard_allows
+from src.core.cancellation import (
+    OperatorCancelled,
+    guard_allows,
+    is_cancelled,
+)
 from src.core.database import get_db
 from src.workers.websocket_emitter import emit_training_progress, emit_extraction_job_progress, emit_extraction_deleted
 from src.core.config import settings
@@ -1967,6 +1971,37 @@ class ExtractionService:
                 incremental_heap = None
                 gc.collect()
                 torch.cuda.empty_cache()
+
+            # A CANCELLED EXTRACTION IS NOT COMPLETED.
+            #
+            # `guard_allows` deliberately permits terminal -> terminal so the
+            # janitors can fail an abandoned row, which means COMPLETED over
+            # CANCELLED is ALLOWED and the operator's stop is overwritten at the
+            # very last write. The two sibling paths — `mark_completed` for
+            # activation extraction and `_cancel_point` for the export — each
+            # got an explicit gate for exactly this; this one was missed.
+            #
+            # The window is always open: the per-feature checker throttles at
+            # 2 s, so the final iterations of the latent_dim loop usually do not
+            # poll at all.
+            self.db.expire_all()
+            _row = self.db.query(ExtractionJob).filter(
+                ExtractionJob.id == extraction_job.id
+            ).populate_existing().first()
+            if _row is not None and is_cancelled("sae_extraction", _row.status):
+                logger.info(
+                    "Extraction %s finished after it was cancelled; keeping the "
+                    "cancelled status and recording the artifact",
+                    extraction_job.id,
+                )
+                _row.statistics = statistics
+                _row.features_extracted = features_processed
+                _row.error_message = (
+                    "Cancelled by user; the extraction had already finished and "
+                    "its features were kept."
+                )
+                self.db.commit()
+                return statistics
 
             # Mark completed
             self.update_extraction_status_sync(

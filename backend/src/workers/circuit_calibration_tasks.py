@@ -42,6 +42,29 @@ def _calibration_progress(db, circuit_id):
     return _cb
 
 
+def _refuse_if_cancelled(db, target_id) -> bool:
+    """False when the row is already cancelled, so the caller should not start."""
+    from ..core.cancellation import is_cancelled
+
+    scope = "circuit_calibration"
+    try:
+        from ..core.cancellation import get_scope
+
+        sc = get_scope(scope)
+        model = sc.model()
+        row = (
+            db.query(model)
+            .filter(getattr(model, sc.id_field) == target_id)
+            .populate_existing()
+            .first()
+        )
+    except Exception:  # noqa: BLE001 - a failed check must not block the work
+        return True
+    if row is None:
+        return True
+    return not is_cancelled(scope, getattr(row, sc.status_field, None))
+
+
 @celery_app.task(bind=True, base=DatabaseTask,
                  name="src.workers.circuit_calibration_tasks.run_circuit_calibration",
                  max_retries=0)
@@ -52,6 +75,16 @@ def run_circuit_calibration(self, circuit_id: str,
     from ..services.circuit_calibration_service import CircuitCalibrationService
 
     with self.get_db() as db:
+        # A CANCEL-WHILE-QUEUED MUST NOT BE STAMPED OVER.
+        #
+        # `request_cancel` writes "cancelled" and issues a plain revoke(), but a
+        # solo worker busy on another job is not reading the control queue — so
+        # the revoke can land late or not at all, this task starts anyway, and
+        # this write turns "cancelled" back into "running". Every subsequent
+        # poll then reads running and the cancellation is simply gone, while
+        # the endpoint has already told the operator "it will not run".
+        if not _refuse_if_cancelled(db, circuit_id):
+            return {"status": "cancelled", "id": circuit_id}
         _set_status(db, circuit_id, "running")
         try:
             result = CircuitCalibrationService.run(

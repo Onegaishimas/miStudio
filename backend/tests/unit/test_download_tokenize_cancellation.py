@@ -280,17 +280,44 @@ class TestTheCancelledDownloadCleansUpAfterItself:
             settings.resolve_deletable_path.return_value = gone
             assert remove_partial_download(str(gone)) is False
 
+    def test_it_targets_what_is_actually_on_disk(self):
+        """R1-05(c). The handler cleaned `raw_path` — which does not exist yet.
+
+        The tqdm checkpoint fires during `load_dataset`, and `raw_path` is only
+        created by `save_to_disk` AFTER that returns. So the cleanup deleted
+        nothing while HuggingFace's real cache — `downloads/` and the
+        `repo___id` arrow tree — leaked with the endpoint no longer removing it
+        either. A no-op cleanup is worse than the live-directory delete it
+        replaced.
+        """
+        import _cancel_ast as A
+
+        from src.workers.dataset_tasks import download_dataset_task
+
+        body = A.handler_body(download_dataset_task, "OperatorCancelled")
+        assert "downloads" in body, (
+            "the transfer cache is not cleaned up; only raw_path is, and at "
+            "cancel time raw_path does not exist"
+        )
+
     def test_the_cancellation_handler_calls_it(self):
         """Wiring: the helper is worthless if the handler does not reach it."""
         import inspect
 
         from src.workers.dataset_tasks import download_dataset_task
 
-        src = inspect.getsource(inspect.unwrap(download_dataset_task))
-        handler = src.index("except OperatorCancelled")
-        assert "remove_partial_download(" in src[handler:], (
-            "the cancelled download leaves its partial directory behind, and "
-            "the endpoint no longer deletes it either"
+        # R1-08. `src[handler:]` is the rest of the WHOLE function, so moving
+        # the cleanup out of the cancel handler into the generic one left this
+        # green — and leaked the partial directory, which is the specific thing
+        # this class exists to prevent.
+        import _cancel_ast as A
+
+        body = A.handler_body(download_dataset_task, "OperatorCancelled")
+        assert body, "there is no OperatorCancelled handler to clean up in"
+        assert "remove_partial_download" in body, (
+            "the cleanup is not in the cancellation handler; a cancelled "
+            "download leaves its partial output behind and the endpoint no "
+            "longer deletes it either"
         )
 
     def test_the_handler_precedes_the_generic_one(self):
@@ -298,14 +325,13 @@ class TestTheCancelledDownloadCleansUpAfterItself:
 
         from src.workers.dataset_tasks import download_dataset_task
 
-        src = inspect.getsource(inspect.unwrap(download_dataset_task))
-        # The OUTER handler, matched at the function's own indent. A bare
-        # search finds a NESTED `except Exception as e:` earlier in the body
-        # and compares against the wrong one.
-        outer = src.index("\n    except Exception as e:")
-        assert src.index("\n    except OperatorCancelled") < outer, (
-            "the generic handler precedes the cancellation one, so a cancel is "
-            "recorded as a download failure"
+        import _cancel_ast as A
+
+        assert A.catches_before(
+            download_dataset_task, "OperatorCancelled", "Exception"
+        ), (
+            "no single try lists OperatorCancelled before the generic handler, "
+            "so a cancel is recorded as a download failure"
         )
 
 
@@ -315,15 +341,18 @@ class TestTheEndpointDoesNotDeleteALiveDirectory:
 
         from src.workers.dataset_tasks import cancel_dataset_download
 
-        src = inspect.getsource(inspect.unwrap(cancel_dataset_download))
-        assert "job_had_started" in src, (
-            "the cancel path rmtree's the directory the live download is "
-            "writing into; revoke(terminate=) is inert on a solo pool, so the "
-            "task is still running when this fires"
+        # R1-09: index() found the ASSIGNMENT, trivially before the rmtree.
+        import _cancel_ast as A
+
+        guarded, total = A.guard_counts(
+            cancel_dataset_download, "job_had_started", "rmtree"
         )
-        guard = src.index("job_had_started")
-        rmtree = src.index("shutil.rmtree(raw_path)")
-        assert guard < rmtree
+        assert total >= 1, "the cancel path deletes nothing at all now"
+        assert guarded >= 1, (
+            "no rmtree is guarded by job_had_started; the cancel path deletes "
+            "the directory a live download is writing into, and "
+            "revoke(terminate=) is inert on a solo pool so it IS still running"
+        )
 
     def test_the_tokenization_endpoint_no_longer_sigkills(self):
         import inspect

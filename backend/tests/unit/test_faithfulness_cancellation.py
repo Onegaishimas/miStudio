@@ -86,8 +86,14 @@ class TestShapeATheRealLoopStops:
             CircuitFaithfulnessService, _FaithfulnessCancelled,
         )
 
+        # The dataset must be NON-EMPTY, or `if doc_id >= len(dataset): continue`
+        # skips every prompt and the "no model work happened" assertions below
+        # are true by construction of the fixture rather than by the poll's
+        # position. A bare MagicMock has len() == 0.
         kwargs = self._behavior_kwargs(lambda: True, doc_ids=list(range(1000)))
-        dataset = kwargs["dataset"]
+        dataset = MagicMock()
+        dataset.__len__ = MagicMock(return_value=1000)
+        kwargs["dataset"] = dataset
         model = kwargs["model"]
 
         with pytest.raises(_FaithfulnessCancelled):
@@ -113,20 +119,34 @@ class TestShapeATheRealLoopStops:
             return calls["n"] > 3
 
         kwargs = self._behavior_kwargs(check, doc_ids=list(range(1000)))
-        # Every prompt past the third must be abandoned; the prompts before it
-        # would need a real model, so the run is stopped at the boundary where
-        # only the polls have happened.
-        with pytest.raises(Exception):
+        dataset = MagicMock()
+        dataset.__len__ = MagicMock(return_value=0)  # every prompt skips the body
+        kwargs["dataset"] = dataset
+
+        # EXACTLY four, not ">= 1". The loose version passed against a throttled
+        # poll — `if i % 50 == 0 and cancel_check()` still calls it at least
+        # once and still raises, while the latency becomes fifty prompts.
+        with pytest.raises(_FaithfulnessCancelled):
             CircuitFaithfulnessService._behavior(**kwargs)
-        assert calls["n"] >= 1, "the loop never polled at all"
+        assert calls["n"] == 4, (
+            f"the poll ran {calls['n']} times over four prompts; it must fire "
+            f"once per prompt, or the latency is however many prompts it skips"
+        )
 
     def test_none_still_means_no_polling(self):
         """The old caller passed None and that must remain legal — the service
         is also called from paths that genuinely have no cancel channel."""
         from src.services.circuit_faithfulness_service import CircuitFaithfulnessService
 
+        # `assert X or True` was here until R1 — a literal tautology. What the
+        # case is actually for is that `cancel_check=None` stays legal, because
+        # other callers genuinely have no cancel channel.
         kwargs = self._behavior_kwargs(None, doc_ids=[])
-        assert CircuitFaithfulnessService._behavior(**kwargs) is not None or True
+        result = CircuitFaithfulnessService._behavior(**kwargs)
+        assert isinstance(result, float), (
+            f"_behavior returned {result!r}; with no prompts and no checker it "
+            f"must still produce a behaviour score"
+        )
 
 
 class TestTheTaskSuppliesARealChecker:

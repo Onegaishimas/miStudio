@@ -442,7 +442,24 @@ def download_dataset_task(
         # pool, so the task was very much alive. Deletion moved here, where the
         # writer is the deleter and there is no race to lose.
         print(f"[CANCEL] {cancelled}")
-        remove_partial_download(str(raw_path))
+
+        # THE PARTIAL OUTPUT IS NOT `raw_path`. The tqdm checkpoint fires during
+        # `load_dataset`, and `raw_path` is not created until
+        # `dataset.save_to_disk(raw_path)` AFTER that returns — so a cancelled
+        # download's `raw_path` does not exist and deleting it removes nothing.
+        # What is actually on disk is HuggingFace's own cache under `data_dir`:
+        # `downloads/` (the transfer chunks) and the `repo___id` arrow tree,
+        # which the SUCCESS path already cleans up at the end of this task.
+        #
+        # Getting this wrong replaced the endpoint's cleanup with a no-op, so
+        # the multi-gigabyte cache leaked with nothing left to remove it — a
+        # worse outcome than the live-directory delete the move was meant to fix.
+        for partial in (
+            data_dir / "downloads",
+            data_dir / repo_id.replace("/", "___"),
+            raw_path,
+        ):
+            remove_partial_download(str(partial))
 
         record_progress(
             "dataset_download", dataset_id,
@@ -1301,6 +1318,32 @@ def tokenize_dataset_task(
             "dataset_tokenization", tokenization_id,
             error_message=str(cancelled), db=None,
         )
+
+        # RESTORE THE PARENT DATASET. `tokenize_dataset_task` sets the Dataset
+        # row to PROCESSING when it starts, and the BaseException handler this
+        # branch now pre-empts was the thing that put it back to READY.
+        # Without this, cancelling a tokenization left the dataset PROCESSING
+        # FOREVER — which blocks re-tokenizing it and makes the download-cancel
+        # path believe it is still in flight.
+        #
+        # Strictly worse than before the handler existed: the cancel used to be
+        # inert, so the task ran to completion and the dataset ended up READY.
+        # A handler that fixes the reported state and breaks an unreported one
+        # is the shape this repo keeps finding in its own fixes.
+        try:
+            with self.get_db() as db:
+                dataset_obj = db.query(Dataset).filter_by(id=dataset_uuid).first()
+                if dataset_obj:
+                    dataset_obj.status = DatasetStatus.READY
+                    dataset_obj.progress = 0.0
+                    dataset_obj.error_message = "Tokenization cancelled by user"
+                    db.commit()
+        except Exception as restore_exc:  # noqa: BLE001 - must not mask the cancel
+            logger.warning(
+                "Could not restore dataset %s after a cancelled tokenization: %s",
+                dataset_id, restore_exc,
+            )
+
         release_redis_lock(dataset_id)
         return {
             "status": "cancelled",

@@ -66,29 +66,32 @@ class TestFeatureGroupingStops:
         assert poll < work, "the loop reads a batch before checking"
 
     def test_the_task_supplies_a_factory_bound_to_the_new_run(self):
-        """The run id does not exist until `compute` creates the row, so the
-        task cannot build a checker in advance — and threading the scope name
-        into the service would put cancellation vocabulary where it does not
-        belong."""
-        import inspect
+        """R1-05. Two presence checks, both satisfied by `cancel_check_for=None`
+        plus the scope name in a log line — the Phase-3 defect exactly."""
+        import _cancel_ast as A
 
         from src.workers.feature_grouping_tasks import compute_feature_groups_task
 
-        src = inspect.getsource(inspect.unwrap(compute_feature_groups_task))
-        assert "cancel_check_for=" in src
-        assert '"feature_grouping"' in src
+        assert A.passes_real_value(
+            compute_feature_groups_task, "compute", "cancel_check_for"
+        ), "the service is called with cancel_check_for=None; every checkpoint is inert"
+        assert "feature_grouping" in A.scopes_passed_to(
+            compute_feature_groups_task, "cancel_checker"
+        )
 
     def test_a_cancelled_run_is_recorded_as_cancelled_not_failed(self):
         import inspect
 
         from src.workers.feature_grouping_tasks import compute_feature_groups_task
 
-        src = inspect.getsource(inspect.unwrap(compute_feature_groups_task))
-        cancelled = src.index("except OperatorCancelled")
-        generic = src.index("except Exception as")
-        assert cancelled < generic, (
-            "the generic handler runs first, so a cancel is written as a failure"
-        )
+        # R1-07: text position says nothing about whether the two handlers are
+        # siblings. Moving one into an inner `try` preserves the order and
+        # changes the semantics.
+        import _cancel_ast as A
+
+        assert A.catches_before(
+            compute_feature_groups_task, "OperatorCancelled", "Exception"
+        ), "no single try lists OperatorCancelled before the generic handler"
 
     def test_the_status_enum_can_express_a_cancellation(self):
         from src.models.feature_grouping import GroupingRunStatus
@@ -116,9 +119,13 @@ class TestSteeringRecorderStops:
 
         from src.workers.circuit_record_tasks import run_circuit_record
 
-        src = inspect.getsource(inspect.unwrap(run_circuit_record))
-        assert '"steering_record"' in src
-        assert src.index("except OperatorCancelled") < src.index("except Exception as")
+        import _cancel_ast as A
+
+        assert A.passes_real_value(
+            run_circuit_record, "record_samples", "cancel_check"
+        ), "record_samples is called with cancel_check=None"
+        assert "steering_record" in A.scopes_passed_to(run_circuit_record, "cancel_checker")
+        assert A.catches_before(run_circuit_record, "OperatorCancelled", "Exception")
 
 
 class TestCalibrationStops:
@@ -149,8 +156,9 @@ class TestCalibrationStops:
 
         from src.workers.circuit_calibration_tasks import run_circuit_calibration
 
-        src = inspect.getsource(inspect.unwrap(run_circuit_calibration))
-        assert src.index("except OperatorCancelled") < src.index("except Exception as")
+        import _cancel_ast as A
+
+        assert A.catches_before(run_circuit_calibration, "OperatorCancelled", "Exception")
 
 
 class TestEnhancedLabelingStops:
@@ -187,8 +195,11 @@ class TestEnhancedLabelingStops:
 
         from src.workers.enhanced_labeling_tasks import enhanced_label_feature_task
 
-        src = inspect.getsource(inspect.unwrap(enhanced_label_feature_task))
-        assert src.index("except OperatorCancelled") < src.index("except Exception as exc")
+        import _cancel_ast as A
+
+        assert A.catches_before(
+            enhanced_label_feature_task, "OperatorCancelled", "Exception"
+        )
 
 
 class TestTheRoutesReachTheChannel:
@@ -205,6 +216,15 @@ class TestTheRoutesReachTheChannel:
         ],
     )
     def test_the_request_is_visible_to_a_checker(self, kind, status_field):
+        # R1-10. Without this the parametrization was decorative: writer and
+        # reader both use `scope.status_field`, so they agree WHATEVER it points
+        # at. `circuit_faithfulness` and `circuit_calibration` are both on the
+        # `circuits` table, so pointing calibration at `faithfulness_status`
+        # passed the column-exists check and this one, while cancelling a
+        # calibration silently cancelled the faithfulness run instead.
+        assert C.get_scope(kind).status_field == status_field, (
+            f"{kind} reads {C.get_scope(kind).status_field!r}, not {status_field!r}"
+        )
         row = _Row(**{status_field: "running"})
         db = _session(row)
         out = C.request_cancel(kind, "row_1", db=db)
@@ -254,10 +274,15 @@ class TestTheModelDownloadStops:
 
         from src.workers.model_tasks import download_and_load_model
 
+        import _cancel_ast as A
+
         src = inspect.getsource(inspect.unwrap(download_and_load_model))
-        poll = src.find("stopped before the download began")
+        assert A.calls_named(download_and_load_model, "raise_if_cancelled"), (
+            "a model cancelled while queued still pulls the weights"
+        )
+        poll = src.find("raise_if_cancelled")
         start = src.find("progress_monitor.start()")
-        assert poll != -1, "a model cancelled while queued still pulls the weights"
+        assert poll != -1 and start != -1, "shape changed — re-read the task"
         assert poll < start
 
     def test_it_polls_after_the_download_before_loading(self):
@@ -265,10 +290,22 @@ class TestTheModelDownloadStops:
 
         from src.workers.model_tasks import download_and_load_model
 
+        import _cancel_ast as A
+
         src = inspect.getsource(inspect.unwrap(download_and_load_model))
-        assert "stopped after the download, before loading" in src, (
-            "nothing acts on a cancellation seen mid-transfer, so the task "
-            "goes on to quantize and profile a model nobody wants"
+        # The message alone is a string that survives in a comment; require the
+        # poll AND its position relative to the work that follows.
+        assert len(A.calls_named(download_and_load_model, "raise_if_cancelled")) >= 2, (
+            "only one boundary polls; a cancellation seen mid-transfer is never "
+            "acted on and the task goes on to quantize and profile"
+        )
+        poll = src.rindex("raise_if_cancelled")
+        assert poll != -1
+        assert A.catches_before(
+            download_and_load_model, "OperatorCancelled", "Exception"
+        ), (
+            "the cancellation escapes the task: except Exception cannot catch a "
+            "BaseException, so celery never acks the acks_late message"
         )
 
     def test_the_monitor_thread_observes_the_flag(self):
@@ -287,6 +324,14 @@ class TestTheModelDownloadStops:
 
         from src.workers.model_tasks import cancel_download
 
-        src = inspect.getsource(inspect.unwrap(cancel_download))
-        assert "job_had_started" in src
-        assert src.index("job_had_started") < src.index("shutil.rmtree(cache_dir)")
+        # R1-09. `src.index("job_had_started")` matched the ASSIGNMENT, which is
+        # trivially before the rmtree — so deleting the guard condition
+        # survived, and the endpoint deleted a live download's directory again.
+        import _cancel_ast as A
+
+        guarded, total = A.guard_counts(cancel_download, "job_had_started", "rmtree")
+        assert total >= 1, "cancel_download no longer deletes anything at all"
+        assert guarded >= 1, (
+            "no rmtree in cancel_download is guarded by job_had_started; the "
+            "endpoint deletes the directory a live download is writing into"
+        )

@@ -171,17 +171,23 @@ class TestTheTaskIsWired:
         assert found == "sae_extraction"
 
     def test_the_task_injects_a_real_checker(self):
-        import inspect
+        """R1-03. `assert "cancel_check=" in src` was satisfied by
+        `cancel_check=None` — the EXACT Phase-3 faithfulness defect this arc
+        exists to fix, and the highest-value surviving mutation in the round:
+        every checkpoint in the SAE service goes inert, suite green."""
+        import _cancel_ast as A
 
         from src.workers.extraction_tasks import extract_features_from_sae_task
 
-        src = inspect.getsource(inspect.unwrap(extract_features_from_sae_task))
-        assert 'cancel_checker(\n                    "sae_extraction"' in src or \
-               'cancel_checker("sae_extraction"' in src, (
-            "the service is called without a checker, so every checkpoint in it "
-            "is inert"
+        assert "sae_extraction" in A.scopes_passed_to(
+            extract_features_from_sae_task, "cancel_checker"
+        ), "the task constructs no checker for its own scope"
+        assert A.passes_real_value(
+            extract_features_from_sae_task, "extract_features_for_sae", "cancel_check"
+        ), (
+            "the service is called with cancel_check=None, so every checkpoint "
+            "inside it is inert"
         )
-        assert "cancel_check=" in src
 
     def test_the_failure_path_goes_through_the_guard(self):
         """It wrote status=FAILED straight onto the ORM row, so an exception
@@ -191,11 +197,15 @@ class TestTheTaskIsWired:
 
         from src.workers.extraction_tasks import extract_features_from_sae_task
 
+        import _cancel_ast as A
+
+        assert A.calls_named(extract_features_from_sae_task, "record_progress"), (
+            "the failure path no longer goes through the guard"
+        )
         src = inspect.getsource(inspect.unwrap(extract_features_from_sae_task))
         code = "\n".join(
             line for line in src.splitlines() if not line.lstrip().startswith("#")
         )
-        assert "record_progress(" in code
         assert "extraction_job.status = ExtractionStatus.FAILED.value" not in code, (
             "the task writes FAILED directly again, bypassing guard_allows"
         )

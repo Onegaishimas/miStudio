@@ -59,6 +59,20 @@ def _f821_findings():
          "--no-cache", "src/"],
         cwd=BACKEND, capture_output=True, text=True,
     )
+    # R1-11: A MISSING RUFF ALSO EXITS 1, with empty stdout — so the returncode
+    # gate alone still reported a clean tree it never inspected, which is the
+    # exact fail-open this function's docstring claims to have closed. Prove the
+    # tool is there before trusting its silence.
+    probe = subprocess.run(
+        [sys.executable, "-m", "ruff", "--version"],
+        cwd=BACKEND, capture_output=True, text=True,
+    )
+    if probe.returncode != 0 or "ruff" not in probe.stdout.lower():
+        raise AssertionError(
+            "ruff is not importable in this interpreter, so this gate cannot "
+            f"report anything about the tree.\nstdout: {probe.stdout!r}\n"
+            f"stderr: {probe.stderr[-500:]!r}"
+        )
     if proc.returncode not in (0, 1):
         raise AssertionError(
             f"ruff did not run (exit {proc.returncode}); this gate cannot "
@@ -84,18 +98,25 @@ def test_the_gate_fails_loudly_when_ruff_cannot_run():
     """
     import unittest.mock as mock
 
-    broken = subprocess.CompletedProcess(
-        args=[], returncode=2, stdout="", stderr="error: invalid value"
-    )
-    with mock.patch.object(subprocess, "run", return_value=broken):
-        try:
-            _f821_findings()
-        except AssertionError as exc:
-            assert "did not run" in str(exc)
-        else:
-            raise AssertionError(
-                "a failed ruff invocation was reported as a clean tree"
-            )
+    # Two ways the tool can be unusable, and NEITHER may read as a clean tree:
+    #   returncode 2 — a bad invocation (the original bug: a rejected flag)
+    #   returncode 1 with empty stdout — ruff is not installed at all, which
+    #                 is indistinguishable from "no findings" by exit code
+    for returncode, stderr in ((2, "error: invalid value"),
+                               (1, "No module named ruff")):
+        broken = subprocess.CompletedProcess(
+            args=[], returncode=returncode, stdout="", stderr=stderr
+        )
+        with mock.patch.object(subprocess, "run", return_value=broken):
+            try:
+                _f821_findings()
+            except AssertionError:
+                pass  # refused, which is the whole point
+            else:
+                raise AssertionError(
+                    f"a ruff invocation exiting {returncode} with no output was "
+                    f"reported as a clean tree"
+                )
 
 
 def test_no_new_undefined_names():
@@ -142,7 +163,11 @@ def test_the_export_services_clock_import_is_real():
 def test_the_readme_template_does_not_tell_users_to_import_our_clock():
     """Where the bogus import came from: it was pasted into user-facing text."""
     source = (BACKEND / "src/services/neuronpedia_export_service.py").read_text()
-    readme_block = source[source.index("## Usage with SAELens"):]
-    assert "core.clock" not in readme_block[:800], (
+    # R1-12: `readme_block[:800]` was an arbitrary window — the bogus import
+    # re-added 900 characters in survived. Bound the block by its real end.
+    start = source.index("## Usage with SAELens")
+    end = source.index('"""', start)
+    readme_block = source[start:end]
+    assert "core.clock" not in readme_block, (
         "the exported README tells the reader to import miStudio internals"
     )

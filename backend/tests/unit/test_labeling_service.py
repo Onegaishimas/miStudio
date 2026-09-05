@@ -311,6 +311,12 @@ class TestCancelLabelingJob:
         args, kwargs = request_cancel.call_args
         assert args[0] == "labeling"
         assert args[1] == "label_test_123"
+        # R1-15: the celery id is the ONE case a plain revoke() genuinely
+        # handles — a task that has not started. The fixture left it None, so
+        # nothing checked it was forwarded at all.
+        assert "celery_task_id" in kwargs, (
+            "the celery id is not forwarded, so a queued job is never revoked"
+        )
 
     @pytest.mark.asyncio
     async def test_cancel_labeling_job_not_found(self, labeling_service, mock_async_session):

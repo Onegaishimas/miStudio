@@ -9,7 +9,11 @@ single GPU like calibration; its in-flight marker is a `steering_record_runs` ro
 import logging
 from typing import Any, Dict
 
-from ..core.cancellation import OperatorCancelled, cancel_checker
+from ..core.cancellation import (
+    OperatorCancelled,
+    cancel_checker,
+    is_cancelled,
+)
 from ..core.celery_app import celery_app
 from .base_task import DatabaseTask
 from .websocket_emitter import (
@@ -19,6 +23,29 @@ from .websocket_emitter import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _refuse_if_cancelled(db, target_id) -> bool:
+    """False when the row is already cancelled, so the caller should not start."""
+    from ..core.cancellation import is_cancelled
+
+    scope = "steering_record"
+    try:
+        from ..core.cancellation import get_scope
+
+        sc = get_scope(scope)
+        model = sc.model()
+        row = (
+            db.query(model)
+            .filter(getattr(model, sc.id_field) == target_id)
+            .populate_existing()
+            .first()
+        )
+    except Exception:  # noqa: BLE001 - a failed check must not block the work
+        return True
+    if row is None:
+        return True
+    return not is_cancelled(scope, getattr(row, sc.status_field, None))
 
 
 @celery_app.task(bind=True, base=DatabaseTask,
@@ -31,6 +58,16 @@ def run_circuit_record(self, record_run_id: str,
     from ..services.steering_recorder_service import SteeringRecorderService
 
     with self.get_db() as db:
+        # A CANCEL-WHILE-QUEUED MUST NOT BE STAMPED OVER.
+        #
+        # `request_cancel` writes "cancelled" and issues a plain revoke(), but a
+        # solo worker busy on another job is not reading the control queue — so
+        # the revoke can land late or not at all, this task starts anyway, and
+        # this write turns "cancelled" back into "running". Every subsequent
+        # poll then reads running and the cancellation is simply gone, while
+        # the endpoint has already told the operator "it will not run".
+        if not _refuse_if_cancelled(db, record_run_id):
+            return {"status": "cancelled", "id": record_run_id}
         _set_status(db, record_run_id, "running")
         try:
             result = SteeringRecorderService.record_samples(
@@ -93,8 +130,23 @@ def _complete(db, record_run_id, manifest_ref):
         logger.exception("Rollback before record completion failed for %s",
                          record_run_id)
     try:
+        # populate_existing: this runs on the long-lived task session, which
+        # holds the row as it looked when the recording started — so without it
+        # the check below reads a stale status and can never see a cancel.
         row = db.query(SteeringRecordRun).filter(
-            SteeringRecordRun.id == record_run_id).first()
+            SteeringRecordRun.id == record_run_id).populate_existing().first()
+        if row is not None and is_cancelled("steering_record", row.status):
+            # The last checkpoint is the top of the prompt loop, so a cancel
+            # arriving during the final prompt's generations, or during manifest
+            # persistence, lands on this write — which was unguarded, and would
+            # have relabelled the operator's stop as a success.
+            logger.info(
+                "Record run %s finished after it was cancelled; keeping the "
+                "cancelled status", record_run_id,
+            )
+            row.manifest_ref = manifest_ref
+            db.commit()
+            return
         if row is not None:
             row.status = "completed"
             row.manifest_ref = manifest_ref

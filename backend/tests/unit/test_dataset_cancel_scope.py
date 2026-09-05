@@ -49,7 +49,16 @@ def test_cancel_skips_tokenizations_that_are_not_in_flight():
     """
     src = _cancel_source()
     loop_start = src.index("for tokenization in dataset.tokenizations")
-    loop_body = src[loop_start:loop_start + 900]
+    # R1-14: a fixed-size window is the pattern another file in this same
+    # change explicitly calls out as a bug. Bound it by the next dedent.
+    rest = src[loop_start:]
+    _lines, _out = rest.splitlines(True), []
+    _indent = len(_lines[0]) - len(_lines[0].lstrip())
+    for _i, _l in enumerate(_lines):
+        if _i and _l.strip() and (len(_l) - len(_l.lstrip())) <= _indent:
+            break
+        _out.append(_l)
+    loop_body = "".join(_out)
     assert "tokenization.status" in loop_body, (
         "the tokenization cleanup loop deletes without consulting status — it "
         "will destroy completed tokenizations belonging to other models"
@@ -103,9 +112,23 @@ def test_cancel_endpoint_passes_a_task_id():
                 target = body
                 break
     assert target, "no caller of cancel_task found"
-    assert "task_id=" in target, (
-        "cancel_task is called without task_id — the worker's revoke branch is "
-        "dead and the job runs to completion after a successful-looking cancel"
+    # R1-14: `"task_id=" in target` is satisfied by `cancel_task(…,
+    # task_id=None)`, which restores the dead-revoke defect this test exists to
+    # prevent. Require a real value.
+    import ast as _ast
+
+    _passes_real = False
+    for _node in _ast.walk(_ast.parse(_ast.unparse(_ast.parse(target)))):
+        if isinstance(_node, _ast.Call):
+            for _kw in _node.keywords:
+                if _kw.arg == "task_id" and not (
+                    isinstance(_kw.value, _ast.Constant) and _kw.value.value is None
+                ):
+                    _passes_real = True
+    assert _passes_real, (
+        "cancel_task is called without a real task_id — the worker's revoke "
+        "branch is dead and the job runs to completion after a "
+        "successful-looking cancel"
     )
     assert 'extra_metadata' in target, (
         "task_id must come from where the dispatch sites actually store it"
