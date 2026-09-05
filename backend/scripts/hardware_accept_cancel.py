@@ -93,6 +93,24 @@ def gpu_used_gb(_p=None) -> float:
         return -1.0
 
 
+def newest_row_id(model: str, after: str = "") -> str:
+    """The id of the newest extraction row for this model, from the DATABASE.
+
+    The endpoint's returned id cannot be trusted on a deployment predating the
+    fix: it was generated from its own `datetime.now()` and never handed to the
+    task, which generated another. Resolving from the row makes this harness
+    correct on both sides of that fix, and keeps it measuring WORKER behaviour
+    rather than an API contract it is not trying to test.
+    """
+    q = (f"select id from activation_extractions where model_id='{model}'"
+         f"{f" and id > '{after}'" if after else ''} "
+         f"order by created_at desc limit 1")
+    return _sh(
+        f"kubectl exec -n {NS} deploy/postgres -- psql -U mistudio -d mistudio "
+        f"-tAc \"{q}\""
+    ).strip()
+
+
 def extraction(p: str, model: str, ext_id: str) -> dict:
     body = api(p, "GET", f"/api/v1/models/{model}/extractions")
     for e in body.get("extractions", []):
@@ -122,10 +140,15 @@ def main() -> int:
         "max_samples": args.samples,
         "batch_size": 4,
     })
-    ext_id = started.get("extraction_id") or started.get("id")
-    if not ext_id:
+    claimed = started.get("extraction_id") or started.get("id")
+    if not claimed:
         print("FAILED to start:", json.dumps(started)[:400])
         return 1
+    time.sleep(4)
+    ext_id = newest_row_id(args.model) or claimed
+    if ext_id != claimed:
+        print(f"[!] endpoint returned {claimed}, the row is {ext_id} "
+              f"— pre-fix deployment")
     print(f"[started] {ext_id}")
 
     # A SECOND job, queued behind it — criterion 4 needs something to pick up.
@@ -141,8 +164,14 @@ def main() -> int:
         "max_samples": 200,
         "batch_size": 4,
     })
-    second_id = second.get("extraction_id") or second.get("id")
-    print(f"[queued behind it] {second_id}")
+    # ITS ROW DOES NOT EXIST YET. `extract_activations` creates the row when
+    # the WORKER picks the task up, not when the endpoint queues it — so a
+    # queued job has no row at all until the one ahead of it finishes. Looking
+    # for it now returns nothing and falls back to the endpoint's guessed id,
+    # which is what made criterion 4 report None while the worker had in fact
+    # taken the next job two seconds after the cancel landed.
+    print(f"[queued behind it] (no row until the worker starts it)")
+    second_id = None
 
     peak, samples_at_cancel = baseline, 0
     deadline = time.time() + args.cancel_after
@@ -186,6 +215,11 @@ def main() -> int:
     time.sleep(25)
     after = gpu_used_gb(p)
     final = observations[-1] if observations else (0, "?", None, -1)
+    # Resolve it AFTER the wait: by now the worker has either taken it or not,
+    # and that is precisely the question.
+    second_id = newest_row_id(args.model)
+    if second_id == ext_id:
+        second_id = None  # nothing new appeared; the worker took nothing
     second_row = extraction(p, args.model, second_id) if second_id else {}
 
     print("\n=== ACCEPTANCE ===")
@@ -214,11 +248,9 @@ def main() -> int:
           f"cancelled)")
     ok &= c3
 
-    if second_id == ext_id:
-        print("4. WORKER TAKES THE NEXT JOB : INVALID (the two jobs share an id)")
-        c4 = False
-    else:
-        c4 = str(second_row.get("status", "")).lower() not in ("", "queued")
+    c4 = bool(second_id) and str(
+        second_row.get("status", "")
+    ).lower() not in ("", "queued")
     print(f"4. WORKER TAKES THE NEXT JOB  : {'PASS' if c4 else 'FAIL'}  "
           f"(second job status={second_row.get('status')})")
     ok &= c4
